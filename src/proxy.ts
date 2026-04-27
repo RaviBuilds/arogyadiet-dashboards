@@ -1,10 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const url = request.nextUrl;
   const hostname = request.headers.get("host") || "";
-
   // 2. Subdomain Routing Mapping
 
   const portals: Record<string, string> = {
@@ -19,7 +18,6 @@ export async function middleware(request: NextRequest) {
     hostname.startsWith(`${sub}.`),
   );
   const portalPath = currentSubdomain ? portals[currentSubdomain] : "";
-
   //Determine if we need to silently rewrite the URL to the mapped folder
   let response = NextResponse.next({ request });
 
