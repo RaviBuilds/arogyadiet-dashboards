@@ -1,5 +1,5 @@
 'use server';
-import { AuthService } from "@/services/AuthService";
+import { login } from "@/services/AuthService"
 import { redirect } from "next/navigation";
 
 export async function LoginAction(prevState: any, formData: FormData) {
@@ -9,7 +9,7 @@ export async function LoginAction(prevState: any, formData: FormData) {
   const redirectPath = formData.get("redirectPath") as string;
 
   try {
-    await AuthService.login(email, password, portalRole);
+    await login(email, password, portalRole);
   } catch (error: any) {
     return { error: error.message };
   }

@@ -66,10 +66,14 @@ export async function proxy(request: NextRequest) {
     !url.pathname.includes('.')
   )
   {
-    if(!user && !url.pathname.startsWith('/login') && !url.pathname.startsWith('/auth'))
-    {
-      const loginUrl = new URL('/login',request.url)
-      return NextResponse.redirect(loginUrl)  
+    if (
+      !user &&
+      !url.pathname.startsWith("/login") &&
+      !url.pathname.startsWith("/signup") &&
+      !url.pathname.startsWith("/auth")
+    ) {
+      const loginUrl = new URL("/login", request.url);
+      return NextResponse.redirect(loginUrl);
     }
   }
 
