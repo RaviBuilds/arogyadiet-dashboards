@@ -2,6 +2,12 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
+
+  if (request.nextUrl.pathname.startsWith("/api")) {
+    return NextResponse.next();
+  }
+
+
   const url = request.nextUrl;
   const hostname = request.headers.get("host") || "";
   // 2. Subdomain Routing Mapping
@@ -57,28 +63,37 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-
   // 3. Route protection, gatekeeper logic
-
-  if(
+  if (
     !url.pathname.startsWith(`/_next`) &&
     !url.pathname.startsWith(`/api`) &&
-    !url.pathname.includes('.')
-  )
-  {
+    !url.pathname.includes(".")
+  ) {
     if (
       !user &&
       !url.pathname.startsWith("/login") &&
       !url.pathname.startsWith("/signup") &&
-      !url.pathname.startsWith("/auth")
+      !url.pathname.startsWith("/auth") &&
+      !url.pathname.startsWith("/forgot-password") &&
+      !url.pathname.startsWith("/update-password")
     ) {
       const loginUrl = new URL("/login", request.url);
       return NextResponse.redirect(loginUrl);
     }
   }
 
-  return response
+  if (
+    user &&
+    (url.pathname === "/" ||
+      url.pathname.startsWith("/login") ||
+      url.pathname.startsWith("/signup")) &&
+    !url.pathname.startsWith("/update-password")
+  ) {
+    const dashboardUrl = new URL("/dashboard", request.url);
+    return NextResponse.redirect(dashboardUrl);
+  }
 
+  return response;
 }
 
 export const config = {

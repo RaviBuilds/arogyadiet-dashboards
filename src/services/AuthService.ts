@@ -24,6 +24,8 @@ export async function login(
     .eq(`auth_user_id`, authData.user.id)
     .single();
 
+  console.log("userData =>", userData);
+  console.log("UserError=>", userError);
   if (userError || !userData) {
     await supabase.auth.signOut();
     throw new Error("User profile setup incomplete.");
@@ -51,4 +53,31 @@ export async function login(
   }
 
   return authData.user;
+}
+
+
+export async function sendPasswordResetEmail(email: string, redirectUrl: string) {
+  const supabase = await createClient();
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: redirectUrl,
+  });
+  if (error) {
+    throw new Error(error.message);
+  }
+  return true;
+}
+
+export async function updateUserPassword(password:string)
+{
+  const supabase = await createClient();
+  const { error } = await supabase.auth.updateUser({
+    password:password
+  })
+  if(error)
+  {
+    throw new Error(error.message);
+  }
+
+  return true;
 }

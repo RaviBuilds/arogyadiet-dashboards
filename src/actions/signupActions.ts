@@ -14,5 +14,5 @@ export async function customerSignupAction(prevState:any, formData:FormData){
     } catch (error:any) {
         return {error: error.message}
     }
-    redirect(`/customer/dashboard`)
+    redirect(`/signup/success`);
 }

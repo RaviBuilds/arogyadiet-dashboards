@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function registerCustomer(data: {
   email: string;
@@ -7,26 +8,34 @@ export async function registerCustomer(data: {
   mobile: string;
 }) {
   const supabase = await createClient();
+  const adminAuthClient = createAdminClient();
 
-  const { data: roleData } = await supabase
-    .from("roles")
-    .select("id")
-    .eq("code", "CUSTOMER")
-    .single();
-
-  if (!roleData) {
-    throw new Error("System configuration error: Role not found.");
-  }
+  //1. create the User in supabase auth
 
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email: data.email,
     password: data.password,
   });
 
+  console.log("AUTHDATA =>", authData);
   if (authError) throw new Error(authError.message);
   if (!authData.user) throw new Error("Signup failed at auth layer");
 
-  const { data: userData, error: userError } = await supabase
+  //2. get the Customer Role, ID using adminclient
+  const { data: roleData, error:roleError } = await adminAuthClient
+    .from("roles")
+    .select("id")
+    .eq("code", "CUSTOMER")
+    .single();
+
+ console.log("ROLEDATA=>", roleData, "ROLE ERROR=>", roleError);
+
+  if (!roleData) {
+    throw new Error("System configuration error: Role not found.");
+  }
+
+  // insert a data with adminClient
+  const { data: userData, error: userError } = await adminAuthClient
     .from("users")
     .insert({
       auth_user_id: authData.user.id,
@@ -42,7 +51,8 @@ export async function registerCustomer(data: {
   if (userError || !userData)
     throw new Error(`Failed to create core user profile `);
 
-  const { error: profileError } = await supabase
+  // create a customer_profiles with admin
+  const { error: profileError } = await adminAuthClient
     .from("customer_profiles")
     .insert({ user_id: userData.id, is_active: true });
 
@@ -59,42 +69,41 @@ export async function createCustomerFromOAth(
   email: string,
   fullName: string,
 ) {
+  // const supabase = await createClient();
+  const adminAuthClientAuth = createAdminClient();
 
-    const supabase = await createClient();
+  const { data: roleData } = await adminAuthClientAuth
+    .from("roles")
+    .select("id")
+    .eq("code", "CUSTOMER")
+    .single();
 
-     const { data: roleData } = await supabase
-       .from("roles")
-       .select("id")
-       .eq("code", "CUSTOMER")
-       .single();
+  if (!roleData) {
+    throw new Error("System configuration error: Role not found.");
+  }
 
-     if (!roleData) {
-       throw new Error("System configuration error: Role not found.");
-     }
-     
-     const { data: userData, error: userError } = await supabase
-       .from("users")
-       .insert({
-         auth_user_id: authUserId,
-         role_id: roleData.id,
-         full_name: fullName || "Google User",
-         email: email,
-         mobile: null,
-         is_active: true,
-         is_email_verified: true,
-       })
-       .select("id")
-       .single();
+  const { data: userData, error: userError } = await adminAuthClientAuth
+    .from("users")
+    .insert({
+      auth_user_id: authUserId,
+      role_id: roleData.id,
+      full_name: fullName || "Google User",
+      email: email,
+      mobile: null,
+      is_active: true,
+      is_email_verified: true,
+    })
+    .select("id")
+    .single();
 
-       if (userError || !userData)
-         throw new Error("Failed to create OAuth user profile.");
+  if (userError || !userData)
+    throw new Error("Failed to create OAuth user profile.");
 
-       const { error: profileError } = await supabase
-         .from("customer_profiles")
-         .insert({ user_id: userData.id, is_active: true });
+  const { error: profileError } = await adminAuthClientAuth
+    .from("customer_profiles")
+    .insert({ user_id: userData.id, is_active: true });
 
-       if (profileError)
-         throw new Error("Failed to create OAuth customer profile.");
+  if (profileError) throw new Error("Failed to create OAuth customer profile.");
 
-       return true;
+  return true;
 }

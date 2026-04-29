@@ -1,27 +1,33 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createCustomerFromOAth } from "@/services/signupService";
 
-export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+export async function GET(request: NextRequest) {
+  // 1. Get the true hostname directly from headers
+  const host = request.headers.get("host");
+  const protocol = host?.includes("localhost") ? "http" : "https";
+  const baseOrigin = `${protocol}://${host}`;
 
+  const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/customer/dashboard";
-  const expectedRole = "CUSTOMER";
+  const next = searchParams.get("next") ?? "/dashboard";
 
+
+  // Use baseOrigin for errors to stay on the correct subdomain [cite: 109, 113]
   if (!code) {
-    return NextResponse.redirect(`${origin}/login?error=Invalid_Request`);
+    return NextResponse.redirect(`${baseOrigin}/login?error=Invalid_Request`);
   }
 
   const supabase = await createClient();
 
+  // Exchange code for a session [cite: 39]
   const {
     data: { session },
     error: sessionError,
   } = await supabase.auth.exchangeCodeForSession(code);
 
   if (sessionError || !session) {
-    return NextResponse.redirect(`${origin}/login?error=OAuth_Failed`);
+    return NextResponse.redirect(`${baseOrigin}/login?error=OAuth_Failed`);
   }
 
   const authUserId = session.user.id;
@@ -32,42 +38,39 @@ export async function GET(request: Request) {
     .eq("auth_user_id", authUserId)
     .single();
 
-  // if user does not exist in our business table
   if (userError || !userData) {
     try {
-      const email = session.user.email || '';
-      const fullName = session.user.user_metadata?.full_name || 'Customer';
+      const email = session.user.email || "";
+      const fullName = session.user.user_metadata?.full_name || "Customer";
 
-      await createCustomerFromOAth(
-        authUserId,
-        email,
-        fullName,
-      );
+      await createCustomerFromOAth(authUserId, email, fullName);
     } catch (error) {
       await supabase.auth.signOut();
-      return NextResponse.redirect(
-        `${origin}/customer/login?error=Signup_Failed`,
-      );
+      return NextResponse.redirect(`${baseOrigin}/login?error=Signup_Failed`);
     }
   } else {
     if (!userData.is_active) {
       await supabase.auth.signOut();
       return NextResponse.redirect(
-        `${origin}/customer/login?error=Account_Deactivated`,
+        `${baseOrigin}/login?error=Account_Deactivated`,
       );
     }
-    //check the role boundary
 
     const userRole = Array.isArray(userData.roles)
       ? userData.roles[0]?.code
       : (userData.roles as { code: string })?.code;
 
-    if (userRole !== expectedRole) {
+    if (userRole == "MASTER") {
       await supabase.auth.signOut();
       return NextResponse.redirect(
-        `${origin}/customer/login?error=Unauthorized_Role`,
+        `${baseOrigin}/login?error=Unauthorized_Role`,
       );
     }
   }
-  return NextResponse.redirect(`${origin}${next}`);
+
+  // 2. Build the final redirect URL using the verified host header [cite: 109, 111]
+  const finalUrl = new URL(next, baseOrigin);
+  finalUrl.search = ""; // Clean the URL for security [cite: 110]
+
+  return NextResponse.redirect(finalUrl);
 }
