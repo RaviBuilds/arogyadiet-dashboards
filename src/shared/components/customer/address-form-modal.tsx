@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +50,7 @@ export function AddressFormModal({
       city: initialData?.city || "Hyderabad",
       state: initialData?.state || "Telangana",
       pincode: initialData?.pincode || "",
+      is_primary:initialData?.is_primary || false,
     },
   });
 
@@ -64,6 +66,7 @@ export function AddressFormModal({
         city: initialData?.city || "Hyderabad",
         state: initialData?.state || "Telangana",
         pincode: initialData?.pincode || "",
+        is_primary: initialData?.is_primary || false,
       });
     }
   }, [isOpen, initialData, form]);
@@ -170,6 +173,23 @@ export function AddressFormModal({
               </label>
               <Input disabled {...form.register("state")} />
             </div>
+          </div>
+
+          <div className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm mt-4">
+            <div className="space-y-0.5">
+              <label className="text-sm font-medium">
+                Set as default address
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Your diet meals will be delivered here by default.
+              </p>
+            </div>
+            <Switch
+              checked={form.watch("is_primary")}
+              onCheckedChange={(checked) =>
+                form.setValue("is_primary", checked)
+              }
+            />
           </div>
 
           {serverError && (

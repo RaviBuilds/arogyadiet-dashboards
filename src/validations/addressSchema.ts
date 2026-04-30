@@ -9,6 +9,7 @@ export const addressSchema = z.object({
   landmark: z.string().optional(),
   city: z.string(),
   state: z.string(),
+  is_primary: z.boolean(),
   pincode: z
     .string()
     .regex(
