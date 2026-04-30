@@ -9,7 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 const navItems = [
   { name: "My Profile", href: "/profile", icon: User },
-  { name: "Subscriptions", href: "/subscriptions", icon: CalendarDays },
+  { name: "Subscription", href: "/subscription", icon: CalendarDays },
   { name: "Billing", href: "/billing", icon: CreditCard },
 ];
 
