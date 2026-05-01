@@ -5,11 +5,18 @@ export default async function SubscriptionPage() {
   const supabase = await createClient();
 
   // Fetch plans ordered by duration as per global pricing catalog[cite: 3]
-  const { data: plans , error} = await supabase
+  const { data: plansData , error} = await supabase
     .from("subscription_plans")
     .select("*")
     .eq("is_active", true)
     .order("duration_days", { ascending: true });
+
+    const dashboardOrder = [30,90,60];
+    const plans = plansData?.sort(
+      (a, b) =>
+        dashboardOrder.indexOf(a.duration_days) -
+        dashboardOrder.indexOf(b.duration_days),
+    );
 
     console.log("PLANS",plans);
     console.log("PLAN ERROR=>", error);
@@ -30,7 +37,7 @@ export default async function SubscriptionPage() {
           <PlanCard
             key={plan.id}
             plan={plan}
-            isPopular={plan.duration_days === 60} // Marketing the 60-day plan as "Value Plan"[cite: 3]
+            isPopular={plan.duration_days === 90} // Marketing the 60-day plan as "Value Plan"[cite: 3]
           />
         ))}
       </div>

@@ -13,9 +13,8 @@ import { MapPin, Edit, Trash2, Plus } from "lucide-react";
 import type { Address } from "@/services/addressService";
 import { useState } from "react";
 import { AddressFormModal } from "./address-form-modal";
-import { deleteAddressAction } from "@/actions/addressActions"; // <-- Import the new action
+import { deleteAddressAction } from "@/actions/addressActions"; 
 
-// <-- Import Shadcn Alert Dialog components
 import {
   AlertDialog,
   AlertDialogContent,
@@ -28,9 +27,10 @@ import {
 
 interface AddressListProps {
   addresses: Address[];
+  onRefresh?: () => void;
 }
 
-export function AddressList({ addresses }: AddressListProps) {
+export function AddressList({ addresses, onRefresh }: AddressListProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
 
@@ -48,16 +48,18 @@ export function AddressList({ addresses }: AddressListProps) {
     setIsModalOpen(true);
   };
 
-  // The function that actually triggers the server action
   const confirmDelete = async () => {
     if (!addressToDelete) return;
     setIsDeleting(true);
 
     const result = await deleteAddressAction(addressToDelete);
 
-    if (result.error) {
+    if (result?.error) {
       console.error(result.error);
       // Optional: Add a toast notification here later
+    } else {
+      // SUCCESS! Trigger the refresh so the modal updates instantly
+      if (onRefresh) onRefresh();
     }
 
     setIsDeleting(false);
@@ -157,7 +159,6 @@ export function AddressList({ addresses }: AddressListProps) {
                   <Edit className="h-4 w-4 mr-2" /> Edit
                 </Button>
 
-                {/* Updated Delete Button to trigger the alert dialog */}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -178,6 +179,10 @@ export function AddressList({ addresses }: AddressListProps) {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         initialData={editingAddress}
+        onSuccess={() => {
+          setIsModalOpen(false); // Close the inner form
+          if (onRefresh) onRefresh(); // Trigger the fetch update!
+        }}
       />
 
       {/* The Delete Confirmation Dialog */}
@@ -195,7 +200,6 @@ export function AddressList({ addresses }: AddressListProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            {/* The destructive action button */}
             <Button
               variant="destructive"
               onClick={confirmDelete}

@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export type Address = {
   id: string;
-  user_id: string;
+  customer_profile_id: string; // Changed from user_id
   tag: string;
   street_1: string;
   street_2?: string;
@@ -16,24 +16,44 @@ export type Address = {
 export async function getUserAddresses(): Promise<Address[]> {
   const supabase = await createClient();
 
-  // 1. Get the securely authenticated user
   const {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
   if (authError || !user) throw new Error("Unauthorized");
 
-  // 2. Fetch their addresses, ordering primary first, then newest
+  console.log("USER =>", user)
+  // 1. Get the Customer Profile ID
+  const { data: profile, error: errorInAddressFetch } = await supabase
+    .from("customer_profiles")
+    .select("id")
+    .eq(
+      "user_id",
+      (
+        await supabase
+          .from("users")
+          .select("id")
+          .eq("auth_user_id", user.id)
+          .single()
+      ).data?.id,
+    )
+    .single();
+
+  if (!profile) return [];
+
+  console.log("PROFILE =>", profile);
+  console.log("Error in address Fetch =>", errorInAddressFetch);
+  // 2. Fetch addresses using the correct column
   const { data, error } = await supabase
     .from("addresses")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("customer_profile_id", profile.id) // This fixes the 42703 error
     .order("is_primary", { ascending: false })
     .order("created_at", { ascending: false });
 
+    console.log("ADDRESSES for profile=>", data);
   if (error) {
-    console.error("Error fetching addresses:", error);
-    console.log("THE ERROR =>", error);
+    console.error("Error fetching addresses:", error.message);
     throw new Error("Failed to load addresses.");
   }
 

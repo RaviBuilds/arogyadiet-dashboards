@@ -28,6 +28,7 @@ import type { Address } from "@/services/addressService";
 interface AddressFormModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
   initialData?: Address | null;
 }
 
@@ -35,6 +36,7 @@ export function AddressFormModal({
   isOpen,
   onClose,
   initialData,
+  onSuccess
 }: AddressFormModalProps) {
   const [isPending, setIsPending] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -71,21 +73,27 @@ export function AddressFormModal({
     }
   }, [isOpen, initialData, form]);
 
-  async function onSubmit(data: AddressFormValues) {
-    setIsPending(true);
-    setServerError(null);
+ async function onSubmit(data: AddressFormValues) {
+   setIsPending(true);
+   setServerError(null);
 
-    const result = await saveAddressAction(data);
+   const result = await saveAddressAction(data);
 
-    if (result?.error) {
-      setServerError(result.error);
-      setIsPending(false);
-    } else {
-      setIsPending(false);
-      form.reset();
-      onClose();
-    }
-  }
+   if (result?.error) {
+     setServerError(result.error);
+     setIsPending(false);
+   } else {
+     setIsPending(false);
+     form.reset();
+
+     // THE FIX: Trigger onSuccess if it exists so the parent refreshes!
+     if (onSuccess) {
+       onSuccess();
+     } else {
+       onClose();
+     }
+   }
+ }
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>

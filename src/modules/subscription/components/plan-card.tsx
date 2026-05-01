@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/shared/components/ui/card";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 interface PlanCardProps {
   plan: {
@@ -74,8 +75,11 @@ export function PlanCard({ plan, isPopular }: PlanCardProps) {
         <Button
           className="w-full font-bold h-11 text-base"
           variant={isPopular ? "default" : "outline"}
+          asChild
         >
-          Subscribe Now
+          <Link href={`/subscription/checkout?plan=${plan.id}`}>
+            Subscribe Now
+          </Link>
         </Button>
       </CardFooter>
     </Card>
