@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { format, addDays } from "date-fns";
+import { useState, useEffect, useCallback ,useMemo} from "react";
+import { format, addDays,startOfDay } from "date-fns";
 import {
   CalendarIcon,
   MapPin,
@@ -22,7 +22,6 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { cn } from "@/lib/utils";
 
 // 1. IMPORT YOUR MODAL (Adjust path if necessary based on your structure)
-import { AddressFormModal } from "@/shared/components/customer/address-form-modal";
 import { AddressManagerModal } from "@/shared/components/customer/address-manager-modal";
 
 export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
@@ -81,6 +80,17 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
     setIsLoading(false);
   }, [data.addressId, setData, supabase]);
 
+  const minStartDate = useMemo(() => {
+    const now = new Date();
+    const currentHour = now.getHours(); // Local hour (0-23)
+
+    // If it's past 17:00 (5 PM), we need 2 days lead time. Otherwise, 1 day.
+    const daysToAdd = currentHour >= 17 ? 2 : 1;
+
+    // startOfDay resets the time to 00:00:00 so the calendar compares cleanly
+    return startOfDay(addDays(now, daysToAdd));
+  }, []);
+
   // Call it on initial load
   useEffect(() => {
     fetchAddresses();
@@ -122,7 +132,7 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
                   setData({ ...data, startDate: date });
                   setIsCalendarOpen(false);
                 }}
-                disabled={(date) => date < addDays(new Date(), 1)}
+                disabled={(date) => startOfDay(date) < minStartDate}
                 initialFocus
               />
             </PopoverContent>

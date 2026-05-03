@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { CheckoutWizard } from "@/modules/subscription/components/checkout-wizard.tsx";
+import { CheckoutWizard } from "@/modules/subscription/components/checkout/checkout-wizard.tsx";
 
 export default async function CheckoutPage() {
   const supbase = await createClient();

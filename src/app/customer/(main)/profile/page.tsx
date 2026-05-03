@@ -45,7 +45,7 @@ export default async function CustomerProfilePage() {
   };
 
   const addresses = await getUserAddresses();
-  console.log("ADDRESS=>", addresses);
+  
   return (
     <div className="flex flex-col gap-8 max-w-5xl mx-auto w-full">
       <div>

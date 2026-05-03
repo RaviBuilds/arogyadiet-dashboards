@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { PlanCard } from "@/modules/subscription/components/plan-card";
+import { PlanCard } from "@/modules/subscription/components/checkout/plan-card";
 
 export default async function SubscriptionPage() {
   const supabase = await createClient();
@@ -17,9 +17,7 @@ export default async function SubscriptionPage() {
         dashboardOrder.indexOf(a.duration_days) -
         dashboardOrder.indexOf(b.duration_days),
     );
-
-    console.log("PLANS",plans);
-    console.log("PLAN ERROR=>", error);
+    
   return (
     <div className="max-w-6xl mx-auto py-10 space-y-12">
       <div className="text-center space-y-4">

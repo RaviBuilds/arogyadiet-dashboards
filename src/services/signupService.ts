@@ -17,7 +17,7 @@ export async function registerCustomer(data: {
     password: data.password,
   });
 
-  console.log("AUTHDATA =>", authData);
+ 
   if (authError) throw new Error(authError.message);
   if (!authData.user) throw new Error("Signup failed at auth layer");
 
@@ -28,7 +28,7 @@ export async function registerCustomer(data: {
     .eq("code", "CUSTOMER")
     .single();
 
- console.log("ROLEDATA=>", roleData, "ROLE ERROR=>", roleError);
+ 
 
   if (!roleData) {
     throw new Error("System configuration error: Role not found.");

@@ -24,8 +24,7 @@ export async function login(
     .eq(`auth_user_id`, authData.user.id)
     .single();
 
-  console.log("userData =>", userData);
-  console.log("UserError=>", userError);
+
   if (userError || !userData) {
     await supabase.auth.signOut();
     throw new Error("User profile setup incomplete.");

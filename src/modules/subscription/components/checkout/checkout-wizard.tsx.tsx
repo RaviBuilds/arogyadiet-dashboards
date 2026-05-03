@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { PlanSelection } from "./step-1-plan";
 import { DeliveryDetails } from "./step-2-delivery";
 import { useSearchParams } from "next/navigation";
+import { PauseSelection } from "@/modules/subscription/components/checkout/step-3-pause";
+import { MealCustomization } from "@/modules/subscription/components/checkout/step-4-customization";
 // import { MealPlannerConfig } from "./step-3-planner";
 // import { OrderPreview } from "./step-4-preview";
 
@@ -47,7 +49,7 @@ export function CheckoutWizard({
 
         {/* Step Progress Bar */}
         <div className="flex items-center justify-center gap-4 mt-6">
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2, 3, 4, 5].map((i) => (
             <div
               key={i}
               className={`h-2 w-16 rounded-full transition-all ${step >= i ? "bg-primary" : "bg-zinc-200"}`}
@@ -76,7 +78,27 @@ export function CheckoutWizard({
           />
         )}
 
-        {/* Steps 3 and 4 will follow */}
+       
+        {step === 3 && (
+          <PauseSelection
+            data={checkoutData}
+            setData={setCheckoutData}
+            plans={plans}
+            onNext={nextStep}
+            onBack={prevStep}
+          />
+        )}
+
+        {step === 4 && (
+          <MealCustomization
+            data={checkoutData}
+            plans={plans}
+            setData={setCheckoutData}
+            onNext={() => setStep(4)} // Goes to Payment next!
+            onBack={() => setStep(2)}
+          />
+        )}
+        {/*  step 4 will follow */}
       </div>
     </div>
   );

@@ -21,7 +21,7 @@ export async function LoginAction(prevState: any, formData: FormData) {
 
 export async function forgotPasswordAction(prevState: any, formData: FormData) {
   const email = formData.get("email") as string;
-  console.log("Forget Passowrd function ******");
+  
 
   const headerList = await headers();
   const host = headerList.get("host");
@@ -31,7 +31,7 @@ export async function forgotPasswordAction(prevState: any, formData: FormData) {
   // Point to the new recovery route! No ?next= parameter required.
   const exactRedirectUrl = `${protocol}://${host}/api/auth/recovery`;
 
-  console.log("SENDING TO SUPABASE", exactRedirectUrl);
+  
 
   if (!email) {
     return { error: "Email is required!" };

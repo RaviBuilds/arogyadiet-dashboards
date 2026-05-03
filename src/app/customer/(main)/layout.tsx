@@ -24,7 +24,7 @@ export default async function CustomerLayout({
     .eq("auth_user_id", user?.id)
     .single();
 
-    console.log("USER=>", profile);
+    
   const userName = profile?.full_name || user?.user_metadata?.full_name || null;
 
   return (

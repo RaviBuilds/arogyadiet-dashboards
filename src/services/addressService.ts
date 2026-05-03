@@ -22,7 +22,7 @@ export async function getUserAddresses(): Promise<Address[]> {
   } = await supabase.auth.getUser();
   if (authError || !user) throw new Error("Unauthorized");
 
-  console.log("USER =>", user)
+  
   // 1. Get the Customer Profile ID
   const { data: profile, error: errorInAddressFetch } = await supabase
     .from("customer_profiles")
@@ -41,8 +41,7 @@ export async function getUserAddresses(): Promise<Address[]> {
 
   if (!profile) return [];
 
-  console.log("PROFILE =>", profile);
-  console.log("Error in address Fetch =>", errorInAddressFetch);
+  ;
   // 2. Fetch addresses using the correct column
   const { data, error } = await supabase
     .from("addresses")
@@ -51,7 +50,7 @@ export async function getUserAddresses(): Promise<Address[]> {
     .order("is_primary", { ascending: false })
     .order("created_at", { ascending: false });
 
-    console.log("ADDRESSES for profile=>", data);
+    
   if (error) {
     console.error("Error fetching addresses:", error.message);
     throw new Error("Failed to load addresses.");
