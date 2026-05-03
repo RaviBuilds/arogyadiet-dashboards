@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api")) {
     return NextResponse.next();
   }
@@ -25,9 +25,13 @@ export async function proxy(request: NextRequest) {
 
   //Detect which subdomain is being accessed
 
-  const currentSubdomain = Object.keys(portals).find((sub) =>
+  let currentSubdomain = Object.keys(portals).find((sub) =>
     hostname.startsWith(`${sub}.`),
   );
+
+  if (hostname.includes("vercel.app")) {
+    currentSubdomain = "customer";
+  }
 
   const portalPath = currentSubdomain ? portals[currentSubdomain] : "";
 
