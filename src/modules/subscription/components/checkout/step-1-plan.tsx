@@ -21,7 +21,6 @@ export function PlanSelection({
   const [warning, setWarning] = useState<string | null>(null);
 
   const handleFoodTypeChange = (type: string) => {
-    //if profilee is veg and user selcting somethng else
     if (profilePreference === "Veg" && type !== "Veg") {
       setWarning(
         "Are you sure? You have updated 'Veg' in your profile details.",
@@ -65,7 +64,7 @@ export function PlanSelection({
                 <p className="text-3xl font-black my-2">
                   ₹{plan.price.toLocaleString("en-IN")}
                 </p>
-                <div className="text-[10px] text-muted-foreground border-t pt-2 mt-2">
+                <div className="text-[10px] text-muted-foreground border-t pt-2 mt-2 break-words">
                   ₹{plan.base_price} Base + ₹{plan.tax_amount} GST
                 </div>
               </CardContent>
@@ -73,6 +72,7 @@ export function PlanSelection({
           ))}
         </div>
       </section>
+
       <section>
         <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
           <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
@@ -80,13 +80,13 @@ export function PlanSelection({
           </span>
           Initial Food Preference
         </h2>
-        <div className="flex flex-wrap gap-4">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-4">
           {["Veg", "Non-Veg", "Egg", "Mixed"].map((type) => (
             <Button
               key={type}
               variant={data.foodType === type ? "default" : "outline"}
               className={cn(
-                "px-10 h-12 font-semibold transition-all",
+                "w-full sm:w-auto px-6 md:px-10 h-12 font-semibold transition-all",
                 data.foodType === type && "ring-2 ring-primary ring-offset-2",
               )}
               onClick={() => handleFoodTypeChange(type)}
@@ -97,19 +97,21 @@ export function PlanSelection({
         </div>
 
         {warning && (
-          <Alert className="mt-6 border-amber-200 bg-amber-50 text-amber-900">
-            <AlertCircle className="h-4 w-4 stroke-amber-600" />
+          <Alert className="mt-6 border-amber-200 bg-amber-50 text-amber-900 break-words">
+            <AlertCircle className="h-4 w-4 stroke-amber-600 shrink-0" />
             <AlertTitle className="font-bold">Dietary Note</AlertTitle>
             <AlertDescription>{warning}</AlertDescription>
           </Alert>
         )}
       </section>
-      <div className="pt-8 border-t flex justify-end">
+
+      {/* Button Layout Fixed */}
+      <div className="pt-8 border-t flex flex-col sm:flex-row justify-end mt-8">
         <Button
           size="lg"
           disabled={!data.planId}
           onClick={onNext}
-          className="bg-secondary hover:bg-secondary/90 px-10 text-white font-bold"
+          className="w-full sm:w-auto bg-secondary hover:bg-secondary/90 px-10 text-white font-bold"
         >
           Next: Delivery Details
         </Button>

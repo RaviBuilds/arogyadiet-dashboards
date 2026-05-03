@@ -10,13 +10,11 @@ export default async function CustomerLayout({
 }) {
   const supabase = await createClient();
 
-  // 1. Secure the entire customer route
   const {
     data: { user },
     error,
   } = await supabase.auth.getUser();
 
-  // 2. Fetch profile data for the greeting
   const { data: profile } = await supabase
     .from("users")
     .select("full_name")
@@ -26,13 +24,16 @@ export default async function CustomerLayout({
   const userName = profile?.full_name || user?.user_metadata?.full_name || null;
 
   return (
-    <div className="flex min-h-screen w-full bg-slate-50/50">
-      {/* Sidebar for Desktop */}
+    // ADDED max-w-full and overflow-x-hidden to kill horizontal scroll
+    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50/50">
       <CustomerSidebar isMobile={false} />
 
-      <div className="flex flex-col w-full min-w-0 flex-1">
+      {/* Added min-w-0 to allow text truncation inside flex children */}
+      <div className="flex flex-col w-full min-w-0 flex-1 overflow-x-hidden">
         <CustomerHeader userEmail={user?.email || ""} userName={userName} />
-        <main className="flex-1 p-4 md:p-6 lg:p-8">{children}</main>
+        <main className="flex-1 p-4 md:p-6 lg:p-8 w-full min-w-0">
+          {children}
+        </main>
       </div>
     </div>
   );

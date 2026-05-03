@@ -62,8 +62,6 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
   const selectedPlan = plans?.find((p: any) => p.id === data.planId);
   const baseDuration = selectedPlan?.duration_days || 30;
 
-  // Enforce the SRS Pause Credit Rule dynamically from the DB or fallback
-  //const maxPauses = selectedPlan?.pause_credits || (baseDuration / 30) * 7;
   const maxPauses = selectedPlan?.pause_credits;
   const pausesUsed = data.pausedDates?.length || 0;
   const isLimitReached = pausesUsed >= maxPauses;
@@ -87,18 +85,16 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
     return months;
   }, [scheduleDays]);
 
- 
-
   const handleTogglePause = (dateString: string) => {
     setData((prev: any) => {
       const newPaused = [...(prev.pausedDates || [])];
       const index = newPaused.indexOf(dateString);
 
       if (index > -1) {
-        newPaused.splice(index, 1); // Un-pause and free up a credit
+        newPaused.splice(index, 1);
       } else {
-        if (newPaused.length >= maxPauses) return prev; // Security safeguard
-        newPaused.push(dateString); // Pause
+        if (newPaused.length >= maxPauses) return prev;
+        newPaused.push(dateString);
       }
       return { ...prev, pausedDates: newPaused };
     });
@@ -108,40 +104,39 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
     scheduleDays.length > 0 ? scheduleDays[scheduleDays.length - 1] : null;
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 max-w-4xl mx-auto">
+    <div className="space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-right-4 max-w-4xl mx-auto overflow-hidden">
       <div className="space-y-2">
         <h2 className="text-xl font-bold flex items-center gap-2">
-          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
+          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0">
             3
           </span>
           Manage Schedule & Pauses
         </h2>
-        <p className="text-muted-foreground ml-10">
+        <p className="text-sm sm:text-base text-muted-foreground ml-8 sm:ml-10 break-words">
           Need a break? Select any days you want to skip. We will automatically
           extend your subscription end date so you never lose a meal!
         </p>
       </div>
 
       <div className="ml-0 md:ml-10 space-y-6">
-        {/* Dynamic End Date & Pause Credit Banner */}
         <div
           className={cn(
-            "border rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors",
+            "border rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-colors",
             isLimitReached
               ? "bg-amber-50 border-amber-200"
               : "bg-blue-50 border-blue-200",
           )}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
             {isLimitReached ? (
-              <AlertCircle className="h-6 w-6 text-amber-600" />
+              <AlertCircle className="h-6 w-6 text-amber-600 shrink-0" />
             ) : (
-              <CalendarCheck className="h-6 w-6 text-blue-600" />
+              <CalendarCheck className="h-6 w-6 text-blue-600 shrink-0" />
             )}
-            <div>
+            <div className="min-w-0 flex-1">
               <p
                 className={cn(
-                  "text-sm font-semibold",
+                  "text-sm font-semibold truncate",
                   isLimitReached ? "text-amber-900" : "text-blue-900",
                 )}
               >
@@ -149,17 +144,17 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
               </p>
               <p
                 className={cn(
-                  "text-xs",
+                  "text-xs leading-tight break-words",
                   isLimitReached ? "text-amber-700" : "text-blue-700",
                 )}
               >
-                You have used <strong>{pausesUsed}</strong> of{" "}
-                <strong>{maxPauses}</strong> pause credits.
+                Used <strong>{pausesUsed}</strong> of{" "}
+                <strong>{maxPauses}</strong> credits.
                 {isLimitReached && " (Limit Reached)"}
               </p>
             </div>
           </div>
-          <div className="text-center sm:text-right">
+          <div className="text-left sm:text-right w-full sm:w-auto border-t sm:border-0 border-blue-200/50 pt-2 sm:pt-0">
             <p
               className={cn(
                 "text-xs font-medium",
@@ -170,43 +165,42 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
             </p>
             <p
               className={cn(
-                "text-lg font-extrabold",
+                "text-lg font-extrabold truncate",
                 isLimitReached ? "text-amber-900" : "text-blue-900",
               )}
             >
-              {endDate ? format(endDate, "MMMM do, yyyy") : "..."}
+              {endDate ? format(endDate, "MMM do, yyyy") : "..."}
             </p>
           </div>
         </div>
 
-        {/* Dynamic Calendar Generation */}
-        <div className="space-y-12">
+        <div className="space-y-8 sm:space-y-12">
           {Object.entries(calendarMonths).map(([monthName, daysInMonth]) => {
             const firstDayOffset = daysInMonth[0].getDay();
 
             return (
               <div
                 key={monthName}
-                className="bg-white rounded-2xl border p-4 md:p-8 shadow-sm"
+                className="bg-white rounded-xl sm:rounded-2xl border p-3 sm:p-8 shadow-sm overflow-hidden"
               >
-                <h3 className="text-xl font-bold text-center mb-6 text-zinc-800">
+                <h3 className="text-lg sm:text-xl font-bold text-center mb-4 sm:mb-6 text-zinc-800">
                   {monthName}
                 </h3>
                 <div
-                  className="grid gap-2 md:gap-4 text-center mb-2"
+                  className="grid gap-1 sm:gap-4 text-center mb-2"
                   style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
                 >
                   {WEEKDAYS.map((day) => (
                     <div
                       key={day}
-                      className="text-xs md:text-sm font-bold text-zinc-400 uppercase tracking-wider"
+                      className="text-[10px] sm:text-sm font-bold text-zinc-400 uppercase tracking-wider"
                     >
                       {day}
                     </div>
                   ))}
                 </div>
                 <div
-                  className="grid gap-2 md:gap-4"
+                  className="grid gap-1 sm:gap-4"
                   style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
                 >
                   {Array.from({ length: firstDayOffset }).map((_, i) => (
@@ -216,8 +210,6 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
                   {daysInMonth.map((date, index) => {
                     const dateStr = format(date, "yyyy-MM-dd");
                     const isPaused = data.pausedDates?.includes(dateStr);
-
-                    // UX Logic: Disable button if it is NOT paused AND the limit is reached
                     const isDisabled = !isPaused && isLimitReached;
 
                     return (
@@ -226,7 +218,7 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
                         disabled={isDisabled}
                         onClick={() => handleTogglePause(dateStr)}
                         className={cn(
-                          "flex flex-col items-center justify-center aspect-square p-1 rounded-2xl border-2 transition-all relative select-none",
+                          "flex flex-col items-center justify-center aspect-square p-0.5 sm:p-1 rounded-xl sm:rounded-2xl border sm:border-2 transition-all relative select-none",
                           isPaused
                             ? "bg-zinc-50 border-zinc-300 border-dashed"
                             : "bg-green-50/30 border-green-200",
@@ -234,12 +226,12 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
                             !isPaused &&
                             "group hover:shadow-md hover:border-green-400 hover:-translate-y-0.5",
                           isDisabled &&
-                            "opacity-40 cursor-not-allowed grayscale", // Visually lock out the button
+                            "opacity-40 cursor-not-allowed grayscale",
                         )}
                       >
                         <span
                           className={cn(
-                            "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",
+                            "text-sm sm:text-xl font-extrabold mb-0.5",
                             isPaused || isDisabled
                               ? "text-zinc-400"
                               : "text-green-700",
@@ -249,11 +241,11 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
                         </span>
                         <div className="flex flex-col items-center justify-center gap-1">
                           {isPaused ? (
-                            <SkipSvg className="h-6 w-6 md:h-8 md:w-8" />
+                            <SkipSvg className="h-4 w-4 sm:h-8 sm:w-8" />
                           ) : (
                             <ActiveSvg
                               className={cn(
-                                "h-6 w-6 md:h-8 md:w-8",
+                                "h-4 w-4 sm:h-8 sm:w-8",
                                 !isDisabled && "drop-shadow-sm",
                               )}
                             />
@@ -269,14 +261,19 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
         </div>
       </div>
 
-      <div className="pt-8 border-t flex justify-between items-center md:ml-10">
-        <Button variant="ghost" onClick={onBack} className="gap-2">
-          <ChevronLeft className="h-4 w-4" /> Back
+      {/* Button Layout Fixed */}
+      <div className="pt-6 sm:pt-8 border-t flex flex-col-reverse sm:flex-row justify-between items-center gap-4 md:ml-10 mt-8">
+        <Button
+          variant="ghost"
+          onClick={onBack}
+          className="w-full sm:w-auto gap-2"
+        >
+          <ChevronLeft className="h-4 w-4 shrink-0" /> Back
         </Button>
         <Button
           size="lg"
           onClick={onNext}
-          className="bg-primary hover:bg-primary/90 px-10 text-white font-bold shadow-md"
+          className="w-full sm:w-auto bg-primary hover:bg-primary/90 px-10 text-white font-bold shadow-md"
         >
           Next: Customize Meals
         </Button>
