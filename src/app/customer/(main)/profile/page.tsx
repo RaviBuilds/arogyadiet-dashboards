@@ -18,7 +18,7 @@ export default async function CustomerProfilePage() {
     .from("users")
     .select("*")
     .eq("auth_user_id", user.id)
-    .single();
+    .maybeSingle();
 
   // 2. Fetch Customer Specific Info from 'customer_profiles' table
   let customerProfile = null;
@@ -27,7 +27,7 @@ export default async function CustomerProfilePage() {
       .from("customer_profiles")
       .select("*")
       .eq("user_id", dbUser.id)
-      .single();
+      .maybeSingle();
 
     customerProfile = cpData;
   }
@@ -45,7 +45,7 @@ export default async function CustomerProfilePage() {
   };
 
   const addresses = await getUserAddresses();
-  
+
   return (
     <div className="flex flex-col gap-8 max-w-5xl mx-auto w-full">
       <div>

@@ -17,6 +17,8 @@ export default async function SubscriptionPage() {
         dashboardOrder.indexOf(a.duration_days) -
         dashboardOrder.indexOf(b.duration_days),
     );
+
+   
     
   return (
     <div className="max-w-6xl mx-auto py-10 space-y-12">

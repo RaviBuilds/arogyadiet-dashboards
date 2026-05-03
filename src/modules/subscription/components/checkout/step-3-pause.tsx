@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { format, addDays } from "date-fns";
-import { ChevronLeft, Info, CalendarOff, CalendarCheck } from "lucide-react";
+import { ChevronLeft, CalendarCheck, AlertCircle } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -62,9 +62,13 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
   const selectedPlan = plans?.find((p: any) => p.id === data.planId);
   const baseDuration = selectedPlan?.duration_days || 30;
 
-  //The logic total days = Base plan + Number of paused Days
+  // Enforce the SRS Pause Credit Rule dynamically from the DB or fallback
+  //const maxPauses = selectedPlan?.pause_credits || (baseDuration / 30) * 7;
+  const maxPauses = selectedPlan?.pause_credits;
+  const pausesUsed = data.pausedDates?.length || 0;
+  const isLimitReached = pausesUsed >= maxPauses;
 
-  const totalDaysToGenerate = baseDuration + (data.pauseDates?.length || 0);
+  const totalDaysToGenerate = baseDuration + pausesUsed;
 
   const scheduleDays = useMemo(() => {
     if (!data.startDate) return [];
@@ -83,21 +87,25 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
     return months;
   }, [scheduleDays]);
 
+ 
+
   const handleTogglePause = (dateString: string) => {
     setData((prev: any) => {
       const newPaused = [...(prev.pausedDates || [])];
       const index = newPaused.indexOf(dateString);
 
       if (index > -1) {
-        newPaused.splice(index, 1); // Un-pause
+        newPaused.splice(index, 1); // Un-pause and free up a credit
       } else {
+        if (newPaused.length >= maxPauses) return prev; // Security safeguard
         newPaused.push(dateString); // Pause
       }
       return { ...prev, pausedDates: newPaused };
     });
   };
 
-  const endDate = scheduleDays.length > 0 ? scheduleDays[scheduleDays.length - 1] : null;
+  const endDate =
+    scheduleDays.length > 0 ? scheduleDays[scheduleDays.length - 1] : null;
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 max-w-4xl mx-auto">
@@ -115,23 +123,57 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
       </div>
 
       <div className="ml-0 md:ml-10 space-y-6">
-        {/* Dynamic End Date Banner */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+        {/* Dynamic End Date & Pause Credit Banner */}
+        <div
+          className={cn(
+            "border rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors",
+            isLimitReached
+              ? "bg-amber-50 border-amber-200"
+              : "bg-blue-50 border-blue-200",
+          )}
+        >
           <div className="flex items-center gap-3">
-            <CalendarCheck className="h-6 w-6 text-blue-600" />
+            {isLimitReached ? (
+              <AlertCircle className="h-6 w-6 text-amber-600" />
+            ) : (
+              <CalendarCheck className="h-6 w-6 text-blue-600" />
+            )}
             <div>
-              <p className="text-sm text-blue-900 font-semibold">
+              <p
+                className={cn(
+                  "text-sm font-semibold",
+                  isLimitReached ? "text-amber-900" : "text-blue-900",
+                )}
+              >
                 Your {baseDuration}-Meal Plan
               </p>
-              <p className="text-xs text-blue-700">
-                You have paused <strong>{data.pausedDates?.length || 0}</strong>{" "}
-                days.
+              <p
+                className={cn(
+                  "text-xs",
+                  isLimitReached ? "text-amber-700" : "text-blue-700",
+                )}
+              >
+                You have used <strong>{pausesUsed}</strong> of{" "}
+                <strong>{maxPauses}</strong> pause credits.
+                {isLimitReached && " (Limit Reached)"}
               </p>
             </div>
           </div>
           <div className="text-center sm:text-right">
-            <p className="text-xs text-blue-700 font-medium">New End Date</p>
-            <p className="text-lg font-extrabold text-blue-900">
+            <p
+              className={cn(
+                "text-xs font-medium",
+                isLimitReached ? "text-amber-700" : "text-blue-700",
+              )}
+            >
+              New End Date
+            </p>
+            <p
+              className={cn(
+                "text-lg font-extrabold",
+                isLimitReached ? "text-amber-900" : "text-blue-900",
+              )}
+            >
               {endDate ? format(endDate, "MMMM do, yyyy") : "..."}
             </p>
           </div>
@@ -175,21 +217,32 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
                     const dateStr = format(date, "yyyy-MM-dd");
                     const isPaused = data.pausedDates?.includes(dateStr);
 
+                    // UX Logic: Disable button if it is NOT paused AND the limit is reached
+                    const isDisabled = !isPaused && isLimitReached;
+
                     return (
                       <button
                         key={index}
+                        disabled={isDisabled}
                         onClick={() => handleTogglePause(dateStr)}
                         className={cn(
-                          "flex flex-col items-center justify-center aspect-square p-1 rounded-2xl border-2 transition-all relative select-none group hover:-translate-y-0.5",
+                          "flex flex-col items-center justify-center aspect-square p-1 rounded-2xl border-2 transition-all relative select-none",
                           isPaused
                             ? "bg-zinc-50 border-zinc-300 border-dashed"
-                            : "bg-green-50/30 border-green-200 hover:shadow-md hover:border-green-400",
+                            : "bg-green-50/30 border-green-200",
+                          !isDisabled &&
+                            !isPaused &&
+                            "group hover:shadow-md hover:border-green-400 hover:-translate-y-0.5",
+                          isDisabled &&
+                            "opacity-40 cursor-not-allowed grayscale", // Visually lock out the button
                         )}
                       >
                         <span
                           className={cn(
                             "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",
-                            isPaused ? "text-zinc-400" : "text-green-700",
+                            isPaused || isDisabled
+                              ? "text-zinc-400"
+                              : "text-green-700",
                           )}
                         >
                           {format(date, "d")}
@@ -198,7 +251,12 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
                           {isPaused ? (
                             <SkipSvg className="h-6 w-6 md:h-8 md:w-8" />
                           ) : (
-                            <ActiveSvg className="h-6 w-6 md:h-8 md:w-8 drop-shadow-sm" />
+                            <ActiveSvg
+                              className={cn(
+                                "h-6 w-6 md:h-8 md:w-8",
+                                !isDisabled && "drop-shadow-sm",
+                              )}
+                            />
                           )}
                         </div>
                       </button>

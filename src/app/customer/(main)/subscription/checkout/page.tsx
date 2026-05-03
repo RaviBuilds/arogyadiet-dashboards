@@ -12,7 +12,6 @@ export default async function CheckoutPage() {
   if (!user || userError) redirect("/login");
 
   //fetch the plan and profile  in parallel
-
   const [plansResponse, profileResponse] = await Promise.all([
     supbase
       .from("subscription_plans")
@@ -20,10 +19,10 @@ export default async function CheckoutPage() {
       .eq("is_active", true)
       .order("duration_days", { ascending: true }),
     supbase
-      .from("user")
-      .select("dietary_preference, id")
-      .eq("auth_user_id", user.id)
-      .single(),
+      .from("customer_profiles")
+      .select("dietary_preference, id, users!inner(auth_user_id)")
+      .eq("users.auth_user_id", user.id)
+      .maybeSingle(),
   ]);
 
   return (

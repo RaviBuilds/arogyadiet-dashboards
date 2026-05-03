@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback ,useMemo} from "react";
-import { format, addDays,startOfDay } from "date-fns";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { format, addDays, startOfDay } from "date-fns";
 import {
   CalendarIcon,
   MapPin,
@@ -52,10 +52,10 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
             .from("users")
             .select("id")
             .eq("auth_user_id", user.id)
-            .single()
+            .maybeSingle()
         ).data?.id,
       )
-      .single();
+      .maybeSingle();
 
     if (!profile) {
       setIsLoading(false);

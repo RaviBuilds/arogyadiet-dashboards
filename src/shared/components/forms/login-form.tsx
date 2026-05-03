@@ -24,8 +24,8 @@ import Link from "next/link";
 interface LoginFormProps extends React.ComponentProps<"div"> {
   socialLogin?: boolean;
   formTitle?: string;
-  portalRole: string;
-  redirectPath: string;
+  portalRole?: string;
+  redirectPath?: string;
 }
 
 export function LoginForm({

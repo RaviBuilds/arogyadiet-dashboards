@@ -16,15 +16,13 @@ export default async function CustomerLayout({
     error,
   } = await supabase.auth.getUser();
 
-
   // 2. Fetch profile data for the greeting
   const { data: profile } = await supabase
     .from("users")
     .select("full_name")
     .eq("auth_user_id", user?.id)
-    .single();
+    .maybeSingle();
 
-    
   const userName = profile?.full_name || user?.user_metadata?.full_name || null;
 
   return (

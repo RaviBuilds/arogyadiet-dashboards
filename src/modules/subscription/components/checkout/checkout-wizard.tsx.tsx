@@ -6,6 +6,7 @@ import { DeliveryDetails } from "./step-2-delivery";
 import { useSearchParams } from "next/navigation";
 import { PauseSelection } from "@/modules/subscription/components/checkout/step-3-pause";
 import { MealCustomization } from "@/modules/subscription/components/checkout/step-4-customization";
+import { OrderPreview } from "@/modules/subscription/components/checkout/step-5-preview";
 // import { MealPlannerConfig } from "./step-3-planner";
 // import { OrderPreview } from "./step-4-preview";
 
@@ -21,7 +22,7 @@ export function CheckoutWizard({
   const [step, setStep] = useState(1);
 
   const [checkoutData, setCheckoutData] = useState({
-    planId:preSelectedPlan || "",
+    planId: preSelectedPlan || "",
     foodType: profile?.dietary_preference || "Veg",
     startDate: undefined as Date | undefined,
     addressId: "",
@@ -30,12 +31,11 @@ export function CheckoutWizard({
     couponCode: "",
   });
 
-  useEffect(()=>{
-    if(preSelectedPlan)
-    {
-        setCheckoutData(prev=>({...prev, planId:preSelectedPlan}))
+  useEffect(() => {
+    if (preSelectedPlan) {
+      setCheckoutData((prev) => ({ ...prev, planId: preSelectedPlan }));
     }
-  },[preSelectedPlan])
+  }, [preSelectedPlan]);
   const nextStep = () => setStep((s) => s + 1);
   const prevStep = () => setStep((s) => s - 1);
 
@@ -78,7 +78,6 @@ export function CheckoutWizard({
           />
         )}
 
-       
         {step === 3 && (
           <PauseSelection
             data={checkoutData}
@@ -94,11 +93,14 @@ export function CheckoutWizard({
             data={checkoutData}
             plans={plans}
             setData={setCheckoutData}
-            onNext={() => setStep(4)} // Goes to Payment next!
-            onBack={() => setStep(2)}
+            onNext={nextStep} // Goes to Payment next!
+            onBack={prevStep}
           />
         )}
         {/*  step 4 will follow */}
+        {step === 5 && (
+          <OrderPreview data={checkoutData} plans={plans} onBack={prevStep} />
+        )}
       </div>
     </div>
   );
