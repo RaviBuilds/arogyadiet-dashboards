@@ -19,7 +19,7 @@ export default function CustomerLogin() {
           socialLogin={true}
           formTitle="Customer Portal"
           portalRole="CUSTOMER"
-          redirectPath="/customer/dashboard"
+          redirectPath="/dashboard"
         />
       </div>
     </div>
