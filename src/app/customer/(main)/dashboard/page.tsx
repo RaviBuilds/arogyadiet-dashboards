@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { format, parseISO, addDays } from "date-fns";
+import { format, parseISO, addDays, isToday, isTomorrow } from "date-fns";
 import Link from "next/link";
 import {
   CalendarDays,
@@ -27,20 +27,51 @@ import {
 } from "@/shared/components/ui/alert";
 import { cn } from "@/lib/utils";
 
+export const revalidate = 0;
+
+// --- DYNAMIC MEAL THEMES ---
+const MEAL_THEMES: Record<string, any> = {
+  VEG: {
+    bg: "bg-green-50",
+    border: "border-green-200",
+    text: "text-green-700",
+    label: "Veg",
+  },
+  CHICKEN: {
+    bg: "bg-red-50",
+    border: "border-red-200",
+    text: "text-red-700",
+    label: "Chicken",
+  },
+  EGG: {
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    text: "text-amber-700",
+    label: "Egg",
+  },
+  MIXED: {
+    bg: "bg-purple-50",
+    border: "border-purple-200",
+    text: "text-purple-700",
+    label: "Mixed",
+  },
+};
+
 export default async function CustomerDashboard() {
   const supabase = await createClient();
 
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  if (userError || !user) redirect("/login");
 
-  const { data: appUser, error: userError } = await supabase
+  const { data: appUser, error: appUserError } = await supabase
     .from("users")
     .select("id")
     .eq("auth_user_id", user.id)
     .maybeSingle();
-  if (!appUser) redirect("/login");
+  if (appUserError || !appUser) redirect("/login");
 
   const { data: profile, error: profileError } = await supabase
     .from("customer_profiles")
@@ -96,8 +127,8 @@ export default async function CustomerDashboard() {
               No Active Subscription
             </h2>
             <p className="text-muted-foreground max-w-md mx-auto">
-              You don't have an active meal plan yet. Subscribe today to get
-              healthy, chef-prepared meals delivered daily.
+              You don&apos;t have an active meal plan yet. Subscribe today to
+              get healthy, chef-prepared meals delivered daily.
             </p>
             <Button
               asChild
@@ -119,11 +150,16 @@ export default async function CustomerDashboard() {
     : activeSub.subscription_plans;
   const planName = planDetails?.name || "Custom Plan";
   const safeTotal = activeSub.pause_credits_total || 1;
-  const pausePercentage = Math.round(
-    (activeSub.pause_credits_used / safeTotal) * 100,
-  );
+  const { count: actualPauseCreditsUsed } = await supabase
+    .from("subscription_daily_preferences")
+    .select("*", { count: "exact", head: true })
+    .eq("subscription_id", activeSub.id)
+    .eq("is_paused", true);
+  const pauseCreditsUsed =
+    actualPauseCreditsUsed ?? activeSub.pause_credits_used ?? 0;
+  const pausePercentage = Math.round((pauseCreditsUsed / safeTotal) * 100);
 
-  // --- NEW: Fetch Next 7 Days Deliveries ---
+  // --- Fetch Next 7 Days Deliveries ---
   const todayStr = format(new Date(), "yyyy-MM-dd");
   const nextWeekStr = format(addDays(new Date(), 7), "yyyy-MM-dd");
 
@@ -229,7 +265,7 @@ export default async function CustomerDashboard() {
           <CardContent className="p-6 flex-1 flex flex-col justify-center">
             <div className="flex justify-between items-end mb-2">
               <span className="text-4xl font-black text-zinc-900">
-                {activeSub.pause_credits_used}
+                {pauseCreditsUsed}
               </span>
               <span className="text-sm font-bold text-zinc-500 mb-1">
                 / {activeSub.pause_credits_total} Used
@@ -242,87 +278,137 @@ export default async function CustomerDashboard() {
               />
             </div>
             <p className="text-xs text-zinc-500 mt-4 leading-relaxed">
-              {activeSub.pause_credits_total - activeSub.pause_credits_used}{" "}
-              credits remaining. Pausing a delivery automatically extends your
-              end date.
+              {activeSub.pause_credits_total - pauseCreditsUsed} credits
+              remaining. Pausing a delivery automatically extends your end date.
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* NEW: Next 7 Days Roster */}
-      <div className="pt-6">
-        <h2 className="text-xl font-bold text-zinc-900 mb-4 flex items-center gap-2">
-          Upcoming Deliveries
-          <span className="bg-zinc-100 text-zinc-600 text-xs px-2 py-1 rounded-full font-semibold">
+      {/* NEW: Next 7 Days Roster - Upgraded to Premium Grid */}
+      <div className="pt-8">
+        <div className="mb-6 flex items-center gap-3">
+          <h3 className="text-xl font-bold text-zinc-900">
+            Upcoming Deliveries
+          </h3>
+          <span className="px-3 py-1 bg-zinc-100 text-zinc-600 text-xs font-bold rounded-full border border-zinc-200 shadow-sm">
             Next 7 Days
           </span>
-        </h2>
+        </div>
 
-        <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-          {upcomingMeals?.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">
-              No upcoming deliveries found.
-            </div>
-          ) : (
-            <div className="divide-y">
-              {upcomingMeals?.map((meal, idx) => {
-                const mealDate = parseISO(meal.preference_date);
-                const address = Array.isArray(meal.addresses)
-                  ? meal.addresses[0]
-                  : meal.addresses;
-                const category = Array.isArray(meal.meal_categories)
-                  ? meal.meal_categories[0]
-                  : meal.meal_categories;
+        {upcomingMeals?.length === 0 ? (
+          <div className="bg-white border rounded-xl shadow-sm p-8 text-center text-muted-foreground">
+            No upcoming deliveries found.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
+            {upcomingMeals?.map((meal: any, idx: number) => {
+              const date = parseISO(meal.preference_date);
+              const isPaused = meal.is_paused;
 
-                return (
-                  <div
-                    key={idx}
-                    className={cn(
-                      "p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors",
-                      meal.is_paused ? "bg-zinc-50" : "hover:bg-zinc-50/50",
-                    )}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div
+              const address = Array.isArray(meal.addresses)
+                ? meal.addresses[0]
+                : meal.addresses;
+              const category = Array.isArray(meal.meal_categories)
+                ? meal.meal_categories[0]
+                : meal.meal_categories;
+
+              const mealCode = category?.code || "VEG";
+              const theme = MEAL_THEMES[mealCode] || MEAL_THEMES["VEG"];
+
+              // Temporal Context Badges
+              const showToday = isToday(date);
+              const showTomorrow = isTomorrow(date);
+
+              return (
+                <div
+                  key={idx}
+                  className={cn(
+                    "flex flex-col relative overflow-hidden rounded-2xl border-2 transition-all p-5",
+                    isPaused
+                      ? "bg-zinc-50 border-zinc-200 border-dashed"
+                      : cn(
+                          "bg-white hover:shadow-md hover:-translate-y-1",
+                          theme.border,
+                        ),
+                  )}
+                >
+                  {/* Top Header: Date & Status Badge */}
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                        {format(date, "EEEE")}
+                      </p>
+                      <p
                         className={cn(
-                          "w-14 h-14 rounded-lg flex flex-col items-center justify-center shrink-0 border",
-                          meal.is_paused
-                            ? "bg-zinc-100 border-zinc-200"
-                            : "bg-primary/5 border-primary/20 text-primary",
+                          "text-2xl font-black",
+                          isPaused ? "text-zinc-500" : "text-zinc-900",
                         )}
                       >
-                        <span className="text-[10px] font-bold uppercase">
-                          {format(mealDate, "EEE")}
-                        </span>
-                        <span className="text-lg font-black leading-none">
-                          {format(mealDate, "dd")}
-                        </span>
-                      </div>
-                      <div>
-                        {meal.is_paused ? (
-                          <p className="font-bold text-zinc-500 flex items-center gap-2">
-                            <PauseCircle className="h-4 w-4" /> Delivery Paused
-                          </p>
-                        ) : (
-                          <>
-                            <p className="font-bold text-zinc-900">
-                              {category?.code || "Standard Meal"}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                              <MapPin className="h-3 w-3" /> {address?.tag}:{" "}
-                              {address?.street_1}
-                            </p>
-                          </>
-                        )}
-                      </div>
+                        {format(date, "dd MMM")}
+                      </p>
                     </div>
+
+                    {!isPaused && showToday && (
+                      <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider shadow-sm">
+                        Today
+                      </span>
+                    )}
+                    {!isPaused && showTomorrow && (
+                      <span className="bg-indigo-50 text-indigo-600 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider shadow-sm">
+                        Tomorrow
+                      </span>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+
+                  {/* Middle: Meal Details or Paused State */}
+                  <div className="flex-grow flex flex-col justify-center py-2">
+                    {isPaused ? (
+                      <div className="flex items-center gap-2 text-zinc-400">
+                        <AlertCircle className="h-5 w-5" />
+                        <span className="font-bold">Delivery Paused</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg border font-black text-sm tracking-wide",
+                            theme.bg,
+                            theme.text,
+                            theme.border,
+                          )}
+                        >
+                          {theme.label}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Bottom: Address Details */}
+                  <div className="mt-4 pt-4 border-t border-zinc-100">
+                    {isPaused ? (
+                      <p className="text-xs text-zinc-400 font-medium">
+                        No meal will be prepared.
+                      </p>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <MapPin className="h-4 w-4 text-zinc-400 shrink-0 mt-0.5" />
+                        <div className="overflow-hidden">
+                          <p className="text-xs font-bold text-zinc-700 truncate">
+                            {address?.tag || "Delivery Address"}
+                          </p>
+                          <p className="text-[11px] text-zinc-500 truncate mt-0.5">
+                            {address?.street_1 || "Address pending"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

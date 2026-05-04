@@ -511,7 +511,7 @@ export function MealCustomization({
           onClick={onNext}
           className="w-full sm:w-auto bg-secondary hover:bg-secondary/90 px-10 text-white font-bold"
         >
-          Customize My Meals
+          Review and Pay
         </Button>
       </div>
     </div>

@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { MealPlannerClient } from "@/modules/subscription/components/manage/meal-planner-client";
 
+export const revalidate = 0;
+
 export default async function ManageMealPlannerPage() {
   const supabase = await createClient();
 

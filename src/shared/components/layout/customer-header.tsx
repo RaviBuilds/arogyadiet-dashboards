@@ -23,13 +23,12 @@ interface CustomerHeaderProps {
 export function CustomerHeader({ userEmail, userName }: CustomerHeaderProps) {
   const displayString = userName || userEmail || "U";
   const initial = displayString.charAt(0).toUpperCase();
-  
+
   // ADDED: State to control the mobile menu sheet
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   return (
-    <header className="flex h-14 items-center gap-3 sm:gap-4 border-b bg-background px-4 lg:h-[60px] lg:px-6 sticky top-0 z-10 w-full overflow-hidden">
-      
+    <header className="flex h-14 items-center gap-3 sm:gap-4 border-b bg-background px-4 lg:h-[60px] lg:px-6 sticky top-0 z-10 w-full overflow-hidden print:hidden">
       {/* WIRED UP: open and onOpenChange state */}
       <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
         <SheetTrigger
@@ -51,7 +50,7 @@ export function CustomerHeader({ userEmail, userName }: CustomerHeaderProps) {
             </SheetDescription>
           </SheetHeader>
 
-          <div className="w-full h-[full]">
+          <div className="w-full h-full">
             {/* WIRED UP: onNavigate closes the sheet when a link is clicked */}
             <CustomerSidebar isMobile onNavigate={() => setIsSheetOpen(false)} />
           </div>

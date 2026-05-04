@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { format, addDays, startOfDay, parseISO, isBefore } from "date-fns";
 import { RefreshCw, Save, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
@@ -194,6 +195,7 @@ export function MealPlannerClient({
   pausedDates,
   categoryMap, // Maps "Veg" to its UUID in the DB
 }: any) {
+  const router = useRouter();
   const [overrides, setOverrides] =
     useState<Record<string, string>>(initialOverrides);
   const [isSaving, setIsSaving] = useState(false);
@@ -201,6 +203,16 @@ export function MealPlannerClient({
     type: "success" | "error";
     text: string;
   } | null>(null);
+
+  useEffect(() => {
+    console.log("DEBUG: initialOverrides changed:", initialOverrides);
+
+    const syncTimer = window.setTimeout(() => {
+      setOverrides(initialOverrides);
+    }, 0);
+
+    return () => window.clearTimeout(syncTimer);
+  }, [initialOverrides]);
 
   // --- 5 PM CUT-OFF LOGIC ---
   const minEditableDate = useMemo(() => {
@@ -274,6 +286,8 @@ export function MealPlannerClient({
         type: "success",
         text: "Meal preferences successfully updated!",
       });
+      console.log("DEBUG: Meal Planner Syncing...");
+      router.refresh();
     } else {
       setSaveMessage({
         type: "error",
