@@ -21,16 +21,20 @@ import {
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { cn } from "@/lib/utils";
 
+// 1. IMPORT YOUR MODAL (Adjust path if necessary based on your structure)
 import { AddressManagerModal } from "@/shared/components/customer/address-manager-modal";
 
 export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
   const [addresses, setAddresses] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
+  // 2. ADD MODAL STATE
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
 
   const supabase = createClient();
 
+  // 3. EXTRACT FETCH FUNCTION so it can be reused after saving a new address
   const fetchAddresses = useCallback(async () => {
     setIsLoading(true);
     const {
@@ -67,6 +71,7 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
     const addressList = addrData || [];
     setAddresses(addressList);
 
+    // Auto-select primary address if nothing is selected yet
     if (!data.addressId && addressList.length > 0) {
       const primary =
         addressList.find((a: any) => a.is_primary) || addressList[0];
@@ -77,25 +82,31 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
 
   const minStartDate = useMemo(() => {
     const now = new Date();
-    const currentHour = now.getHours();
+    const currentHour = now.getHours(); // Local hour (0-23)
+
+    // If it's past 17:00 (5 PM), we need 2 days lead time. Otherwise, 1 day.
     const daysToAdd = currentHour >= 17 ? 2 : 1;
+
+    // startOfDay resets the time to 00:00:00 so the calendar compares cleanly
     return startOfDay(addDays(now, daysToAdd));
   }, []);
 
+  // Call it on initial load
   useEffect(() => {
     fetchAddresses();
   }, [fetchAddresses]);
 
   return (
-    <div className="space-y-10 animate-in fade-in slide-in-from-right-4 max-w-full overflow-hidden">
+    <div className="space-y-10 animate-in fade-in slide-in-from-right-4">
+      {/* 1. Subscription Start Date */}
       <section className="space-y-4">
         <h2 className="text-xl font-bold flex items-center gap-2">
-          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0">
+          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
             3
           </span>
           When should we start?
         </h2>
-        <div className="w-full sm:max-w-xs">
+        <div className="max-w-xs">
           <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -105,12 +116,12 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
                   !data.startDate && "text-muted-foreground",
                 )}
               >
-                <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
-                <span className="truncate">
-                  {data.startDate
-                    ? format(data.startDate, "PPP")
-                    : "Select Start Date"}
-                </span>
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {data.startDate ? (
+                  format(data.startDate, "PPP")
+                ) : (
+                  <span>Select Start Date</span>
+                )}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
@@ -126,38 +137,41 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
               />
             </PopoverContent>
           </Popover>
-          <p className="text-[11px] text-muted-foreground mt-2 px-1 break-words">
+          <p className="text-[11px] text-muted-foreground mt-2 px-1">
             * Note: Tomorrow's meal must be finalized before 5:00 PM today.
           </p>
         </div>
       </section>
 
+      {/* 2. Address Selection */}
       <section className="space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+        <div className="flex flex-col md:flex-row gap-2 items-start justify-between md:items-center">
+         
           <h2 className="text-xl font-bold flex items-center gap-2">
-            <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0">
+            <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
               4
             </span>
             Delivery Address
           </h2>
 
+          {/* WIRE UP THE ONCLICK HANDLERS HERE */}
           {addresses.length >= 2 ? (
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border-zinc-300 text-zinc-700 hover:bg-zinc-50 w-full sm:w-auto"
+              className="gap-2 border-zinc-300 text-zinc-700 hover:bg-zinc-50"
               onClick={() => setIsAddressModalOpen(true)}
             >
-              <Settings className="h-4 w-4 shrink-0" /> Manage Addresses
+              <Settings className="h-4 w-4" /> Manage Addresses
             </Button>
           ) : (
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border-primary text-primary hover:bg-primary/5 w-full sm:w-auto"
+              className="gap-2 border-primary text-primary hover:bg-primary/5"
               onClick={() => setIsAddressModalOpen(true)}
             >
-              <Plus className="h-4 w-4 shrink-0" /> Add New Address
+              <Plus className="h-4 w-4" /> Add New Address
             </Button>
           )}
         </div>
@@ -183,21 +197,21 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
               >
                 {data.addressId === addr.id && (
                   <div className="absolute top-3 right-3 text-secondary">
-                    <CheckCircle2 className="h-5 w-5 fill-secondary text-white shrink-0" />
+                    <CheckCircle2 className="h-5 w-5 fill-secondary text-white" />
                   </div>
                 )}
-                <CardContent className="p-4 flex gap-3 min-w-0">
+                <CardContent className="p-4 flex gap-3">
                   <MapPin className="h-5 w-5 text-muted-foreground shrink-0 mt-1" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-bold text-sm truncate">{addr.tag}</p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-sm">{addr.tag}</p>
                       {addr.is_primary && (
-                        <span className="bg-secondary/20 text-secondary-foreground text-[10px] px-2 py-0.5 rounded font-bold shrink-0">
+                        <span className="bg-secondary/20 text-secondary-foreground text-[10px] px-2 py-0.5 rounded font-bold">
                           PRIMARY
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2 break-words">
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                       {addr.street_1}, {addr.street_2 && `${addr.street_2},`}{" "}
                       {addr.city}, {addr.pincode}
                     </p>
@@ -207,8 +221,8 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
             ))}
 
             {addresses.length === 0 && (
-              <div className="col-span-full py-10 px-4 text-center border-2 border-dashed rounded-xl space-y-3">
-                <p className="text-muted-foreground text-sm break-words">
+              <div className="col-span-full py-10 text-center border-2 border-dashed rounded-xl space-y-3">
+                <p className="text-muted-foreground">
                   No saved addresses found.
                 </p>
                 <Button
@@ -224,30 +238,27 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
         )}
       </section>
 
-      {/* Button Layout Fixed */}
+      {/* Navigation */}
       <div className="pt-8 border-t flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8">
-        <Button
-          variant="ghost"
-          onClick={onBack}
-          className="w-full sm:w-auto gap-2"
-        >
-          <ChevronLeft className="h-4 w-4 shrink-0" /> Back to Plans
+        <Button variant="ghost" onClick={onBack} className="gap-2">
+          <ChevronLeft className="h-4 w-4" /> Back to Plans
         </Button>
         <Button
           size="lg"
           disabled={!data.startDate || !data.addressId}
           onClick={onNext}
-          className="w-full sm:w-auto bg-secondary hover:bg-secondary/90 px-10 text-white font-bold"
+          className="bg-secondary hover:bg-secondary/90 px-10 text-white font-bold"
         >
           Customize My Meals
         </Button>
       </div>
 
+      {/* 4. RENDER THE MODAL AT THE BOTTOM */}
       {isAddressModalOpen && (
         <AddressManagerModal
           isOpen={isAddressModalOpen}
           onClose={() => setIsAddressModalOpen(false)}
-          onAddressUpdated={() => fetchAddresses()}
+          onAddressUpdated={() => fetchAddresses()} // Refresh checkout list when done
         />
       )}
     </div>

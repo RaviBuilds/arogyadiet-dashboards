@@ -51,7 +51,7 @@ export function CustomerHeader({ userEmail, userName }: CustomerHeaderProps) {
             </SheetDescription>
           </SheetHeader>
 
-          <div className="w-full h-full">
+          <div className="w-full h-[full]">
             {/* WIRED UP: onNavigate closes the sheet when a link is clicked */}
             <CustomerSidebar isMobile onNavigate={() => setIsSheetOpen(false)} />
           </div>

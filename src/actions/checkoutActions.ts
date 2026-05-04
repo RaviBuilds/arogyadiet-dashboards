@@ -246,9 +246,9 @@ export async function verifyAndActivateSubscriptionAction(
       .from("payments")
       .insert({
         customer_profile_id: customerProfileId,
-        payment_method: "ONLINE",
+        payment_method: "RAZORPAY",
         amount: exactAmountPaid,
-        status: "PAID",
+        status: "SUCCESS",
         paid_at: new Date().toISOString(),
       })
       .select("id")
@@ -256,16 +256,7 @@ export async function verifyAndActivateSubscriptionAction(
 
     if (paymentError) throw paymentError;
 
-    // 4. Insert Razorpay Transaction Audit
-    await supabaseAdmin.from("razorpay_transactions").insert({
-      payment_id: payment.id,
-      razorpay_order_id: razorpay_order_id,
-      razorpay_payment_id: razorpay_payment_id,
-      razorpay_signature: razorpay_signature,
-      gateway_status: "CAPTURED",
-    });
-
-    // 5. Calculate Subscription Dates
+    // 4. Calculate Subscription Dates
     const baseDuration = plan.duration_days;
     const pausesUsed = pausedDates.length;
     const start = new Date(startDate);
@@ -275,13 +266,12 @@ export async function verifyAndActivateSubscriptionAction(
     // Generate a readable subscription code
     const subCode = `SUB-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // 6. Insert Subscription Record (Removed invalid activated_at column)
+    // 5. Insert Subscription Record
     const { data: subscription, error: subError } = await supabaseAdmin
       .from("subscriptions")
       .insert({
         customer_profile_id: customerProfileId,
         plan_id: planId,
-        payment_id: payment.id,
         subscription_code: subCode,
         starts_on: format(start, "yyyy-MM-dd"),
         ends_on: format(end, "yyyy-MM-dd"),
@@ -296,11 +286,26 @@ export async function verifyAndActivateSubscriptionAction(
 
     if (subError) throw subError;
 
-    // 7. Update Payment with Subscription ID
-    await supabaseAdmin
+    // 6. Link Payment to Subscription
+    const { error: paymentUpdateError } = await supabaseAdmin
       .from("payments")
       .update({ subscription_id: subscription.id })
       .eq("id", payment.id);
+
+    if (paymentUpdateError) throw paymentUpdateError;
+
+    // 7. Insert Razorpay Transaction Audit
+    const { error: transactionError } = await supabaseAdmin
+      .from("razorpay_transactions")
+      .insert({
+        payment_id: payment.id,
+        razorpay_order_id: razorpay_order_id,
+        razorpay_payment_id: razorpay_payment_id,
+        razorpay_signature: razorpay_signature,
+        gateway_status: "SUCCESS",
+      });
+
+    if (transactionError) throw transactionError;
 
     // 8. Generate Daily Preferences (Meal Planner & Paused Dates logic)
     const dailyPreferences = [];

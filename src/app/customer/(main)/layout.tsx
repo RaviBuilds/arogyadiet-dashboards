@@ -25,7 +25,7 @@ export default async function CustomerLayout({
 
   return (
     // ADDED max-w-full and overflow-x-hidden to kill horizontal scroll
-    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50/50">
+    <div className="flex min-h-screen w-full max-w-full bg-slate-50/50">
       <CustomerSidebar isMobile={false} />
 
       {/* Added min-w-0 to allow text truncation inside flex children */}

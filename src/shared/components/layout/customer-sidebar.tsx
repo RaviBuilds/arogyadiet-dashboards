@@ -86,8 +86,8 @@ export function CustomerSidebar({
   return (
     <div
       className={cn(
-        "border-r border-white/10 bg-zinc-950 h-screen sticky top-0 shrink-0 rounded-tr-3xl",
-        isMobile ? "w-full" : "hidden md:block md:w-64 lg:w-72",
+        "border-r border-white/10 bg-zinc-950  sticky top-0 shrink-0 rounded-tr-3xl",
+        isMobile ? "w-full h-screen" : "hidden md:block md:w-64 lg:w-72 h-screen",
       )}
     >
       <SidebarContent />
