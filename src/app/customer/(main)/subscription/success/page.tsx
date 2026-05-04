@@ -26,7 +26,7 @@ export default function SubscriptionSuccessPage() {
             </p>
             <div className="flex flex-col justify-center gap-3 sm:flex-row">
               <Button asChild className="gap-2">
-                <Link href="/customer/subscription">
+                <Link href="/subscription">
                   <ReceiptText className="h-4 w-4" />
                   View Subscription
                 </Link>

@@ -206,7 +206,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
           );
 
           if (verifyRes.success) {
-            router.push("/customer/subscription/success");
+            router.push("/subscription/success");
           } else {
             setPaymentError(
               "Database sync failed after payment. Please contact support.",
