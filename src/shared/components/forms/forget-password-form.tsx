@@ -1,7 +1,5 @@
-// src/shared/components/forms/forgot-password-form.tsx
 "use client";
 
-import { useState, useEffect } from "react";
 import { useActionState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -56,8 +54,6 @@ export function ForgotPasswordForm({
         </CardHeader>
         <CardContent>
           <form action={formAction} className="grid gap-4">
-          
-
             <div className="grid gap-2">
               <Input
                 id="email"

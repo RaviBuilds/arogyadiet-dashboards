@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useActionState, useState } from "react";
-import { LoginAction } from "@/actions/authActions"; // Assuming the action location
+import { LoginAction } from "@/actions/authActions";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 
@@ -26,6 +26,7 @@ interface LoginFormProps extends React.ComponentProps<"div"> {
   formTitle?: string;
   portalRole?: string;
   redirectPath?: string;
+  showSignup?: boolean; // <-- NEW PROP
 }
 
 export function LoginForm({
@@ -34,31 +35,26 @@ export function LoginForm({
   formTitle = "Login",
   portalRole,
   redirectPath = "/dashboard",
+  showSignup = true, // <-- DEFAULTS TO TRUE FOR CUSTOMERS
   ...props
 }: LoginFormProps) {
-
-
   const [state, formAction, isPending] = useActionState(LoginAction, null);
-  const [isGoogleLoadig, setIsGoogleLoading] = useState(false);
-
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const handleGoogleLogin = async () => {
     setIsGoogleLoading(true);
     const supabase = createClient();
 
-  await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      // Redirect to our callback route, and pass the intended destination
-      redirectTo: `${window.location.origin}/api/auth/callback?next=${redirectPath}`,
-      // We can pass metadata to enforce they are signing up as a specific role
-      queryParams: {
-        access_type: "offline",
-        prompt: "consent",
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/api/auth/callback?next=${redirectPath}`,
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+        },
       },
-    },
-  });
-
+    });
   };
 
   return (
@@ -73,7 +69,6 @@ export function LoginForm({
         <CardContent>
           <form action={formAction}>
             <FieldGroup>
-              {/* configure the input for the server */}
               <input type="hidden" name="portalRole" value={portalRole} />
               <input type="hidden" name="redirectPath" value={redirectPath} />
 
@@ -83,7 +78,7 @@ export function LoginForm({
                     variant="outline"
                     type="button"
                     onClick={handleGoogleLogin}
-                    disabled={isGoogleLoadig || isPending}
+                    disabled={isGoogleLoading || isPending}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
                       <path
@@ -91,7 +86,7 @@ export function LoginForm({
                         fill="currentColor"
                       />
                     </svg>
-                    {isGoogleLoadig ? "Connecting ...." : "Login with Google"}
+                    {isGoogleLoading ? "Connecting ...." : "Login with Google"}
                   </Button>
                 </Field>
               )}
@@ -114,8 +109,8 @@ export function LoginForm({
                 <div className="flex items-center">
                   <FieldLabel htmlFor="password">Password</FieldLabel>
                   <Link
-                    href="/forgot-password"
-                    className="ml-auto text-sm underline-offset-4 hover:underline"
+                    href="forgot-password" // <-- Relative path ensures it works on /customer or /rider domains
+                    className="ml-auto text-sm underline-offset-4 hover:underline text-primary"
                   >
                     Forgot your password?
                   </Link>
@@ -130,23 +125,41 @@ export function LoginForm({
               )}
 
               <Field>
-                <Button type="submit" disabled={isPending || isGoogleLoadig}>
+                <Button type="submit" disabled={isPending || isGoogleLoading}>
                   {isPending ? "Logging in..." : "Login"}
                 </Button>
-                <FieldDescription className="text-center">
-                  Don&apos;t have an account?{" "}
-                  <Link href="/signup">Sign up</Link>
-                </FieldDescription>
+
+                {/* CONDITIONAL SIGNUP RENDER */}
+                {showSignup && (
+                  <FieldDescription className="text-center mt-2">
+                    Don&apos;t have an account?{" "}
+                    <Link
+                      href="signup"
+                      className="text-primary hover:underline"
+                    >
+                      Sign up
+                    </Link>
+                  </FieldDescription>
+                )}
               </Field>
             </FieldGroup>
           </form>
         </CardContent>
       </Card>
-      <FieldDescription className="px-6 text-center">
-        By clicking continue, you agree to our{" "}
-        <Link href="#">Terms of Service</Link> and{" "}
-        <Link href="#">Privacy Policy</Link>.
-      </FieldDescription>
+
+      {showSignup && (
+        <FieldDescription className="px-6 text-center">
+          By clicking continue, you agree to our{" "}
+          <Link href="#" className="underline">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href="#" className="underline">
+            Privacy Policy
+          </Link>
+          .
+        </FieldDescription>
+      )}
     </div>
   );
 }

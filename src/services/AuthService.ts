@@ -7,6 +7,9 @@ export async function login(
 ) {
   const supabase = await createClient();
 
+  console.log("--- AuthService.login Triggered ---");
+  console.log("Attempting Supabase signInWithPassword for:", email);
+
   // 1. Authenticate with supabase auth
   const { data: authData, error: authError } =
     await supabase.auth.signInWithPassword({
@@ -14,8 +17,17 @@ export async function login(
       password,
     });
 
-  if (authError) throw new Error(authError.message);
-  if (!authData.user) throw new Error("Login failed !");
+  if (authError) {
+    console.error("Step 1 FAILED - Supabase Auth Error:", authError.message);
+    throw new Error(authError.message);
+  }
+  if (!authData.user) {
+    console.error("Step 1 FAILED - No authData.user returned!");
+    throw new Error("Login failed !");
+  }
+
+  console.log("Step 1 SUCCESS - Auth User ID:", authData.user.id);
+  console.log("Fetching public.users metadata...");
 
   // 2. Fetch user metadata and verify Role / Active status
   const { data: userData, error: userError } = await supabase
@@ -24,14 +36,23 @@ export async function login(
     .eq(`auth_user_id`, authData.user.id)
     .single();
 
-
   if (userError || !userData) {
+    console.error(
+      "Step 2 FAILED - User metadata fetch error:",
+      userError?.message,
+    );
     await supabase.auth.signOut();
     throw new Error("User profile setup incomplete.");
   }
 
+  console.log(
+    "Step 2 SUCCESS - User metadata retrieved:",
+    JSON.stringify(userData),
+  );
+
   // 3. Check if account is active
   if (!userData.is_active) {
+    console.error("Step 3 FAILED - Account is inactive.");
     await supabase.auth.signOut();
     throw new Error(
       "Your account has been deactivated please contact support!",
@@ -43,38 +64,48 @@ export async function login(
     ? userData.roles[0]?.code
     : (userData.roles as { code: string })?.code;
 
+  console.log(
+    `Step 4 Checking Boundary - Expected Role: ${expectedRole} | Actual Role: ${userRole}`,
+  );
+
   // 4. Portal boundary check
   if (userRole !== expectedRole) {
+    console.error(
+      `Step 4 FAILED - Role mismatch! Expected ${expectedRole} but got ${userRole}`,
+    );
     await supabase.auth.signOut();
     throw new Error(
       `Unauthorized. This portal is restricted to ${expectedRole}`,
     );
   }
 
+  console.log("Login completely successful. Returning user.");
   return authData.user;
 }
 
-
-export async function sendPasswordResetEmail(email: string, redirectUrl: string) {
+export async function sendPasswordResetEmail(
+  email: string,
+  redirectUrl: string,
+) {
   const supabase = await createClient();
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: redirectUrl,
   });
+
   if (error) {
     throw new Error(error.message);
   }
   return true;
 }
 
-export async function updateUserPassword(password:string)
-{
+export async function updateUserPassword(password: string) {
   const supabase = await createClient();
   const { error } = await supabase.auth.updateUser({
-    password:password
-  })
-  if(error)
-  {
+    password: password,
+  });
+
+  if (error) {
     throw new Error(error.message);
   }
 
