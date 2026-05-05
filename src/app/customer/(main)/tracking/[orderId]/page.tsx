@@ -1,12 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, MapPin, Bike, Phone, Clock } from "lucide-react";
+import Image from "next/image";
+import { ArrowLeft, MapPin, User, Phone, Clock } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 
 // IMPORTANT: Adjust this import path if you saved LiveTrackingMap somewhere else!
-// import { LiveTrackingMap } from "@/modules/customer/components/LiveTrackingMap";
 import { LiveTrackingMap } from "@/modules/customer/component/LiveTrackingMap";
 
 export const revalidate = 0;
@@ -24,7 +24,7 @@ export default async function OrderTrackingPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Fetch the specific order, including the rider's details and the destination address
+  // Fetch the specific order, including the rider's details, avatar, and destination address
   const { data: order, error } = await supabase
     .from("delivery_orders")
     .select(
@@ -32,7 +32,7 @@ export default async function OrderTrackingPage({
       id,
       status,
       assigned_rider_id,
-      rider:rider_profiles ( users ( full_name, mobile ) ),
+      rider:rider_profiles ( users ( full_name, mobile, avatar_url ) ),
       address:addresses ( street_1, landmark, city )
     `,
     )
@@ -49,6 +49,7 @@ export default async function OrderTrackingPage({
       </div>
     );
   }
+  console.log("ORDRe =>", order);
 
   // Safely extract relationships
   const riderProfile = Array.isArray(order.rider)
@@ -60,10 +61,29 @@ export default async function OrderTrackingPage({
   const address = Array.isArray(order.address)
     ? order.address[0]
     : order.address;
+
   const addressString = [address?.street_1, address?.landmark, address?.city]
     .filter(Boolean)
     .join(", ");
 
+  // Safely extract Rider variables
+  const riderName = riderUser?.full_name || "Assigning Rider...";
+  const riderPhone = riderUser?.mobile || null;
+  const riderAvatar = riderUser?.avatar_url || null;
+
+  // Dynamic status formatting
+  const formatStatus = (status: string) => {
+    if (status === "ON_THE_WAY") return "On the way";
+    if (status === "PICKED") return "Order picked up";
+    if (status === "ASSIGNED") return "Rider assigned";
+    if (status === "DELIVERED") return "Delivered";
+    return "Preparing...";
+  };
+
+  console.log("Rider Name =>", riderName);
+  console.log("Rider Phone =>", riderPhone);
+  console.log("Rider User =>", riderUser);
+  console.log("Rider riderProfile =>", riderProfile);
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4">
       {/* Header */}
@@ -95,28 +115,54 @@ export default async function OrderTrackingPage({
               <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-4">
                 Your Delivery Partner
               </p>
+
               <div className="flex items-center gap-4 mb-6">
-                <div className="h-14 w-14 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                  <Bike className="h-7 w-7 text-blue-600" />
+                {/* Rider Avatar Logic */}
+                <div className="h-14 w-14 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center overflow-hidden shrink-0 relative">
+                  {riderAvatar ? (
+                    <Image
+                      src={riderAvatar}
+                      alt={riderName}
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <User className="h-6 w-6 text-blue-500" />
+                  )}
                 </div>
+
                 <div>
-                  <h3 className="font-black text-lg text-zinc-900">
-                    {riderUser?.full_name || "Assigning Rider..."}
+                  <h3 className="font-black text-lg text-zinc-900 leading-tight">
+                    {riderName}
                   </h3>
-                  <div className="flex items-center gap-1 text-sm font-medium text-zinc-500 mt-0.5">
-                    <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                    On the way
+                  <div className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 mt-1">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                    {formatStatus(order.status)}
                   </div>
                 </div>
               </div>
-              <Button
-                asChild
-                className="w-full bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl"
-              >
-                <a href={`tel:${riderUser?.mobile || ""}`}>
+
+              {/* Call Rider CTA Logic */}
+              {riderPhone ? (
+                <Button
+                  asChild
+                  className="w-full bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl h-12 font-bold"
+                >
+                  <a href={`tel:${riderPhone}`}>
+                    <Phone className="h-4 w-4 mr-2" /> Call Rider
+                  </a>
+                </Button>
+              ) : (
+                <Button
+                  disabled
+                  className="w-full bg-zinc-100 text-zinc-400 font-bold rounded-xl h-12 cursor-not-allowed"
+                >
                   <Phone className="h-4 w-4 mr-2" /> Call Rider
-                </a>
-              </Button>
+                </Button>
+              )}
             </CardContent>
           </Card>
 
