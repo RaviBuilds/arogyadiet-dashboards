@@ -135,7 +135,7 @@ export default async function CustomerDashboard() {
               size="lg"
               className="mt-6 font-bold bg-primary hover:bg-primary/90 text-white"
             >
-              <Link href="/subscription/checkout">
+              <Link href="/subscription">
                 Explore Plans <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>

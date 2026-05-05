@@ -49,12 +49,13 @@ export async function registerCustomer(data: {
     .single();
 
   if (userError || !userData)
+    console.log("USER ERRO =>", userError)
     throw new Error(`Failed to create core user profile `);
 
   // create a customer_profiles with admin
   const { error: profileError } = await adminAuthClient
     .from("customer_profiles")
-    .insert({ user_id: userData.id, is_active: true });
+    .insert({ user_id: userData?.id, is_active: true });
 
   if (profileError)
     throw new Error("Failed to create customer extension profile.");
@@ -96,14 +97,23 @@ export async function createCustomerFromOAth(
     .select("id")
     .single();
 
-  if (userError || !userData)
-    throw new Error("Failed to create OAuth user profile.");
+  if (userError || !userData) {
+    console.error("🔥 ACTUAL DB ERROR:", userError);
+    throw new Error(`DB Error: ${userError?.message || "Unknown"}`);
+  }
+
 
   const { error: profileError } = await adminAuthClientAuth
     .from("customer_profiles")
     .insert({ user_id: userData.id, is_active: true });
 
-  if (profileError) throw new Error("Failed to create OAuth customer profile.");
+  if (profileError) 
+  {
+
+    console.error("Profile Insert Error:", profileError);
+    throw new Error("Failed to create OAuth customer profile.");
+
+  }
 
   return true;
 }

@@ -48,6 +48,9 @@ export function AddressFormModal({
   >("idle");
   const [locationErrorMsg, setLocationErrorMsg] = useState("");
 
+  // NEW: State to allow skipping location detection
+  const [skipLocation, setSkipLocation] = useState(false);
+
   const form = useForm<AddressFormValues>({
     resolver: zodResolver(addressSchema),
     defaultValues: {
@@ -80,7 +83,12 @@ export function AddressFormModal({
         lat: initialData?.lat || null,
         lng: initialData?.lng || null,
       });
-      // If editing an address that already has coordinates, show success state
+
+      // Reset our custom UI states
+      setSkipLocation(false);
+      setServerError(null);
+      setLocationErrorMsg("");
+
       if (initialData?.lat && initialData?.lng) {
         setLocationStatus("success");
       } else {
@@ -89,10 +97,10 @@ export function AddressFormModal({
     }
   }, [isOpen, initialData, form]);
 
-  // --- HTML5 Geolocation Function ---
   const handleDetectLocation = () => {
     setLocationStatus("loading");
     setLocationErrorMsg("");
+    setSkipLocation(false); // Uncheck skip if they try to detect
 
     if (!navigator.geolocation) {
       setLocationStatus("error");
@@ -102,10 +110,10 @@ export function AddressFormModal({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        // Automatically fill the hidden lat/lng fields
         form.setValue("lat", position.coords.latitude, { shouldDirty: true });
         form.setValue("lng", position.coords.longitude, { shouldDirty: true });
         setLocationStatus("success");
+        setServerError(null); // Clear any previous errors
       },
       (error) => {
         setLocationStatus("error");
@@ -131,10 +139,15 @@ export function AddressFormModal({
   };
 
   async function onSubmit(data: AddressFormValues) {
-    // Safety check: ensure coordinates are captured!
-    if (!data.lat || !data.lng) {
+    // UPDATED CHECK: Allow save if they explicitly opted to skip
+    if (
+      !skipLocation &&
+      !data.lat &&
+      !data.lng &&
+      locationStatus !== "success"
+    ) {
       setServerError(
-        "Please click 'Detect My Location' so the rider can find you.",
+        "Please detect your location OR check the skip box below.",
       );
       return;
     }
@@ -168,7 +181,7 @@ export function AddressFormModal({
         </DialogHeader>
 
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
-          {/* NEW: GPS Location Banner */}
+          {/* GPS Location Banner with Fallback */}
           <div className="bg-zinc-50 border rounded-xl p-4 flex flex-col gap-3">
             <div className="flex items-start justify-between">
               <div>
@@ -192,7 +205,7 @@ export function AddressFormModal({
                   size="sm"
                   className="h-8 text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 border-blue-200"
                   onClick={handleDetectLocation}
-                  disabled={locationStatus === "loading"}
+                  disabled={locationStatus === "loading" || skipLocation}
                 >
                   {locationStatus === "loading" ? (
                     <>
@@ -208,10 +221,32 @@ export function AddressFormModal({
               )}
             </div>
 
-            {locationStatus === "error" && (
+            {locationStatus === "error" && !skipLocation && (
               <p className="text-xs font-medium text-red-500 bg-red-50 p-2 rounded">
                 {locationErrorMsg}
               </p>
+            )}
+
+            {/* THE FALLBACK OPTION */}
+            {locationStatus !== "success" && (
+              <label className="flex items-start gap-2 mt-2 pt-3 border-t border-zinc-200 border-dashed cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="rounded border-zinc-300 text-primary focus:ring-primary h-4 w-4 mt-0.5"
+                  checked={skipLocation}
+                  onChange={(e) => {
+                    setSkipLocation(e.target.checked);
+                    if (e.target.checked) setServerError(null); // Clear error if they choose to skip
+                  }}
+                />
+                <span className="text-xs font-medium text-zinc-600 leading-tight">
+                  I am not currently at this address.
+                  <br />
+                  <span className="text-[10px] text-zinc-400 font-normal">
+                    Skip location detection for now.
+                  </span>
+                </span>
+              </label>
             )}
           </div>
 
