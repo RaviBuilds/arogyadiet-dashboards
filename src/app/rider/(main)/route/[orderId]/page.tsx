@@ -9,6 +9,7 @@ import {
   Phone,
   Utensils,
 } from "lucide-react";
+import { LiveLocationTracker } from "@/modules/rider/components/LiveLocationTracker";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -194,9 +195,15 @@ export default async function RiderDeliveryDetailPage({
                 {customerUser?.full_name || "Customer"}
               </h1>
             </div>
-            <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-700">
-              {String(order.status).replaceAll("_", " ")}
-            </span>
+            <div className="flex flex-col items-end gap-2 mt-1">
+              <LiveLocationTracker
+                riderId={riderProfile.id}
+                isDelivering={order.status === "ON_THE_WAY"}
+              />
+              <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-700">
+                {String(order.status).replaceAll("_", " ")}
+              </span>
+            </div>
           </div>
 
           <div className="grid gap-3">

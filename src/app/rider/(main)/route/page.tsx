@@ -23,7 +23,6 @@ export default async function RiderRoutePage() {
     .select("id")
     .eq("auth_user_id", user.id)
     .limit(1);
-
   const appUser = appUsers?.[0];
 
   if (appUserError || !appUser) {
@@ -46,7 +45,6 @@ export default async function RiderRoutePage() {
     .select("id, is_online")
     .eq("user_id", appUser.id)
     .limit(1);
-
   const riderProfile = riderProfiles?.[0];
 
   if (riderProfileError || !riderProfile) {
@@ -237,9 +235,12 @@ export default async function RiderRoutePage() {
               const profile = Array.isArray(order.customer_profile)
                 ? order.customer_profile[0]
                 : order.customer_profile;
+                console.log("ORDER=>", order);
+                console.log("PROFILE =>", profile);
               const customerUser = Array.isArray(profile?.users)
                 ? profile.users[0]
                 : profile?.users;
+                console.log("CUSTOMER USER=>", customerUser);
               const mealCategory = Array.isArray(order.meal_category)
                 ? order.meal_category[0]
                 : order.meal_category;
@@ -251,6 +252,9 @@ export default async function RiderRoutePage() {
               ]
                 .filter(Boolean)
                 .join(", ");
+
+
+              
 
               return (
                 <Link
