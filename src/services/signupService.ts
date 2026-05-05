@@ -48,9 +48,10 @@ export async function registerCustomer(data: {
     .select("id")
     .single();
 
-  if (userError || !userData)
-    console.log("USER ERRO =>", userError)
+  if (userError || !userData) {
+    console.log("USER ERRO =>", userError);
     throw new Error(`Failed to create core user profile `);
+  }
 
   // create a customer_profiles with admin
   const { error: profileError } = await adminAuthClient
