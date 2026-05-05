@@ -70,6 +70,8 @@ export async function saveAddressAction(data: AddressFormValues) {
     state: parsed.data.state,
     pincode: parsed.data.pincode,
     is_primary: parsed.data.is_primary,
+    lat: parsed.data.lat,
+    lng: parsed.data.lng,
   };
 
   if (parsed.data.id) {

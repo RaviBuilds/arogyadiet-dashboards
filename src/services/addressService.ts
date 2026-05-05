@@ -11,6 +11,8 @@ export type Address = {
   state: string;
   pincode: string;
   is_primary: boolean;
+  lat?: number | null; 
+  lng?: number | null; 
 };
 
 export async function getUserAddresses(): Promise<Address[]> {

@@ -16,6 +16,8 @@ export const addressSchema = z.object({
       /^500\d{3}$/,
       "Sorry, we currently only deliver to Hyderabad pincodes (500XXX).",
     ),
+  lat: z.number().optional().nullable(),
+  lng: z.number().optional().nullable(),
 });
 
 export type AddressFormValues = z.infer<typeof addressSchema>;
