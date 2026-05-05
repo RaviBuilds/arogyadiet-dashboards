@@ -15,11 +15,13 @@ export function LiveLocationTracker({
   const [isHijacked, setIsHijacked] = useState(false);
   const supabase = createClient();
 
-  // Generate a unique ID for this specific browser tab/phone
-  const sessionIdRef = useRef(crypto.randomUUID());
+  // Generates a unique ID for this specific tab/phone session
+  const [sessionId] = useState(() => crypto.randomUUID());
+
+  // Keeps track of whether this phone has officially claimed the database yet
+  const hasClaimedSession = useRef(false);
 
   useEffect(() => {
-    // If not delivering OR if another phone took over, do not track!
     if (!isDelivering || isHijacked) return;
 
     if (!navigator.geolocation) {
@@ -27,40 +29,52 @@ export function LiveLocationTracker({
       return;
     }
 
-    let watchId: number;
-
-    // 1. ANTI-PING-PONG LISTENER: Watch to see if another device takes over
-    const channel = supabase
-      .channel(`tracker-hijack-${riderId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "rider_live_locations",
-          filter: `rider_id=eq.${riderId}`,
-        },
-        (payload) => {
-          // If the DB has a different session ID, another phone is broadcasting!
-          if (
-            payload.new.tracker_session_id &&
-            payload.new.tracker_session_id !== sessionIdRef.current
-          ) {
-            console.warn("Tracking hijacked by another device!");
-            setIsHijacked(true); // This instantly unmounts the tracker below
-            if (watchId) navigator.geolocation.clearWatch(watchId);
-          }
-        },
-      )
-      .subscribe();
-
-    // 2. Start broadcasting our location & our secret Session ID
-    watchId = navigator.geolocation.watchPosition(
+    const watchId = navigator.geolocation.watchPosition(
       async (position) => {
-        if (isHijacked) return; // Double-check before pushing to DB
+        if (isHijacked) return;
 
         const { latitude, longitude } = position.coords;
 
+        // 1. THE FIRST PING: The device MUST formally claim the database session
+        if (!hasClaimedSession.current) {
+          const { error: claimError } = await supabase
+            .from("rider_live_locations")
+            .upsert(
+              {
+                rider_id: riderId,
+                lat: latitude,
+                lng: longitude,
+                tracker_session_id: sessionId, // Claim ownership!
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "rider_id" },
+            );
+
+          if (!claimError) {
+            hasClaimedSession.current = true; // Mark as successfully claimed
+          }
+          return; // Done for this ping!
+        }
+
+        // 2. ALL FUTURE PINGS: Verify we still own it before pushing updates
+        const { data: dbCheck } = await supabase
+          .from("rider_live_locations")
+          .select("tracker_session_id")
+          .eq("rider_id", riderId)
+          .maybeSingle();
+
+        // If the DB has an ID, and it's NOT ours, someone else logged in and stole it!
+        if (
+          dbCheck?.tracker_session_id &&
+          dbCheck.tracker_session_id !== sessionId
+        ) {
+          console.warn("Tracking hijacked by another device!");
+          setIsHijacked(true); // Trigger the red UI
+          navigator.geolocation.clearWatch(watchId); // Permanently kill the GPS loop for this phone
+          return;
+        }
+
+        // 3. SAFE TO PROCEED: We still own the session, save the new coordinates
         const { error: dbError } = await supabase
           .from("rider_live_locations")
           .upsert(
@@ -68,7 +82,7 @@ export function LiveLocationTracker({
               rider_id: riderId,
               lat: latitude,
               lng: longitude,
-              tracker_session_id: sessionIdRef.current, // Claim ownership!
+              tracker_session_id: sessionId,
               updated_at: new Date().toISOString(),
             },
             { onConflict: "rider_id" },
@@ -90,15 +104,11 @@ export function LiveLocationTracker({
     );
 
     // Cleanup when leaving page
-    return () => {
-      navigator.geolocation.clearWatch(watchId);
-      supabase.removeChannel(channel);
-    };
-  }, [riderId, isDelivering, isHijacked]);
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [riderId, isDelivering, isHijacked, sessionId]);
 
   if (!isDelivering) return null;
- console.log("ISHIJACKED =>", isHijacked)
-  // NEW: Show a warning if they are logged in elsewhere
+
   if (isHijacked) {
     return (
       <div className="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-red-600 uppercase tracking-wide bg-red-50 px-2.5 py-1 rounded-md border border-red-200">
