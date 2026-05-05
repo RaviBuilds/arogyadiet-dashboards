@@ -23,7 +23,7 @@ export function RiderLogoutButton() {
       onClick={handleLogout}
       variant="destructive"
       disabled={isLoggingOut}
-      className="w-full sm:w-auto font-bold rounded-xl"
+      className="w-fit sm:w-auto font-bold rounded-xl"
     >
       <LogOut className="mr-2 h-4 w-4" />
       {isLoggingOut ? "Logging out..." : "Logout"}

@@ -49,7 +49,7 @@ export default async function RiderProfilePage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 pb-20 md:pb-8">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex px-3 pt-2 flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-zinc-900">My Profile</h1>
           <p className="text-muted-foreground mt-1">
@@ -59,8 +59,8 @@ export default async function RiderProfilePage() {
         <RiderLogoutButton />
       </div>
 
-      <Card className="border-2 shadow-sm overflow-hidden">
-        <div className="h-24 bg-zinc-900 w-full relative">
+      <Card className="border-2 py-0 shadow-sm overflow-hidden">
+        <div className="h-24 top-0 bg-zinc-900 w-full relative">
           {riderProfile?.is_active && (
             <div className="absolute top-4 right-4 bg-green-500/20 text-green-300 px-3 py-1 rounded-full text-xs font-bold uppercase flex items-center gap-1 backdrop-blur-sm border border-green-500/30">
               <BadgeCheck className="h-3.5 w-3.5 shrink-0" /> Active Partner
