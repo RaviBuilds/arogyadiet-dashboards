@@ -35,9 +35,12 @@ import {
   Mail,
   Calendar as CalendarDays,
   Info,
+  Stethoscope,
+  UploadCloud,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { MedicalDocumentUploadModal } from "./medical-document-upload-modal";
 
 interface ProfileFormProps {
   initialData: ProfileFormValues;
@@ -338,6 +341,49 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
           )}
         </div>
 
+        {/* Mdeical history */}
+        <div className="space-y-4 pt-4 border-t">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground font-bold flex items-center gap-2">
+              <Stethoscope className="h-4 w-4" />
+              Medical History & Notes
+            </Label>
+
+            {/* THIS IS WHERE YOUR MODAL WILL GO */}
+            {!isEditing && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 gap-2 text-xs font-bold text-zinc-600"
+              >
+                <UploadCloud className="h-4 w-4" />
+                Upload Documents
+              </Button>
+            )}
+           
+          </div>
+
+          {isEditing ? (
+            <Textarea
+              {...form.register("medical_history_notes")}
+              placeholder="Briefly describe any past medical conditions, surgeries, or ongoing treatments..."
+              className="min-h-[100px] resize-none"
+            />
+          ) : (
+            <div className="flex gap-3 p-4 bg-zinc-50 rounded-xl border border-dashed text-zinc-700 text-sm min-h-[80px]">
+              <Info className="h-4 w-4 text-zinc-400 mt-0.5 shrink-0" />
+              <div className="whitespace-pre-wrap">
+                {watchedValues.medical_history_notes || (
+                  <span className="italic">
+                    No medical history provided. Click Edit Profile to add
+                    notes, or upload your documents above.
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         {/* Message */}
         {message && (
           <div

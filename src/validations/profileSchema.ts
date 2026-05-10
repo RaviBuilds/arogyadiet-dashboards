@@ -8,6 +8,7 @@ export const profileSchema = z.object({
   gender: z.enum(["Male", "Female", "Other"]).optional(), // Required by SRS Table 6
   dietary_preference: z.enum(["Veg", "Non-Veg"]),
   allergies: z.string().optional(),
+  medical_history_notes: z.string().optional(),
 });
 
 export type ProfileFormValues = z.infer<typeof profileSchema>;
