@@ -32,8 +32,36 @@ export default async function CustomerProfilePage() {
     customerProfile = cpData;
   }
 
-  // 3. Combine the data to pass into the form
+  // 3. Fetch uploaded medical documents and generate secure Signed URLs
+  let documentsWithUrls: any[] = [];
+  if (customerProfile?.id) {
+    const { data: docs } = await supabase
+      .from("medical_documents")
+      .select("*")
+      .eq("customer_profile_id", customerProfile.id)
+      .order("uploaded_at", { ascending: false });
+
+    if (docs && docs.length > 0) {
+      documentsWithUrls = await Promise.all(
+        docs.map(async (doc) => {
+          // Generates a temporary secure link valid for 1 hour
+          const { data } = await supabase.storage
+            .from("medical_records")
+            .createSignedUrl(doc.storage_path, 3600);
+
+          return {
+            ...doc,
+            signedUrl: data?.signedUrl || null,
+          };
+        }),
+      );
+    }
+  }
+
+  console.log("DB User =>", dbUser);
+  // 4. Combine the data to pass into the form
   const initialProfileData = {
+    id: customerProfile?.id || null,
     full_name: dbUser?.full_name || "",
     email: user.email || "",
     phone: dbUser?.mobile || "", // Note: mapping DB 'mobile' to Form 'phone'
@@ -42,6 +70,12 @@ export default async function CustomerProfilePage() {
     dietary_preference:
       (customerProfile?.dietary_preference as "Veg" | "Non-Veg") || "Veg",
     allergies: customerProfile?.allergies || "",
+    medical_history_notes: customerProfile?.medical_history_notes || "",
+    has_medical_history:
+      customerProfile?.has_medical_history || documentsWithUrls.length > 0,
+    no_medical_history_confirmed: !(
+      customerProfile?.has_medical_history || documentsWithUrls.length > 0
+    ),
   };
 
   const addresses = await getUserAddresses();
@@ -56,7 +90,10 @@ export default async function CustomerProfilePage() {
       </div>
 
       <div className="bg-white p-6 rounded-xl border shadow-sm">
-        <ProfileForm initialData={initialProfileData} />
+        <ProfileForm
+          initialData={initialProfileData}
+          initialDocuments={documentsWithUrls}
+        />
       </div>
 
       <Separator />

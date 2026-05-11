@@ -1,0 +1,4 @@
+# Cline Operational Boundaries
+1. STRICT EXECUTION ONLY: Do not autonomously explore the workspace. Do not use `list_directory` or `read_file` unless explicitly instructed to do so for a specific file.
+2. NO BROAD SCANS: Never attempt to read `package.json`, `tsconfig.json`, or generic configuration files unless asked.
+3. TRUST THE USER: The user acts as the Lead Architect. Assume the architectural context provided in the prompt is complete and accurate. Execute the targeted file modifications immediately.
