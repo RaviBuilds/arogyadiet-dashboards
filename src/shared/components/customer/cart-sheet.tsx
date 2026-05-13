@@ -64,7 +64,7 @@ export function CartSheet() {
         ) : (
           <>
             <ScrollArea className="flex-1">
-              <div className="flex flex-col gap-4 px-4 py-6 w-full min-w-0 box-border">
+              <div className="flex flex-col gap-3 w-full max-w-full box-border overflow-x-hidden pb-4 px-4">
                 {items.map((item) => (
                   <CartItem key={item.id} item={item} />
                 ))}

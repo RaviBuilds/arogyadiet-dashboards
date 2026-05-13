@@ -437,6 +437,81 @@ export async function createAddonCheckoutOrder(
   }
 }
 
+export async function validateCouponCode(code: string) {
+  try {
+    const supabase = await createClient();
+    const cleanCode = code.trim();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      throw new Error("Unauthorized");
+    }
+
+    const { data: dbUser, error: dbUserError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_user_id", user.id)
+      .single();
+
+    if (dbUserError || !dbUser) {
+      throw new Error("User not found.");
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("customer_profiles")
+      .select("id")
+      .eq("user_id", dbUser.id)
+      .single();
+
+    if (profileError || !profile) {
+      throw new Error("Customer profile not found.");
+    }
+
+    const customer_profile_id = profile.id;
+
+    const { data: coupon, error: couponError } = await supabase
+      .from("coupons")
+      .select("discount_type, discount_value, expires_at, times_used, max_uses")
+      .ilike("code", cleanCode)
+      .eq("customer_profile_id", customer_profile_id)
+      .maybeSingle();
+
+    console.log("Fetched Coupon:", coupon);
+
+    if (couponError || !coupon) {
+      return { success: false, error: "Invalid coupon code" };
+    }
+
+    if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+      return { success: false, error: "Coupon expired" };
+    }
+
+    if (
+      typeof coupon.times_used === "number" &&
+      typeof coupon.max_uses === "number" &&
+      coupon.times_used >= coupon.max_uses
+    ) {
+      return { success: false, error: "Coupon usage limit reached" };
+    }
+
+    return {
+      success: true,
+      discountType: coupon.discount_type,
+      discountValue: parseFloat(coupon.discount_value),
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to validate coupon",
+    };
+  }
+}
+
 export async function verifyAddonPayment(
   paymentId: string,
   razorpayResponse: any,

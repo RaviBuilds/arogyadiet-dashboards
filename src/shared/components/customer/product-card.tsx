@@ -13,6 +13,7 @@ export default function ProductCard({ product }: ProductCardProps) {
   const addItem = useCartStore((state) => state.addItem);
   const removeItem = useCartStore((state) => state.removeItem);
   const cartItem = items.find((item) => item.id === product.id);
+  const isOutOfStock = !product.in_stock;
 
   const isOnSale =
     typeof product.sale_price === "number" &&
@@ -26,13 +27,19 @@ export default function ProductCard({ product }: ProductCardProps) {
   const primaryImage = imageUrls[0];
 
   return (
-    <article className="overflow-hidden rounded-xl border border-zinc-200 bg-white transition-shadow duration-200 hover:shadow-md">
+    <article
+      className={`overflow-hidden rounded-xl border border-zinc-200 bg-white transition-shadow duration-200 ${
+        isOutOfStock ? "opacity-75" : "hover:shadow-md"
+      }`}
+    >
       <div className="relative aspect-[4/3] w-full bg-zinc-100">
         {primaryImage ? (
           <img
             src={primaryImage}
             alt={product.name}
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover ${
+              isOutOfStock ? "grayscale" : ""
+            }`}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-sm text-zinc-500">
@@ -40,11 +47,15 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         )}
 
-        {isOnSale && (
+        {isOutOfStock ? (
+          <span className="absolute right-3 top-3 rounded-md bg-zinc-900 px-2 py-1 text-xs font-semibold text-white">
+            Out of stock
+          </span>
+        ) : isOnSale ? (
           <span className="absolute right-3 top-3 rounded-md bg-red-500 px-2 py-1 text-xs font-semibold text-white">
             Sale!
           </span>
-        )}
+        ) : null}
       </div>
 
       <div className="space-y-3 p-4">
@@ -82,7 +93,15 @@ export default function ProductCard({ product }: ProductCardProps) {
           )}
         </div>
 
-        {!cartItem ? (
+        {isOutOfStock ? (
+          <button
+            type="button"
+            disabled
+            className="w-full cursor-not-allowed rounded-md bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-500"
+          >
+            Out of stock
+          </button>
+        ) : !cartItem ? (
           <button
             type="button"
             onClick={() => addItem(product)}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, MapPin } from "lucide-react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { useCartStore } from "@/store/useCartStore";
 import { createClient } from "@/lib/supabase/client";
 import {
   createAddonCheckoutOrder,
+  validateCouponCode,
   verifyAddonPayment,
 } from "@/app/actions/shop-actions";
 import { Button } from "@/shared/components/ui/button";
@@ -32,33 +33,37 @@ type PrimaryAddress = {
 const formatCurrency = (value: number) => `₹${value.toFixed(2)}`;
 
 export default function ShopCheckoutPage() {
+
+  //for routing 
   const router = useRouter();
+  
+  //functons / values from store
   const items = useCartStore((state) => state.items);
+  const cartTotal = useCartStore((state) => state.cartTotal);
   const clearCart = useCartStore((state) => state.clearCart);
 
+  // 
   const [isLoadingAddress, setIsLoadingAddress] = useState(true);
   const [isPaying, setIsPaying] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const [name, setName] = useState("");
-  const [customerProfileId, setCustomerProfileId] = useState<string | null>(
-    null,
-  );
   const [address, setAddress] = useState<PrimaryAddress | null>(null);
   const [couponInput, setCouponInput] = useState("");
-  const [appliedCouponCode, setAppliedCouponCode] = useState("");
-  const [estimatedDiscount, setEstimatedDiscount] = useState(0);
+  const [discount, setDiscount] = useState<{
+    type: "PERCENTAGE" | "FLAT" | null;
+    value: number;
+  }>({ type: null, value: 0 });
 
-  const subtotal = useMemo(
-    () =>
-      items.reduce((acc, item) => {
-        const unitPrice = item.sale_price ?? item.original_price;
-        return acc + unitPrice * item.quantity;
-      }, 0),
-    [items],
-  );
-
-  const taxableAmount = Math.max(0, subtotal - estimatedDiscount);
-  const gst = taxableAmount * 0.05;
-  const total = taxableAmount + gst;
+  const subtotal = cartTotal();
+  const rawDiscountAmount =
+    discount.type === "PERCENTAGE"
+      ? (subtotal * discount.value) / 100
+      : discount.type === "FLAT"
+        ? discount.value
+        : 0;
+  const discountAmount = Math.min(Math.max(rawDiscountAmount, 0), subtotal);
+  const gst = (subtotal - discountAmount) * 0.05;
+  const grandTotal = subtotal - discountAmount + gst;
 
   useEffect(() => {
     if (items.length === 0) {
@@ -100,8 +105,6 @@ export default function ShopCheckoutPage() {
         if (profileError || !profile) {
           throw new Error("Failed to fetch customer profile.");
         }
-
-        setCustomerProfileId(profile.id);
 
         const { data: primaryAddress, error: addressError } = await supabase
           .from("addresses")
@@ -153,56 +156,29 @@ export default function ShopCheckoutPage() {
       return;
     }
 
-    if (!customerProfileId) {
-      toast.error("Unable to validate coupon right now.");
-      return;
-    }
-
+    setIsApplying(true);
     try {
-      const supabase = createClient();
-      const { data: coupon, error } = await supabase
-        .from("coupons")
-        .select(
-          "discount_type, discount_value, expires_at, max_uses, times_used",
-        )
-        .eq("customer_profile_id", customerProfileId)
-        .eq("code", code)
-        .single();
+      const res = await validateCouponCode(code);
+      console.log("Coupon Validation Response:", res);
 
-      if (error || !coupon) {
-        throw new Error("Invalid coupon code.");
+      if (!res.success) {
+        setDiscount({ type: null, value: 0 });
+        toast.error(res.error);
+        return;
       }
 
-      if (
-        typeof coupon.max_uses === "number" &&
-        typeof coupon.times_used === "number" &&
-        coupon.times_used >= coupon.max_uses
-      ) {
-        throw new Error("This coupon usage limit has been reached.");
-      }
-
-      if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
-        throw new Error("This coupon has expired.");
-      }
-
-      let discount = 0;
-      if (coupon.discount_type === "PERCENTAGE") {
-        discount = (subtotal * Number(coupon.discount_value ?? 0)) / 100;
-      } else if (coupon.discount_type === "FLAT") {
-        discount = Number(coupon.discount_value ?? 0);
-      }
-
-      discount = Math.max(0, Math.min(discount, subtotal));
-
-      setEstimatedDiscount(discount);
-      setAppliedCouponCode(code);
+      setDiscount({
+        type: (res.discountType as "PERCENTAGE" | "FLAT" | null) ?? null,
+        value: Number(res.discountValue ?? 0),
+      });
       toast.success("Coupon applied.");
     } catch (error) {
-      setEstimatedDiscount(0);
-      setAppliedCouponCode("");
+      setDiscount({ type: null, value: 0 });
       toast.error(
-        error instanceof Error ? error.message : "Failed to apply coupon.",
+        error instanceof Error ? error.message : "Failed to apply coupon",
       );
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -210,10 +186,7 @@ export default function ShopCheckoutPage() {
     setIsPaying(true);
 
     try {
-      const orderResponse = await createAddonCheckoutOrder(
-        items,
-        appliedCouponCode,
-      );
+      const orderResponse = await createAddonCheckoutOrder(items, couponInput);
 
       if (!orderResponse.success) {
         throw new Error(
@@ -382,14 +355,24 @@ export default function ShopCheckoutPage() {
               <Button
                 type="button"
                 onClick={handleApplyCoupon}
+                disabled={isApplying}
                 className="w-full"
               >
-                Apply
+                {isApplying ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Applying...
+                  </>
+                ) : (
+                  "Apply"
+                )}
               </Button>
-              {appliedCouponCode ? (
+              {discount.type ? (
                 <p className="text-xs text-green-700">
                   Applied:{" "}
-                  <span className="font-semibold">{appliedCouponCode}</span>
+                  <span className="font-semibold">
+                    {couponInput.trim().toUpperCase()}
+                  </span>
                 </p>
               ) : null}
             </CardContent>
@@ -406,7 +389,7 @@ export default function ShopCheckoutPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Discount</span>
-                <span>-{formatCurrency(estimatedDiscount)}</span>
+                <span>-{formatCurrency(discountAmount)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">GST (5%)</span>
@@ -415,7 +398,7 @@ export default function ShopCheckoutPage() {
               <Separator />
               <div className="flex justify-between text-base font-bold">
                 <span>Grand Total</span>
-                <span>{formatCurrency(total)}</span>
+                <span>{formatCurrency(grandTotal)}</span>
               </div>
               <Button
                 type="button"

@@ -13,6 +13,7 @@ import {
   Settings2,
   LayoutDashboard,
   ShoppingCart,
+  ShoppingBag,
   PackageSearch,
   type LucideIcon,
 } from "lucide-react";
@@ -30,6 +31,7 @@ const mainNavItems: NavItem[] = [
   { name: "My Profile", href: "/profile", icon: User },
   { name: "My Meals", href: "/meals", icon: PackageSearch },
   { name: "New Subscription", href: "/subscription", icon: ShoppingCart },
+  { name: "Shop", href: "/shop", icon: ShoppingBag },
 ];
 
 const manageMealItems: NavItem[] = [
