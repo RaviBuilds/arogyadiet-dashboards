@@ -146,17 +146,18 @@ export async function processStandaloneCheckout(items: CartItem[]) {
       throw new Error("Failed to link payment with add-on order.");
     }
 
-    const orderItemsPayload = verifiedItems.map((item) => ({
+    // IMPORTANT: Only insert columns that actually exist in the DB schema.
+    // DO NOT include computed fields like `line_total`.
+    const orderItemsData = verifiedItems.map((item) => ({
       addon_order_id: addon_order.id,
       product_id: item.product_id,
       quantity: item.quantity,
       unit_price: item.unit_price,
-      line_total: item.line_total,
     }));
 
     const { error: addonOrderItemsError } = await supabase
       .from("addon_order_items")
-      .insert(orderItemsPayload);
+      .insert(orderItemsData);
 
     if (addonOrderItemsError) {
       throw new Error("Failed to create add-on order items.");
@@ -167,7 +168,7 @@ export async function processStandaloneCheckout(items: CartItem[]) {
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaisa,
       currency: "INR",
-      receipt: `addon_${addon_order.id}`,
+      receipt: `rcpt_${payment.id}`.substring(0, 40),
     });
 
     return {
@@ -356,7 +357,11 @@ export async function createAddonCheckoutOrder(
       .single();
 
     if (addonOrderError || !addon_order) {
-      throw new Error("Failed to initialize add-on order.");
+      console.error("SUPABASE ORDER INSERT ERROR:", addonOrderError);
+      return {
+        success: false,
+        error: `Database Error: ${addonOrderError.message}`,
+      };
     }
 
     const { data: payment, error: paymentError } = await supabase
@@ -372,7 +377,11 @@ export async function createAddonCheckoutOrder(
       .single();
 
     if (paymentError || !payment) {
-      throw new Error("Failed to create pending payment.");
+      console.error("SUPABASE PAYMENT INSERT ERROR:", paymentError);
+      return {
+        success: false,
+        error: `Database Error: ${paymentError.message}`,
+      };
     }
 
     const { error: addonOrderPaymentLinkError } = await supabase
@@ -384,28 +393,35 @@ export async function createAddonCheckoutOrder(
       throw new Error("Failed to link payment with add-on order.");
     }
 
-    const orderItemsPayload = verifiedItems.map((item) => ({
+    // IMPORTANT: Only insert columns that actually exist in the DB schema.
+    // DO NOT include computed fields like `line_total`.
+    const orderItemsData = verifiedItems.map((item) => ({
       addon_order_id: addon_order.id,
       product_id: item.product_id,
       quantity: item.quantity,
       unit_price: item.unit_price,
-      line_total: item.line_total,
     }));
 
     const { error: addonOrderItemsError } = await supabase
       .from("addon_order_items")
-      .insert(orderItemsPayload);
+      .insert(orderItemsData);
 
     if (addonOrderItemsError) {
-      throw new Error("Failed to create add-on order items.");
+      console.error("SUPABASE ITEMS INSERT ERROR:", addonOrderItemsError);
+      return {
+        success: false,
+        error: `Database Error: ${addonOrderItemsError.message}`,
+      };
     }
 
-    const amountInPaisa = Math.round(total * 100);
+    // Razorpay strictly requires an integer amount in paisa.
+    const grandTotal = total;
+    const amountInPaisa = Math.round(grandTotal * 100);
 
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaisa,
       currency: "INR",
-      receipt: `addon_${addon_order.id}`,
+      receipt: `rcpt_${payment.id}`.substring(0, 40),
     });
 
     return {
@@ -413,7 +429,8 @@ export async function createAddonCheckoutOrder(
       orderId: addon_order.id,
       paymentId: payment.id,
       razorpayOrderId: razorpayOrder.id,
-      razorpayKey: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+      razorpayKey:
+        process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID,
       billingDetails: {
         full_name: dbUser.full_name,
         address: primaryAddress,
@@ -427,12 +444,12 @@ export async function createAddonCheckoutOrder(
       appliedCouponCode,
     };
   } catch (error) {
+    console.error("FINAL CHECKOUT FLOW ERROR:", error);
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to create add-on checkout order.",
+      error: `Checkout Error: ${
+        error instanceof Error ? error.message : JSON.stringify(error)
+      }`,
     };
   }
 }
@@ -550,6 +567,25 @@ export async function verifyAddonPayment(
 
     if (addonOrderUpdateError) {
       throw new Error("Failed to update add-on order status.");
+    }
+
+    const { error: transactionError } = await supabase
+      .from("razorpay_transactions")
+      .insert({
+        payment_id: paymentId,
+        razorpay_order_id: razorpayResponse.razorpay_order_id,
+        razorpay_payment_id: razorpayResponse.razorpay_payment_id,
+        razorpay_signature: razorpayResponse.razorpay_signature,
+        gateway_status: "SUCCESS", // Crucial: Schema requires this NOT NULL field
+      });
+
+    if (transactionError) {
+      // We log this but DO NOT throw, because the customer's payment actually succeeded
+      // and we don't want to break the frontend success redirect over an audit log failure.
+      console.error(
+        "Critical Audit Error: Failed to insert razorpay_transaction record:",
+        transactionError.message,
+      );
     }
 
     return { success: true };

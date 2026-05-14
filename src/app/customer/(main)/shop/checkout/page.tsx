@@ -10,7 +10,7 @@ import {
   createAddonCheckoutOrder,
   validateCouponCode,
   verifyAddonPayment,
-} from "@/app/actions/shop-actions";
+} from "@/actions/shop-actions";
 import { Button } from "@/shared/components/ui/button";
 import {
   Card,
@@ -33,16 +33,21 @@ type PrimaryAddress = {
 const formatCurrency = (value: number) => `₹${value.toFixed(2)}`;
 
 export default function ShopCheckoutPage() {
+  const [isMounted, setIsMounted] = useState(false);
 
-  //for routing 
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  //for routing
   const router = useRouter();
-  
+
   //functons / values from store
   const items = useCartStore((state) => state.items);
   const cartTotal = useCartStore((state) => state.cartTotal);
   const clearCart = useCartStore((state) => state.clearCart);
 
-  // 
+  //
   const [isLoadingAddress, setIsLoadingAddress] = useState(true);
   const [isPaying, setIsPaying] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
@@ -53,17 +58,6 @@ export default function ShopCheckoutPage() {
     type: "PERCENTAGE" | "FLAT" | null;
     value: number;
   }>({ type: null, value: 0 });
-
-  const subtotal = cartTotal();
-  const rawDiscountAmount =
-    discount.type === "PERCENTAGE"
-      ? (subtotal * discount.value) / 100
-      : discount.type === "FLAT"
-        ? discount.value
-        : 0;
-  const discountAmount = Math.min(Math.max(rawDiscountAmount, 0), subtotal);
-  const gst = (subtotal - discountAmount) * 0.05;
-  const grandTotal = subtotal - discountAmount + gst;
 
   useEffect(() => {
     if (items.length === 0) {
@@ -133,6 +127,21 @@ export default function ShopCheckoutPage() {
     fetchCheckoutMeta();
   }, [router]);
 
+  if (!isMounted) {
+    return null; // Prevent hydration mismatch with persisted cart state
+  }
+
+  const subtotal = cartTotal();
+  const rawDiscountAmount =
+    discount.type === "PERCENTAGE"
+      ? (subtotal * discount.value) / 100
+      : discount.type === "FLAT"
+        ? discount.value
+        : 0;
+  const discountAmount = Math.min(Math.max(rawDiscountAmount, 0), subtotal);
+  const gst = (subtotal - discountAmount) * 0.05;
+  const grandTotal = subtotal - discountAmount + gst;
+
   const loadRazorpayScript = () => {
     return new Promise<boolean>((resolve) => {
       if ((window as any).Razorpay) {
@@ -150,7 +159,7 @@ export default function ShopCheckoutPage() {
 
   const handleApplyCoupon = async () => {
     const code = couponInput.trim().toUpperCase();
-
+    console.log("CODE =>", code);
     if (!code) {
       toast.error("Please enter a coupon code.");
       return;
@@ -160,7 +169,7 @@ export default function ShopCheckoutPage() {
     try {
       const res = await validateCouponCode(code);
       console.log("Coupon Validation Response:", res);
-
+      console.log("res=>", res);
       if (!res.success) {
         setDiscount({ type: null, value: 0 });
         toast.error(res.error);
@@ -183,8 +192,8 @@ export default function ShopCheckoutPage() {
   };
 
   const handlePayment = async () => {
-    setIsPaying(true);
-
+    const setIsProcessing = setIsPaying;
+    setIsProcessing(true);
     try {
       const orderResponse = await createAddonCheckoutOrder(items, couponInput);
 
@@ -242,23 +251,25 @@ export default function ShopCheckoutPage() {
         },
       };
 
-      const paymentObject = new (window as any).Razorpay(options);
-      paymentObject.on("payment.failed", (response: any) => {
-        toast.error(
-          response?.error?.description ||
-            "Payment failed at gateway. Please try again.",
-        );
+      const rzp = new (window as any).Razorpay(options);
+
+      // Catch payment failures
+      rzp.on("payment.failed", function (response: any) {
+        console.error("Razorpay Payment Failed:", response.error);
+        toast.error(`Payment Failed: ${response.error.description}`);
+        setIsProcessing(false); // Stop the loading spinner
       });
 
-      paymentObject.open();
+      rzp.open();
     } catch (error) {
+      console.error("Payment Flow Error:", error);
       toast.error(
         error instanceof Error
           ? error.message
-          : "Unable to initiate payment at the moment.",
+          : "Payment initialization failed.",
       );
     } finally {
-      setIsPaying(false);
+      setIsProcessing(false);
     }
   };
 

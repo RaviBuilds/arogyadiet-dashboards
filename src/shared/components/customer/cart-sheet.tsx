@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShoppingCart } from "lucide-react";
 import { useCartStore } from "@/store/useCartStore";
@@ -19,8 +19,17 @@ import { CartItem } from "@/shared/components/customer/cart-item";
 export function CartSheet() {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const items = useCartStore((state) => state.items);
   const cartTotal = useCartStore((state) => state.cartTotal);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  if (!isMounted) {
+    return null;
+  }
 
   const handleCheckout = () => {
     setIsOpen(false);
