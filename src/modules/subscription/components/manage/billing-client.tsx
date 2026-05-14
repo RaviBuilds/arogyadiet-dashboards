@@ -24,6 +24,7 @@ type Payment = {
   payment_method: string;
   status: string;
   created_at: string;
+  invoice_type?: "ADDON" | "SUBSCRIPTION" | null;
 };
 
 type ActiveSubscription = {
@@ -126,9 +127,14 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
                   {payments.map((payment) => {
-                    const isSuccessful = successfulStatuses.has(
-                      payment.status,
-                    );
+                    const isSuccessful = successfulStatuses.has(payment.status);
+
+                    const invoiceTypeLabel =
+                      payment.invoice_type === "ADDON"
+                        ? "Shop Order"
+                        : payment.invoice_type === "SUBSCRIPTION"
+                          ? "Meal Subscription"
+                          : null;
 
                     return (
                       <tr
@@ -142,9 +148,16 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                           ₹{Number(payment.amount).toFixed(2)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="bg-zinc-100 text-zinc-700 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider">
-                            {payment.payment_method}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className="bg-zinc-100 text-zinc-700 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider w-fit">
+                              {payment.payment_method}
+                            </span>
+                            {invoiceTypeLabel ? (
+                              <span className="text-xs text-zinc-500 font-medium">
+                                {invoiceTypeLabel}
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
