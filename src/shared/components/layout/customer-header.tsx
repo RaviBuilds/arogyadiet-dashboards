@@ -10,6 +10,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
+import { CartSheet } from "@/shared/components/customer/cart-sheet";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { buttonVariants } from "@/shared/components/ui/button";
 import { Menu } from "lucide-react";
@@ -52,7 +53,10 @@ export function CustomerHeader({ userEmail, userName }: CustomerHeaderProps) {
 
           <div className="w-full h-full">
             {/* WIRED UP: onNavigate closes the sheet when a link is clicked */}
-            <CustomerSidebar isMobile onNavigate={() => setIsSheetOpen(false)} />
+            <CustomerSidebar
+              isMobile
+              onNavigate={() => setIsSheetOpen(false)}
+            />
           </div>
         </SheetContent>
       </Sheet>
@@ -66,6 +70,7 @@ export function CustomerHeader({ userEmail, userName }: CustomerHeaderProps) {
 
       {/* THE FIX: Added shrink-0 so the avatar never gets pushed off screen */}
       <div className="flex items-center gap-4 shrink-0">
+        <CartSheet />
         <div className="hidden sm:flex flex-col items-end text-sm">
           <span className="font-medium leading-none mb-1">
             {userName || "Customer"}

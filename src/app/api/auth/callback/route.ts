@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createCustomerFromOAth } from "@/services/signupService";
 
 export async function GET(request: NextRequest) {
-  // 1. Get the true hostname directly from headers
+  // 1. Get the true hostname directly from headers (Handles subdomains perfectly)
   const host = request.headers.get("host");
   const protocol = host?.includes("localhost") ? "http" : "https";
   const baseOrigin = `${protocol}://${host}`;
@@ -12,15 +12,14 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
 
-
-  // Use baseOrigin for errors to stay on the correct subdomain [cite: 109, 113]
+  // Use baseOrigin + /login (The middleware handles the /customer/ folder routing)
   if (!code) {
     return NextResponse.redirect(`${baseOrigin}/login?error=Invalid_Request`);
   }
 
   const supabase = await createClient();
 
-  // Exchange code for a session [cite: 39]
+  // Exchange code for a session
   const {
     data: { session },
     error: sessionError,
@@ -39,6 +38,7 @@ export async function GET(request: NextRequest) {
     .single();
 
   if (userError || !userData) {
+    // NEW USER: Auto-register them
     try {
       const email = session.user.email || "";
       const fullName = session.user.user_metadata?.full_name || "Customer";
@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${baseOrigin}/login?error=Signup_Failed`);
     }
   } else {
+    // EXISTING USER: Check constraints
     if (!userData.is_active) {
       await supabase.auth.signOut();
       return NextResponse.redirect(
@@ -60,7 +61,8 @@ export async function GET(request: NextRequest) {
       ? userData.roles[0]?.code
       : (userData.roles as { code: string })?.code;
 
-    if (userRole == "MASTER") {
+    // Prevent internal staff (like MASTER) from logging into the Customer portal via OAuth
+    if (userRole === "MASTER") {
       await supabase.auth.signOut();
       return NextResponse.redirect(
         `${baseOrigin}/login?error=Unauthorized_Role`,
@@ -68,9 +70,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 2. Build the final redirect URL using the verified host header [cite: 109, 111]
+  // 2. Build the final redirect URL using the verified host header
   const finalUrl = new URL(next, baseOrigin);
-  finalUrl.search = ""; // Clean the URL for security [cite: 110]
+  finalUrl.search = ""; // Clean the URL for security
 
   return NextResponse.redirect(finalUrl);
 }

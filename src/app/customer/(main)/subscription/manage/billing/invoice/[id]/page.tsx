@@ -27,7 +27,7 @@ export default async function InvoicePage({
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
 
-  // 4. Fetch all nested data using the Admin Client
+  // 4. Fetch core payment + subscription + profile using the Admin Client
   const { data: payment, error } = await supabaseAdmin
     .from("payments")
     .select(
@@ -82,6 +82,14 @@ export default async function InvoicePage({
 
   const profile = payment.customer_profiles;
   const sub = payment.subscriptions;
+
+  // 5. Fetch add-on order separately (more robust than relying on PostgREST relation naming)
+  const { data: addonOrder } = await supabaseAdmin
+    .from("addon_orders")
+    .select("id, total_amount, target_delivery_date, status")
+    .eq("payment_id", paymentId)
+    .maybeSingle();
+
   const customerUser = profile?.users;
 
   // Find the primary address (fallback to first available if none marked primary)
@@ -179,14 +187,31 @@ export default async function InvoicePage({
           </div>
           <div>
             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">
-              Subscription Details
+              {addonOrder ? "Order Details" : "Subscription Details"}
             </p>
-            <p className="font-bold text-zinc-900">
-              Subscription ID - {sub?.subscription_code}
-            </p>
-            <p className="text-sm text-zinc-600">
-              {sub?.total_days} Days Meal Plan
-            </p>
+            {addonOrder ? (
+              <>
+                <p className="font-bold text-zinc-900">Add-on Order</p>
+                {addonOrder.target_delivery_date ? (
+                  <p className="text-sm text-zinc-600">
+                    Target delivery:{" "}
+                    {format(
+                      new Date(addonOrder.target_delivery_date),
+                      "dd MMM, yyyy",
+                    )}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <p className="font-bold text-zinc-900">
+                  Subscription ID - {sub?.subscription_code}
+                </p>
+                <p className="text-sm text-zinc-600">
+                  {sub?.total_days} Days Meal Plan
+                </p>
+              </>
+            )}
             <p className="text-sm text-zinc-500 mt-4">
               Payment Method:{" "}
               <span className="uppercase font-medium">
@@ -212,15 +237,18 @@ export default async function InvoicePage({
             <tr>
               <td className="py-5">
                 <p className="font-bold text-zinc-900">
-                  ArogyaDiet {sub?.total_days} Days Standard Plan
+                  {addonOrder
+                    ? "ArogyaDiet Add-on Purchase"
+                    : `ArogyaDiet ${sub?.total_days} Days Standard Plan`}
                 </p>
                 <p className="text-sm text-zinc-500 mt-1">
-                  Includes daily meal delivery, pause credits, and dynamic
-                  address routing.
+                  {addonOrder
+                    ? "Includes add-on items purchased from the shop."
+                    : "Includes daily meal delivery, pause credits, and dynamic\n                  address routing."}
                 </p>
               </td>
               <td className="py-5 text-right font-medium text-zinc-900">
-                ₹{basePrice.toFixed(2)}
+                ₹{(addonOrder ? finalPrice : basePrice).toFixed(2)}
               </td>
             </tr>
           </tbody>
