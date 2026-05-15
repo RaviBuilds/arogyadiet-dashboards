@@ -15,7 +15,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import {
   markOrderDeliveredAction,
-  markOrderOnTheWayAction,
+  updateDeliveryStatusAction,
 } from "@/actions/rider-actions/routeActions";
 
 export const revalidate = 0;
@@ -28,6 +28,8 @@ type DeliveryAddress = {
   landmark: string | null;
   city: string | null;
   pincode: string | null;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 type MealCategory = {
@@ -102,7 +104,9 @@ export default async function RiderDeliveryDetailPage({
     return (
       <DeliverySetupError
         title="Rider profile not readable"
-        message={riderProfileError?.message || "Check rider_profiles table RLS."}
+        message={
+          riderProfileError?.message || "Check rider_profiles table RLS."
+        }
       />
     );
   }
@@ -118,7 +122,7 @@ export default async function RiderDeliveryDetailPage({
       payout_amount,
       delivery_date,
       meal_category:meal_categories ( name ),
-      delivery_address:addresses ( street_1, street_2, landmark, city, pincode ),
+      delivery_address:addresses ( street_1, street_2, landmark, city, pincode, lat, lng ),
       customer_profile:customer_profiles ( users ( full_name, mobile ) )
     `,
     )
@@ -150,7 +154,9 @@ export default async function RiderDeliveryDetailPage({
     );
   }
 
-  const mealCategory = firstRelated(order.meal_category as Related<MealCategory>);
+  const mealCategory = firstRelated(
+    order.meal_category as Related<MealCategory>,
+  );
   const address = firstRelated(
     order.delivery_address as Related<DeliveryAddress>,
   );
@@ -159,13 +165,26 @@ export default async function RiderDeliveryDetailPage({
   );
   const customerUser = firstRelated(profile?.users ?? null);
   const addressLine = buildAddressLine(address);
-  const mapsQuery = encodeURIComponent(addressLine);
-  const canMarkOnTheWay = order.status === "PICKED";
-  const canMarkDelivered = order.status === "ON_THE_WAY";
+
+  const destLat = address?.lat;
+  const destLng = address?.lng;
+  const mapsUrl =
+    destLat != null && destLng != null
+      ? `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+          addressLine,
+        )}`;
+
+  const canMarkOnTheWay = order.status === "OUT_FOR_DELIVERY";
+  const canMarkDelivered = order.status === "REACHING_TO_LOCATION";
 
   async function markOnTheWay() {
     "use server";
-    await markOrderOnTheWayAction(orderId);
+    await updateDeliveryStatusAction(
+      orderId,
+      "REACHING_TO_LOCATION",
+      "Rider is reaching to location",
+    );
     redirect(`/route/${orderId}`);
   }
 
@@ -198,7 +217,10 @@ export default async function RiderDeliveryDetailPage({
             <div className="flex flex-col items-end gap-2 mt-1">
               <LiveLocationTracker
                 riderId={riderProfile.id}
-                isDelivering={order.status === "ON_THE_WAY"}
+                isDelivering={
+                  order.status === "OUT_FOR_DELIVERY" ||
+                  order.status === "REACHING_TO_LOCATION"
+                }
               />
               <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-700">
                 {String(order.status).replaceAll("_", " ")}
@@ -242,7 +264,7 @@ export default async function RiderDeliveryDetailPage({
             </Button>
             <Button asChild variant="outline" className="h-12 rounded-xl">
               <a
-                href={`https://www.google.com/maps/search/?api=1&query=${mapsQuery}`}
+                href={mapsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-disabled={!addressLine}
@@ -259,7 +281,7 @@ export default async function RiderDeliveryDetailPage({
         <form action={markOnTheWay}>
           <Button className="h-14 w-full rounded-2xl bg-zinc-900 text-base font-bold text-white hover:bg-zinc-800">
             <Navigation className="mr-2 h-5 w-5" />
-            Mark On The Way
+            Notify to prepare for delivery
           </Button>
         </form>
       )}

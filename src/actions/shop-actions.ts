@@ -531,7 +531,11 @@ export async function validateCouponCode(code: string) {
 
 export async function verifyAddonPayment(
   paymentId: string,
-  razorpayResponse: any,
+  razorpayResponse: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  },
 ) {
   try {
     const supabase = await createClient();
@@ -545,9 +549,25 @@ export async function verifyAddonPayment(
       .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
-      return { success: false, error: "Invalid payment signature." };
+      throw new Error("Invalid payment signature.");
     }
 
+    // STRICT SEQUENCE (fail-fast):
+    // 1) Signature verification (above)
+    // 2) Insert into `razorpay_transactions`
+    const { error: rzpTxError } = await supabase
+      .from("razorpay_transactions")
+      .insert({
+        payment_id: paymentId,
+        razorpay_order_id: razorpayResponse.razorpay_order_id,
+        razorpay_payment_id: razorpayResponse.razorpay_payment_id,
+        razorpay_signature: razorpayResponse.razorpay_signature,
+        gateway_status: "SUCCESS", // Schema requires this NOT NULL field
+      });
+
+    if (rzpTxError) throw new Error(`Razorpay TX Error: ${rzpTxError.message}`);
+
+    // 3) Update `payments` to PAID
     const { error: paymentUpdateError } = await supabase
       .from("payments")
       .update({
@@ -556,37 +576,19 @@ export async function verifyAddonPayment(
       })
       .eq("id", paymentId);
 
-    if (paymentUpdateError) {
-      throw new Error("Failed to update payment status.");
-    }
+    if (paymentUpdateError)
+      throw new Error(`Payment Update Error: ${paymentUpdateError.message}`);
 
+    // 4) Update `addon_orders` to PAID (by `payment_id`)
     const { error: addonOrderUpdateError } = await supabase
       .from("addon_orders")
       .update({ status: "PAID" })
       .eq("payment_id", paymentId);
 
-    if (addonOrderUpdateError) {
-      throw new Error("Failed to update add-on order status.");
-    }
-
-    const { error: transactionError } = await supabase
-      .from("razorpay_transactions")
-      .insert({
-        payment_id: paymentId,
-        razorpay_order_id: razorpayResponse.razorpay_order_id,
-        razorpay_payment_id: razorpayResponse.razorpay_payment_id,
-        razorpay_signature: razorpayResponse.razorpay_signature,
-        gateway_status: "SUCCESS", // Crucial: Schema requires this NOT NULL field
-      });
-
-    if (transactionError) {
-      // We log this but DO NOT throw, because the customer's payment actually succeeded
-      // and we don't want to break the frontend success redirect over an audit log failure.
-      console.error(
-        "Critical Audit Error: Failed to insert razorpay_transaction record:",
-        transactionError.message,
+    if (addonOrderUpdateError)
+      throw new Error(
+        `Addon Order Update Error: ${addonOrderUpdateError.message}`,
       );
-    }
 
     return { success: true };
   } catch (error) {

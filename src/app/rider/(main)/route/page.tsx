@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { markBatchPickedUpAction } from "@/actions/rider-actions/routeActions";
 import Link from "next/link";
+import { RouteGpsIndicator } from "@/modules/rider/components/RouteGpsIndicator";
 
 export const revalidate = 0;
 
@@ -102,9 +103,11 @@ export default async function RiderRoutePage() {
     .select(
       `
       id, 
+      route_sequence,
       status, 
       payout_amount,
       meal_category:meal_categories ( name ),
+      addon_orders ( addon_order_items ( quantity, products ( name ) ) ),
       delivery_address:addresses ( street_1, street_2, landmark, city, pincode ),
       customer_profile:customer_profiles ( users ( full_name, mobile ) )
     `,
@@ -113,10 +116,9 @@ export default async function RiderRoutePage() {
     .eq("delivery_date", todayStr)
     .in("status", [
       "ORDER_CREATED",
-      "MEAL_PREPARED",
       "ASSIGNED",
-      "PICKED",
-      "ON_THE_WAY",
+      "OUT_FOR_DELIVERY",
+      "REACHING_TO_LOCATION",
     ]);
 
   if (error) {
@@ -133,11 +135,28 @@ export default async function RiderRoutePage() {
 
   // Grouping logic based on updated lifecycle
   const pendingPickup = safeOrders.filter((o) =>
-    ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"].includes(o.status),
+    ["ORDER_CREATED", "ASSIGNED"].includes(o.status),
   );
 
   const onTheRoad = safeOrders.filter((o) =>
-    ["PICKED", "ON_THE_WAY"].includes(o.status),
+    ["OUT_FOR_DELIVERY", "REACHING_TO_LOCATION"].includes(o.status),
+  );
+
+  const isGpsActive = safeOrders.some((o) =>
+    ["OUT_FOR_DELIVERY", "REACHING_TO_LOCATION"].includes(o?.status),
+  );
+
+  // Strict Sequential Delivery: sort by route_sequence and unlock only the next active delivery.
+  const delivery_orders = [...onTheRoad].sort((a: any, b: any) => {
+    const aSeq =
+      typeof a?.route_sequence === "number" ? a.route_sequence : Infinity;
+    const bSeq =
+      typeof b?.route_sequence === "number" ? b.route_sequence : Infinity;
+    return aSeq - bSeq;
+  });
+
+  const activeDelivery = delivery_orders.find(
+    (o: any) => !["DELIVERED", "FAILED"].includes(o?.status),
   );
 
   const manifest = pendingPickup.reduce(
@@ -147,6 +166,38 @@ export default async function RiderRoutePage() {
         : order.meal_category;
       const mealName = mealCat?.name || "Unknown Meal";
       acc[mealName] = (acc[mealName] || 0) + 1;
+      return acc;
+    },
+    {},
+  );
+
+  const shopProductsManifest = pendingPickup.reduce(
+    (acc: Record<string, number>, order) => {
+      const addonOrders = Array.isArray(order.addon_orders)
+        ? order.addon_orders
+        : order.addon_orders
+          ? [order.addon_orders]
+          : [];
+
+      for (const addonOrder of addonOrders) {
+        const addonOrderItems = Array.isArray(addonOrder?.addon_order_items)
+          ? addonOrder.addon_order_items
+          : addonOrder?.addon_order_items
+            ? [addonOrder.addon_order_items]
+            : [];
+
+        for (const item of addonOrderItems) {
+          const product = Array.isArray(item?.products)
+            ? item.products[0]
+            : item?.products;
+          const productName = product?.name;
+          const qty = Number(item?.quantity || 0);
+
+          if (!productName || qty <= 0) continue;
+          acc[productName] = (acc[productName] || 0) + qty;
+        }
+      }
+
       return acc;
     },
     {},
@@ -166,6 +217,8 @@ export default async function RiderRoutePage() {
             {safeOrders.length} total deliveries
           </p>
         </div>
+
+        <RouteGpsIndicator riderId={riderProfile.id} isActive={isGpsActive} />
       </div>
 
       {safeOrders.length === 0 && (
@@ -206,6 +259,28 @@ export default async function RiderRoutePage() {
                     </span>
                   </div>
                 ))}
+
+                {Object.keys(shopProductsManifest).length > 0 && (
+                  <div className="pt-2">
+                    <div className="border-t border-zinc-100" />
+                  </div>
+                )}
+
+                {Object.entries(shopProductsManifest).map(
+                  ([productName, qty]) => (
+                    <div
+                      key={productName}
+                      className="flex justify-between items-center border-b border-zinc-100 pb-2 last:border-0 last:pb-0"
+                    >
+                      <span className="font-semibold text-zinc-700">
+                        {productName}
+                      </span>
+                      <span className="bg-zinc-100 text-zinc-800 font-black px-3 py-1 rounded-lg">
+                        x {qty}
+                      </span>
+                    </div>
+                  ),
+                )}
               </div>
             </div>
 
@@ -228,22 +303,45 @@ export default async function RiderRoutePage() {
             Pending Drops
           </h3>
           <div className="space-y-3">
-            {onTheRoad.map((order, index) => {
+            {delivery_orders.map((order, index) => {
               const address = Array.isArray(order.delivery_address)
                 ? order.delivery_address[0]
                 : order.delivery_address;
               const profile = Array.isArray(order.customer_profile)
                 ? order.customer_profile[0]
                 : order.customer_profile;
-                console.log("ORDER=>", order);
-                console.log("PROFILE =>", profile);
               const customerUser = Array.isArray(profile?.users)
                 ? profile.users[0]
                 : profile?.users;
-                console.log("CUSTOMER USER=>", customerUser);
               const mealCategory = Array.isArray(order.meal_category)
                 ? order.meal_category[0]
                 : order.meal_category;
+
+              const addonOrders = Array.isArray(order.addon_orders)
+                ? order.addon_orders
+                : order.addon_orders
+                  ? [order.addon_orders]
+                  : [];
+
+              const addonItems = addonOrders.flatMap((ao: any) => {
+                const items = ao?.addon_order_items;
+                return Array.isArray(items) ? items : items ? [items] : [];
+              });
+
+              const addonProductsText = addonItems
+                .map((item: any) => {
+                  const product = Array.isArray(item?.products)
+                    ? item.products[0]
+                    : item?.products;
+                  const name = product?.name;
+                  const qty = Number(item?.quantity || 0);
+                  if (!name || qty <= 0) return null;
+                  return `${name}${qty > 1 ? ` (x${qty})` : ""}`;
+                })
+                .filter(Boolean)
+                .join(", ");
+
+              const hasAddonItems = addonProductsText.length > 0;
               const addressLine = [
                 address?.street_1,
                 address?.street_2,
@@ -253,8 +351,60 @@ export default async function RiderRoutePage() {
                 .filter(Boolean)
                 .join(", ");
 
+              const isActive =
+                Boolean(activeDelivery?.id) && order.id === activeDelivery?.id;
+              const inactiveCardClass =
+                "opacity-50 grayscale pointer-events-none select-none";
 
-              
+              const card = (
+                <Card
+                  className={`border-none shadow-sm bg-white rounded-2xl overflow-hidden transition-transform ${
+                    isActive ? "active:scale-[0.98]" : inactiveCardClass
+                  }`}
+                >
+                  <div className="bg-zinc-900 w-full h-1.5" />
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-start">
+                      <div className="flex gap-4">
+                        <div className="bg-zinc-100 h-10 w-10 rounded-full flex items-center justify-center font-black text-zinc-600 shrink-0">
+                          {index + 1}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-zinc-900 text-lg">
+                            {customerUser?.full_name || "Customer"}
+                          </h4>
+                          <p className="text-sm text-zinc-500 line-clamp-1">
+                            {addressLine || "Address pending..."}
+                          </p>
+                          <div className="mt-2 inline-flex items-center gap-1.5 bg-orange-50 text-orange-700 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wide">
+                            {mealCategory?.name || "Meal"}
+                          </div>
+
+                          {hasAddonItems && (
+                            <p className="text-sm text-muted-foreground mt-2 flex items-center gap-1">
+                              <span aria-hidden>📦</span>
+                              <span>Includes: {addonProductsText}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <ChevronRight
+                        className={`h-6 w-6 mt-2 ${
+                          isActive ? "text-zinc-300" : "text-zinc-200"
+                        }`}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+
+              if (!isActive) {
+                return (
+                  <div key={order.id} className="block">
+                    {card}
+                  </div>
+                );
+              }
 
               return (
                 <Link
@@ -262,30 +412,7 @@ export default async function RiderRoutePage() {
                   href={`/route/${order.id}`}
                   className="block"
                 >
-                  <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden active:scale-[0.98] transition-transform">
-                    <div className="bg-zinc-900 w-full h-1.5" />
-                    <CardContent className="p-4">
-                      <div className="flex justify-between items-start">
-                        <div className="flex gap-4">
-                          <div className="bg-zinc-100 h-10 w-10 rounded-full flex items-center justify-center font-black text-zinc-600 shrink-0">
-                            {index + 1}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-zinc-900 text-lg">
-                              {customerUser?.full_name || "Customer"}
-                            </h4>
-                            <p className="text-sm text-zinc-500 line-clamp-1">
-                              {addressLine || "Address pending..."}
-                            </p>
-                            <div className="mt-2 inline-flex items-center gap-1.5 bg-orange-50 text-orange-700 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wide">
-                              {mealCategory?.name || "Meal"}
-                            </div>
-                          </div>
-                        </div>
-                        <ChevronRight className="h-6 w-6 text-zinc-300 mt-2" />
-                      </div>
-                    </CardContent>
-                  </Card>
+                  {card}
                 </Link>
               );
             })}

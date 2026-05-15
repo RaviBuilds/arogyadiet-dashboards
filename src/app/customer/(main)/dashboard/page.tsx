@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   AlertCircle,
   MapPin,
+  ShoppingBag,
 } from "lucide-react";
 
 import {
@@ -90,6 +91,29 @@ export default async function CustomerDashboard() {
       </div>
     );
   }
+
+  // --- Fetch Active Shop Orders (Addon Orders) ---
+  const customerProfileId = profile.id;
+  const { data: addonOrders } = await supabase
+    .from("addon_orders")
+    .select(`id, delivery_order_id, delivery_orders(status)`)
+    .eq("customer_profile_id", customerProfileId)
+    .eq("status", "PAID");
+
+  // Filter for active/pending shop deliveries
+  const activeAddonOrders =
+    addonOrders?.filter((order) => {
+      const delivery = Array.isArray(order.delivery_orders)
+        ? order.delivery_orders[0]
+        : order.delivery_orders;
+
+      return (
+        !order.delivery_order_id ||
+        (delivery &&
+          delivery.status !== "DELIVERED" &&
+          delivery.status !== "CANCELLED")
+      );
+    }) || [];
 
   const { data: subscriptions, error: subError } = await supabase
     .from("subscriptions")
@@ -180,6 +204,29 @@ export default async function CustomerDashboard() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4">
+      {activeAddonOrders.length > 0 && (
+        <Link href="/meals" className="block">
+          <Card className="border-2 border-amber-200 bg-amber-50/60 shadow-sm hover:shadow-md transition-shadow">
+            <CardContent className="p-5 flex items-start gap-4">
+              <div className="bg-amber-100 text-amber-700 p-2.5 rounded-full shrink-0">
+                <ShoppingBag className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-extrabold text-amber-900">
+                  Active Shop Orders
+                </p>
+                <p className="text-sm text-amber-800 mt-1 leading-relaxed">
+                  You have {activeAddonOrders.length} pending shop order
+                  {activeAddonOrders.length === 1 ? "" : "s"}. Tap to track in
+                  <span className="font-bold"> My Meals</span>.
+                </p>
+              </div>
+              <ArrowRight className="h-5 w-5 text-amber-700 mt-1 shrink-0" />
+            </CardContent>
+          </Card>
+        </Link>
+      )}
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-zinc-900">My Subscription</h1>

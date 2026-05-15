@@ -2,17 +2,24 @@
 
 import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { MapPin, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
+
+export type GpsHardwareState = "idle" | "acquiring" | "active" | "error";
 
 export function LiveLocationTracker({
   riderId,
   isDelivering,
+  showIndicator = true,
+  onGpsStateChange,
 }: {
   riderId: string;
   isDelivering: boolean;
+  showIndicator?: boolean;
+  onGpsStateChange?: (state: GpsHardwareState) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [isHijacked, setIsHijacked] = useState(false);
+  const [gpsState, setGpsState] = useState<GpsHardwareState>("idle");
   const supabase = createClient();
 
   // Generates a unique ID for this specific tab/phone session
@@ -21,17 +28,30 @@ export function LiveLocationTracker({
   // Keeps track of whether this phone has officially claimed the database yet
   const hasClaimedSession = useRef(false);
 
+  const updateGpsState = (next: GpsHardwareState) => {
+    setGpsState(next);
+    onGpsStateChange?.(next);
+  };
+
   useEffect(() => {
     if (!isDelivering || isHijacked) return;
 
+    // We are delivering and attempting to start GPS tracking.
+    updateGpsState("acquiring");
+    setError(null);
+
     if (!navigator.geolocation) {
       setError("Geolocation is not supported by your browser");
+      updateGpsState("error");
       return;
     }
 
     const watchId = navigator.geolocation.watchPosition(
       async (position) => {
         if (isHijacked) return;
+
+        // Hardware is actively providing coordinates.
+        updateGpsState("active");
 
         const { latitude, longitude } = position.coords;
 
@@ -93,7 +113,13 @@ export function LiveLocationTracker({
         }
       },
       (geoError) => {
-        console.error("GPS Error:", geoError);
+        const message =
+          geoError instanceof Error
+            ? geoError.message
+            : (geoError as GeolocationPositionError | undefined)?.message ||
+              "Unknown geolocation error";
+        console.error("GPS Error:", message);
+        updateGpsState("error");
         setError("Failed to get GPS signal. Please check permissions.");
       },
       {
@@ -104,10 +130,22 @@ export function LiveLocationTracker({
     );
 
     // Cleanup when leaving page
-    return () => navigator.geolocation.clearWatch(watchId);
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      updateGpsState("idle");
+    };
   }, [riderId, isDelivering, isHijacked, sessionId]);
 
+  useEffect(() => {
+    if (!isDelivering) {
+      updateGpsState("idle");
+      setError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDelivering]);
+
   if (!isDelivering) return null;
+  if (!showIndicator) return null;
 
   if (isHijacked) {
     return (
@@ -119,16 +157,23 @@ export function LiveLocationTracker({
   }
 
   return (
-    <div className="flex items-center gap-2 text-[10px] sm:text-xs font-bold text-green-700 uppercase tracking-wide">
-      {error ? (
-        <span className="text-red-500 normal-case">{error}</span>
+    <div className="flex items-center gap-2 text-[10px] sm:text-xs font-bold uppercase tracking-wide">
+      {gpsState === "error" || error ? (
+        <span className="text-red-500 normal-case font-bold">
+          {error || "Location Access Blocked"}
+        </span>
+      ) : gpsState === "acquiring" ? (
+        <>
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-yellow-400" />
+          <span className="text-yellow-700">Acquiring GPS...</span>
+        </>
       ) : (
         <>
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
           </span>
-          Live GPS Active
+          <span className="text-green-700">Live GPS Active</span>
         </>
       )}
     </div>

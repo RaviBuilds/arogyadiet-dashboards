@@ -75,10 +75,10 @@ export default async function RiderDashboard() {
   const orders = todayOrders || [];
 
   const assigned = orders.filter((o) =>
-    ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"].includes(o.status),
+    ["ORDER_CREATED", "ASSIGNED"].includes(o.status),
   ).length;
   const picked = orders.filter((o) =>
-    ["PICKED", "ON_THE_WAY"].includes(o.status),
+    ["OUT_FOR_DELIVERY", "REACHING_TO_LOCATION"].includes(o.status),
   ).length;
   const delivered = orders.filter((o) => o.status === "DELIVERED").length;
 
