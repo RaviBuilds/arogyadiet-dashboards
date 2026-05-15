@@ -40,7 +40,7 @@ async function getCurrentRiderProfileId() {
 
 async function updateRiderOrderStatus(
   orderId: string,
-  newStatus: "ON_THE_WAY" | "DELIVERED",
+  newStatus: "REACHING_TO_LOCATION" | "DELIVERED",
   note: string,
 ) {
   const supabase = await createClient();
@@ -125,8 +125,8 @@ export async function updateDeliveryStatusAction(
 export async function markOrderOnTheWayAction(orderId: string) {
   return updateRiderOrderStatus(
     orderId,
-    "ON_THE_WAY",
-    "Rider is on the way",
+    "REACHING_TO_LOCATION",
+    "Rider is reaching to location",
   );
 }
 
@@ -155,7 +155,7 @@ export async function markBatchPickedUpAction(
   const { error } = await supabase
     .from("delivery_orders")
     .update({
-      status: "PICKED",
+      status: "OUT_FOR_DELIVERY",
       pickup_marked_at: new Date().toISOString(),
     })
     .eq("assigned_rider_id", riderId)
@@ -168,7 +168,7 @@ export async function markBatchPickedUpAction(
   if (ordersToUpdate && ordersToUpdate.length > 0) {
     const logs = ordersToUpdate.map((order) => ({
       delivery_order_id: order.id,
-      status: "PICKED",
+      status: "OUT_FOR_DELIVERY",
       note: "Batch picked up from central kitchen",
     }));
 

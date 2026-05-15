@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GoogleMap, useJsApiLoader, Marker } from "@react-google-maps/api";
+import {
+  GoogleMap,
+  useJsApiLoader,
+  Marker,
+  DirectionsRenderer,
+} from "@react-google-maps/api";
 import { createClient } from "@/lib/supabase/client";
-import { MapPin, Navigation } from "lucide-react";
+import { MapPin } from "lucide-react";
 
 const containerStyle = {
   width: "100%",
@@ -12,16 +17,41 @@ const containerStyle = {
   borderRadius: "1rem",
 };
 
+type RiderCoords = { lat: number; lng: number };
+
+function extractCoordsFromRealtimePayload(
+  payload: unknown,
+): RiderCoords | null {
+  // Supabase `postgres_changes` payload puts the updated row in `payload.new`.
+  const newData = (payload as { new?: unknown } | null | undefined)?.new as
+    | Record<string, unknown>
+    | null
+    | undefined;
+
+  const rawLat = newData?.lat;
+  const rawLng = newData?.lng;
+
+  if (rawLat == null || rawLng == null) return null;
+
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return { lat, lng };
+}
+
 export function LiveTrackingMap({
   riderId,
   orderStatus,
   customerLat,
   customerLng,
+  onEtaChange,
 }: {
   riderId: string | null;
   orderStatus: string;
   customerLat?: number;
   customerLng?: number;
+  onEtaChange?: (etaText: string | null) => void;
 }) {
   const supabase = createClient();
   const [riderLocation, setRiderLocation] = useState<{
@@ -29,55 +59,162 @@ export function LiveTrackingMap({
     lng: number;
   } | null>(null);
 
+  const [directionsResponse, setDirectionsResponse] =
+    useState<google.maps.DirectionsResult | null>(null);
+
   const { isLoaded } = useJsApiLoader({
     id: "google-map-script",
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string,
   });
 
+  // Fetch and refresh driving route whenever rider location updates.
   useEffect(() => {
-    if (orderStatus !== "ON_THE_WAY" || !riderId) return;
+    console.log("--- MAP DIAGNOSTICS ---");
+    console.log("1. Rider Location State:", riderLocation);
+    console.log("2. Customer Destination:", { lat: customerLat, lng: customerLng });
+    console.log("3. Order Status:", orderStatus);
 
-    // 1. Fetch initial location
+    if (!isLoaded) return;
+    // Strict guards: DirectionsService must not run until BOTH origin and destination are present.
+    if (!riderLocation) return;
+    if (customerLat == null || customerLng == null) return;
+
+    const canTrack =
+      orderStatus === "OUT_FOR_DELIVERY" ||
+      orderStatus === "REACHING_TO_LOCATION";
+    if (!canTrack) return;
+
+    let cancelled = false;
+
+    const fetchDirections = async () => {
+      try {
+        // HEAVY DIAGNOSTICS: verify that the strict guards are not blocking on malformed state.
+        console.log("[LiveTrackingMap] Directions preflight", {
+          isLoaded,
+          orderStatus,
+          riderLocation,
+          customerLat,
+          customerLng,
+          riderLatType: typeof riderLocation?.lat,
+          riderLngType: typeof riderLocation?.lng,
+          customerLatType: typeof customerLat,
+          customerLngType: typeof customerLng,
+        });
+
+        // CRITICAL: Coerce all coordinates to strict numbers (stringified decimals can silently fail).
+        const originCoords = {
+          lat: Number(riderLocation.lat),
+          lng: Number(riderLocation.lng),
+        };
+        const destCoords = {
+          lat: Number(customerLat),
+          lng: Number(customerLng),
+        };
+
+        // If coercion produced NaN, abort this attempt.
+        if (
+          Number.isNaN(originCoords.lat) ||
+          Number.isNaN(originCoords.lng) ||
+          Number.isNaN(destCoords.lat) ||
+          Number.isNaN(destCoords.lng)
+        ) {
+          console.warn(
+            "[LiveTrackingMap] Directions aborted: NaN coordinates",
+            {
+              originCoords,
+              destCoords,
+              riderLocation,
+              customerLat,
+              customerLng,
+            },
+          );
+          return;
+        }
+
+        const service = new window.google.maps.DirectionsService();
+        const response = await service.route({
+          origin: originCoords,
+          destination: destCoords,
+          travelMode: window.google.maps.TravelMode.DRIVING,
+        });
+
+        if (cancelled) return;
+        setDirectionsResponse(response);
+
+        const etaText = response.routes?.[0]?.legs?.[0]?.duration?.text ?? null;
+        onEtaChange?.(etaText);
+      } catch (err) {
+        console.error("Directions request failed", err);
+        if (cancelled) return;
+        setDirectionsResponse(null);
+        onEtaChange?.(null);
+      }
+    };
+
+    fetchDirections();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isLoaded,
+    riderLocation,
+    customerLat,
+    customerLng,
+    orderStatus,
+    onEtaChange,
+  ]);
+
+  useEffect(() => {
+    if (!riderId || !supabase) return;
+
+    // 1. Robust Initial Fetch
     const fetchInitialLocation = async () => {
-      const { data } = await supabase
-        .from("rider_live_locations")
-        .select("lat, lng")
-        .eq("rider_id", riderId)
-        .single();
+      try {
+        const { data, error } = await supabase
+          .from('rider_live_locations')
+          .select('lat, lng')
+          .eq('rider_id', riderId)
+          .single();
 
-      if (data) {
-        setRiderLocation({ lat: Number(data.lat), lng: Number(data.lng) });
+        if (error) throw error;
+
+        if (data && data.lat && data.lng) {
+          console.log("[LiveTrackingMap] Initial Fetch Success:", data);
+          setRiderLocation({ lat: Number(data.lat), lng: Number(data.lng) });
+        }
+      } catch (err) {
+        console.error("[LiveTrackingMap] Initial Fetch Error:", err);
       }
     };
 
     fetchInitialLocation();
 
-    // 2. Subscribe to Realtime WebSocket updates
+    // 2. Global Realtime Subscription
     const channel = supabase
-      .channel(`tracking-${riderId}`)
+      .channel(`public:rider_live_locations:rider_id=eq.${riderId}`)
       .on(
-        "postgres_changes",
+        'postgres_changes',
         {
-          event: "*", // Listen for both UPSERT actions
-          schema: "public",
-          table: "rider_live_locations",
-          filter: `rider_id=eq.${riderId}`,
+          event: '*',
+          schema: 'public',
+          table: 'rider_live_locations',
+          filter: `rider_id=eq.${riderId}`
         },
         (payload) => {
-          console.log("GPS Ping Received via WebSocket!", payload.new);
-          const newLoc = payload.new as { lat: number; lng: number };
-          setRiderLocation({
-            lat: Number(newLoc.lat),
-            lng: Number(newLoc.lng),
-          });
-        },
+          const newData = payload.new as any;
+          if (newData && newData.lat && newData.lng) {
+            console.log("[LiveTrackingMap] Live Ping Received:", newData);
+            setRiderLocation({ lat: Number(newData.lat), lng: Number(newData.lng) });
+          }
+        }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [riderId, orderStatus, supabase]);
+  }, [riderId, supabase]);
 
   if (!isLoaded) {
     return (
@@ -87,7 +224,11 @@ export function LiveTrackingMap({
     );
   }
 
-  if (orderStatus !== "ON_THE_WAY") {
+  const canShowMap =
+    orderStatus === "OUT_FOR_DELIVERY" ||
+    orderStatus === "REACHING_TO_LOCATION";
+
+  if (!canShowMap) {
     return (
       <div className="p-6 bg-orange-50 border border-orange-100 text-orange-800 rounded-2xl text-center shadow-sm">
         <MapPin className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -133,25 +274,46 @@ export function LiveTrackingMap({
           ],
         }}
       >
-        {/* The Rider's Moving Pin */}
-        {riderLocation && (
-          <Marker
-            position={riderLocation}
-            // You can replace this with a custom bike icon later!
-            icon={{
-              path: window.google.maps.SymbolPath.CIRCLE,
-              scale: 10,
-              fillColor: "#16a34a",
-              fillOpacity: 1,
-              strokeWeight: 3,
-              strokeColor: "#ffffff",
+        {/* Route polyline snapped to the road */}
+        {directionsResponse && (
+          <DirectionsRenderer
+            directions={directionsResponse}
+            options={{
+              suppressMarkers: true,
+              polylineOptions: {
+                strokeColor: "#111827",
+                strokeOpacity: 0.9,
+                strokeWeight: 5,
+              },
             }}
           />
         )}
 
-        {/* The Customer's Home Pin (Optional, if you have their lat/lng) */}
+        {/* Origin marker (Rider) */}
+        {riderLocation && (
+          <Marker
+            position={riderLocation}
+            title="Rider"
+            label={{ text: "🛵", fontSize: "22px" }}
+            // Transparent icon so only the label (emoji) is visible.
+            icon={{
+              url: "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E",
+              scaledSize: new window.google.maps.Size(1, 1),
+            }}
+          />
+        )}
+
+        {/* Destination marker (Customer) */}
         {customerLat && customerLng && (
-          <Marker position={{ lat: customerLat, lng: customerLng }} />
+          <Marker
+            position={{ lat: customerLat, lng: customerLng }}
+            title="Delivery location"
+            label={{ text: "🏠", fontSize: "22px" }}
+            icon={{
+              url: "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E",
+              scaledSize: new window.google.maps.Size(1, 1),
+            }}
+          />
         )}
       </GoogleMap>
     </div>

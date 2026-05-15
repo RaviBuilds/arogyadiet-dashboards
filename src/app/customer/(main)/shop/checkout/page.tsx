@@ -233,8 +233,9 @@ export default function ShopCheckoutPage() {
             orderResponse.paymentId,
             response,
           );
-
+          console.log("Verify Payment Response =>", verifyRes);
           if (verifyRes.success) {
+            console.log("Payment is succesfull!!! Success Message");
             toast.success(
               "Payment successful! Add-ons will be delivered with your next meal.",
             );

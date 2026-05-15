@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import Link from "next/link";
@@ -20,8 +21,41 @@ import {
 } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ShopOrdersTracker } from "@/modules/meals/components/shop-orders-tracker";
 
 export const revalidate = 0;
+
+type AddonProductLine = {
+  name: string;
+  quantity: number;
+};
+
+function buildAddonLinesFromDeliveryOrder(order: any): AddonProductLine[] {
+  const addonOrders = order?.addon_orders;
+  if (!Array.isArray(addonOrders) || addonOrders.length === 0) return [];
+
+  const lines: AddonProductLine[] = [];
+
+  for (const addonOrder of addonOrders) {
+    const items = addonOrder?.addon_order_items;
+    if (!Array.isArray(items)) continue;
+
+    for (const item of items) {
+      const name = item?.products?.name;
+      const quantity = item?.quantity;
+      if (typeof name !== "string" || !name) continue;
+      if (typeof quantity !== "number") continue;
+      lines.push({ name, quantity });
+    }
+  }
+
+  return lines;
+}
+
+function formatAddonLines(lines: AddonProductLine[]) {
+  if (!lines.length) return "";
+  return lines.map((l) => `${l.name} (x${l.quantity})`).join(", ");
+}
 
 export default async function MyMealsPage({
   searchParams,
@@ -54,11 +88,31 @@ export default async function MyMealsPage({
 
   if (!profile) redirect("/dashboard");
 
+  const customerProfileId = profile.id;
+
+  // Track Shop Orders (Standalone Addons)
+  const { data: shopOrders } = await supabase
+    .from("addon_orders")
+    .select(
+      `
+  id, 
+  created_at, 
+  total_amount, 
+  status,
+  delivery_order_id,
+  delivery_orders (delivery_date, status),
+  addon_order_items ( quantity, unit_price, products (name) )
+`,
+    )
+    .eq("customer_profile_id", customerProfileId)
+    .eq("status", "PAID")
+    .order("created_at", { ascending: false });
+
   // 2. Fetch Active Subscription
   const { data: activeSub } = await supabase
     .from("subscriptions")
     .select("id, total_days, consumed_days, starts_on")
-    .eq("customer_profile_id", profile.id)
+    .eq("customer_profile_id", customerProfileId)
     .eq("status", "ACTIVE")
     .single();
 
@@ -72,8 +126,10 @@ export default async function MyMealsPage({
     const [orderRes, prefRes] = await Promise.all([
       supabase
         .from("delivery_orders")
-        .select("id, status")
-        .eq("customer_profile_id", profile.id)
+        .select(
+          "id, status, batch_id, route_sequence, addon_orders(*, addon_order_items(*, products(name)))",
+        )
+        .eq("customer_profile_id", customerProfileId)
         .eq("delivery_date", todayStr)
         .maybeSingle(),
       supabase
@@ -85,6 +141,29 @@ export default async function MyMealsPage({
     ]);
     todaysOrder = orderRes.data;
     todaysPreference = prefRes.data;
+  }
+
+  // Live Queue Tracker (secure, service-role): how many pending drops are ahead of the customer.
+  let stopsAway = 0;
+  const todaysStatus = todaysOrder?.status as string | undefined;
+  const shouldComputeStopsAway =
+    todaysStatus === "OUT_FOR_DELIVERY" ||
+    todaysStatus === "REACHING_TO_LOCATION";
+
+  if (
+    shouldComputeStopsAway &&
+    todaysOrder?.batch_id &&
+    typeof todaysOrder?.route_sequence === "number"
+  ) {
+    const supabaseAdmin = createAdminClient();
+    const { count } = await supabaseAdmin
+      .from("delivery_orders")
+      .select("id", { count: "exact", head: true })
+      .eq("batch_id", todaysOrder.batch_id)
+      .lt("route_sequence", todaysOrder.route_sequence)
+      .not("status", "in", "(DELIVERED,FAILED)");
+
+    stopsAway = count || 0;
   }
 
   // 4. SECTION 2: Fetch Paginated History
@@ -111,24 +190,29 @@ export default async function MyMealsPage({
     const dates = preferences?.map((p) => p.preference_date) || [];
     const { data: orders } = await supabase
       .from("delivery_orders")
-      .select("delivery_date, status")
-      .eq("customer_profile_id", profile.id)
+      .select(
+        "delivery_date, status, addon_orders(*, addon_order_items(*, products(name)))",
+      )
+      .eq("customer_profile_id", customerProfileId)
       .in("delivery_date", dates);
 
     // Map them together
     const orderStatusMap: Record<string, string> = {};
+    const orderAddonsMap: Record<string, AddonProductLine[]> = {};
     orders?.forEach((o) => {
       orderStatusMap[o.delivery_date] = o.status;
+      orderAddonsMap[o.delivery_date] = buildAddonLinesFromDeliveryOrder(o);
     });
 
     historyData =
-      preferences?.map((p:any) => ({
+      preferences?.map((p: any) => ({
         date: p.preference_date,
         is_paused: p.is_paused,
         meal_name: Array.isArray(p.meal_categories)
           ? p.meal_categories[0]?.name
           : p.meal_categories?.name,
         status: orderStatusMap[p.preference_date] || "PENDING",
+        addons: orderAddonsMap[p.preference_date] || [],
       })) || [];
   }
 
@@ -139,11 +223,15 @@ export default async function MyMealsPage({
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4">
-      <div>
-        <h1 className="text-3xl font-bold text-zinc-900">My Meals</h1>
-        <p className="text-muted-foreground mt-1">
-          Track today's delivery and view your entire subscription history.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-zinc-900">My Meals</h1>
+          <p className="text-muted-foreground mt-1">
+            Track today's delivery and view your entire subscription history.
+          </p>
+        </div>
+
+        <ShopOrdersTracker shopOrders={shopOrders || []} />
       </div>
 
       {!activeSub ? (
@@ -188,9 +276,19 @@ export default async function MyMealsPage({
                   <p className="text-green-700 mt-2 font-medium">
                     Eat nutrition-rich food and be healthy. Enjoy your meal!
                   </p>
+                  {(() => {
+                    const lines = buildAddonLinesFromDeliveryOrder(todaysOrder);
+                    if (!lines.length) return null;
+                    return (
+                      <p className="text-muted-foreground text-sm mt-3">
+                        📦 Includes: {formatAddonLines(lines)}
+                      </p>
+                    );
+                  })()}
                 </CardContent>
               </Card>
-            ) : todaysOrder?.status === "ON_THE_WAY" ? (
+            ) : todaysOrder?.status === "REACHING_TO_LOCATION" ||
+              todaysOrder?.status === "OUT_FOR_DELIVERY" ? (
               <Card className="border-none shadow-md bg-white border-2 border-blue-500 overflow-hidden relative">
                 <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 animate-pulse" />
                 <CardContent className="p-6 md:p-8 flex flex-col md:flex-row justify-between items-center gap-6">
@@ -200,11 +298,56 @@ export default async function MyMealsPage({
                     </div>
                     <div>
                       <h3 className="text-xl font-black text-zinc-900">
-                        Rider is on the way!
+                        {todaysOrder?.status === "REACHING_TO_LOCATION"
+                          ? "Rider is arriving"
+                          : "Delivery in progress"}
                       </h3>
-                      <p className="text-zinc-500 mt-1">
-                        Your meal is picked up and out for delivery.
-                      </p>
+
+                      {todaysOrder?.status === "REACHING_TO_LOCATION" ? (
+                        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                          <p className="text-sm font-semibold text-amber-900">
+                            Get ready to collect your package. Rider is arriving
+                            at your location.
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {/* Queue status (muted) */}
+                      {(() => {
+                        const status = todaysOrder?.status;
+                        const isQueued =
+                          status === "OUT_FOR_DELIVERY" ||
+                          status === "REACHING_TO_LOCATION";
+                        if (!isQueued) return null;
+
+                        if (stopsAway === 0) {
+                          return (
+                            <p className="text-muted-foreground mt-1">
+                              Rider is heading to you next. Rider is coming to
+                              deliver your meal.
+                            </p>
+                          );
+                        }
+
+                        return (
+                          <p className="text-muted-foreground mt-1">
+                            Rider finishing previous deliveries. Total{" "}
+                            {stopsAway} previous delivery pending before
+                            reaching you.
+                          </p>
+                        );
+                      })()}
+
+                      {(() => {
+                        const lines =
+                          buildAddonLinesFromDeliveryOrder(todaysOrder);
+                        if (!lines.length) return null;
+                        return (
+                          <p className="text-muted-foreground text-xs mt-2">
+                            📦 Includes: {formatAddonLines(lines)}
+                          </p>
+                        );
+                      })()}
                     </div>
                   </div>
                   <Button
@@ -234,6 +377,16 @@ export default async function MyMealsPage({
                       <p className="text-lg font-black text-zinc-900 capitalize">
                         {formatStatus(todaysOrder.status)}
                       </p>
+                      {(() => {
+                        const lines =
+                          buildAddonLinesFromDeliveryOrder(todaysOrder);
+                        if (!lines.length) return null;
+                        return (
+                          <p className="text-muted-foreground text-xs mt-1">
+                            📦 Includes: {formatAddonLines(lines)}
+                          </p>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div className="text-sm text-zinc-500 flex items-center gap-2">
@@ -292,9 +445,23 @@ export default async function MyMealsPage({
                             <PauseCircle className="h-3 w-3" /> Paused
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2.5 py-1 rounded-md text-xs font-bold uppercase">
-                            {row.meal_name || "Meal"}
-                          </span>
+                          <div>
+                            <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2.5 py-1 rounded-md text-xs font-bold uppercase">
+                              {row.meal_name || "Meal"}
+                            </span>
+                            {Array.isArray(row.addons) &&
+                              row.addons.length > 0 && (
+                                <div className="text-muted-foreground text-xs mt-1 space-y-0.5">
+                                  {row.addons.map(
+                                    (a: AddonProductLine, i: number) => (
+                                      <div key={`${a.name}-${i}`}>
+                                        + {a.name} (x{a.quantity})
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              )}
+                          </div>
                         )}
                       </div>
 
