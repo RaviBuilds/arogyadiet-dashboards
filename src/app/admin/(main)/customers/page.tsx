@@ -1,8 +1,6 @@
-// src/app/admin/(main)/customers/page.tsx
 import { Button } from "@/shared/components/ui/button";
-import { Card, CardContent } from "@/shared/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import { CustomerClientTable, Customer } from "./CustomerClientTable";
+import CustomerDashboard from "@/shared/components/admin/customers/CustomerDashboard";
 
 export default async function CustomersPage() {
   const supabase = await createClient();
@@ -25,7 +23,8 @@ export default async function CustomersPage() {
 
   if (error) console.error("Error fetching customers:", error);
 
-  const customers: Customer[] = (rawCustomers || []).map((customer: any) => {
+  // Map the raw data into our safe Customer interface
+  const customers = (rawCustomers || []).map((customer: any) => {
     const primaryAddress = customer.addresses?.find(
       (addr: any) => addr.is_primary,
     );
@@ -41,7 +40,7 @@ export default async function CustomersPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 flex flex-col">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
@@ -52,11 +51,8 @@ export default async function CustomersPage() {
         <Button>Create Customer</Button>
       </div>
 
-      <Card>
-        <CardContent className="px-2">
-          <CustomerClientTable data={customers} />
-        </CardContent>
-      </Card>
+      {/* Render the new Tabbed Dashboard layout */}
+      <CustomerDashboard customers={customers} />
     </div>
   );
 }
