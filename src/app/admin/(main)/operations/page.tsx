@@ -6,10 +6,20 @@ import { fetchRosterData } from "@/actions/admin-actions/operationsActions";
 export const revalidate = 3600;
 
 export default async function OperationsPage() {
+  const getISTDateString = (offsetDays = 0) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offsetDays);
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  };
   const supabase = await createClient();
 
   // 1. Fetch Today's Dispatch Board
-  const today = new Date().toISOString().split("T")[0];
+  const today = getISTDateString();
   const { data: rawDeliveries } = await supabase
     .from("delivery_orders")
     .select(
@@ -23,12 +33,10 @@ export default async function OperationsPage() {
     )
     .eq("delivery_date", today);
 
+    console.log("rawDeliveries =>", rawDeliveries);
   // 2. Fetch Tomorrow's Planned Deliveries
-  const tomorrow = new Date();
-  //tomorrow planned delivery made to today for testing
-  //tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setDate(tomorrow.getDate());
-  const tomorrowStr = tomorrow.toISOString().split("T")[0];
+  const tomorrowStr = getISTDateString(0);
+  console.log("tomorrowStr=>", tomorrowStr)
   
   const { data: rawPlannedDeliveries } = await supabase
     .from("delivery_orders")
@@ -39,12 +47,12 @@ export default async function OperationsPage() {
       addresses ( street_1, city, pincode ), 
       meal_categories ( name )
     `)
-    .eq("delivery_date", tomorrowStr);
+    .eq("delivery_date", tomorrowStr)
+    .eq("status", "ORDER_CREATED");
   console.log("raw Planned Deliveries=>", rawPlannedDeliveries);
   // 3. Fetch Initial 10-Day Roster for the new Submenu
-  const tenDaysFromNow = new Date();
-  tenDaysFromNow.setDate(tenDaysFromNow.getDate() + 10);
-  const endDate = tenDaysFromNow.toISOString().split("T")[0];
+  const tenDaysFromNow = getISTDateString(10);
+  const endDate = tenDaysFromNow;
 
   const initialRosterData = await fetchRosterData(today, endDate);
 

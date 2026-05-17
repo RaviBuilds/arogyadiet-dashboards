@@ -56,6 +56,13 @@ import {
   Trash2,
   MapPin,
   Loader2,
+  ChefHat,
+  Settings,
+  PlayCircle,
+  CheckCircle2,
+  Clock,
+  ShoppingCart,
+  Network,
 } from "lucide-react";
 import { revalidateOperationsPage } from "@/actions/admin-actions/operationsActions";
 import {
@@ -64,6 +71,7 @@ import {
   getAddressesForOrder,
   updateOrderAddress,
 } from "@/actions/admin-actions/plannedActions";
+import { triggerSystemAutomation } from "@/actions/admin-actions/systemActions";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -87,14 +95,22 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [mealFilter, setMealFilter] = useState<string[]>([]);
 
-  // Address Modal State
+  // Modals State
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
+  const [isPrepModalOpen, setIsPrepModalOpen] = useState(false);
+
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [customerAddresses, setCustomerAddresses] = useState<any[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
     null,
   );
   const [isFetchingAddresses, setIsFetchingAddresses] = useState(false);
+
+  // System Automation State
+  const [systemToggle, setSystemToggle] = useState(false);
+  const [automationStatus, setAutomationStatus] = useState<
+    Record<string, { loading: boolean; lastRun?: string; success?: boolean }>
+  >({});
 
   // Derive final filtered data
   const filteredData = useMemo(() => {
@@ -124,6 +140,17 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     }
     return result;
   }, [data, searchTerm, searchColumn, mealFilter]);
+
+  // Dynamic Kitchen Prep Calculations
+  const prepSummary = useMemo(() => {
+    const summary = { VEG: 0, CHICKEN: 0, EGG: 0, MIXED: 0, OTHER: 0 };
+    filteredData.forEach((order) => {
+      const meal = getMealLabel(order.meal_categories?.name);
+      if (meal in summary) summary[meal as keyof typeof summary]++;
+      else summary["OTHER"]++;
+    });
+    return summary;
+  }, [filteredData]);
 
   // --- ACTIONS ---
   const handleRefreshISR = async () => {
@@ -155,6 +182,52 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     });
   };
 
+  // --- SYSTEM AUTOMATION ACTIONS ---
+  const handleRunAutomation = async (automationName: string) => {
+    if (
+      !confirm(
+        `CRITICAL WARNING:\n\nAre you sure you want to force-run the [${automationName}] script?\nRunning this out of schedule can cause duplicate data if not handled carefully.`,
+      )
+    )
+      return;
+
+    setAutomationStatus((prev) => ({
+      ...prev,
+      [automationName]: { ...prev[automationName], loading: true },
+    }));
+
+    const result = await triggerSystemAutomation(automationName);
+
+    if (result.success) {
+      toast.success(`${automationName} executed successfully!`);
+      const timeStr = new Date().toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
+      setAutomationStatus((prev) => ({
+        ...prev,
+        [automationName]: {
+          loading: false,
+          success: true,
+          lastRun: `Activity done today at ${timeStr}`,
+        },
+      }));
+
+      await revalidateOperationsPage();
+    } else {
+      toast.error(result.error || `Failed to run ${automationName}`);
+      setAutomationStatus((prev) => ({
+        ...prev,
+        [automationName]: {
+          ...prev[automationName],
+          loading: false,
+          success: false,
+        },
+      }));
+    }
+  };
+
   // --- ADDRESS LOGIC ---
   const handleOpenAddressModal = async (orderId: string) => {
     setActiveOrderId(orderId);
@@ -166,7 +239,6 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     const result = await getAddressesForOrder(orderId);
     if (result.success && result.addresses) {
       setCustomerAddresses(result.addresses);
-      // Auto-select their primary address if it exists
       const primary = result.addresses.find((a: any) => a.is_primary);
       if (primary) setSelectedAddressId(primary.id);
     } else {
@@ -177,16 +249,13 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
 
   const handleSubmitAddressChange = () => {
     if (!activeOrderId || !selectedAddressId) return;
-
     startTransition(async () => {
       const result = await updateOrderAddress(activeOrderId, selectedAddressId);
       if (result.success) {
         toast.success("Delivery address updated for tomorrow!");
         setIsAddressModalOpen(false);
         await revalidateOperationsPage();
-      } else {
-        toast.error(result.error || "Failed to update address");
-      }
+      } else toast.error(result.error || "Failed to update address");
     });
   };
 
@@ -198,8 +267,8 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
       "Customer Name": row.customer_profiles?.users?.full_name || "Unknown",
       Mobile: row.customer_profiles?.users?.mobile || "N/A",
       "Meal Type": getMealLabel(row.meal_categories?.name),
-      Address: row.addresses || "N/A",
-      Pincode: row.customer_profiles?.addresses?.[0]?.pincode || "N/A",
+      Address: row.addresses?.street_1 || "N/A",
+      Pincode: row.addresses?.pincode || "N/A",
       Status: row.status || "PENDING",
     }));
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -213,23 +282,52 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     );
   };
 
+  const automationScripts = [
+    {
+      name: "5:15 PM Order Gen",
+      icon: Clock,
+      desc: "Forces the generation of tomorrow's delivery orders based on active subscriptions.",
+    },
+    {
+      name: "Product Linking",
+      icon: ShoppingCart,
+      desc: "Attaches add-on shop products to tomorrow's planned delivery meals.",
+    },
+    {
+      name: "Routing & Batching",
+      icon: Network,
+      desc: "Creates rider batches, sets delivery sequences, and assigns orders for tomorrow.",
+    },
+  ];
+
   return (
     <>
       <Card className="border-border shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <CardHeader className="pb-4 border-b flex flex-row items-center justify-between">
+        <CardHeader className="pb-4 border-b flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <CardTitle className="text-lg font-semibold flex items-center gap-2">
             <CalendarClock className="h-5 w-5 text-primary" />
             Planned for Tomorrow
           </CardTitle>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportExcel}
-            disabled={filteredData.length === 0}
-            className="gap-2 text-primary hover:text-primary"
-          >
-            <Download className="h-4 w-4" /> Export to Excel
-          </Button>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsPrepModalOpen(true)}
+              className="gap-2"
+            >
+              <ChefHat className="h-4 w-4 text-orange-500" /> Prep Sheet
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportExcel}
+              disabled={filteredData.length === 0}
+              className="gap-2 text-primary hover:text-primary"
+            >
+              <Download className="h-4 w-4" /> Export
+            </Button>
+          </div>
         </CardHeader>
 
         <CardContent className="p-4 md:px-6">
@@ -339,7 +437,7 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                       className="text-center py-12 text-muted-foreground"
                     >
                       {data.length === 0
-                        ? "Tomorrow's delivery schedules will appear here after the evening automation runs at 5:15 PM."
+                        ? "Next data will be available here after the 5:15 PM automation today."
                         : "No planned deliveries match your current filters."}
                     </TableCell>
                   </TableRow>
@@ -392,7 +490,6 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                             align="end"
                             className="w-[170px]"
                           >
-                            {/* NEW: Change Address Button */}
                             <DropdownMenuItem
                               className="cursor-pointer font-medium"
                               onClick={() => handleOpenAddressModal(order.id)}
@@ -400,7 +497,6 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                               <MapPin className="mr-2 h-4 w-4 text-muted-foreground" />
                               Change Address
                             </DropdownMenuItem>
-
                             <DropdownMenuSub>
                               <DropdownMenuSubTrigger className="cursor-pointer font-medium">
                                 <UtensilsCrossed className="mr-2 h-4 w-4 text-muted-foreground" />
@@ -455,6 +551,170 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* --- SYSTEM AUTOMATION CONTROL (NEW REFINED UI) --- */}
+      <div className="mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="flex items-center gap-4 mb-5">
+          <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <Settings className="h-5 w-5 text-muted-foreground" />
+            System Automation Control
+          </h2>
+
+          <button
+            role="switch"
+            aria-checked={systemToggle}
+            onClick={() => setSystemToggle(!systemToggle)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${systemToggle ? "bg-primary" : "bg-input"}`}
+          >
+            <span
+              className={`pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${systemToggle ? "translate-x-5" : "translate-x-0"}`}
+            />
+          </button>
+
+          <span
+            className={`text-sm font-medium ${systemToggle ? "text-destructive" : "text-muted-foreground"}`}
+          >
+            {systemToggle
+              ? "ON: Enabled (Proceed with Caution)"
+              : "OFF: Disabled"}
+          </span>
+        </div>
+
+        {systemToggle && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 animate-in zoom-in-95 duration-300 origin-top-left">
+            {automationScripts.map((script) => {
+              const status = automationStatus[script.name] || {};
+              const isSuccess = status.success;
+
+              return (
+                <Card
+                  key={script.name}
+                  className={`relative overflow-hidden transition-all duration-300 flex flex-col justify-between ${
+                    isSuccess
+                      ? "border-green-500/40 shadow-sm bg-green-50/20"
+                      : "border-border shadow-sm hover:border-primary/30"
+                  }`}
+                >
+                  <div className="p-5 flex flex-col gap-3 h-full">
+                    <div className="flex items-center gap-2 font-semibold text-[15px] text-foreground">
+                      <script.icon
+                        className={`h-4 w-4 ${isSuccess ? "text-green-600" : "text-primary"}`}
+                      />
+                      {script.name}
+                    </div>
+
+                    <p className="text-xs text-muted-foreground leading-relaxed pr-2 lg:w-[90%]">
+                      {script.desc}
+                    </p>
+
+                    <div className="mt-1">
+                      <Button
+                        variant={isSuccess ? "outline" : "default"}
+                        size="sm"
+                        className={`w-fit font-medium shadow-sm transition-all ${
+                          isSuccess
+                            ? "border-green-600 text-green-700 hover:bg-green-50"
+                            : "bg-primary text-primary-foreground"
+                        }`}
+                        onClick={() => handleRunAutomation(script.name)}
+                        disabled={status.loading}
+                      >
+                        {status.loading ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <PlayCircle className="mr-2 h-4 w-4" />
+                        )}
+                        {status.loading ? "Processing..." : "Run Script"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Status Footer */}
+                  <div
+                    className={`px-5 py-3 text-xs border-t transition-colors ${
+                      isSuccess
+                        ? "bg-green-100/50 border-green-200 text-green-800"
+                        : "bg-muted/30 border-border/50 text-muted-foreground"
+                    }`}
+                  >
+                    {isSuccess ? (
+                      <div className="flex items-start gap-2 font-medium">
+                        <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                        <span>{status.lastRun}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <Clock className="h-4 w-4 shrink-0 opacity-50" />
+                        <span>Not run today</span>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* --- PREP SUMMARY MODAL --- */}
+      <Dialog open={isPrepModalOpen} onOpenChange={setIsPrepModalOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ChefHat className="h-5 w-5 text-orange-500" />
+              Kitchen Prep Sheet
+            </DialogTitle>
+            <DialogDescription>
+              Total meal counts required for tomorrow based on current table
+              filters.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-4 py-4">
+            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex flex-col items-center justify-center">
+              <span className="text-3xl font-bold text-green-700">
+                {prepSummary.VEG}
+              </span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-green-700 mt-1">
+                Vegetarian
+              </span>
+            </div>
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex flex-col items-center justify-center">
+              <span className="text-3xl font-bold text-red-700">
+                {prepSummary.CHICKEN}
+              </span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-red-700 mt-1">
+                Chicken
+              </span>
+            </div>
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex flex-col items-center justify-center">
+              <span className="text-3xl font-bold text-yellow-700">
+                {prepSummary.EGG}
+              </span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-yellow-700 mt-1">
+                Egg
+              </span>
+            </div>
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 flex flex-col items-center justify-center">
+              <span className="text-3xl font-bold text-blue-700">
+                {prepSummary.MIXED}
+              </span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-blue-700 mt-1">
+                Mixed Diet
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              className="w-full"
+              onClick={() => setIsPrepModalOpen(false)}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* --- CHANGE ADDRESS MODAL --- */}
       <Dialog open={isAddressModalOpen} onOpenChange={setIsAddressModalOpen}>
