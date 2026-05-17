@@ -54,6 +54,8 @@ export default function TodaysDeliveries({ data }: { data: any[] }) {
           meals: 0,
           products: 0,
           status: order.delivery_batches?.status || "PENDING",
+          distance: order.delivery_batches?.total_distance_km || 0,
+          payout: order.delivery_batches?.expected_payout || 0,
         };
       }
 
@@ -215,10 +217,10 @@ export default function TodaysDeliveries({ data }: { data: any[] }) {
                                     {order.rider_profiles.rider_service_areas?.map(
                                       (area: any) => (
                                         <Badge
-                                          key={area.pincode}
+                                          key={area.area_name}
                                           variant="secondary"
                                         >
-                                          {area.pincode}
+                                          {area.area_name}
                                         </Badge>
                                       ),
                                     ) || (
@@ -295,6 +297,8 @@ export default function TodaysDeliveries({ data }: { data: any[] }) {
                   <TableHead>Batch Number</TableHead>
                   <TableHead>Meals Count</TableHead>
                   <TableHead>Shop Products Count</TableHead>
+                  <TableHead>Distance (km)</TableHead>
+                  <TableHead>Payout (INR)</TableHead>
                   <TableHead>Assigned Rider</TableHead>
                   <TableHead>Batch Status</TableHead>
                 </TableRow>
@@ -303,7 +307,7 @@ export default function TodaysDeliveries({ data }: { data: any[] }) {
                 {batchSummary.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={5}
+                      colSpan={7}
                       className="text-center py-6 text-muted-foreground"
                     >
                       No batches active.
@@ -320,6 +324,12 @@ export default function TodaysDeliveries({ data }: { data: any[] }) {
                       </TableCell>
                       <TableCell className="font-semibold text-lg text-primary">
                         {batch.products}
+                      </TableCell>
+                      <TableCell className="font-semibold text-lg">
+                        {batch.distance.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="font-semibold text-lg">
+                        ₹{batch.payout.toFixed(2)}
                       </TableCell>
                       <TableCell>{batch.riderName}</TableCell>
                       <TableCell>

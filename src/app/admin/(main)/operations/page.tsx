@@ -26,8 +26,9 @@ export default async function OperationsPage() {
       `
       id, status, delivery_date, route_sequence, payout_amount, created_at, pickup_marked_at, delivered_at,
       customer_profiles ( users ( full_name, mobile ), addresses ( street_1, city, pincode ) ),
-      rider_profiles ( id, emergency_contact, users ( full_name ), rider_service_areas ( pincode ) ),
-      meal_categories ( name ), delivery_batches ( id, status ),
+      rider_profiles ( id, emergency_contact, users ( full_name ), rider_service_areas ( area_name ) ),
+      meal_categories ( name ),
+      delivery_batches ( id, status, total_distance_km, expected_payout ),
       addon_orders ( addon_order_items ( quantity ) )
     `,
     )
