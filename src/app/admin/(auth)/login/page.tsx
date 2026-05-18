@@ -17,6 +17,7 @@ export default function AdminLogin() {
         </a>
         <LoginForm
           socialLogin={false}
+          showSignup={false}
           formTitle="Admin Login Portal"
           portalRole="ADMIN"
           redirectPath="/dashboard"
