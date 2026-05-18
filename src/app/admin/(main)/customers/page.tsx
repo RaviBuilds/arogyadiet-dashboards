@@ -1,6 +1,9 @@
 import { Button } from "@/shared/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import CustomerDashboard from "@/shared/components/admin/customers/CustomerDashboard";
+import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+
+export const revalidate = 0;
 
 export default async function CustomersPage() {
   const supabase = await createClient();
@@ -25,9 +28,7 @@ export default async function CustomersPage() {
 
   // Map the raw data into our safe Customer interface
   const customers = (rawCustomers || []).map((customer: any) => {
-    const primaryAddress = customer.addresses?.find(
-      (addr: any) => addr.is_primary,
-    );
+    const primaryAddress = customer.addresses?.find((addr: any) => addr.is_primary);
     return {
       id: customer.id,
       fullName: customer.users?.full_name || "N/A",
@@ -41,17 +42,12 @@ export default async function CustomersPage() {
 
   return (
     <div className="space-y-6 flex flex-col">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your subscriber base and account statuses.
-          </p>
-        </div>
-        <Button>Create Customer</Button>
-      </div>
+      <AdminPageHeader 
+        title="Customers" 
+        description="Manage your subscriber base and account statuses."
+        action={<Button>Create Customer</Button>}
+      />
 
-      {/* Render the new Tabbed Dashboard layout */}
       <CustomerDashboard customers={customers} />
     </div>
   );

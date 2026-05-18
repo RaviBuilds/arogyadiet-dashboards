@@ -7,6 +7,8 @@ import {
   login,
 } from "@/services/AuthService";
 import { headers } from "next/headers";
+import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 
 export async function LoginAction(prevState: any, formData: FormData) {
   const email = formData.get("email") as string;
@@ -14,30 +16,48 @@ export async function LoginAction(prevState: any, formData: FormData) {
   const portalRole = formData.get("portalRole") as string;
   const redirectPath = formData.get("redirectPath") as string;
 
+  let finalRedirectPath = redirectPath;
+
   console.log("--- LoginAction Triggered ---");
   console.log("Email:", email);
   console.log("Expected Portal Role:", portalRole);
 
   try {
     await login(email, password, portalRole);
-    console.log("Login successful, redirecting to:", redirectPath);
+
+    // --- NEW: Bypass cookie delay by querying the database directly ---
+    const supabaseAdmin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
+
+    const { data: userData } = await supabaseAdmin
+      .from("users")
+      .select("force_password_change")
+      .eq("email", email)
+      .single();
+
+    if (userData?.force_password_change) {
+      console.log("User requires password change. Intercepting redirect.");
+      finalRedirectPath = `/${portalRole.toLowerCase()}/update-password`;
+    } else {
+      console.log("Login successful, redirecting to:", finalRedirectPath);
+    }
   } catch (error: any) {
     console.error("LoginAction Caught Error:", error.message);
     return { error: error.message };
   }
-  redirect(redirectPath);
+
+  redirect(finalRedirectPath);
 }
 
 //forgot password section
 export async function forgotPasswordAction(prevState: any, formData: FormData) {
   const email = formData.get("email") as string;
-
   const headerList = await headers();
   const host = headerList.get("host");
-
   const protocol = host?.includes("localhost") ? "http" : "https";
 
-  // Point to the new recovery route! No ?next= parameter required.
   const exactRedirectUrl = `${protocol}://${host}/api/auth/recovery`;
 
   if (!email) {
@@ -65,8 +85,26 @@ export async function updatePasswordAction(prevState: any, formData: FormData) {
 
   try {
     await updateUserPassword(password);
+
+    // --- NEW: Clear the database flag so they aren't stuck in a loop ---
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      const supabaseAdmin = createAdminClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      );
+      await supabaseAdmin
+        .from("users")
+        .update({ force_password_change: false })
+        .eq("auth_user_id", user.id);
+    }
   } catch (error: any) {
     return { error: error.message };
   }
+
   redirect("/dashboard");
 }

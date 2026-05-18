@@ -1,103 +1,95 @@
-import { Button } from "@/shared/components/ui/button";
-import { DataTable } from "@/shared/components/ui/data-table";
-import { ColumnDef } from "@tanstack/react-table";
-import { Badge } from "@/shared/components/ui/badge";
-import { Card, CardContent } from "@/shared/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import RiderManagement, {
+  RiderData,
+} from "@/shared/components/admin/riders/RiderManagement";
+import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 
-interface Rider {
-  id: string;
-  fullName: string;
-  mobile: string;
-  employee_code: string;
-  is_online: boolean;
-  assigned_pincodes: string[];
-}
-
-const columns: ColumnDef<Rider>[] = [
-  { accessorKey: "fullName", header: "Full Name" },
-  { accessorKey: "mobile", header: "Mobile" },
-  { accessorKey: "employee_code", header: "Employee Code" },
-  {
-    accessorKey: "is_online",
-    header: "Status",
-    cell: ({ row }) => (
-      <div className="flex items-center gap-2">
-        <span
-          className={`h-2.5 w-2.5 rounded-full ${row.original.is_online ? "bg-emerald-500" : "bg-muted-foreground"}`}
-        />
-        <span className="text-sm font-medium">
-          {row.original.is_online ? "Online" : "Offline"}
-        </span>
-      </div>
-    ),
-  },
-  {
-    accessorKey: "assigned_pincodes",
-    header: "Assigned Pincodes",
-    cell: ({ row }) => (
-      <div className="flex flex-wrap gap-1">
-        {row.original.assigned_pincodes.map((pincode) => (
-          <Badge key={pincode} variant="outline" className="bg-primary/5">
-            {pincode}
-          </Badge>
-        ))}
-      </div>
-    ),
-  },
-];
+export const revalidate = 0;
 
 export default async function RidersPage() {
   const supabase = await createClient();
 
-  const { data: rawRiders, error } = await supabase.from("rider_profiles")
-    .select(`
-      id,
-      employee_code,
-      is_online,
-      users!inner (
-        full_name,
-        mobile
+  const getISTDateString = (offsetDays = 0) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offsetDays);
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  };
+  const today = getISTDateString(0);
+
+  const [ridersRes, areasRes] = await Promise.all([
+    supabase
+      .from("rider_profiles")
+      .select(
+        `id, employee_code, is_online, emergency_contact, created_at, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status))`,
       ),
-      rider_service_areas (
-        pincode
-      )
-    `);
+    supabase
+      .from("rider_service_areas")
+      .select("*")
+      .order("created_at", { ascending: false }),
+  ]);
 
-  if (error) console.error("Error fetching riders:", error);
+  if (ridersRes.error) console.error("Error fetching riders:", ridersRes.error);
 
-  const riders: Rider[] = (rawRiders || []).map((rider: any) => {
+  const riders: RiderData[] = (ridersRes.data || []).map((rider: any) => {
     const serviceAreas =
       rider.rider_service_areas?.map((area: any) => area.pincode) || [];
+    const todaysBatches = (rider.delivery_batches || []).filter(
+      (b: any) => b.delivery_date === today,
+    );
+    let totalOrders = 0,
+      completedOrders = 0,
+      expectedEarning = 0,
+      latestBatchStatus = "No Batch Assigned",
+      latestBatchTime = "N/A";
+
+    if (todaysBatches.length > 0) {
+      const activeBatch = todaysBatches.sort(
+        (a: any, b: any) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )[0];
+      latestBatchStatus = activeBatch.status;
+      latestBatchTime = activeBatch.created_at;
+      todaysBatches.forEach((batch: any) => {
+        expectedEarning += Number(batch.expected_payout || 0);
+        const orders = batch.delivery_orders || [];
+        totalOrders += orders.length;
+        completedOrders += orders.filter(
+          (o: any) => o.status === "DELIVERED",
+        ).length;
+      });
+    }
+
     return {
       id: rider.id,
+      userId: rider.users?.id || "",
       fullName: rider.users?.full_name || "N/A",
+      email: rider.users?.email || "N/A",
       mobile: rider.users?.mobile || "N/A",
+      emergency_contact: rider.emergency_contact || "N/A",
       employee_code: rider.employee_code || "N/A",
       is_online: rider.is_online || false,
+      status_updated_at: rider.created_at || new Date().toISOString(),
       assigned_pincodes: serviceAreas,
+      todayCompletedDeliveries: completedOrders,
+      todayTotalDeliveries: totalOrders,
+      todayEstimatedEarning: expectedEarning,
+      latestBatchStatus,
+      latestBatchTime,
     };
   });
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Rider Management
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Monitor delivery partners and their service areas.
-          </p>
-        </div>
-        <Button>Onboard Rider</Button>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          <DataTable columns={columns} data={riders} />
-        </CardContent>
-      </Card>
+      <AdminPageHeader
+        title="Operations & Riders"
+        description="Manage delivery personnel, daily activity, service areas, and onboarding."
+      />
+      <RiderManagement data={riders} allAreas={areasRes.data || []} />
     </div>
   );
 }
