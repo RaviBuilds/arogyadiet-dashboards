@@ -35,7 +35,7 @@ export function LoginForm({
   formTitle = "Login",
   portalRole,
   redirectPath = "/dashboard",
-  showSignup = true, // <-- DEFAULTS TO TRUE FOR CUSTOMERS
+  showSignup, // <-- DEFAULTS TO TRUE FOR CUSTOMERS
   ...props
 }: LoginFormProps) {
   const [state, formAction, isPending] = useActionState(LoginAction, null);
@@ -63,7 +63,7 @@ export function LoginForm({
       setIsGoogleLoading(false);
     }
   };
-
+  console.log("PORTAL ROLE from Login Form =>", portalRole);
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
