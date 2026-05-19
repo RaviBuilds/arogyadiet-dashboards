@@ -71,6 +71,10 @@ export interface RiderData {
   todayEstimatedEarning: number;
   latestBatchStatus: string;
   latestBatchTime: string;
+  joiningDate: string | null;
+  totalEarned: number | null;
+  lastPayoutAmount: number | null;
+  lastPayoutDate: string | null;
 }
 
 export default function RiderManagement({
@@ -107,6 +111,7 @@ export default function RiderManagement({
           .toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
           .toUpperCase()
       : "N/A";
+
   const getPickupBadgeStatus = (status: string) =>
     ["PICKED_UP", "IN_TRANSIT", "DELIVERED"].includes(status)
       ? "PICKED UP"
@@ -124,15 +129,15 @@ export default function RiderManagement({
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter((row) => {
         if (searchColumn === "fullName")
-          return row.fullName.toLowerCase().includes(lowerTerm);
+          return row.fullName?.toLowerCase().includes(lowerTerm);
         if (searchColumn === "mobile")
-          return row.mobile.toLowerCase().includes(lowerTerm);
+          return row.mobile?.toLowerCase().includes(lowerTerm);
         if (searchColumn === "email")
-          return row.email.toLowerCase().includes(lowerTerm);
+          return row.email?.toLowerCase().includes(lowerTerm);
         if (searchColumn === "employee_code")
-          return row.employee_code.toLowerCase().includes(lowerTerm);
+          return row.employee_code?.toLowerCase().includes(lowerTerm);
         if (searchColumn === "pincode")
-          return row.assigned_pincodes.some((pin) =>
+          return row.assigned_pincodes?.some((pin) =>
             pin.toLowerCase().includes(lowerTerm),
           );
         return true;
@@ -319,11 +324,12 @@ export default function RiderManagement({
                 </TableRow>
               ) : (
                 <TableRow className="bg-muted/10">
-                  <TableHead>Full Name</TableHead>
-                  <TableHead>Mobile</TableHead>
-                  <TableHead>Employee Code</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Assigned Pincodes</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Contacts</TableHead>
+                  <TableHead>Emergency</TableHead>
+                  <TableHead>Joining Date</TableHead>
+                  <TableHead>Earnings</TableHead>
+                  <TableHead>Last Payout</TableHead>
                   <TableHead className="w-[50px]">
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -334,7 +340,7 @@ export default function RiderManagement({
               {filteredData.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-center py-12 text-muted-foreground"
                   >
                     No riders match your criteria.
@@ -406,38 +412,94 @@ export default function RiderManagement({
                       </>
                     ) : (
                       <>
-                        <TableCell className="font-medium">
-                          {rider.fullName}
-                        </TableCell>
-                        <TableCell>{rider.mobile}</TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {rider.employee_code}
-                        </TableCell>
+                        {/* Name & Employee ID */}
                         <TableCell>
-                          <StatusBadge
-                            status={rider.is_online ? "Online" : "Offline"}
-                            variant="dot"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {rider.assigned_pincodes.length > 0 ? (
-                              rider.assigned_pincodes.map((pin) => (
-                                <Badge
-                                  key={pin}
-                                  variant="outline"
-                                  className="bg-primary/5"
-                                >
-                                  {pin}
-                                </Badge>
-                              ))
-                            ) : (
-                              <span className="text-muted-foreground text-xs">
-                                Unassigned
-                              </span>
-                            )}
+                          <div className="font-bold">
+                            {rider.fullName || "N/A"}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            #{rider.employee_code || "UNASSIGNED"}
                           </div>
                         </TableCell>
+
+                        {/* Contacts */}
+                        <TableCell>
+                          <div>{rider.mobile || "N/A"}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {rider.email || "N/A"}
+                          </div>
+                        </TableCell>
+
+                        {/* Emergency Contact */}
+                        <TableCell>
+                          <span
+                            className={
+                              !rider.emergency_contact ||
+                              rider.emergency_contact === "N/A"
+                                ? "text-muted-foreground italic text-sm"
+                                : ""
+                            }
+                          >
+                            {rider.emergency_contact || "N/A"}
+                          </span>
+                        </TableCell>
+
+                        {/* Joining Date Safely Formatted */}
+                        <TableCell>
+                          {rider.joiningDate && rider.joiningDate !== "N/A" ? (
+                            new Date(rider.joiningDate).toLocaleDateString(
+                              "en-IN",
+                              {
+                                day: "2-digit",
+                                month: "short",
+                                year: "numeric",
+                              },
+                            )
+                          ) : (
+                            <span className="text-muted-foreground italic text-sm">
+                              N/A
+                            </span>
+                          )}
+                        </TableCell>
+
+                        {/* Earnings */}
+                        <TableCell>
+                          <span className="font-medium">
+                            ₹{(rider.totalEarned || 0).toLocaleString("en-IN")}
+                          </span>
+                        </TableCell>
+
+                        {/* Last Payout Safely Formatted */}
+                        <TableCell>
+                          {rider.lastPayoutAmount ? (
+                            <div className="flex flex-col">
+                              <span className="font-medium text-green-600">
+                                ₹
+                                {Number(rider.lastPayoutAmount).toLocaleString(
+                                  "en-IN",
+                                )}
+                              </span>
+                              {rider.lastPayoutDate &&
+                                rider.lastPayoutDate !== "N/A" && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {new Date(
+                                      rider.lastPayoutDate,
+                                    ).toLocaleDateString("en-IN", {
+                                      day: "2-digit",
+                                      month: "short",
+                                      year: "numeric",
+                                    })}
+                                  </span>
+                                )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground text-sm italic">
+                              No payouts yet
+                            </span>
+                          )}
+                        </TableCell>
+
+                        {/* Actions */}
                         <TableCell>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
