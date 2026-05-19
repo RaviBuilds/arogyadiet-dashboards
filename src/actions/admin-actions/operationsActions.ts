@@ -22,7 +22,6 @@ export async function fetchRosterData(startDate: string, endDate: string) {
     .gte("preference_date", startDate)
     .lte("preference_date", endDate)
     .order("preference_date", { ascending: true });
-
   if (error) {
     console.error("Error fetching roster data:", error);
     return [];

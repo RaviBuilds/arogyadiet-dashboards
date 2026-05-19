@@ -119,7 +119,7 @@ export default async function RidersPage() {
     <div className="space-y-6">
       <AdminPageHeader
         title="Operations & Riders"
-        description="Manage delivery personnel, daily activity, service areas, and onboarding."
+        description="Manage delivery personnel, daily activity, service areas,onboarding."
       />
       <RiderManagement data={riders} allAreas={areasRes.data || []} />
     </div>

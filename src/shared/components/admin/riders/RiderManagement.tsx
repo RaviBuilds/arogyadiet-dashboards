@@ -95,7 +95,12 @@ export default function RiderManagement({
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(false);
 
   const [activeRider, setActiveRider] = useState<RiderData | null>(null);
-  const [editForm, setEditForm] = useState({ fullName: "", mobile: "" });
+  const [editForm, setEditForm] = useState({
+    fullName: "",
+    mobile: "",
+    emergency_contact: "",
+    joiningDate: "",
+  });
   const [deleteConfirmCode, setDeleteConfirmCode] = useState("");
   const [onboardForm, setOnboardForm] = useState({
     fullName: "",
@@ -203,7 +208,12 @@ export default function RiderManagement({
 
   const openEditModal = (rider: RiderData) => {
     setActiveRider(rider);
-    setEditForm({ fullName: rider.fullName, mobile: rider.mobile });
+    setEditForm({
+      fullName: rider.fullName,
+      mobile: rider.mobile,
+      emergency_contact: rider.emergency_contact || "",
+      joiningDate: rider.joiningDate || "",
+    });
     setIsEditModalOpen(true);
   };
   const openDeleteModal = (rider: RiderData) => {
@@ -219,11 +229,17 @@ export default function RiderManagement({
         activeRider.userId,
         editForm.fullName,
         editForm.mobile,
+        editForm.emergency_contact,
+        editForm.joiningDate,
       );
+      console.log("Update Rider Response:", res);
       if (res.success) {
         toast.success("Rider details updated");
         setIsEditModalOpen(false);
-      } else toast.error(res.error);
+        revalidateRidersPage(); // Revalidate data after successful update
+      } else {
+        toast.error(res.error || "Failed to update rider details.");
+      }
     });
   };
 
@@ -266,7 +282,7 @@ export default function RiderManagement({
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <AdminSubmenu
-        tabs={["Today's Activity", "Rider List", "Service Areas", "Onboarding"]}
+        tabs={["Today's Activity", "Rider List", "Service Areas"]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
       />
@@ -648,11 +664,16 @@ export default function RiderManagement({
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Edit Rider Details</DialogTitle>
-            <DialogDescription asChild>
-              <div className="text-sm text-muted-foreground mt-1.5">
-                Update the name or mobile number for{" "}
-                {activeRider?.employee_code}.
-              </div>
+            <DialogDescription>
+              Update rider details for{" "}
+              <span className="font-bold text-foreground">
+                {activeRider?.fullName}
+              </span>
+              (#
+              {activeRider?.employee_code}).
+            </DialogDescription>
+            <DialogDescription className="text-sm text-yellow-600/90 font-medium">
+              Warning: Changing the Mobile Number might affect login.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -671,6 +692,25 @@ export default function RiderManagement({
                 value={editForm.mobile}
                 onChange={(e) =>
                   setEditForm((prev) => ({ ...prev, mobile: e.target.value }))
+                }
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Emergency Number</label>
+              <Input
+                value={editForm.emergency_contact}
+                onChange={(e) =>
+                  setEditForm((prev) => ({ ...prev, emergency_contact: e.target.value }))
+                }
+              />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Joining Date</label>
+              <Input
+                type="date"
+                value={editForm.joiningDate}
+                onChange={(e) =>
+                  setEditForm((prev) => ({ ...prev, joiningDate: e.target.value }))
                 }
               />
             </div>

@@ -38,7 +38,7 @@ export default function OperationsDashboard({
       {activeTab === "Live Routing" && <LiveRoutingBoard />}
 
       {activeTab === "Daily Meal Roster" && (
-        <DailyMealRoster data={rosterData} /> // Fixed the prop error here!
+        <DailyMealRoster initialRosterData={rosterData} /> // Fixed the prop error here!
       )}
     </div>
   );

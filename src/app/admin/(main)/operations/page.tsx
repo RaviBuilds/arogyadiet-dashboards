@@ -56,7 +56,7 @@ export default async function OperationsPage() {
   const endDate = tenDaysFromNow;
 
   const initialRosterData = await fetchRosterData(today, endDate);
-
+  console.log("PAGE DATA =>", initialRosterData);
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -71,7 +71,7 @@ export default async function OperationsPage() {
       <OperationsDashboard
         deliveries={rawDeliveries || []}
         plannedDeliveries={rawPlannedDeliveries || []}
-        initialRosterData={initialRosterData}
+        rosterData={initialRosterData}
       />
     </div>
   );
