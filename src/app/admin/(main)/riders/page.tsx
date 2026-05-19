@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import RiderManagement, {
   RiderData,
 } from "@/shared/components/admin/riders/RiderManagement";
@@ -7,7 +7,11 @@ import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader"
 export const revalidate = 0;
 
 export default async function RidersPage() {
-  const supabase = await createClient();
+  // Use Service Role for Admin Dashboard to securely bypass RLS
+  const supabaseAdmin = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  );
 
   const getISTDateString = (offsetDays = 0) => {
     const date = new Date();
@@ -21,19 +25,26 @@ export default async function RidersPage() {
   };
   const today = getISTDateString(0);
 
+  // Removed foreignTable order/limit to prevent PostgREST parsing crashes.
   const [ridersRes, areasRes] = await Promise.all([
-    supabase
+    supabaseAdmin
       .from("rider_profiles")
       .select(
-        `id, employee_code, is_online, emergency_contact, created_at, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status))`,
+        `id, employee_code, is_online, emergency_contact, created_at, joining_date, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
       ),
-    supabase
+    supabaseAdmin
       .from("rider_service_areas")
       .select("*")
       .order("created_at", { ascending: false }),
   ]);
 
-  if (ridersRes.error) console.error("Error fetching riders:", ridersRes.error);
+  if (ridersRes.error) {
+    // Stringify the error so we can actually read it if it ever happens again
+    console.error(
+      "Error fetching riders:",
+      JSON.stringify(ridersRes.error, null, 2),
+    );
+  }
 
   const riders: RiderData[] = (ridersRes.data || []).map((rider: any) => {
     const serviceAreas =
@@ -64,6 +75,23 @@ export default async function RidersPage() {
       });
     }
 
+    const totalEarned =
+      rider.rider_monthly_summaries?.reduce(
+        (sum: number, curr: any) => sum + Number(curr.total_earnings || 0),
+        0,
+      ) || 0;
+
+    // Sort payouts safely in JS to find the most recent one
+    const payouts = rider.rider_payouts || [];
+    payouts.sort(
+      (a: any, b: any) =>
+        new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime(),
+    );
+
+    const lastPayoutAmount =
+      payouts.length > 0 ? payouts[0].amount_withdrawn : null;
+    const lastPayoutDate = payouts.length > 0 ? payouts[0].payment_date : null;
+
     return {
       id: rider.id,
       userId: rider.users?.id || "",
@@ -80,6 +108,10 @@ export default async function RidersPage() {
       todayEstimatedEarning: expectedEarning,
       latestBatchStatus,
       latestBatchTime,
+      joiningDate: rider.joining_date || null,
+      totalEarned: totalEarned,
+      lastPayoutAmount: lastPayoutAmount,
+      lastPayoutDate: lastPayoutDate,
     };
   });
 
@@ -87,7 +119,7 @@ export default async function RidersPage() {
     <div className="space-y-6">
       <AdminPageHeader
         title="Operations & Riders"
-        description="Manage delivery personnel, daily activity, service areas, and onboarding."
+        description="Manage delivery personnel, daily activity, service areas,onboarding."
       />
       <RiderManagement data={riders} allAreas={areasRes.data || []} />
     </div>

@@ -111,7 +111,7 @@ export default async function RiderDashboard() {
               You are offline
             </h2>
             <p className="mt-2 text-sm font-medium text-zinc-500">
-              Toggle On Duty to sync today&apos;s assigned route.
+              Toggle On Duty to sync today's assigned route.
             </p>
           </CardContent>
         </Card>
@@ -120,7 +120,7 @@ export default async function RiderDashboard() {
       {isOnDuty && (
         <div>
           <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-3 px-1">
-            Today&apos;s Overview
+            Today's Overview
           </h3>
           <div className="grid grid-cols-2 gap-3 md:gap-4">
             <Card className="border-none shadow-sm bg-white rounded-2xl">
@@ -167,8 +167,9 @@ export default async function RiderDashboard() {
                 <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
                   Est. Payout
                 </p>
+                {/* Fixed JavaScript binary floating-point rounding artifact by calling toFixed(2) */}
                 <p className="text-lg font-black text-green-600">
-                  ₹{estimatedPayout}
+                  ₹{estimatedPayout.toFixed(2)}
                 </p>
               </div>
             </CardContent>

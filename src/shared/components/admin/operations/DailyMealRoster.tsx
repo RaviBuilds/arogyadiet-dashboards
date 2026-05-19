@@ -1,12 +1,20 @@
 "use client";
 
 import { useState, useMemo, useTransition } from "react";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/components/ui/table";
+
 import { CalendarDays } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
-// Core Design System Components
+// Core Components
 import { DataTableCard } from "../core/DataTableCard";
 import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
@@ -14,7 +22,11 @@ import { DateRangeFilter } from "../core/DateRangeFilter";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton } from "../core/ActionButtons";
 
-export default function DailyMealRoster({ data = [] }: { data?: any[] }) {
+export default function DailyMealRoster({
+  initialRosterData = [],
+}: {
+  initialRosterData?: any[];
+}) {
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -26,58 +38,101 @@ export default function DailyMealRoster({ data = [] }: { data?: any[] }) {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-  // Derived filtered data
+  console.log("VISIBLE ROSTER DATA =>", initialRosterData);
+
+  // Filter Logic
   const filteredData = useMemo(() => {
-    let result = data;
+    let result = initialRosterData;
+
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
-      result = result.filter(row => {
-        if (searchColumn === "sub_code") return (row.subscription_code || "").toLowerCase().includes(lowerTerm);
-        if (searchColumn === "customer") return (row.customer_name || "").toLowerCase().includes(lowerTerm);
-        if (searchColumn === "pincode") return (row.pincode || "").toLowerCase().includes(lowerTerm);
+
+      result = result.filter((row) => {
+        const subscriptionCode =
+          row?.subscriptions?.subscription_code?.toLowerCase() || "";
+
+        const customerName =
+          row?.customer_profiles?.users?.full_name?.toLowerCase() || "";
+
+        const pincode =
+          row?.addresses?.pincode?.toString()?.toLowerCase() || "";
+
+        if (searchColumn === "sub_code") {
+          return subscriptionCode.includes(lowerTerm);
+        }
+
+        if (searchColumn === "customer") {
+          return customerName.includes(lowerTerm);
+        }
+
+        if (searchColumn === "pincode") {
+          return pincode.includes(lowerTerm);
+        }
+
         return true;
       });
     }
+
     return result;
-  }, [data, searchTerm, searchColumn]);
+  }, [initialRosterData, searchTerm, searchColumn]);
 
   const handleLoadRange = () => {
     if (!fromDate || !toDate) {
-      toast.error("Please select both 'From' and 'To' dates.");
+      toast.error("Please select both From and To dates.");
       return;
     }
+
     setIsLoading(true);
+
     startTransition(() => {
-      // In a real scenario, this updates URL search params or calls a server action.
-      // For the UI refactor, we simulate the network request.
       setTimeout(() => {
         setIsLoading(false);
-        toast.success("Roster data refreshed for selected range.");
+        toast.success("Roster data refreshed.");
       }, 500);
     });
   };
 
   const handleExportExcel = () => {
     if (filteredData.length === 0) return;
-    const exportData = filteredData.map(row => ({
-      "Sub Code": row.subscription_code || "N/A",
-      "Customer": row.customer_name || "Unknown",
-      "Delivery Date": row.delivery_date ? new Date(row.delivery_date).toDateString() : "N/A",
-      "Meal Type": row.meal_type || "N/A",
-      "Pincode": row.pincode || "N/A",
-      "Status": row.status || "UNKNOWN"
+
+    const exportData = filteredData.map((row) => ({
+      "Sub Code": row?.subscriptions?.subscription_code || "N/A",
+
+      Customer: row?.customer_profiles?.users?.full_name || "Unknown",
+
+      "Delivery Date": row?.preference_date
+        ? new Date(row.preference_date).toDateString()
+        : "N/A",
+
+      "Meal Type": row?.meal_categories?.name || "N/A",
+
+      Pincode: row?.addresses?.pincode || "N/A",
+
+      Status: row?.is_paused ? "PAUSED" : "ACTIVE",
     }));
+
     const worksheet = XLSX.utils.json_to_sheet(exportData);
+
     const workbook = XLSX.utils.book_new();
+
     XLSX.utils.book_append_sheet(workbook, worksheet, "Daily Meal Roster");
-    XLSX.writeFile(workbook, `Meal_Roster_${new Date().toISOString().split("T")[0]}.xlsx`);
+
+    XLSX.writeFile(
+      workbook,
+      `Meal_Roster_${new Date().toISOString().split("T")[0]}.xlsx`,
+    );
   };
 
-  // Formatter for UI Date
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "N/A";
+
     const d = new Date(dateStr);
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    return d.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
   };
 
   return (
@@ -92,15 +147,23 @@ export default function DailyMealRoster({ data = [] }: { data?: any[] }) {
               searchTerm={searchTerm}
               onTermChange={setSearchTerm}
               options={[
-                { value: "sub_code", label: "Subscription Code" },
-                { value: "customer", label: "Customer Name" },
-                { value: "pincode", label: "Pincode" }
+                {
+                  value: "sub_code",
+                  label: "Subscription Code",
+                },
+                {
+                  value: "customer",
+                  label: "Customer Name",
+                },
+                {
+                  value: "pincode",
+                  label: "Pincode",
+                },
               ]}
             />
-            
-            {/* Visual separator for large screens */}
+
             <div className="hidden xl:block w-px h-8 bg-border/60 mx-2"></div>
-            
+
             <DateRangeFilter
               fromDate={fromDate}
               onFromChange={setFromDate}
@@ -112,7 +175,10 @@ export default function DailyMealRoster({ data = [] }: { data?: any[] }) {
           </div>
         }
         actions={
-          <ExportButton onClick={handleExportExcel} disabled={filteredData.length === 0} />
+          <ExportButton
+            onClick={handleExportExcel}
+            disabled={filteredData.length === 0}
+          />
         }
       >
         <Table>
@@ -126,23 +192,40 @@ export default function DailyMealRoster({ data = [] }: { data?: any[] }) {
               <TableHead>Status</TableHead>
             </TableRow>
           </TableHeader>
+
           <TableBody>
             {filteredData.length === 0 ? (
-               <TableRow>
-                 <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
-                   No meals found for the selected range and filters.
-                 </TableCell>
-               </TableRow>
+              <TableRow>
+                <TableCell
+                  colSpan={6}
+                  className="text-center py-12 text-muted-foreground"
+                >
+                  No meals found for the selected range and filters.
+                </TableCell>
+              </TableRow>
             ) : (
               filteredData.map((row, i) => (
                 <TableRow key={row.id || i} className="hover:bg-muted/30">
-                  <TableCell className="font-medium text-foreground">{row.subscription_code || "N/A"}</TableCell>
-                  <TableCell>{row.customer_name || "Unknown"}</TableCell>
-                  <TableCell>{formatDate(row.delivery_date)}</TableCell>
-                  <TableCell className="font-semibold text-xs tracking-wide text-muted-foreground">{row.meal_type || "N/A"}</TableCell>
-                  <TableCell>{row.pincode || "N/A"}</TableCell>
+                  <TableCell className="font-medium">
+                    {row?.subscriptions?.subscription_code || "N/A"}
+                  </TableCell>
+
                   <TableCell>
-                    <StatusBadge status={row.status || "ACTIVE"} />
+                    {row?.customer_profiles?.users?.full_name || "Unknown"}
+                  </TableCell>
+
+                  <TableCell>{formatDate(row?.preference_date)}</TableCell>
+
+                  <TableCell className="font-semibold text-xs tracking-wide text-muted-foreground">
+                    {row?.meal_categories?.name || "N/A"}
+                  </TableCell>
+
+                  <TableCell>{row?.addresses?.pincode || "N/A"}</TableCell>
+
+                  <TableCell>
+                    <StatusBadge
+                      status={row?.is_paused ? "PAUSED" : "ACTIVE"}
+                    />
                   </TableCell>
                 </TableRow>
               ))

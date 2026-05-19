@@ -94,7 +94,7 @@ export default async function RiderEarningsPage() {
           <div className="flex items-baseline gap-1">
             <span className="text-2xl font-bold">₹</span>
             <span className="text-5xl font-black tracking-tight">
-              {todayEarnings}
+              {todayEarnings.toFixed(2)}
             </span>
           </div>
           <p className="text-sm font-medium text-green-100 mt-2">
@@ -114,7 +114,7 @@ export default async function RiderEarningsPage() {
               This Month
             </p>
             <h3 className="text-2xl font-black text-zinc-900">
-              ₹{monthEarnings}
+              ₹{monthEarnings.toFixed(2)}
             </h3>
           </CardContent>
         </Card>
@@ -128,7 +128,7 @@ export default async function RiderEarningsPage() {
               Total All Time
             </p>
             <h3 className="text-2xl font-black text-zinc-900">
-              ₹{totalEarnings}
+              ₹{totalEarnings.toFixed(2)}
             </h3>
           </CardContent>
         </Card>
@@ -172,7 +172,7 @@ export default async function RiderEarningsPage() {
                   </div>
                   <div className="text-right">
                     <span className="font-black text-green-600">
-                      +₹{order.payout_amount}
+                      +₹{Number(order.payout_amount || 0).toFixed(2)}
                     </span>
                   </div>
                 </CardContent>

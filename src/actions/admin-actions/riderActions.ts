@@ -1,9 +1,7 @@
 "use server";
-
-import { createClient } from "@/lib/supabase/server";
-import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/logger";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function revalidateRidersPage() {
   revalidatePath("/admin/riders");
@@ -14,29 +12,50 @@ export async function updateRiderDetails(
   userId: string,
   fullName: string,
   mobile: string,
+  emergencyContact: string,
+  joiningDate: string,
 ) {
-  const supabase = await createClient();
-  const { error } = await supabase
+  const supabaseAdmin = createAdminClient();
+
+  console.log("Updating user with ID:", userId, "fullName:", fullName, "mobile:", mobile);
+  const { error: userError } = await supabaseAdmin
     .from("users")
     .update({ full_name: fullName, mobile: mobile })
     .eq("id", userId);
-  if (error) return { success: false, error: error.message };
+
+  if (userError) {
+    console.error("User update error:", userError);
+    return { success: false, error: userError.message };
+  }
+
+  console.log("Updating rider profile for user ID:", userId, "emergencyContact:", emergencyContact, "joiningDate:", joiningDate);
+  const { error: riderProfileError } = await supabaseAdmin
+    .from("rider_profiles")
+    .update({
+      emergency_contact: emergencyContact,
+      joining_date: joiningDate ,
+    })
+    .eq("user_id", userId);
+
+  if (riderProfileError) {
+    console.error("Rider profile update error:", riderProfileError);
+    return { success: false, error: riderProfileError.message };
+  }
+
   await logAdminAction("UPDATE_RIDER", "users", userId, {
     full_name: fullName,
     mobile: mobile,
+    emergency_contact: emergencyContact,
+    joining_date: joiningDate,
   });
   revalidatePath("/admin/riders");
   return { success: true };
 }
 
 export async function deleteRider(riderId: string) {
-  const supabase = await createClient();
-  const supabaseAdmin = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
-  const { data: riderData, error: fetchError } = await supabase
+  
+const supabaseAdmin = createAdminClient();
+  const { data: riderData, error: fetchError } = await supabaseAdmin
     .from("rider_profiles")
     .select("user_id")
     .eq("id", riderId)
@@ -46,16 +65,16 @@ export async function deleteRider(riderId: string) {
   const userId = riderData.user_id;
 
   try {
-    await supabase
+    await supabaseAdmin
       .from("rider_service_areas")
       .update({ rider_id: null })
       .eq("rider_id", riderId);
-    const { error: profileError } = await supabase
+    const { error: profileError } = await supabaseAdmin
       .from("rider_profiles")
       .delete()
       .eq("id", riderId);
     if (profileError) throw profileError;
-    const { error: userError } = await supabase
+    const { error: userError } = await supabaseAdmin
       .from("users")
       .delete()
       .eq("id", userId);
@@ -90,8 +109,9 @@ export async function onboardRider(formData: {
   employeeCode: string;
   password: string;
 }) {
-  const supabase = await createClient();
-  const { data: existingUser } = await supabase
+  const supabaseAdmin = createAdminClient();
+  
+  const { data: existingUser } = await supabaseAdmin
     .from("users")
     .select("id")
     .eq("email", formData.email)
@@ -102,11 +122,6 @@ export async function onboardRider(formData: {
       error: "This email ID is already linked to an account.",
     };
 
-  const supabaseAdmin = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
   const { data: authData, error: authError } =
     await supabaseAdmin.auth.admin.createUser({
       email: formData.email,
@@ -117,24 +132,22 @@ export async function onboardRider(formData: {
   if (authError) return { success: false, error: authError.message };
   const userId = authData.user.id;
 
-  const { data: roleData } = await supabase
+  const { data: roleData } = await supabaseAdmin
     .from("roles")
     .select("id")
     .eq("code", "RIDER")
     .single();
   if (roleData?.id)
-    await supabase
-      .from("users")
-      .upsert({
-        id: userId,
-        auth_user_id: userId,
-        full_name: formData.fullName,
-        email: formData.email,
-        mobile: formData.mobile,
-        role_id: roleData.id,
-        force_password_change: true,
-      });
-  const { error: profileError } = await supabase
+    await supabaseAdmin.from("users").upsert({
+      id: userId,
+      auth_user_id: userId,
+      full_name: formData.fullName,
+      email: formData.email,
+      mobile: formData.mobile,
+      role_id: roleData.id,
+      force_password_change: true,
+    });
+  const { error: profileError } = await supabaseAdmin
     .from("rider_profiles")
     .insert({
       user_id: userId,
@@ -157,10 +170,7 @@ export async function upsertServiceArea(
   pincode: string,
 ) {
   try {
-    const supabaseAdmin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
+    const supabaseAdmin = createAdminClient();
 
     if (id) {
       const { error } = await supabaseAdmin
@@ -191,10 +201,7 @@ export async function upsertServiceArea(
 
 export async function deleteServiceArea(id: string) {
   try {
-    const supabaseAdmin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
+    const supabaseAdmin = createAdminClient();
     const { error } = await supabaseAdmin
       .from("rider_service_areas")
       .delete()
@@ -217,10 +224,7 @@ export async function updateAreaAssignment(
   riderId: string | null,
 ) {
   try {
-    const supabaseAdmin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
+    const supabaseAdmin = createAdminClient();
     const { error } = await supabaseAdmin
       .from("rider_service_areas")
       .update({ rider_id: riderId })

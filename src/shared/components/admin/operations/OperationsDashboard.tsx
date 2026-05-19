@@ -1,64 +1,45 @@
 "use client";
 
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/shared/components/ui/tabs";
-import TodaysDeliveries from "./TodaysDeliveries";
-import PlannedDeliveries from "./PlannedDeliveries";
+import { useState } from "react";
+import TodaysDeliveries from "@/shared/components/admin/operations/TodaysDeliveries";
+import PlannedDeliveries from "@/shared/components/admin/operations/PlannedDeliveries";
 import DailyMealRoster from "@/shared/components/admin/operations/DailyMealRoster";
-
-interface OperationsDashboardProps {
-  deliveries: any[];
-  plannedDeliveries: any[];
-  initialRosterData: any[];
-}
+import LiveRoutingBoard from "@/shared/components/admin/operations/LiveRoutingBoard";
+import { AdminSubmenu } from "../core/AdminSubmenu";
 
 export default function OperationsDashboard({
   deliveries,
   plannedDeliveries,
-  initialRosterData,
-}: OperationsDashboardProps) {
+  rosterData,
+}: any) {
+  const [activeTab, setActiveTab] = useState("Today's Scheduled");
+
   return (
-    <Tabs defaultValue="today" className="w-full space-y-6">
-      {/* Modern Pill Navigation */}
-      <div className="mb-2">
-        <TabsList className="bg-transparent h-auto p-0 flex flex-wrap gap-2 justify-start">
-          <TabsTrigger
-            value="today"
-            className="rounded-full px-5 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground hover:bg-muted data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
-          >
-            Today's Scheduled
-          </TabsTrigger>
-          <TabsTrigger
-            value="planned"
-            className="rounded-full px-5 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground hover:bg-muted data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
-          >
-            Planned (Tomorrow)
-          </TabsTrigger>
-          <TabsTrigger
-            value="roster"
-            className="rounded-full px-5 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground hover:bg-muted data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none"
-          >
-            Daily Meal Roster
-          </TabsTrigger>
-        </TabsList>
-      </div>
+    <div className="w-full space-y-6 animate-in fade-in duration-500">
+      <AdminSubmenu
+        tabs={[
+          "Today's Scheduled",
+          "Planned (Tomorrow)",
+          "Live Routing",
+          "Daily Meal Roster",
+        ]}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      />
 
-      {/* Submenu Content */}
-      <TabsContent value="today" className="m-0 focus-visible:outline-none">
+      {activeTab === "Today's Scheduled" && (
         <TodaysDeliveries data={deliveries} />
-      </TabsContent>
+      )}
 
-      <TabsContent value="planned" className="m-0 focus-visible:outline-none">
+      {activeTab === "Planned (Tomorrow)" && (
         <PlannedDeliveries data={plannedDeliveries} />
-      </TabsContent>
+      )}
 
-      <TabsContent value="roster" className="m-0 focus-visible:outline-none">
-        <DailyMealRoster initialData={initialRosterData} />
-      </TabsContent>
-    </Tabs>
+      {activeTab === "Live Routing" && <LiveRoutingBoard />}
+
+      {activeTab === "Daily Meal Roster" && (
+        <DailyMealRoster initialRosterData={rosterData} /> // Fixed the prop error here!
+      )}
+    </div>
   );
 }
