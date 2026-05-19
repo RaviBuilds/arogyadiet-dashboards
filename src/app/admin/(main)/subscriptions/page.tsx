@@ -1,22 +1,12 @@
 
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import { SubscriptionClientTable } from "./SubscriptionClientTable";
 import { columns } from "./columns";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function SubscriptionsPage() {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
-      },
-    }
-  );
+
+  const supabase = await createClient();
+
 
   const { data: rawSubscriptions, error } = await supabase
     .from('subscriptions')
@@ -36,18 +26,24 @@ export default async function SubscriptionsPage() {
     console.error("Error fetching subscriptions:", error);
     return <p>Error loading subscriptions.</p>;
   }
+  console.log("RawSubscription =>", rawSubscriptions);
 
-  const subscriptions = rawSubscriptions.map((sub) => ({
-    id: sub.id,
-    status: sub.status,
-    starts_on: sub.starts_on,
-    ends_on: sub.ends_on,
-    pause_credits_total: sub.pause_credits_total,
-    pause_credits_used: sub.pause_credits_used,
-    customer_name: sub.customer_profiles?.users?.full_name || "N/A",
-    customer_email: sub.customer_profiles?.users?.email || "N/A",
-    plan_name: sub.subscription_plans?.name || "N/A",
-  }));
+  const subscriptions = rawSubscriptions.map((sub: any) => {
+    const profile = Array.isArray(sub.customer_profiles) ? sub.customer_profiles[0] : sub.customer_profiles;
+    const user = Array.isArray(profile?.users) ? profile?.users[0] : profile?.users;
+
+    return {
+      id: sub.id,
+      status: sub.status,
+      starts_on: sub.starts_on,
+      ends_on: sub.ends_on,
+      pause_credits_total: sub.pause_credits_total,
+      pause_credits_used: sub.pause_credits_used,
+      customer_name: user?.full_name || "N/A",
+      email: user?.email || "N/A",
+      plan_name: sub.subscription_plans?.name || "N/A",
+    };
+  });
 
   return (
     <div className="flex-1 space-y-4 p-8 pt-6">

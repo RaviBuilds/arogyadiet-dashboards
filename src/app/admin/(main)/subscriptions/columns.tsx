@@ -8,7 +8,7 @@ export type Subscription = {
   pause_credits_total: number;
   pause_credits_used: number;
   customer_name: string;
-  customer_email: string;
+  email: string;
   plan_name: string;
 };
 
@@ -22,7 +22,7 @@ export const columns: ColumnDef<Subscription>[] = [
     header: "Customer Name",
   },
   {
-    accessorKey: "customer_email",
+    accessorKey: "email",
     header: "Customer Email",
   },
   {
