@@ -159,7 +159,6 @@ export default function ShopCheckoutPage() {
 
   const handleApplyCoupon = async () => {
     const code = couponInput.trim().toUpperCase();
-    console.log("CODE =>", code);
     if (!code) {
       toast.error("Please enter a coupon code.");
       return;
@@ -168,8 +167,7 @@ export default function ShopCheckoutPage() {
     setIsApplying(true);
     try {
       const res = await validateCouponCode(code);
-      console.log("Coupon Validation Response:", res);
-      console.log("res=>", res);
+   
       if (!res.success) {
         setDiscount({ type: null, value: 0 });
         toast.error(res.error);
@@ -233,9 +231,7 @@ export default function ShopCheckoutPage() {
             orderResponse.paymentId,
             response,
           );
-          console.log("Verify Payment Response =>", verifyRes);
           if (verifyRes.success) {
-            console.log("Payment is succesfull!!! Success Message");
             toast.success(
               "Payment successful! Add-ons will be delivered with your next meal.",
             );

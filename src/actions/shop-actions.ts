@@ -497,7 +497,6 @@ export async function validateCouponCode(code: string) {
       .eq("customer_profile_id", customer_profile_id)
       .maybeSingle();
 
-    console.log("Fetched Coupon:", coupon);
 
     if (couponError || !coupon) {
       return { success: false, error: "Invalid coupon code" };

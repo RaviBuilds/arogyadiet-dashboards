@@ -30,7 +30,6 @@ export async function validateCouponAction(
       .single();
 
     // Log this to your terminal so you can see exactly what Supabase returns!
-    console.log("SERVER SIDE COUPON FETCH:", { coupon, error });
 
     if (error || !coupon)
       return { success: false, error: "Invalid coupon code." };

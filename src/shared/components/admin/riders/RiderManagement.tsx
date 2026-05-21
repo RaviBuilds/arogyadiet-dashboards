@@ -232,7 +232,7 @@ export default function RiderManagement({
         editForm.emergency_contact,
         editForm.joiningDate,
       );
-      console.log("Update Rider Response:", res);
+      
       if (res.success) {
         toast.success("Rider details updated");
         setIsEditModalOpen(false);

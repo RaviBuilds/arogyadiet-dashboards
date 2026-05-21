@@ -12,7 +12,6 @@ export async function customerSignupAction(prevState:any, formData:FormData){
     try {
         await registerCustomer({email, password, fullName, mobile})
     } catch (error:any) {
-        console.log("ERROR in signup=>", error);
         return {error: error.message}
     }
     redirect(`/signup/success`);

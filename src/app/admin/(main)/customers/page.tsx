@@ -13,30 +13,49 @@ export default async function CustomersPage() {
       id,
       is_active,
       dietary_preference,
-      users!inner (
-        full_name,
-        email,
-        mobile
-      ),
-      addresses (
-        pincode,
-        is_primary
-      )
+      gender,
+      date_of_birth,
+      allergies,
+      has_medical_history,
+      users!inner ( id, full_name, email, mobile ),
+      addresses ( pincode, is_primary ),
+      subscriptions ( status, subscription_plans ( name ) )
     `);
 
   if (error) console.error("Error fetching customers:", error);
 
-  // Map the raw data into our safe Customer interface
   const customers = (rawCustomers || []).map((customer: any) => {
     const primaryAddress = customer.addresses?.find((addr: any) => addr.is_primary);
+    
+    // Calculate Age
+    let age = null;
+    if (customer.date_of_birth) {
+      const birthDate = new Date(customer.date_of_birth);
+      const today = new Date();
+      age = today.getFullYear() - birthDate.getFullYear();
+      const m = today.getMonth() - birthDate.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
+    }
+
+    // Find Active Plan
+    const activeSub = customer.subscriptions?.find((sub: any) => sub.status === 'ACTIVE' || sub.status === 'PENDING');
+    const activePlanName = activeSub?.subscription_plans?.name || null;
+
     return {
       id: customer.id,
+      userId: customer.users?.id || "",
       fullName: customer.users?.full_name || "N/A",
       email: customer.users?.email || "N/A",
       mobile: customer.users?.mobile || "N/A",
       dietary_preference: customer.dietary_preference || "N/A",
       primary_pincode: primaryAddress?.pincode || "N/A",
-      status: customer.is_active ? "Active" : "Inactive",
+      status: activePlanName ? "Active" : "Expired",
+      gender: customer.gender || "N/A",
+      dateOfBirth: customer.date_of_birth || "",
+      age: age,
+      allergies: customer.allergies || null,
+      hasMedicalHistory: customer.has_medical_history || false,
+      activePlanName: activePlanName
     };
   });
 

@@ -15,7 +15,6 @@ export default async function ShopPage() {
   }
 
   const products: Product[] = data ?? [];
-  console.log("Shop products:", products);
 
   return (
     <main className="p-6 lg:p-8">

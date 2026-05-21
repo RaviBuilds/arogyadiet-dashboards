@@ -154,7 +154,6 @@ export async function bulkUpdatePausePreferencesAction(
 
     // 3. Update the subscription tally so the Dashboard is always perfectly synced
     if (count !== null) {
-      console.log("SERVER DEBUG: New count to be saved:", count);
 
       const { data: updatedSubscription, error: subUpdateError } =
         await supabaseAdmin
@@ -169,10 +168,6 @@ export async function bulkUpdatePausePreferencesAction(
         throw subUpdateError;
       }
 
-      console.log(
-        "SERVER DEBUG: Subscription pause count updated:",
-        updatedSubscription.pause_credits_used,
-      );
 
       revalidatePath("/dashboard");
       revalidatePath("/subscription");

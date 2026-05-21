@@ -45,6 +45,8 @@ export async function updateProfileAction(formData: any) {
     dietary_preference: formData.dietary_preference,
     allergies: formData.allergies || null,
     // Add any other required fields for customer_profiles here (like is_active: true if needed)
+    medical_history_notes: formData.medical_history_notes || null,
+    has_medical_history: formData.has_medical_history || false,
   };
 
   const { error: profileUpsertError } = await supabase

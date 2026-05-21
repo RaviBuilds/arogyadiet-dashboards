@@ -76,8 +76,7 @@ export function PauseClient({
   } | null>(null);
 
   useEffect(() => {
-    console.log("DEBUG: initialPausedDates changed:", initialPausedDates.length);
-    console.log("DEBUG: initialPausesUsed changed:", initialPausesUsed);
+  
 
     const syncTimer = window.setTimeout(() => {
       setPausedDates(initialPausedDates);
@@ -155,8 +154,7 @@ export function PauseClient({
     );
 
     if (result.success) {
-      console.log("DEBUG: Save Successful. Triggering router.refresh()...");
-      console.log("DEBUG: Current initialPausesUsed prop:", initialPausesUsed);
+      
 
       setSaveMessage({
         type: "success",

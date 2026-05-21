@@ -62,7 +62,6 @@ export function MedicalDocumentUploadModal({
 
   const handleUpload = async () => {
     if (selectedFiles.length === 0) return;
-    console.log("Attempting upload for Profile ID:", customerProfileId);
     setIsUploading(true);
     setError(null);
 
