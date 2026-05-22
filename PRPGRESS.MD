@@ -24,3 +24,13 @@ inventory
    Check mark of the product OR meals at delivery
    on rider home, show list of the meals or products
 4. Implement the notification system
+
+thats fine as of now for the customer. now we will go ahead and work on the some of the missing and additonal parts of the subscription.
+So in existing subscription this is what happening as below:
+
+1. subscription model is working on customer dashboard. where I have shown the 3 subscription plans , which are stored in database table : subscription_plans.
+2. customer can purchase the subscription and while purchasing the subscription, he can customize the things like - start date for the subscription( table subscription_plans) daily meal preference, pause dates, delivery address selection for each day (table subscription_daily_preferences), and then customer can purchase the subscription.
+3. As of now system is created to have only one subscription for one customer.
+
+I wanted to make below changes:
+I want that customer can purchase more than one subscriptions while one subscription is active. so by default the next subscription will start after the expiry of the current subscription. So once current subscription expired then it will have status as expired and expired date, there will be maximum only one subscription Active, and remaining all which are purchased while existing active subscription all go in pending in queue, like one finished the nstart another like wise. So customer can only manage the start and start date of the pending subscrription. I mean they can shift start date to any date, like after expiry of subscription immidiatly or after few days of the expiry of subscription. BUt we wont give upfront option to shift the dates for pending subscription to customer, we will provide options to admin to do that. But we should create a system in database which make this thnigs flexible.

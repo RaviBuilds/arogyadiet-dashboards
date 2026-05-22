@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { format, addDays } from "date-fns";
+import { format, addDays, isBefore } from "date-fns";
 import { ChevronLeft, CalendarCheck, AlertCircle } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -58,7 +58,10 @@ const ActiveSvg = ({ className }: { className?: string }) => (
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
-export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
+import { createClient } from "@/lib/supabase/server";
+
+
+export function PauseSelection({ data, setData, plans, onNext, onBack, latestSubscription }: any) {
   const selectedPlan = plans?.find((p: any) => p.id === data.planId);
   const baseDuration = selectedPlan?.duration_days || 30;
 
@@ -216,9 +219,10 @@ export function PauseSelection({ data, setData, plans, onNext, onBack }: any) {
                   {daysInMonth.map((date, index) => {
                     const dateStr = format(date, "yyyy-MM-dd");
                     const isPaused = data.pausedDates?.includes(dateStr);
+                    const isPastEndDate = latestSubscription?.ends_on && isBefore(date, addDays(new Date(latestSubscription.ends_on), 1));
 
-                    // UX Logic: Disable button if it is NOT paused AND the limit is reached
-                    const isDisabled = !isPaused && isLimitReached;
+                    // UX Logic: Disable button if it is NOT paused AND the limit is reached OR if it's a past date relative to the previous subscription
+                    const isDisabled = (!isPaused && isLimitReached) || isPastEndDate;
 
                     return (
                       <button

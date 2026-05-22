@@ -454,7 +454,7 @@ export default function CustomerDashboard({
                         <DropdownMenuContent align="end" className="w-[180px]">
                           <DropdownMenuItem asChild>
                             <Link
-                              href={`/admin/customers/${customer.id}`}
+                              href={`/customers/${customer.id}`}
                               className="cursor-pointer font-medium flex items-center"
                             >
                               <Eye className="mr-2 h-4 w-4 text-primary" />

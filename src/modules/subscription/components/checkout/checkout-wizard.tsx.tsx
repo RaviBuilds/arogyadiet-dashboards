@@ -13,9 +13,11 @@ import { OrderPreview } from "@/modules/subscription/components/checkout/step-5-
 export function CheckoutWizard({
   plans,
   profile,
+  latestSubscription,
 }: {
   plans: any[];
   profile: any;
+  latestSubscription: any;
 }) {
   const searchParams = useSearchParams();
   const preSelectedPlan = searchParams.get("plan");
@@ -85,6 +87,7 @@ export function CheckoutWizard({
             plans={plans}
             onNext={nextStep}
             onBack={prevStep}
+            latestSubscription={latestSubscription}
           />
         )}
 
