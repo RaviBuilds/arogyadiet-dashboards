@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Customer360Dashboard } from "@/shared/components/admin/customers/Customer360Dashboard";
 
 interface CustomerProfile {
+  userId: string;
   id: string;
   full_name: string;
   email: string;
@@ -105,6 +106,7 @@ export default async function Customer360Page({
   const userData = data.users as any;
 
   const customerData: CustomerProfile = {
+    userId: userData?.id || "",
     id: data.id,
     full_name: userData?.full_name || "N/A",
     email: userData?.email || "N/A",

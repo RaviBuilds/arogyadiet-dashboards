@@ -484,7 +484,7 @@ export function MealCustomization({
 
                         {!isPaused && (
                           <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                            <RefreshCw className="h-5 w-5 text-zinc-600 opacity-50" />
+                            <RefreshCw className="h-5 w-5 text-zinc-600 opacity-20" />
                           </div>
                         )}
                       </button>

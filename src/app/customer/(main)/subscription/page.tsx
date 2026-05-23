@@ -48,20 +48,20 @@ export default async function StorefrontPage() {
     .in("status", ["ACTIVE", "QUEUED"]);
 
   // 3. Fetch Plans
-  const { data: plansData } = await supabase
+  const { data: plans } = await supabase
     .from("subscription_plans")
     .select("*")
     .eq("is_active", true)
     .order("price");
 
-    const customOrder = [30, 90, 60];
+    // const customOrder = [30, 90, 60];
 
-    const plans = plansData?.sort((a, b) => {
-      return (
-        customOrder.indexOf(a.duration_days) -
-        customOrder.indexOf(b.duration_days)
-      );
-    });
+    // const plans = plansData?.sort((a, b) => {
+    //   return (
+    //     customOrder.indexOf(a.duration_days) -
+    //     customOrder.indexOf(b.duration_days)
+    //   );
+    // });
 
   // PROFILE GATE LOGIC
   const isProfileComplete = !!profile?.dietary_preference;
@@ -122,7 +122,7 @@ export default async function StorefrontPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
         {plans?.map((plan) => {
           // Highlight the middle plan as "Popular" automatically if there are 3 plans
-          const isPopular = plan.duration_days === 90; // Adjust based on your strategy
+          const isPopular = plan.recommended; // Adjust based on your strategy
 
           return (
             <Card

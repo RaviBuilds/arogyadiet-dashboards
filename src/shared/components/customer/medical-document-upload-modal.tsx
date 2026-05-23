@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { UploadCloud, FileText, X, AlertCircle, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface MedicalUploadModalProps {
   customerProfileId: string;

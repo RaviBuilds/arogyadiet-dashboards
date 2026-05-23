@@ -82,6 +82,12 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
             Customers
           </Link>
           <Link
+            href="/subscriptions"
+            className={`transition-colors hover:text-foreground ${isActive("/subscriptions") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+          >
+            Subscriptions
+          </Link>
+          <Link
             href="/riders"
             className={`transition-colors hover:text-foreground ${isActive("/riders") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
           >
@@ -175,6 +181,12 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
                   className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/customers") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
                 >
                   Customers
+                </Link>
+                <Link
+                  href="/subscriptions"
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/subscriptions") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                >
+                  Subscriptions
                 </Link>
                 <Link
                   href="/riders"

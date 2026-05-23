@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { BillingClient } from "@/modules/subscription/components/manage/billing-client";
+import { BillingClient } from "@/shared/components/customer/subscription/manage/billing-client";
 
 export const revalidate = 0;
 

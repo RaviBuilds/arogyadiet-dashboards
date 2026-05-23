@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import { PlanSelection } from "./step-1-plan";
 import { DeliveryDetails } from "./step-2-delivery";
 import { useSearchParams } from "next/navigation";
-import { PauseSelection } from "@/modules/subscription/components/checkout/step-3-pause";
-import { MealCustomization } from "@/modules/subscription/components/checkout/step-4-customization";
-import { OrderPreview } from "@/modules/subscription/components/checkout/step-5-preview";
+import { PauseSelection } from "./step-3-pause";
+import { MealCustomization } from "./step-4-customization";
+import { OrderPreview } from "./step-5-preview";
 // import { MealPlannerConfig } from "./step-3-planner";
 // import { OrderPreview } from "./step-4-preview";
 
@@ -77,6 +77,7 @@ export function CheckoutWizard({
             setData={setCheckoutData}
             onNext={nextStep}
             onBack={prevStep}
+            latestSubscription={latestSubscription}
           />
         )}
 

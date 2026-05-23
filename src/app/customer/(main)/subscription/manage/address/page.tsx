@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
-import { AddressSwitcherClient } from "@/modules/subscription/components/manage/address-switcher-client";
+import { AddressSwitcherClient } from "@/shared/components/customer/subscription/manage/address-switcher-client";
 
 export const revalidate = 0;
 

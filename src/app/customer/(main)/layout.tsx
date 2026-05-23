@@ -3,7 +3,7 @@ import { CustomerHeader } from "@/shared/components/layout/customer-header";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
 import { redirect } from "next/navigation";
 import { Metadata } from "next";
-import { Toaster } from "sonner";
+
 
 export const metadata: Metadata = {
   title: "ArogyaDiet Customer Dashboard",
@@ -44,8 +44,7 @@ export default async function CustomerLayout({
           {children}
         </main>
 
-        {/* This component listens for toast() calls and displays them */}
-        <Toaster richColors position="top-right" />
+       
       </div>
     </div>
   );

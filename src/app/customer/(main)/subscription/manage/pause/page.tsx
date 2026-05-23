@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
-import { PauseClient } from "@/modules/subscription/components/manage/pause-client";
+import { PauseClient } from "@/shared/components/customer/subscription/manage/pause-client";
 
 export const revalidate = 0;
 

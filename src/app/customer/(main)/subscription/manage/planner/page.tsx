@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
-import { MealPlannerClient } from "@/modules/subscription/components/manage/meal-planner-client";
+import { MealPlannerClient } from "@/shared/components/customer/subscription/manage/meal-planner-client";
 
 export const revalidate = 0;
 
