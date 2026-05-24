@@ -80,10 +80,24 @@ export interface CustomerData {
   activePlanName: string | null;
 }
 
+export interface ActiveSubscriptionData {
+  id: string;
+  customer_name: string;
+  email: string;
+  plan_name: string;
+  total_days: number;
+  starts_on: string;
+  ends_on: string;
+  pause_credits_total: number;
+  pause_credits_used: number;
+}
+
 export default function CustomerDashboard({
   customers = [],
+  activeSubscriptions = []
 }: {
   customers?: CustomerData[];
+  activeSubscriptions?: ActiveSubscriptionData[];
 }) {
 
   const [activeTab, setActiveTab] = useState("Customer Directory");
@@ -120,11 +134,11 @@ export default function CustomerDashboard({
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    setSearchColumn("fullName");
+    setSearchColumn(tab === "Customer Directory" ? "fullName" : "customer_name"); // Reset search column based on tab
     setSearchTerm("");
   };
 
-  const filteredData = useMemo(() => {
+  const filteredCustomers = useMemo(() => {
     let result = customers;
 
     if (searchTerm) {
@@ -161,12 +175,40 @@ export default function CustomerDashboard({
     return result;
   }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterMedical]);
 
-  const searchOptions = [
-    { value: "fullName", label: "Name" },
-    { value: "mobile", label: "Phone Number" },
-    { value: "email", label: "Email ID" },
-    { value: "primary_pincode", label: "Pincode" },
-  ];
+  const filteredActiveSubscriptions = useMemo(() => {
+    let result = activeSubscriptions;
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase();
+      result = result.filter((sub) => {
+        if (searchColumn === "customer_name")
+          return sub.customer_name.toLowerCase().includes(lowerTerm);
+        if (searchColumn === "email")
+          return sub.email.toLowerCase().includes(lowerTerm);
+        if (searchColumn === "plan_name")
+          return sub.plan_name.toLowerCase().includes(lowerTerm);
+        return true;
+      });
+    }
+    return result;
+  }, [activeSubscriptions, searchTerm, searchColumn]);
+
+  const searchOptions = useMemo(() => {
+    if (activeTab === "Customer Directory") {
+      return [
+        { value: "fullName", label: "Name" },
+        { value: "mobile", label: "Phone Number" },
+        { value: "email", label: "Email ID" },
+        { value: "primary_pincode", label: "Pincode" },
+      ];
+    } else if (activeTab === "Active Subscriptions") {
+      return [
+        { value: "customer_name", label: "Customer Name" },
+        { value: "email", label: "Email ID" },
+        { value: "plan_name", label: "Plan Name" },
+      ];
+    }
+    return [];
+  }, [activeTab]);
 
   const handleRefreshISR = async () => {
     setIsLoading(true);
@@ -176,24 +218,45 @@ export default function CustomerDashboard({
   };
 
   const handleExportExcel = () => {
-    if (filteredData.length === 0) return;
-    const exportData = filteredData.map((row) => ({
-      "Full Name": row.fullName,
-      Email: row.email,
-      Mobile: row.mobile,
-      Gender: row.gender,
-      "Date of Birth": row.dateOfBirth,
-      "Dietary Preference": row.dietary_preference,
-      "Primary Pincode": row.primary_pincode,
-      Status: row.status,
-    }));
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Customers");
-    XLSX.writeFile(
-      wb,
-      `Customers_${new Date().toISOString().split("T")[0]}.xlsx`,
-    );
+    if (activeTab === "Customer Directory") {
+      if (filteredCustomers.length === 0) return;
+      const exportData = filteredCustomers.map((row) => ({
+        "Full Name": row.fullName,
+        Email: row.email,
+        Mobile: row.mobile,
+        Gender: row.gender,
+        "Date of Birth": row.dateOfBirth,
+        "Dietary Preference": row.dietary_preference,
+        "Primary Pincode": row.primary_pincode,
+        Status: row.status,
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Customers");
+      XLSX.writeFile(
+        wb,
+        `Customers_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
+    } else if (activeTab === "Active Subscriptions") {
+      if (filteredActiveSubscriptions.length === 0) return;
+      const exportData = filteredActiveSubscriptions.map((row) => ({
+        "Customer Name": row.customer_name,
+        Email: row.email,
+        "Plan Name": row.plan_name,
+        "Total Days": row.total_days,
+        "Starts On": row.starts_on,
+        "Ends On": row.ends_on,
+        "Pause Credits Total": row.pause_credits_total,
+        "Pause Credits Used": row.pause_credits_used,
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Active Subscriptions");
+      XLSX.writeFile(
+        wb,
+        `ActiveSubscriptions_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
+    }
   };
 
   const openEditModal = (customer: CustomerData) => {
@@ -256,7 +319,7 @@ export default function CustomerDashboard({
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <AdminSubmenu
-        tabs={["Overview", "Customer Directory"]}
+        tabs={["Overview", "Customer Directory", "Active Subscriptions"]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
       />
@@ -265,7 +328,7 @@ export default function CustomerDashboard({
         <div className="p-10 text-center text-muted-foreground border rounded-xl border-dashed">
           Customer Overview Analytics will go here
         </div>
-      ) : (
+      ) : activeTab === "Customer Directory" ? (
         <DataTableCard
           header={<SectionHeader title="Customer Directory" icon={Users} />}
           controls={
@@ -283,7 +346,7 @@ export default function CustomerDashboard({
             <>
               <ExportButton
                 onClick={handleExportExcel}
-                disabled={filteredData.length === 0}
+                disabled={filteredCustomers.length === 0}
               />
               <RefreshButton
                 onClick={handleRefreshISR}
@@ -372,17 +435,17 @@ export default function CustomerDashboard({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredData.length === 0 ? (
+              {filteredCustomers.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={6}
                     className="text-center py-12 text-muted-foreground"
                   >
                     No customers match your criteria.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredData.map((customer) => (
+                filteredCustomers.map((customer) => (
                   <TableRow key={customer.id} className="hover:bg-muted/30">
                     {/* Column 1: Customer Info */}
                     <TableCell>
@@ -486,7 +549,78 @@ export default function CustomerDashboard({
             </TableBody>
           </Table>
         </DataTableCard>
-      )}
+      ) : activeTab === "Active Subscriptions" ? (
+        <DataTableCard
+          header={<SectionHeader title="Active Subscriptions" icon={Users} />}
+          controls={
+            <div className="flex flex-wrap items-center gap-3">
+              <DataSearchFilter
+                searchColumn={searchColumn}
+                onColumnChange={setSearchColumn}
+                searchTerm={searchTerm}
+                onTermChange={setSearchTerm}
+                options={searchOptions}
+              />
+            </div>
+          }
+          actions={
+            <>
+              <ExportButton
+                onClick={handleExportExcel}
+                disabled={filteredActiveSubscriptions.length === 0}
+              />
+              <RefreshButton
+                onClick={handleRefreshISR}
+                isLoading={isLoading || isPending}
+              />
+            </>
+          }
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/10">
+                <TableHead>Customer</TableHead>
+                <TableHead>Plan</TableHead>
+                <TableHead>Dates</TableHead>
+                <TableHead>Pause Credits</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredActiveSubscriptions.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={4}
+                    className="text-center py-12 text-muted-foreground"
+                  >
+                    No active subscriptions match your criteria.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredActiveSubscriptions.map((sub) => (
+                  <TableRow key={sub.id} className="hover:bg-muted/30">
+                    <TableCell>
+                      <div className="font-bold">{sub.customer_name}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{sub.email}</div>
+                    </TableCell>
+                    <TableCell>
+                      {sub.plan_name}
+                      <div className="text-xs text-muted-foreground mt-0.5">Total Days: {sub.total_days}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">Starts: {new Date(sub.starts_on).toLocaleDateString()}</div>
+                      <div className="text-sm">Ends: {new Date(sub.ends_on).toLocaleDateString()}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">Total: {sub.pause_credits_total}</div>
+                      <div className="text-sm">Used: {sub.pause_credits_used}</div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </DataTableCard>
+      ) : null}
 
       {/* --- EDIT CUSTOMER MODAL --- */}
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
