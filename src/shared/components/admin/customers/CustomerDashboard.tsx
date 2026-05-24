@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/components/ui/dropdown-menu";
+import { Eye, MoreHorizontal } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -39,12 +40,10 @@ import {
 } from "@/shared/components/ui/select";
 import {
   Users,
-  MoreHorizontal,
   Edit,
   Trash2,
   AlertTriangle,
   Loader2,
-  Eye,
   Filter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -583,6 +582,9 @@ export default function CustomerDashboard({
                 <TableHead>Plan</TableHead>
                 <TableHead>Dates</TableHead>
                 <TableHead>Pause Credits</TableHead>
+                <TableHead className="w-[50px]">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -613,6 +615,26 @@ export default function CustomerDashboard({
                     <TableCell>
                       <div className="text-sm">Total: {sub.pause_credits_total}</div>
                       <div className="text-sm">Used: {sub.pause_credits_used}</div>
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-[180px]">
+                          <DropdownMenuItem asChild>
+                            <Link
+                              href={`/subscriptions/${sub.id}`}
+                              className="cursor-pointer font-medium flex items-center"
+                            >
+                              <Eye className="mr-2 h-4 w-4 text-primary" />
+                              View Subscription 360
+                            </Link>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))
