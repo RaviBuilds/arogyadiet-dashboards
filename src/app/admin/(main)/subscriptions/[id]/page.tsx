@@ -69,7 +69,7 @@ export default async function Subscription360Page({ params }: { params: Promise<
         description={`Manage plan: ${subData.subscription_code || subData.id.split('-')[0].toUpperCase()}`}
         action={
           <Button variant="outline" asChild>
-            <Link href="/admin/customers"><ChevronLeft className="h-4 w-4 mr-2" /> Back to Customers</Link>
+            <Link href="/customers"><ChevronLeft className="h-4 w-4 mr-2" /> Back to Customers</Link>
           </Button>
         }
       />

@@ -45,6 +45,7 @@ import {
 } from "@/actions/admin-actions/adminLifecycleActions";
 import { AdminPauseClient } from "@/shared/components/admin/subscriptions/AdminPauseClient";
 import { AdminMealPlannerClient } from "@/shared/components/admin/subscriptions/AdminMealPlannerClient";
+import { AdminDeliveryRoutingClient } from "@/shared/components/admin/subscriptions/AdminDeliveryRoutingClient";
 
 export function Subscription360Dashboard({
   subscription,
@@ -52,12 +53,14 @@ export function Subscription360Dashboard({
   allCustomerSubs,
   mealCategories,
   deliveryOrders,
+  
 }: {
   subscription: any;
   dailyPrefs: any[];
   allCustomerSubs: any[];
   mealCategories: any[];
   deliveryOrders: any[];
+ 
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Subscription Details");
@@ -545,13 +548,20 @@ export function Subscription360Dashboard({
           </div>
         )}
 
-        {/* Placeholder Tabs */}
+        {/* Delivery Routing Tab */}
         {activeTab === "Delivery Routing" && (
-          <Card>
-            <CardContent className="p-12 text-center text-muted-foreground border-dashed">
-              Delivery Routing coming in Phase 4C
-            </CardContent>
-          </Card>
+          <AdminDeliveryRoutingClient
+            subscriptionId={subscription.id}
+            scheduleDays={scheduleDays}
+            initialAddressMap={dailyPrefs?.reduce((acc: any, p: any) => {
+              if (p.delivery_address_id) {
+                acc[p.preference_date] = p.delivery_address_id;
+              }
+              return acc;
+            }, {}) || {}}
+            availableAddresses={addresses || []}
+            pausedDates={initialPausedDates}
+          />
         )}
       </div>
 

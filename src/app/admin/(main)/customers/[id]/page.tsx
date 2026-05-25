@@ -18,12 +18,13 @@ interface CustomerProfile {
   has_medical_history: boolean;
   addresses: {
     id: string;
-    address_line_1: string;
-    address_line_2: string;
+    tag: string;
+    street_1: string;
+    street_2: string;
     city: string;
     state: string;
     pincode: string;
-    is_default: boolean;
+    is_primary: boolean;
   }[];
   medical_documents: {
     id: string;
@@ -37,18 +38,20 @@ interface CustomerProfile {
     status: string;
     starts_on: string;
     ends_on: string;
-    subscription_plans: {
-      name: string;
-    };
+    effective_end_on: string;
+    subscription_plans: { name: string; };
+    total_days: number;
+    pause_credits_used: number;
+    pause_credits_total: number;
   }[];
 }
 
 export default async function Customer360Page({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }) {
-  const { id } = await params;
+  const { id } = params;
 
   // 1. USE ADMIN CLIENT TO SECURELY BYPASS RLS
   const supabaseAdmin = createAdminClient(
@@ -69,84 +72,87 @@ export default async function Customer360Page({
       medical_history_notes,
       has_medical_history,
       users!inner ( id, full_name, email, mobile ),
-      addresses ( id, tag, street_1, street_2, city, pincode, is_primary ),
-      medical_documents ( id, file_name, storage_path, uploaded_at, file_size_bytes ),
-      subscriptions ( id, status, starts_on, ends_on, subscription_plans ( name ) )
-      `,
-    )
-    .eq("id", id)
-    .single();
+        addresses ( id, tag, street_1, street_2, city, state, pincode, is_primary ),
+        medical_documents ( id, file_name, storage_path, uploaded_at, file_size_bytes ),
+        subscriptions ( id, status, starts_on, ends_on, effective_end_on, total_days, pause_credits_used, pause_credits_total, subscription_plans ( name ) )
+        `,
+      )
+      .eq("id", id)
+      .single();
 
-  if (error || !data) {
-    console.error("Error fetching customer profile:", error);
-    notFound();
-  }
+    if (error || !data) {
+      console.error("Error fetching customer profile:", error);
+      notFound();
+    }
 
-  // 2. GENERATE SECURE SIGNED URLS FOR MEDICAL DOCUMENTS
-  let documentsWithUrls: any[] = [];
-  if (data.medical_documents && data.medical_documents.length > 0) {
-    documentsWithUrls = await Promise.all(
-      data.medical_documents.map(async (doc: any) => {
-        const { data: urlData } = await supabaseAdmin.storage
-          .from("medical_records")
-          .createSignedUrl(doc.storage_path, 3600); // 1 hour expiry
+    // 2. GENERATE SECURE SIGNED URLS FOR MEDICAL DOCUMENTS
+    let documentsWithUrls: any[] = [];
+    if (data.medical_documents && data.medical_documents.length > 0) {
+      documentsWithUrls = await Promise.all(
+        data.medical_documents.map(async (doc: any) => {
+          const { data: urlData } = await supabaseAdmin.storage
+            .from("medical_records")
+            .createSignedUrl(doc.storage_path, 3600); // 1 hour expiry
 
-        return {
-          id: doc.id,
-          file_name: doc.file_name,
-          storage_path: doc.storage_path,
-          uploaded_at: doc.uploaded_at,
-          signedUrl: urlData?.signedUrl || null,
-        };
-      }),
-    );
-  }
+          return {
+            id: doc.id,
+            file_name: doc.file_name,
+            storage_path: doc.storage_path,
+            uploaded_at: doc.uploaded_at,
+            signedUrl: urlData?.signedUrl || null,
+          };
+        }),
+      );
+    }
 
-  // 3. FIX USERS MAPPING (It's an object, not an array)
-  const userData = data.users as any;
+    // 3. FIX USERS MAPPING (It\\'s an object, not an array)
+    const userData = data.users as any;
 
-  const customerData: CustomerProfile = {
-    userId: userData?.id || "",
-    id: data.id,
-    full_name: userData?.full_name || "N/A",
-    email: userData?.email || "N/A",
-    mobile: userData?.mobile || "N/A",
-    gender: data.gender || "N/A",
-    date_of_birth: data.date_of_birth || "N/A",
-    dietary_preference: data.dietary_preference || "N/A",
-    allergies: data.allergies || "None",
-    medical_history_notes: data.medical_history_notes || "N/A",
-    has_medical_history: data.has_medical_history || false,
-    addresses:
-      data.addresses?.map((addr: any) => ({
+    const customerData: CustomerProfile = {
+      userId: userData?.id || "",
+      id: data.id,
+      full_name: userData?.full_name || "N/A",
+      email: userData?.email || "N/A",
+      mobile: userData?.mobile || "N/A",
+      gender: data.gender || "N/A",
+      date_of_birth: data.date_of_birth || "N/A",
+      dietary_preference: data.dietary_preference || "N/A",
+      allergies: data.allergies || "None",
+      medical_history_notes: data.medical_history_notes || "N/A",
+      has_medical_history: data.has_medical_history || false,
+      addresses: data.addresses?.map((addr: any) => ({
         id: addr.id,
-        address_line_1: addr.street_1,
-        address_line_2: addr.street_2,
+        tag: addr.tag,
+        street_1: addr.street_1,
+        street_2: addr.street_2,
         city: addr.city,
-        state: "N/A",
+        state: addr.state || "N/A", // Ensure state is included
         pincode: addr.pincode,
-        is_default: addr.is_primary,
+        is_primary: addr.is_primary,
       })) || [],
-    medical_documents: documentsWithUrls,
-    subscriptions:
-      data.subscriptions?.map((sub: any) => ({
+      medical_documents: documentsWithUrls,
+      subscriptions: data.subscriptions?.map((sub: any) => ({
         id: sub.id,
         status: sub.status,
         starts_on: sub.starts_on,
         ends_on: sub.ends_on,
+        effective_end_on: sub.effective_end_on,
+        total_days: sub.total_days,
+        pause_credits_used: sub.pause_credits_used,
+        pause_credits_total: sub.pause_credits_total,
         subscription_plans: {
           name: sub.subscription_plans?.name || "N/A",
         },
       })) || [],
-  };
+    };
 
   return (
     <div className="flex flex-col gap-8">
       <AdminPageHeader
-        title={`${customerData.full_name}'s Profile`}
+        title={`${customerData.full_name}\'s Profile`}
         description="Manage the Customer"
         action={
-          <Link href="/customers" className="btn btn-secondary">
+          <Link href="/admin/customers" className="btn btn-secondary">
             Back to Directory
           </Link>
         }

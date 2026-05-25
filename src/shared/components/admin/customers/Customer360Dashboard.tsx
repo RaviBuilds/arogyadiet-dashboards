@@ -39,9 +39,10 @@ import {
 } from "@/shared/components/ui/dialog";
 import { ConfirmDeleteModal } from "../core/ConfirmDeleteModal";
 import { AdminMedicalUploadModal } from "./AdminMedicalUploadModal";
+import { AdminDeliveryRoutingClient } from "@/shared/components/admin/subscriptions/AdminDeliveryRoutingClient";
 
 import { Edit, Loader2, Trash2, Eye, FileText } from "lucide-react";
-import { format, isValid } from "date-fns";
+import { format, isValid, addDays, startOfDay, parseISO, isBefore } from "date-fns";
 
 interface CustomerProfile {
   userId: string;
@@ -61,6 +62,26 @@ interface CustomerProfile {
     storage_path: string;
     uploaded_at: string;
     signedUrl?: string;
+  }[];
+  subscriptions: {
+    id: string;
+    status: string;
+    starts_on: string;
+    ends_on: string;
+    effective_end_on: string;
+    subscription_plans: { name: string; };
+    total_days: number;
+    pause_credits_used: number;
+    pause_credits_total: number;
+  }[];
+  addresses: {
+    id: string;
+    tag: string;
+    street_1: string;
+    street_2?: string;
+    city: string;
+    pincode: string;
+    is_primary: boolean;
   }[];
 }
 
@@ -156,6 +177,7 @@ export function Customer360Dashboard({
           "Profile & Medical",
           "Subscriptions & Pauses",
           "Addresses",
+          "Delivery Routing",
           "Billing",
         ]}
         activeTab={activeTab}
@@ -322,23 +344,42 @@ export function Customer360Dashboard({
           </div>
         )}
 
-        {/* ... OTHER TABS ... */}
+        {/* Subscriptions Tab */}
         {activeTab === "Subscriptions & Pauses" && (
-          <div className="p-8 text-center text-muted-foreground border border-dashed rounded-xl">
-            Subscriptions Module coming soon...
-          </div>
+          <Card>
+            <CardContent className="p-12 text-center text-muted-foreground border-dashed">
+              Subscriptions Module coming soon...
+            </CardContent>
+          </Card>
         )}
 
+        {/* Addresses Tab */}
         {activeTab === "Addresses" && (
-          <div className="p-8 text-center text-muted-foreground border border-dashed rounded-xl">
-            Addresses Module coming soon...
-          </div>
+          <Card>
+            <CardContent className="p-12 text-center text-muted-foreground border-dashed">
+              Addresses Module coming soon...
+            </CardContent>
+          </Card>
         )}
 
+        {/* Delivery Routing Tab */}
+        {activeTab === "Delivery Routing" && (
+          <AdminDeliveryRoutingClient
+            subscriptionId={customer.subscriptions[0]?.id} // Assuming the first active subscription for routing
+            scheduleDays={[]} // You'll need to fetch these from relevant subscription if displaying customer's current subscription delivery days
+            initialAddressMap={{}} // Populate this from subscription_daily_preferences
+            availableAddresses={customer.addresses || []}
+            pausedDates={[]} // Populate this from subscription_daily_preferences
+          />
+        )}
+
+        {/* Billing Tab */}
         {activeTab === "Billing" && (
-          <div className="p-8 text-center text-muted-foreground border border-dashed rounded-xl">
-            Billing Module coming soon...
-          </div>
+          <Card>
+            <CardContent className="p-12 text-center text-muted-foreground border-dashed">
+              Billing Module coming soon...
+            </CardContent>
+          </Card>
         )}
       </div>
 

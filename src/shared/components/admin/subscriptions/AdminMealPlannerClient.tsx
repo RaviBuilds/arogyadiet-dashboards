@@ -4,7 +4,6 @@ import { useState, useMemo } from "react";
 import { format, addDays, startOfDay, parseISO, isBefore } from "date-fns";
 import { Save, Loader2, AlertCircle, Utensils, Ban, CheckCircle2, XCircle, ShoppingBag } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
-import { Alert, AlertDescription } from "@/shared/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -26,10 +25,6 @@ export function AdminMealPlannerClient({
 }: any) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
 
   // Helper to find the default category based on customer preference
   const defaultCategory = useMemo(() => {
@@ -64,13 +59,11 @@ export function AdminMealPlannerClient({
   }, []);
 
   const handleMealChange = (date: string, categoryId: string) => {
-    setSaveMessage(null);
     setMealSelections((prev) => ({ ...prev, [date]: categoryId }));
   };
 
   const handleSave = async () => {
     setIsSaving(true);
-    setSaveMessage(null);
 
     const updates: any[] = [];
     dailyPrefs.forEach((pref: any) => {
@@ -97,17 +90,9 @@ export function AdminMealPlannerClient({
 
     if (result.success) {
       toast.success("Meal preferences successfully updated!");
-      setSaveMessage({
-        type: "success",
-        text: "Meal preferences successfully updated!",
-      });
       router.refresh();
     } else {
       toast.error(result.error || "Failed to update meals. Please try again.");
-      setSaveMessage({
-        type: "error",
-        text: result.error || "Failed to update meals. Please try again.",
-      });
     }
     setIsSaving(false);
   };
@@ -146,20 +131,6 @@ export function AdminMealPlannerClient({
           )}
         </Button>
       </div>
-
-      {saveMessage && (
-        <Alert
-          className={
-            saveMessage.type === "success"
-              ? "bg-green-50 border-green-200 text-green-900"
-              : "bg-red-50 border-red-200 text-red-900"
-          }
-        >
-          <AlertDescription className="font-medium">
-            {saveMessage.text}
-          </AlertDescription>
-        </Alert>
-      )}
 
       <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
         <div className="grid grid-cols-1 divide-y">
