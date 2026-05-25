@@ -27,8 +27,10 @@ export default async function CustomersPage() {
   if (error) console.error("Error fetching customers:", error);
 
   const customers = (rawCustomers || []).map((customer: any) => {
-    const primaryAddress = customer.addresses?.find((addr: any) => addr.is_primary);
-    
+    const primaryAddress = customer.addresses?.find(
+      (addr: any) => addr.is_primary,
+    );
+
     // Calculate Age
     let age = null;
     if (customer.date_of_birth) {
@@ -40,7 +42,9 @@ export default async function CustomersPage() {
     }
 
     // Find Active Plan
-    const activeSub = customer.subscriptions?.find((sub: any) => sub.status === 'ACTIVE' || sub.status === 'PENDING');
+    const activeSub = customer.subscriptions?.find(
+      (sub: any) => sub.status === "ACTIVE" || sub.status === "PENDING",
+    );
     const activePlanName = activeSub?.subscription_plans?.name || null;
 
     return {
@@ -57,23 +61,29 @@ export default async function CustomersPage() {
       age: age,
       allergies: customer.allergies || null,
       hasMedicalHistory: customer.has_medical_history || false,
-      activePlanName: activePlanName
+      activePlanName: activePlanName,
     };
   });
 
   const { data: rawActiveSubs } = await supabaseAdmin
     .from("subscriptions")
-    .select(`
+    .select(
+      `
       id, starts_on, effective_end_on, ends_on, total_days, pause_credits_total, pause_credits_used,
       customer_profiles ( users ( full_name, email ) ),
       subscription_plans ( name )
-    `)
+    `,
+    )
     .eq("status", "ACTIVE")
     .order("starts_on", { ascending: false });
 
   const activeSubs = (rawActiveSubs || []).map((sub: any) => {
-    const profile = Array.isArray(sub.customer_profiles) ? sub.customer_profiles[0] : sub.customer_profiles;
-    const user = Array.isArray(profile?.users) ? profile?.users[0] : profile?.users;
+    const profile = Array.isArray(sub.customer_profiles)
+      ? sub.customer_profiles[0]
+      : sub.customer_profiles;
+    const user = Array.isArray(profile?.users)
+      ? profile?.users[0]
+      : profile?.users;
     return {
       id: sub.id,
       customer_name: user?.full_name || "N/A",
@@ -83,19 +93,22 @@ export default async function CustomersPage() {
       starts_on: sub.starts_on,
       ends_on: sub.effective_end_on || sub.ends_on,
       pause_credits_total: sub.pause_credits_total || 0,
-      pause_credits_used: sub.pause_credits_used || 0
+      pause_credits_used: sub.pause_credits_used || 0,
     };
   });
 
   return (
     <div className="space-y-6 flex flex-col">
-      <AdminPageHeader 
-        title="Customers" 
+      <AdminPageHeader
+        title="Customers"
         description="Manage your subscriber base and account statuses."
         action={<Button>Create Customer</Button>}
       />
 
-      <CustomerDashboard customers={customers} activeSubscriptions={activeSubs} />
+      <CustomerDashboard
+        customers={customers}
+        activeSubscriptions={activeSubs}
+      />
     </div>
   );
 }
