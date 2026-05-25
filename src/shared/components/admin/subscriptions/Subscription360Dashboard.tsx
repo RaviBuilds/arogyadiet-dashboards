@@ -51,11 +51,13 @@ export function Subscription360Dashboard({
   dailyPrefs,
   allCustomerSubs,
   mealCategories,
+  deliveryOrders,
 }: {
   subscription: any;
   dailyPrefs: any[];
   allCustomerSubs: any[];
   mealCategories: any[];
+  deliveryOrders: any[];
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Subscription Details");
@@ -369,6 +371,8 @@ export function Subscription360Dashboard({
             subscriptionId={subscription.id}
             dailyPrefs={dailyPrefs}
             mealCategories={mealCategories}
+            customerDietaryPreference={subscription.customer_profiles?.dietary_preference}
+            deliveryOrders={deliveryOrders}
           />
         )}
 

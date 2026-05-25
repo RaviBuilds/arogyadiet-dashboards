@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { format, addDays, startOfDay, parseISO, isBefore } from "date-fns";
-import { Save, Loader2, AlertCircle, Utensils, Ban } from "lucide-react";
+import { Save, Loader2, AlertCircle, Utensils, Ban, CheckCircle2, XCircle, ShoppingBag } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Alert, AlertDescription } from "@/shared/components/ui/alert";
 import {
@@ -15,11 +15,14 @@ import {
 import { adminBulkUpdateMealPreferences } from "@/actions/admin-actions/adminMealActions";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export function AdminMealPlannerClient({
   subscriptionId,
   dailyPrefs,
   mealCategories,
+  customerDietaryPreference,
+  deliveryOrders,
 }: any) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
@@ -28,15 +31,29 @@ export function AdminMealPlannerClient({
     text: string;
   } | null>(null);
 
-  // Initialize state with current DB values
+  // Helper to find the default category based on customer preference
+  const defaultCategory = useMemo(() => {
+    const prefLower = (customerDietaryPreference || "Veg").toLowerCase();
+    return mealCategories.find((cat: any) => {
+      const code = cat.code?.toUpperCase();
+      const name = cat.name?.toLowerCase() || "";
+      if (prefLower === "veg") return code === "VEG" || name === "veg";
+      if (prefLower === "non-veg") return code === "CHICKEN" || name.includes("non-veg") || name.includes("non veg");
+      if (prefLower === "egg") return code === "EGG" || name === "egg";
+      if (prefLower === "mixed") return code === "MIXED" || name === "mixed";
+      return false;
+    }) || mealCategories[0];
+  }, [customerDietaryPreference, mealCategories]);
+
+  // Initialize state with current DB values, falling back to default customer preference if null
   const [mealSelections, setMealSelections] = useState<
     Record<string, string | null>
-  >(
-    dailyPrefs.reduce((acc: any, pref: any) => {
-      acc[pref.preference_date] = pref.meal_category_id;
+  >(() => {
+    return dailyPrefs.reduce((acc: any, pref: any) => {
+      acc[pref.preference_date] = pref.meal_category_id || defaultCategory?.id || null;
       return acc;
-    }, {}),
-  );
+    }, {});
+  });
 
   // 5 PM Cutoff Logic
   const minEditableDate = useMemo(() => {
@@ -58,7 +75,8 @@ export function AdminMealPlannerClient({
     const updates: any[] = [];
     dailyPrefs.forEach((pref: any) => {
       const selectedCategory = mealSelections[pref.preference_date];
-      if (pref.meal_category_id !== selectedCategory) {
+      const originalCategory = pref.meal_category_id || defaultCategory?.id || null;
+      if (originalCategory !== selectedCategory) {
         updates.push({
           date: pref.preference_date,
           categoryId: selectedCategory,
@@ -67,7 +85,7 @@ export function AdminMealPlannerClient({
     });
 
     if (updates.length === 0) {
-      setSaveMessage({ type: "success", text: "No changes detected." });
+      toast.info("No changes detected.");
       setIsSaving(false);
       return;
     }
@@ -78,25 +96,27 @@ export function AdminMealPlannerClient({
     );
 
     if (result.success) {
+      toast.success("Meal preferences successfully updated!");
       setSaveMessage({
         type: "success",
         text: "Meal preferences successfully updated!",
       });
       router.refresh();
     } else {
+      toast.error(result.error || "Failed to update meals. Please try again.");
       setSaveMessage({
         type: "error",
-        text: "Failed to update meals. Please try again.",
+        text: result.error || "Failed to update meals. Please try again.",
       });
     }
     setIsSaving(false);
   };
 
-  // Check if any selections differ from the original props
-  const hasChanges = dailyPrefs.some(
-    (pref: any) =>
-      mealSelections[pref.preference_date] !== pref.meal_category_id,
-  );
+  // Check if any selections differ from the original props (or fallback default)
+  const hasChanges = dailyPrefs.some((pref: any) => {
+    const originalCategory = pref.meal_category_id || defaultCategory?.id || null;
+    return mealSelections[pref.preference_date] !== originalCategory;
+  });
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
@@ -145,9 +165,100 @@ export function AdminMealPlannerClient({
         <div className="grid grid-cols-1 divide-y">
           {dailyPrefs.map((pref: any) => {
             const date = parseISO(pref.preference_date);
-            const isLocked = isBefore(startOfDay(date), minEditableDate);
+            const today = startOfDay(new Date());
+            const tomorrow = startOfDay(addDays(new Date(), 1));
+
+            const isPast = isBefore(startOfDay(date), today);
+            const isToday = format(date, "yyyy-MM-dd") === format(today, "yyyy-MM-dd");
+            const isTomorrow = format(date, "yyyy-MM-dd") === format(tomorrow, "yyyy-MM-dd");
+
+            // Look up delivery order dynamically by date from the separate deliveryOrders prop
+            const delivery = (deliveryOrders || []).find(
+              (d: any) => d.delivery_date === pref.preference_date
+            );
+            const deliveryStatus = delivery?.status;
+
+            // 5 PM Cutoff Active logic:
+            // Lock tomorrow's meal if current time is >= 5:00 PM
+            const isTimeAfter5PM = new Date().getHours() >= 17;
+            const isLocked = isPast || isToday || (isTomorrow && isTimeAfter5PM) || deliveryStatus === "DELIVERED";
             const isPaused = pref.is_paused;
             const isDisabled = isLocked || isPaused;
+
+            // Format delivery status label
+            const formatDeliveryStatus = (status: string) => {
+              if (status === "DELIVERED") return "Delivered";
+              if (status === "OUT_FOR_DELIVERY") return "Out for Delivery";
+              if (status === "REACHING_TO_LOCATION") return "Rider Arriving";
+              if (status === "ASSIGNED") return "Rider Assigned";
+              if (status === "ORDER_CREATED") return "Preparing";
+              if (status === "CANCELLED") return "Cancelled";
+              return status;
+            };
+
+            let statusLabel = "";
+            let statusClass = "text-zinc-500";
+            let statusIcon = <AlertCircle className="h-3.5 w-3.5" />;
+
+            if (isPaused) {
+              statusLabel = "Delivery Paused";
+              statusClass = "text-amber-600";
+              statusIcon = <Ban className="h-3.5 w-3.5" />;
+            } else if (deliveryStatus) {
+              statusLabel = formatDeliveryStatus(deliveryStatus);
+              if (deliveryStatus === "DELIVERED") {
+                statusClass = "text-green-600 font-bold";
+                statusIcon = <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />;
+              } else if (deliveryStatus === "OUT_FOR_DELIVERY" || deliveryStatus === "REACHING_TO_LOCATION") {
+                statusClass = "text-blue-600 font-bold";
+                statusIcon = <Loader2 className="h-3.5 w-3.5 text-blue-600 animate-spin" />;
+              } else if (deliveryStatus === "CANCELLED") {
+                statusClass = "text-red-600 font-medium";
+                statusIcon = <XCircle className="h-3.5 w-3.5 text-red-600" />;
+              } else {
+                statusClass = "text-zinc-600 font-medium";
+                statusIcon = <Utensils className="h-3.5 w-3.5 text-zinc-500" />;
+              }
+            } else if (isPast) {
+              statusLabel = "Delivered";
+              statusClass = "text-green-600 font-bold";
+              statusIcon = <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />;
+            } else if (isToday) {
+              statusLabel = "Preparing";
+              statusClass = "text-zinc-600 font-medium";
+              statusIcon = <Utensils className="h-3.5 w-3.5 text-zinc-500" />;
+            } else if (isTomorrow && isLocked) {
+              statusLabel = "Locked (Past 5 PM cut-off)";
+              statusClass = "text-zinc-500 font-medium";
+              statusIcon = <AlertCircle className="h-3.5 w-3.5 text-zinc-400" />;
+            } else {
+              statusLabel = "Active Delivery";
+              statusClass = "text-green-600 font-medium";
+              statusIcon = <Utensils className="h-3.5 w-3.5 text-green-600" />;
+            }
+
+            // Extract shop products (add-ons)
+            const addonOrdersList = delivery?.addon_orders
+              ? (Array.isArray(delivery.addon_orders) ? delivery.addon_orders : [delivery.addon_orders])
+              : [];
+
+            const getProductName = (products: any) => {
+              if (!products) return "Shop Product";
+              if (Array.isArray(products)) {
+                return products[0]?.name || "Shop Product";
+              }
+              return products.name || "Shop Product";
+            };
+
+            const shopProducts = addonOrdersList.flatMap((order: any) => {
+              const items = order.addon_order_items
+                ? (Array.isArray(order.addon_order_items) ? order.addon_order_items : [order.addon_order_items])
+                : [];
+              return items.map((item: any) => ({
+                name: getProductName(item.products),
+                quantity: item.quantity,
+              }));
+            });
 
             return (
               <div
@@ -160,7 +271,7 @@ export function AdminMealPlannerClient({
                 <div className="flex items-center gap-4">
                   <div
                     className={cn(
-                      "flex flex-col items-center justify-center h-14 w-14 rounded-xl border-2",
+                      "flex flex-col items-center justify-center h-14 w-14 rounded-xl border-2 shrink-0",
                       isPaused
                         ? "border-dashed border-zinc-300 bg-zinc-100"
                         : isLocked
@@ -184,19 +295,25 @@ export function AdminMealPlannerClient({
                     <p className="font-bold text-zinc-900">
                       {format(date, "EEEE")}
                     </p>
-                    {isPaused ? (
-                      <p className="text-sm font-medium text-amber-600 flex items-center gap-1 mt-0.5">
-                        <Ban className="h-3 w-3" /> Delivery Paused
-                      </p>
-                    ) : isLocked ? (
-                      <p className="text-sm font-medium text-zinc-500 flex items-center gap-1 mt-0.5">
-                        <AlertCircle className="h-3 w-3" /> Locked (Past 5 PM
-                        cut-off)
-                      </p>
-                    ) : (
-                      <p className="text-sm text-green-600 font-medium mt-0.5">
-                        Active Delivery
-                      </p>
+                    <p className={cn("text-sm flex items-center gap-1 mt-0.5", statusClass)}>
+                      {statusIcon} {statusLabel}
+                    </p>
+                    
+                    {/* Change 3: Shop Add-ons Display */}
+                    {(deliveryStatus === "DELIVERED" || (isPast && !isPaused)) && shopProducts.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5 items-center text-xs">
+                        <span className="text-zinc-500 font-bold flex items-center gap-1">
+                          <ShoppingBag className="h-3.5 w-3.5 text-blue-500" /> Shop Add-ons Delivered:
+                        </span>
+                        {shopProducts.map((p: any, idx: number) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-100"
+                          >
+                            {p.name} (x{p.quantity})
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>

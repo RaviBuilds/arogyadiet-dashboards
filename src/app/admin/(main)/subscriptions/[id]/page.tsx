@@ -12,7 +12,6 @@ export default async function Subscription360Page({ params }: { params: Promise<
   const { id } = await params;
   const supabaseAdmin = createAdminClient();
 
-  // 1. Fetch Core Subscription Data
   const { data: subData, error: subError } = await supabaseAdmin
     .from("subscriptions")
     .select(`
@@ -29,21 +28,31 @@ export default async function Subscription360Page({ params }: { params: Promise<
 
   if (subError || !subData) notFound();
 
-  // 2. Fetch all daily preferences mapped to this subscription
+  // 1. Fetch preferences ONLY
   const { data: dailyPrefs } = await supabaseAdmin
     .from("subscription_daily_preferences")
-    .select(`*, meal_categories(code, name)`)
+    .select(`*, meal_categories(id, name)`)
     .eq("subscription_id", id)
     .order("preference_date", { ascending: true });
 
-  // 3. Fetch all historical and pending subscriptions for this specific customer
+  // 2. Fetch delivery orders + shop products separately to avoid FK join errors
+  const { data: deliveryOrders } = await supabaseAdmin
+    .from("delivery_orders")
+    .select(`
+      id, delivery_date, status,
+      addon_orders(
+        id, total_amount,
+        addon_order_items(product_id, quantity, products(name))
+      )
+    `)
+    .eq("customer_profile_id", subData.customer_profile_id);
+
   const { data: allCustomerSubs } = await supabaseAdmin
     .from("subscriptions")
     .select(`*, subscription_plans(name, duration_days)`)
     .eq("customer_profile_id", subData.customer_profile_id)
     .order("created_at", { ascending: false });
 
-  // 4. Fetch all active meal categories for the planner dropdown
   const { data: mealCategories } = await supabaseAdmin
     .from("meal_categories")
     .select("id, code, name")
@@ -56,7 +65,7 @@ export default async function Subscription360Page({ params }: { params: Promise<
   return (
     <div className="flex flex-col gap-8 max-w-6xl mx-auto w-full p-4 md:p-8">
       <AdminPageHeader
-        title={`${customerUser?.full_name || "Customer"}\'s Subscription`}
+        title={`${customerUser?.full_name || "Customer"}'s Subscription`}
         description={`Manage plan: ${subData.subscription_code || subData.id.split('-')[0].toUpperCase()}`}
         action={
           <Button variant="outline" asChild>
@@ -69,6 +78,7 @@ export default async function Subscription360Page({ params }: { params: Promise<
         dailyPrefs={dailyPrefs || []} 
         allCustomerSubs={allCustomerSubs || []}
         mealCategories={mealCategories || []}
+        deliveryOrders={deliveryOrders || []}
       />
     </div>
   );
