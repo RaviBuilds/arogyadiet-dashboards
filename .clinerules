@@ -1,35 +1,44 @@
-# Arogyadiet Platform - System Architecture & AI Rules
+# Arogyadiet System Ruleset / AI Agent Prompt
 
-## 1. The Prime Directive (Do No Harm)
-You are working on a Modular Monolith. The `customer` and `rider` (deliverypartner) portals are currently stable and in production. **Under no circumstances should you modify, break, or alter the functionality of the `customer` or `rider` modules when building new `admin` features.** If modifying shared files (like `middleware.ts`, `tailwind.config.ts`, or global UI components), you MUST ensure backward compatibility.
+You are an AI assistant working on the Arogyadiet project. You must strictly adhere to the following imperative rules at all times.
 
-## 2. Portal & Role Isolation
-The application uses subdomain routing handled by `middleware.ts`. Each portal has a strict 1:1 relationship with a database role (`users.roles.code`):
-* `customer.localhost` -> `src/app/customer/` -> Role: `CUSTOMER`
-* `deliverypartner.localhost` -> `src/app/rider/` -> Role: `RIDER`
-* `admin.localhost` -> `src/app/admin/` -> Role: `ADMIN`
-* `master.localhost` -> `src/app/master/` -> Role: `MASTER`
+## 1. Project Context & Folder Structure
+- **Always** place routing logic inside `src/app/`.
+- **Always** isolate business logic and database interactions inside Next.js Server Actions within `src/actions/`. Group these by domain.
+- **Always** put reusable UI components, layouts, and forms inside `src/shared/components/`.
+- **Always** place domain-specific, non-reusable components inside `src/modules/`.
+- **Always** keep validations in `src/validations/` using Zod.
 
-**Rule:** Modules must remain isolated. An `admin` page MUST NOT import components or actions from the `rider` or `customer` folders. Shared utilities must live in `src/components`, `src/lib`, or `src/shared`.
+## 2. Next.js & React Guidelines
+- **Always** default to Server Components. Use them for data fetching, secure backend access, and static UI.
+- **Always** explicitly declare `"use client"` at the top of the file for components requiring state, browser APIs, or interactivity. Push these Client Components as far down the tree as possible (leaves).
+- **Never** create REST API endpoints (`src/app/api/`) for standard data mutations. **Always** use Next.js Server Actions.
+- **Only** use Route Handlers (`src/app/api/`) for webhooks, auth callbacks, cron jobs, or 3rd-party integrations.
 
-## 3. The "Pincode" Pivot (CRITICAL DATA STRUCTURE)
-We have abandoned the rigid geographical "Zone" model. Do not write code or database queries that reference `zones` or `zone_id`.
-* We now use **Pincode-Based Service Areas**.
-* Riders are mapped to specific pincodes via the `rider_service_areas` table (`area_name`, `pincode`, `rider_id`).
-* When assigning riders or filtering customers, use the `addresses.pincode` matched against `rider_service_areas.pincode`.
+## 3. Supabase Data & Security Rules
+- **Always** rely on PostgreSQL Row Level Security (RLS) for standard client calls.
+- **Always** use the `createAdminClient()` helper (with `SUPABASE_SERVICE_ROLE_KEY`) for background transactions, bulk operations, or admin tasks (e.g., inside `src/actions/admin-actions`) to explicitly bypass RLS.
+- **Always** enforce subdomain routing logic: `customer.` maps to `/customer`, `deliverypartner.` maps to `/rider`, `admin.` maps to `/admin`, and `master.` maps to `/master`. This is handled in `src/middleware.ts`.
+- **Always** redirect unauthenticated users to `/login` via middleware, unless the route is explicitly whitelisted (e.g., `/_next`, `/api`, `/login`, `/signup`).
+- **Always** strictly enforce Role-Based Access Control in middleware. Verify `roleCode === "ADMIN"` for admin subdomains, and `roleCode === "RIDER"` for deliverypartner subdomains. Redirect unauthorized access to `/unauthorized`.
 
-## 4. Supabase & Data Access Strategy
-* **Server-First:** Always prefer Server Components and Server Actions (`use server`).
-* **Row Level Security (RLS):** Remember that `public.users` and other operational tables are protected by RLS. When writing Admin Server Actions that require bypassing RLS to manage the whole business, use the Supabase Service Role Key (`@supabase/supabase-js` initialized with `process.env.SUPABASE_SERVICE_ROLE_KEY`), NOT the SSR anon client.
-* **Never expose sensitive data:** Do not pass entire database row objects to Client Components if they contain sensitive fields. Select only what is needed.
+## 4. Immutable Business Logic
 
-## 5. UI/UX Standards
-* **Customer Portal:** Mobile-responsive, consumer-friendly, visually polished.
-* **Rider Portal:** Mobile-first, Progressive Web App (PWA) style, high-contrast, large tap targets.
-* **Admin Portal:** Desktop-first, data-dense, horizontal top-navigation (NO sidebar). Uses Shadcn UI Data Tables extensively.
+### The 5 PM Cutoff Rule
+- **Never** violate the 5 PM (17:00) cutoff constraint.
+- **Always** enforce that changes to upcoming schedules (pauses, meal choices, address updates) can only affect **tomorrow** if submitted **before 5:00 PM today**.
+- **Always** enforce that changes submitted **at or after 5:00 PM** can only affect the **day after tomorrow** (or later).
+- **Always** implement this check using: `const daysToAdd = currentHour >= 17 ? 2 : 1; const minEditableDate = startOfDay(addDays(new Date(), daysToAdd));`
 
-## 6. Standardized Supabase Imports (CRITICAL)
-Do not write new Supabase initialization code or import legacy helpers. The project already has a fully configured and standardized set of clients in `src/lib/supabase/`. You MUST use these exact imports:
-* **Server Components & Standard Server Actions:** `import { createClient } from "@/lib/supabase/server";`
-* **Client Components:** `import { createClient } from "@/lib/supabase/client";`
-* **Admin/Bypass RLS (Server Only):** `import { createAdminClient } from "@/lib/supabase/admin";` (Use this for admin operations that require bypassing RLS, such as viewing/deleting cross-user `medical_documents` or reassigning routes).
+### The Pause Reconciliation Engine
+- **Always** dynamically shift a subscription's `effective_end_on` date when a pause is toggled. Subscriptions are based on fixed delivery days (e.g., 30 days), not a fixed calendar end date.
+- **Always** rebuild the calendar iteratively when a pause is updated:
+  1. Iterate day by day from the `starts_on` date.
+  2. Skip any date where `is_paused = true` in the `subscription_daily_preferences` table.
+  3. Continue until the count of unpaused days equals the subscription's `total_days`. The final date becomes the new `effective_end_on`.
+  4. Dynamically insert or delete missing/extra rows at the end of the `subscription_daily_preferences` calendar to match the new duration.
+
+### Delivery Routing Constraints
+- **Always** group orders for the same rider into `delivery_batches` and sequence them.
+- **Always** calculate the straight-line Haversine distance between coordinates, and **must always** multiply that straight-line distance by **`1.3`** to estimate actual road distance.
+- **Always** calculate rider payouts dynamically based on this `1.3` road distance multiplied by the global `rider_payout_per_km` rate, saving the result to the `delivery_batches` table.
