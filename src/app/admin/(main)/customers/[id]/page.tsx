@@ -3,6 +3,8 @@ import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader"
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Customer360Dashboard } from "@/shared/components/admin/customers/Customer360Dashboard";
+import { Button } from "@/shared/components/ui/button";
+import { ChevronLeft } from "lucide-react";
 
 interface CustomerProfile {
   userId: string;
@@ -146,9 +148,11 @@ export default async function Customer360Page({
         title={`${customerData.full_name}'s Profile`}
         description="Manage the Customer"
         action={
-          <Link href="/customers" className="btn btn-secondary">
-            Back to Directory
-          </Link>
+          <Button variant="outline" asChild>
+            <Link href="/customers">
+              <ChevronLeft className="h-4 w-4 mr-2" /> Back to Directory
+            </Link>
+          </Button>
         }
       />
       <Customer360Dashboard customer={customerData} />
