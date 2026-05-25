@@ -32,7 +32,7 @@ export default async function Subscription360Page({ params }: { params: Promise<
   // 2. Fetch all daily preferences mapped to this subscription
   const { data: dailyPrefs } = await supabaseAdmin
     .from("subscription_daily_preferences")
-    .select(`*, meal_categories(code)`)
+    .select(`*, meal_categories(code, name)`)
     .eq("subscription_id", id)
     .order("preference_date", { ascending: true });
 
@@ -43,6 +43,12 @@ export default async function Subscription360Page({ params }: { params: Promise<
     .eq("customer_profile_id", subData.customer_profile_id)
     .order("created_at", { ascending: false });
 
+  // 4. Fetch all active meal categories for the planner dropdown
+  const { data: mealCategories } = await supabaseAdmin
+    .from("meal_categories")
+    .select("id, code, name")
+    .order("name");
+
   const customerUser = Array.isArray(subData.customer_profiles?.users)
     ? subData.customer_profiles.users[0]
     : subData.customer_profiles?.users;
@@ -50,18 +56,19 @@ export default async function Subscription360Page({ params }: { params: Promise<
   return (
     <div className="flex flex-col gap-8 max-w-6xl mx-auto w-full p-4 md:p-8">
       <AdminPageHeader
-        title={`${customerUser?.full_name || "Customer"}'s Subscription`}
+        title={`${customerUser?.full_name || "Customer"}\'s Subscription`}
         description={`Manage plan: ${subData.subscription_code || subData.id.split('-')[0].toUpperCase()}`}
         action={
           <Button variant="outline" asChild>
-            <Link href="/customers"><ChevronLeft className="h-4 w-4 mr-2" /> Back to Customers</Link>
+            <Link href="/admin/customers"><ChevronLeft className="h-4 w-4 mr-2" /> Back to Customers</Link>
           </Button>
         }
       />
       <Subscription360Dashboard 
         subscription={subData} 
         dailyPrefs={dailyPrefs || []} 
-        allCustomerSubs={allCustomerSubs || []} 
+        allCustomerSubs={allCustomerSubs || []}
+        mealCategories={mealCategories || []}
       />
     </div>
   );

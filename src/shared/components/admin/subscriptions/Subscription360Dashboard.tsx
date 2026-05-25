@@ -20,11 +20,11 @@ import {
 import { Label } from "@/shared/components/ui/label";
 import { Input } from "@/shared/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select as UISelect,
+  SelectContent as UISelectContent,
+  SelectItem as UISelectItem,
+  SelectTrigger as UISelectTrigger,
+  SelectValue as UISelectValue,
 } from "@/shared/components/ui/select";
 import { format, addDays } from "date-fns";
 import {
@@ -44,15 +44,18 @@ import {
   updateActiveSubscriptionDates,
 } from "@/actions/admin-actions/adminLifecycleActions";
 import { AdminPauseClient } from "@/shared/components/admin/subscriptions/AdminPauseClient";
+import { AdminMealPlannerClient } from "@/shared/components/admin/subscriptions/AdminMealPlannerClient";
 
 export function Subscription360Dashboard({
   subscription,
   dailyPrefs,
   allCustomerSubs,
+  mealCategories,
 }: {
   subscription: any;
   dailyPrefs: any[];
   allCustomerSubs: any[];
+  mealCategories: any[];
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Subscription Details");
@@ -67,13 +70,11 @@ export function Subscription360Dashboard({
   const plan = subscription?.subscription_plans;
   const addresses = subscription?.customer_profiles?.addresses || [];
 
-  // Data Preparation for Calendars
   const scheduleDays = dailyPrefs.map((p: any) => p.preference_date);
   const initialPausedDates = dailyPrefs
     .filter((p: any) => p.is_paused)
     .map((p: any) => p.preference_date);
 
-  // Lifecycle Grouping
   const pendingSubs = allCustomerSubs.filter(
     (s) => s.status === "PENDING" || s.status === "QUEUED",
   );
@@ -82,10 +83,8 @@ export function Subscription360Dashboard({
     (s) => s.status === "STOPPED" || s.status === "CANCELLED",
   );
 
-  // General State
   const [isPending, startTransition] = useTransition();
 
-  // Mange Pending State
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
   const [selectedPendingSub, setSelectedPendingSub] = useState<any>(null);
   const [pendingForm, setPendingForm] = useState({
@@ -93,22 +92,18 @@ export function Subscription360Dashboard({
     status: "QUEUED",
   });
 
-  // Manage Active Edit State
   const [isEditActiveModalOpen, setIsEditActiveModalOpen] = useState(false);
   const [activeEditForm, setActiveEditForm] = useState({
     starts_on: "",
     pause_credits_total: 0,
   });
 
-  // --- LOGIC HELPER DATES ---
   const todayStr = format(new Date(), "yyyy-MM-dd");
 
-  // 1. Pending Subscriptions minimum start date
   const minPendingStartDateStr = subscription.effective_end_on
     ? format(addDays(new Date(subscription.effective_end_on), 1), "yyyy-MM-dd")
     : format(addDays(new Date(), 1), "yyyy-MM-dd");
 
-  // 2. Active Subscription Edit Logic
   const isStartDateEditable = subscription.starts_on > todayStr;
   const currentHour = new Date().getHours();
   const daysToAdd = currentHour >= 17 ? 2 : 1;
@@ -368,6 +363,15 @@ export function Subscription360Dashboard({
           />
         )}
 
+        {/* MEAL PLANNER TAB */}
+        {activeTab === "Meal Planner" && (
+          <AdminMealPlannerClient
+            subscriptionId={subscription.id}
+            dailyPrefs={dailyPrefs}
+            mealCategories={mealCategories}
+          />
+        )}
+
         {/* LIFECYCLE & HISTORY TAB */}
         {activeTab === "Lifecycle & History" && (
           <div className="space-y-8">
@@ -538,17 +542,10 @@ export function Subscription360Dashboard({
         )}
 
         {/* Placeholder Tabs */}
-        {activeTab === "Meal Planner" && (
-          <Card>
-            <CardContent className="p-12 text-center text-muted-foreground border-dashed">
-              Meal Planner coming in Phase 4
-            </CardContent>
-          </Card>
-        )}
         {activeTab === "Delivery Routing" && (
           <Card>
             <CardContent className="p-12 text-center text-muted-foreground border-dashed">
-              Delivery Routing coming in Phase 4
+              Delivery Routing coming in Phase 4C
             </CardContent>
           </Card>
         )}
@@ -586,23 +583,25 @@ export function Subscription360Dashboard({
 
             <div className="grid gap-2">
               <Label className="font-medium">Update Status</Label>
-              <Select
+              <UISelect
                 value={pendingForm.status}
                 onValueChange={(val) =>
                   setPendingForm({ ...pendingForm, status: val })
                 }
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="QUEUED">Keep Queued / Pending</SelectItem>
-                  <SelectItem value="ACTIVE">Mark as ACTIVE</SelectItem>
-                  <SelectItem value="STOPPED">
+                <UISelectTrigger>
+                  <UISelectValue />
+                </UISelectTrigger>
+                <UISelectContent>
+                  <UISelectItem value="QUEUED">
+                    Keep Queued / Pending
+                  </UISelectItem>
+                  <UISelectItem value="ACTIVE">Mark as ACTIVE</UISelectItem>
+                  <UISelectItem value="STOPPED">
                     Mark as STOPPED (Cancel)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                  </UISelectItem>
+                </UISelectContent>
+              </UISelect>
             </div>
           </div>
           <DialogFooter className="flex pt-4 border-t">
