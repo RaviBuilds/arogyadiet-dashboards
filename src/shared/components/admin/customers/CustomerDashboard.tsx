@@ -315,6 +315,7 @@ export default function CustomerDashboard({
     });
   };
 
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <AdminSubmenu
@@ -364,19 +365,62 @@ export default function CustomerDashboard({
                 <TableHead>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground"
+                      >
                         <span>Diet & Allergy</span>
-                        <Filter className={cn("ml-2 h-3.5 w-3.5", filterDiet !== "ALL" ? "text-primary fill-primary/20" : "text-muted-foreground/70")} />
+                        <Filter
+                          className={cn(
+                            "ml-2 h-3.5 w-3.5",
+                            filterDiet !== "ALL"
+                              ? "text-primary fill-primary/20"
+                              : "text-muted-foreground/70",
+                          )}
+                        />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-[180px]">
                       <DropdownMenuLabel>Filter by Diet</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => setFilterDiet("ALL")} className={filterDiet === "ALL" ? "bg-accent font-semibold" : ""}>All Diets & Allergies</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterDiet("VEG")} className={filterDiet === "VEG" ? "bg-accent font-semibold" : ""}>Vegetarian</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterDiet("NON_VEG")} className={filterDiet === "NON_VEG" ? "bg-accent font-semibold" : ""}>Non-Vegetarian</DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterDiet("ALL")}
+                        className={
+                          filterDiet === "ALL" ? "bg-accent font-semibold" : ""
+                        }
+                      >
+                        All Diets & Allergies
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterDiet("VEG")}
+                        className={
+                          filterDiet === "VEG" ? "bg-accent font-semibold" : ""
+                        }
+                      >
+                        Vegetarian
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterDiet("NON_VEG")}
+                        className={
+                          filterDiet === "NON_VEG"
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        Non-Vegetarian
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuLabel>Filter by Allergy</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => setFilterDiet("ALLERGY")} className={filterDiet === "ALLERGY" ? "bg-accent font-semibold" : ""}>Has Allergies</DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterDiet("ALLERGY")}
+                        className={
+                          filterDiet === "ALLERGY"
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        Has Allergies
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableHead>
@@ -385,22 +429,68 @@ export default function CustomerDashboard({
                 <TableHead>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground"
+                      >
                         <span>Status</span>
-                        <Filter className={cn("ml-2 h-3.5 w-3.5", filterStatus !== "ALL" ? "text-primary fill-primary/20" : "text-muted-foreground/70")} />
+                        <Filter
+                          className={cn(
+                            "ml-2 h-3.5 w-3.5",
+                            filterStatus !== "ALL"
+                              ? "text-primary fill-primary/20"
+                              : "text-muted-foreground/70",
+                          )}
+                        />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-[180px]">
                       <DropdownMenuLabel>Filter by Status</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => setFilterStatus("ALL")} className={filterStatus === "ALL" ? "bg-accent font-semibold" : ""}>All Statuses</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterStatus("ACTIVE")} className={filterStatus === "ACTIVE" ? "bg-accent font-semibold" : ""}>Active</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterStatus("EXPIRED")} className={filterStatus === "EXPIRED" ? "bg-accent font-semibold" : ""}>Expired</DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterStatus("ALL")}
+                        className={
+                          filterStatus === "ALL"
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        All Statuses
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterStatus("ACTIVE")}
+                        className={
+                          filterStatus === "ACTIVE"
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        Active
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterStatus("EXPIRED")}
+                        className={
+                          filterStatus === "EXPIRED"
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        Expired
+                      </DropdownMenuItem>
                       {uniquePlans && uniquePlans.length > 0 && (
                         <>
                           <DropdownMenuSeparator />
                           <DropdownMenuLabel>Filter by Plan</DropdownMenuLabel>
                           {uniquePlans.map((plan: any) => (
-                            <DropdownMenuItem key={plan} onClick={() => setFilterStatus(plan)} className={filterStatus === plan ? "bg-accent font-semibold" : ""}>
+                            <DropdownMenuItem
+                              key={plan}
+                              onClick={() => setFilterStatus(plan)}
+                              className={
+                                filterStatus === plan
+                                  ? "bg-accent font-semibold"
+                                  : ""
+                              }
+                            >
                               {plan}
                             </DropdownMenuItem>
                           ))}
@@ -414,16 +504,54 @@ export default function CustomerDashboard({
                 <TableHead>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground"
+                      >
                         <span>Medical History</span>
-                        <Filter className={cn("ml-2 h-3.5 w-3.5", filterMedical !== "ALL" ? "text-primary fill-primary/20" : "text-muted-foreground/70")} />
+                        <Filter
+                          className={cn(
+                            "ml-2 h-3.5 w-3.5",
+                            filterMedical !== "ALL"
+                              ? "text-primary fill-primary/20"
+                              : "text-muted-foreground/70",
+                          )}
+                        />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-[180px]">
                       <DropdownMenuLabel>Filter by History</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => setFilterMedical("ALL")} className={filterMedical === "ALL" ? "bg-accent font-semibold" : ""}>All Medical History</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterMedical("PROVIDED")} className={filterMedical === "PROVIDED" ? "bg-accent font-semibold" : ""}>Provided</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterMedical("EMPTY")} className={filterMedical === "EMPTY" ? "bg-accent font-semibold" : ""}>Empty</DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterMedical("ALL")}
+                        className={
+                          filterMedical === "ALL"
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        All Medical History
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterMedical("PROVIDED")}
+                        className={
+                          filterMedical === "PROVIDED"
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        Provided
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterMedical("EMPTY")}
+                        className={
+                          filterMedical === "EMPTY"
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        Empty
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableHead>
@@ -451,7 +579,10 @@ export default function CustomerDashboard({
                       <div className="font-bold">{customer.fullName}</div>
                       <div className="text-xs text-muted-foreground mt-0.5">
                         {customer.gender && customer.gender !== "N/A" ? (
-                          <span>( {customer.gender.charAt(0).toUpperCase()} - {customer.age ? `${customer.age} yrs` : 'N/A'} )</span>
+                          <span>
+                            ( {customer.gender.charAt(0).toUpperCase()} -{" "}
+                            {customer.age ? `${customer.age} yrs` : "N/A"} )
+                          </span>
                         ) : (
                           <span>( N/A )</span>
                         )}
@@ -461,35 +592,51 @@ export default function CustomerDashboard({
                     {/* Column 2: Contact */}
                     <TableCell>
                       <div className="font-medium">{customer.mobile}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{customer.email}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {customer.email}
+                      </div>
                     </TableCell>
 
                     {/* Column 3: Diet & Location */}
                     <TableCell>
                       <div className="flex flex-col items-start gap-2">
-                        <Badge variant="outline" className="bg-primary/5">{customer.dietary_preference}</Badge>
-                        {customer.allergies && customer.allergies.toLowerCase() !== 'none' && customer.allergies.trim() !== '' && (
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 bg-red-50 text-red-600 border-red-200 hover:bg-red-100">
-                                View Allergy
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-64 p-3 text-sm">
-                              <p className="font-semibold mb-1 text-red-600">Allergies/Instructions:</p>
-                              <p className="text-muted-foreground">{customer.allergies}</p>
-                            </PopoverContent>
-                          </Popover>
-                        )}
+                        <Badge variant="outline" className="bg-primary/5">
+                          {customer.dietary_preference}
+                        </Badge>
+                        {customer.allergies &&
+                          customer.allergies.toLowerCase() !== "none" &&
+                          customer.allergies.trim() !== "" && (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[10px] px-2 bg-red-50 text-red-600 border-red-200 hover:bg-red-100"
+                                >
+                                  View Allergy
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-64 p-3 text-sm">
+                                <p className="font-semibold mb-1 text-red-600">
+                                  Allergies/Instructions:
+                                </p>
+                                <p className="text-muted-foreground">
+                                  {customer.allergies}
+                                </p>
+                              </PopoverContent>
+                            </Popover>
+                          )}
                       </div>
                     </TableCell>
 
                     {/* Column 4: Status */}
                     <TableCell>
-<StatusBadge 
-  status={customer.status} 
-  variant={customer.status === "Active" ? "solid" : "outline"} 
-/>
+                      <StatusBadge
+                        status={customer.status}
+                        variant={
+                          customer.status === "Active" ? "solid" : "outline"
+                        }
+                      />
                       <div className="text-xs text-muted-foreground mt-1 font-medium">
                         {customer.activePlanName || "No Active Plan"}
                       </div>
@@ -498,9 +645,16 @@ export default function CustomerDashboard({
                     {/* Column 5: Medical History */}
                     <TableCell>
                       {customer.hasMedicalHistory ? (
-                        <Badge className="bg-blue-50 text-blue-700 border-blue-200 shadow-none hover:bg-blue-100">Provided</Badge>
+                        <Badge className="bg-blue-50 text-blue-700 border-blue-200 shadow-none hover:bg-blue-100">
+                          Provided
+                        </Badge>
                       ) : (
-                        <Badge variant="outline" className="text-muted-foreground bg-zinc-50 shadow-none">Empty</Badge>
+                        <Badge
+                          variant="outline"
+                          className="text-muted-foreground bg-zinc-50 shadow-none"
+                        >
+                          Empty
+                        </Badge>
                       )}
                     </TableCell>
 
@@ -602,19 +756,31 @@ export default function CustomerDashboard({
                   <TableRow key={sub.id} className="hover:bg-muted/30">
                     <TableCell>
                       <div className="font-bold">{sub.customer_name}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{sub.email}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {sub.email}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {sub.plan_name}
-                      <div className="text-xs text-muted-foreground mt-0.5">Total Days: {sub.total_days}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Total Days: {sub.total_days}
+                      </div>
                     </TableCell>
                     <TableCell>
-                      <div className="text-sm">Starts: {new Date(sub.starts_on).toLocaleDateString()}</div>
-                      <div className="text-sm">Ends: {new Date(sub.ends_on).toLocaleDateString()}</div>
+                      <div className="text-sm">
+                        Starts: {new Date(sub.starts_on).toLocaleDateString()}
+                      </div>
+                      <div className="text-sm">
+                        Ends: {new Date(sub.ends_on).toLocaleDateString()}
+                      </div>
                     </TableCell>
                     <TableCell>
-                      <div className="text-sm">Total: {sub.pause_credits_total}</div>
-                      <div className="text-sm">Used: {sub.pause_credits_used}</div>
+                      <div className="text-sm">
+                        Total: {sub.pause_credits_total}
+                      </div>
+                      <div className="text-sm">
+                        Used: {sub.pause_credits_used}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
