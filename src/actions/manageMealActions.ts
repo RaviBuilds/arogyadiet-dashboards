@@ -3,6 +3,7 @@
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { format, addDays } from "date-fns";
 
 const supabaseAdmin = createSupabaseAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -54,6 +55,7 @@ async function assertOwnsSubscription(subscriptionId: string) {
   }
 }
 
+// --- MEAL UPDATES (UNTOUCHED / PROTECTED) ---
 export async function bulkUpdateMealPreferencesAction(
   subscriptionId: string,
   updates: {
@@ -66,7 +68,6 @@ export async function bulkUpdateMealPreferencesAction(
   try {
     await assertOwnsSubscription(subscriptionId);
 
-    // We update row by row in a loop (Supabase REST API handles this efficiently)
     for (const update of updates) {
       const payload: PreferenceUpdatePayload = {};
       if (update.categoryId !== undefined)
@@ -102,6 +103,7 @@ export async function bulkUpdateMealPreferencesAction(
   }
 }
 
+// --- PAUSE UPDATES (RECONCILIATION ENGINE ADDED) ---
 export async function bulkUpdatePausePreferencesAction(
   subscriptionId: string,
   updates: { date: string; isPaused: boolean }[],
@@ -109,71 +111,111 @@ export async function bulkUpdatePausePreferencesAction(
   try {
     await assertOwnsSubscription(subscriptionId);
 
-    // 1. Update the daily preferences on the calendar
+    // 1. Update manually toggled dates
     for (const update of updates) {
-      const { data: updatedRows, error: updateError } = await supabaseAdmin
+      const { error: updateError } = await supabaseAdmin
         .from("subscription_daily_preferences")
         .update({
           is_paused: update.isPaused,
           pause_credit_used: update.isPaused,
         })
         .eq("subscription_id", subscriptionId)
-        .eq("preference_date", update.date)
-        .select("id");
+        .eq("preference_date", update.date);
 
       if (updateError) throw updateError;
-      if (!updatedRows?.length) {
-        throw new Error(`No daily preference found for ${update.date}`);
-      }
     }
 
-    const { error: normalizePausedError } = await supabaseAdmin
+    // 2. Fetch core subscription limits and start date
+    const { data: sub, error: subError } = await supabaseAdmin
+      .from("subscriptions")
+      .select("starts_on, total_days, customer_profile_id")
+      .eq("id", subscriptionId)
+      .single();
+
+    if (subError || !sub) throw new Error("Subscription not found");
+
+    // Fetch customer's primary address to apply to any new days generated
+    const { data: profile } = await supabaseAdmin
+      .from("customer_profiles")
+      .select("addresses(id, is_primary)")
+      .eq("id", sub.customer_profile_id)
+      .single();
+    const defaultAddressId = profile?.addresses?.find((a: any) => a.is_primary)?.id || profile?.addresses?.[0]?.id;
+
+    // 3. Fetch all currently existing calendar days for this sub
+    const { data: allPrefs, error: prefsErr } = await supabaseAdmin
       .from("subscription_daily_preferences")
-      .update({ pause_credit_used: true })
+      .select("id, preference_date, is_paused")
       .eq("subscription_id", subscriptionId)
-      .eq("is_paused", true);
+      .order("preference_date", { ascending: true });
 
-    if (normalizePausedError) throw normalizePausedError;
+    if (prefsErr) throw prefsErr;
 
-    const { error: normalizeActiveError } = await supabaseAdmin
-      .from("subscription_daily_preferences")
-      .update({ pause_credit_used: false })
-      .eq("subscription_id", subscriptionId)
-      .eq("is_paused", false);
+    // 4. Rebuild the calendar iteratively
+    let validDeliveryDaysCount = 0;
+    let currentDate = new Date(sub.starts_on);
+    
+    const prefsMap = new Map(allPrefs?.map((p) => [p.preference_date, p]) || []);
+    const requiredDates = new Set<string>();
+    let newEffectiveEndOn = sub.starts_on; 
 
-    if (normalizeActiveError) throw normalizeActiveError;
+    while (validDeliveryDaysCount < sub.total_days) {
+      const dateStr = format(currentDate, "yyyy-MM-dd");
+      requiredDates.add(dateStr);
+      
+      const existingPref = prefsMap.get(dateStr);
+      
+      // If it's paused, we don't count it. The loop pushes further into the future.
+      if (!existingPref?.is_paused) {
+        validDeliveryDaysCount++;
+        newEffectiveEndOn = dateStr;
+      }
+      
+      currentDate = addDays(currentDate, 1);
+    }
 
-    // 2. BULLETPROOF FIX: Recount the exact number of paused days directly from the source of truth
-    const { count, error: countError } = await supabaseAdmin
+    // 5. Insert missing days at the end of the calendar
+    const missingDates = Array.from(requiredDates).filter(date => !prefsMap.has(date));
+    if (missingDates.length > 0) {
+      const inserts = missingDates.map(date => ({
+        subscription_id: subscriptionId,
+        customer_profile_id: sub.customer_profile_id,
+        preference_date: date,
+        is_paused: false,
+        pause_credit_used: false,
+        delivery_address_id: defaultAddressId || null,
+      }));
+      await supabaseAdmin.from("subscription_daily_preferences").insert(inserts);
+    }
+
+    // 6. Delete cut-off days (if unpausing causes the calendar to shrink)
+    const extraPrefs = allPrefs?.filter(p => !requiredDates.has(p.preference_date)) || [];
+    if (extraPrefs.length > 0) {
+      const extraIds = extraPrefs.map(p => p.id);
+      await supabaseAdmin.from("subscription_daily_preferences").delete().in("id", extraIds);
+    }
+
+    // 7. Get exact pause usage count from source of truth
+    const { count: pausedCount } = await supabaseAdmin
       .from("subscription_daily_preferences")
       .select("*", { count: "exact", head: true })
       .eq("subscription_id", subscriptionId)
       .eq("is_paused", true);
 
-    if (countError) throw countError;
+    // 8. Update Subscription End Date and Usage
+    await supabaseAdmin
+      .from("subscriptions")
+      .update({ 
+        pause_credits_used: pausedCount || 0,
+        effective_end_on: newEffectiveEndOn 
+      })
+      .eq("id", subscriptionId);
 
-    // 3. Update the subscription tally so the Dashboard is always perfectly synced
-    if (count !== null) {
-
-      const { data: updatedSubscription, error: subUpdateError } =
-        await supabaseAdmin
-          .from("subscriptions")
-          .update({ pause_credits_used: count })
-          .eq("id", subscriptionId)
-          .select("id, pause_credits_used")
-          .single();
-
-      if (subUpdateError) {
-        console.error("SERVER ERROR:", subUpdateError);
-        throw subUpdateError;
-      }
-
-
-      revalidatePath("/dashboard");
-      revalidatePath("/subscription");
-      revalidatePath("/subscription/manage/pause");
-      revalidatePath("/subscription/manage/planner");
-    }
+    revalidatePath("/dashboard");
+    revalidatePath("/subscription");
+    revalidatePath("/subscription/manage/pause");
+    revalidatePath("/subscription/manage/planner");
+    revalidatePath("/", "layout"); // Ultimate Cache Buster
 
     return { success: true };
   } catch (error) {
@@ -182,15 +224,14 @@ export async function bulkUpdatePausePreferencesAction(
   }
 }
 
+// --- ADDRESS UPDATES (UNTOUCHED / PROTECTED) ---
 export async function bulkUpdateAddressPreferencesAction(
   subscriptionId: string,
   updates: { date: string; addressId: string }[],
 ) {
   try {
-    // 1. Run the same security check you use for Pauses and Meals
     await assertOwnsSubscription(subscriptionId);
 
-    // 2. Use the admin client to ensure the update goes through cleanly
     for (const update of updates) {
       const { error } = await supabaseAdmin
         .from("subscription_daily_preferences")

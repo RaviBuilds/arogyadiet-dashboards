@@ -70,7 +70,7 @@ export function ProfileForm({
     },
   });
 
-  console.log("FORM =>", form);
+
 
   useEffect(() => {
     form.reset(

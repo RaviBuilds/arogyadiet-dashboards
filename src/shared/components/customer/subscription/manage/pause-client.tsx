@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/shared/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { bulkUpdatePausePreferencesAction } from "@/actions/manageMealActions";
 import { useRouter } from "next/navigation";
+import { Console } from "console";
 // --- SVGS ---
 const SkipSvg = ({ className }: { className?: string }) => (
   <svg
@@ -75,9 +76,17 @@ export function PauseClient({
     text: string;
   } | null>(null);
 
-  useEffect(() => {
-  
+  console.log("========PROPS======");
+  console.log("subscriptionId =>", subscriptionId);
+  console.log("scheduleDays =>", scheduleDays);
+  console.log("initialPausedDates =>", initialPausedDates);
+  console.log("maxPauses =>", maxPauses);
+  console.log("initialPausesUsed =>", initialPausesUsed);
 
+  console.log("===== STATES =========");
+  console.log("PausedDateS=>", pausedDates);
+  console.log("Save Message =>", saveMessage);
+  useEffect(() => {
     const syncTimer = window.setTimeout(() => {
       setPausedDates(initialPausedDates);
     }, 0);
@@ -154,8 +163,6 @@ export function PauseClient({
     );
 
     if (result.success) {
-      
-
       setSaveMessage({
         type: "success",
         text: "Pause schedule successfully updated!",

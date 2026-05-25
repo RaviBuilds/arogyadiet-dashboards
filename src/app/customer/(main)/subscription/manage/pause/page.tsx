@@ -12,7 +12,7 @@ export default async function ManagePausePage() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-
+  console.log("user =>", user);
   const { data: profile } = await supabase
     .from("customer_profiles")
     .select("id")
@@ -28,6 +28,7 @@ export default async function ManagePausePage() {
     )
     .single();
 
+    console.log("profile =>", profile);
   if (!profile) redirect("/profile");
 
   const { data: activeSub } = await supabase
@@ -36,7 +37,7 @@ export default async function ManagePausePage() {
     .eq("customer_profile_id", profile.id)
     .eq("status", "ACTIVE")
     .single();
-
+ console.log("activeSub =>", activeSub);
   if (!activeSub) {
     return (
       <div className="p-8 text-center mt-10">
@@ -57,13 +58,14 @@ export default async function ManagePausePage() {
     .gte("preference_date", todayStr)
     .lte("preference_date", activeSub.effective_end_on)
     .order("preference_date", { ascending: true });
-
+ console.log("dailyPrefs =>", dailyPrefs);
   const { count: pausedCount } = await supabase
     .from("subscription_daily_preferences")
     .select("*", { count: "exact", head: true })
     .eq("subscription_id", activeSub.id)
     .eq("is_paused", true);
 
+    console.log("pausedCount =>", pausedCount);
   const scheduleDays: string[] = [];
   const initialPausedDates: string[] = [];
 

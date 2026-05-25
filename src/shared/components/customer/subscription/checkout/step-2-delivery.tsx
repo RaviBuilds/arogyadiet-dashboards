@@ -87,7 +87,7 @@ export function DeliveryDetails({
   }, [data.addressId, setData, supabase]);
 
   const minStartDate = useMemo(() => {
-    console.log("LATEST SUBSCRIPTION =>", latestSubscription)
+   
     if(latestSubscription)
     {
       const currentEndDate = new Date(latestSubscription.effective_end_on || latestSubscription.ends_on); 
@@ -115,7 +115,7 @@ export function DeliveryDetails({
     }
   }, [latestSubscription, minStartDate, data.startDate, setData]);
 
-  console.log("DATA STAR DATE=>", data.startDate);
+  
   return (
     <div className="space-y-10 animate-in fade-in slide-in-from-right-4">
       {/* 1. Subscription Start Date */}
