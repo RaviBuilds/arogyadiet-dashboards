@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { BillingClient } from "@/modules/subscription/components/manage/billing-client";
+import { BillingClient } from "@/shared/components/customer/subscription/manage/billing-client";
 
 export const revalidate = 0;
 
@@ -38,7 +38,9 @@ export default async function ManageBillingPage() {
 
   const { data: payments } = await supabase
     .from("payments")
-    .select("*")
+    .select(
+      "id, amount, payment_method, status, created_at, paid_at, subscription_id, base_amount, tax_percent, tax_amount, discount_amount, invoice_type, payment_reference, payment_notes",
+    )
     .eq("customer_profile_id", profile.id)
     .order("created_at", { ascending: false });
 

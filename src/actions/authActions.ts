@@ -18,9 +18,7 @@ export async function LoginAction(prevState: any, formData: FormData) {
 
   let finalRedirectPath = redirectPath;
 
-  console.log("--- LoginAction Triggered ---");
-  console.log("Email:", email);
-  console.log("Expected Portal Role:", portalRole);
+ 
 
   try {
     await login(email, password, portalRole);
@@ -38,10 +36,8 @@ export async function LoginAction(prevState: any, formData: FormData) {
       .single();
 
     if (userData?.force_password_change) {
-      console.log("User requires password change. Intercepting redirect.");
       finalRedirectPath = `/${portalRole.toLowerCase()}/update-password`;
     } else {
-      console.log("Login successful, redirecting to:", finalRedirectPath);
     }
   } catch (error: any) {
     console.error("LoginAction Caught Error:", error.message);

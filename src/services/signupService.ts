@@ -49,7 +49,7 @@ export async function registerCustomer(data: {
     .single();
 
   if (userError || !userData) {
-    console.log("USER ERRO =>", userError);
+   
     throw new Error(`Failed to create core user profile `);
   }
 

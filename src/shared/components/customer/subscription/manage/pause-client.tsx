@@ -4,10 +4,10 @@ import { useState, useMemo, useEffect } from "react";
 import { format, addDays, startOfDay, parseISO, isBefore } from "date-fns";
 import { Save, Loader2, AlertCircle, CalendarCheck } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
-import { Alert, AlertDescription } from "@/shared/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { bulkUpdatePausePreferencesAction } from "@/actions/manageMealActions";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 // --- SVGS ---
 const SkipSvg = ({ className }: { className?: string }) => (
   <svg
@@ -70,15 +70,17 @@ export function PauseClient({
   const router = useRouter();
   const [pausedDates, setPausedDates] = useState<string[]>(initialPausedDates);
   const [isSaving, setIsSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
 
+  console.log("========PROPS======");
+  console.log("subscriptionId =>", subscriptionId);
+  console.log("scheduleDays =>", scheduleDays);
+  console.log("initialPausedDates =>", initialPausedDates);
+  console.log("maxPauses =>", maxPauses);
+  console.log("initialPausesUsed =>", initialPausesUsed);
+
+  console.log("===== STATES =========");
+  console.log("PausedDateS=>", pausedDates);
   useEffect(() => {
-    console.log("DEBUG: initialPausedDates changed:", initialPausedDates.length);
-    console.log("DEBUG: initialPausesUsed changed:", initialPausesUsed);
-
     const syncTimer = window.setTimeout(() => {
       setPausedDates(initialPausedDates);
     }, 0);
@@ -117,7 +119,6 @@ export function PauseClient({
   const isLimitReached = currentPausesUsed >= maxPauses;
 
   const handleTogglePause = (dateStr: string) => {
-    setSaveMessage(null);
     setPausedDates((prev) => {
       if (prev.includes(dateStr)) {
         return prev.filter((d) => d !== dateStr); // Unpause
@@ -130,7 +131,6 @@ export function PauseClient({
 
   const handleSave = async () => {
     setIsSaving(true);
-    setSaveMessage(null);
 
     const updates: any[] = [];
     scheduleDays.forEach((dateStr: string) => {
@@ -143,7 +143,7 @@ export function PauseClient({
     });
 
     if (updates.length === 0) {
-      setSaveMessage({ type: "success", text: "No changes detected." });
+      toast.info("No changes detected.");
       setIsSaving(false);
       return;
     }
@@ -155,21 +155,12 @@ export function PauseClient({
     );
 
     if (result.success) {
-      console.log("DEBUG: Save Successful. Triggering router.refresh()...");
-      console.log("DEBUG: Current initialPausesUsed prop:", initialPausesUsed);
-
-      setSaveMessage({
-        type: "success",
-        text: "Pause schedule successfully updated!",
-      });
+      toast.success("Pause schedule successfully updated!");
 
       // 4. THE MAGIC REFRESH TRIGGER
       router.refresh();
     } else {
-      setSaveMessage({
-        type: "error",
-        text: "Failed to update pauses. Please try again.",
-      });
+      toast.error("Failed to update pauses. Please try again.");
     }
 
     setIsSaving(false);
@@ -207,20 +198,6 @@ export function PauseClient({
           )}
         </Button>
       </div>
-
-      {saveMessage && (
-        <Alert
-          className={
-            saveMessage.type === "success"
-              ? "bg-green-50 border-green-200 text-green-900"
-              : "bg-red-50 border-red-200 text-red-900"
-          }
-        >
-          <AlertDescription className="font-medium">
-            {saveMessage.text}
-          </AlertDescription>
-        </Alert>
-      )}
 
       {/* Dynamic Pause Credit Banner */}
       <div

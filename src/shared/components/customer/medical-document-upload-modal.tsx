@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { UploadCloud, FileText, X, AlertCircle, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface MedicalUploadModalProps {
   customerProfileId: string;
@@ -62,7 +61,6 @@ export function MedicalDocumentUploadModal({
 
   const handleUpload = async () => {
     if (selectedFiles.length === 0) return;
-    console.log("Attempting upload for Profile ID:", customerProfileId);
     setIsUploading(true);
     setError(null);
 

@@ -34,10 +34,8 @@ export default async function OperationsPage() {
     )
     .eq("delivery_date", today);
 
-    console.log("rawDeliveries =>", rawDeliveries);
   // 2. Fetch Tomorrow's Planned Deliveries
   const tomorrowStr = getISTDateString(0);
-  console.log("tomorrowStr=>", tomorrowStr)
   
   const { data: rawPlannedDeliveries } = await supabase
     .from("delivery_orders")
@@ -50,13 +48,11 @@ export default async function OperationsPage() {
     `)
     .eq("delivery_date", tomorrowStr)
     .eq("status", "ORDER_CREATED");
-  console.log("raw Planned Deliveries=>", rawPlannedDeliveries);
   // 3. Fetch Initial 10-Day Roster for the new Submenu
   const tenDaysFromNow = getISTDateString(10);
   const endDate = tenDaysFromNow;
 
   const initialRosterData = await fetchRosterData(today, endDate);
-  console.log("PAGE DATA =>", initialRosterData);
   return (
     <div className="flex flex-col gap-6">
       <div>

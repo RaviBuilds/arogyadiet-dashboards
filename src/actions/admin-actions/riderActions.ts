@@ -17,7 +17,6 @@ export async function updateRiderDetails(
 ) {
   const supabaseAdmin = createAdminClient();
 
-  console.log("Updating user with ID:", userId, "fullName:", fullName, "mobile:", mobile);
   const { error: userError } = await supabaseAdmin
     .from("users")
     .update({ full_name: fullName, mobile: mobile })
@@ -28,7 +27,6 @@ export async function updateRiderDetails(
     return { success: false, error: userError.message };
   }
 
-  console.log("Updating rider profile for user ID:", userId, "emergencyContact:", emergencyContact, "joiningDate:", joiningDate);
   const { error: riderProfileError } = await supabaseAdmin
     .from("rider_profiles")
     .update({

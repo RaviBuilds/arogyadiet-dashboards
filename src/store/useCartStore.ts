@@ -58,7 +58,7 @@ export const useCartStore = create<CartStore>()(
       clearCart: () => set({ items: [] }),
       cartTotal: () => {
         const { items } = get();
-        console.log("ITEMSSSSSSSSSSS =>", items);
+       
         return items.reduce((total, item) => {
           const unitPrice = item.sale_price ?? item.original_price;
           return total + unitPrice * item.quantity;

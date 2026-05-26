@@ -7,6 +7,7 @@ import {
   Clock,
   CreditCard,
   Download,
+  FileText,
   ReceiptText,
 } from "lucide-react";
 import {
@@ -24,7 +25,14 @@ type Payment = {
   payment_method: string;
   status: string;
   created_at: string;
+  paid_at?: string | null;
   invoice_type?: "ADDON" | "SUBSCRIPTION" | null;
+  base_amount?: number | null;
+  tax_percent?: number | null;
+  tax_amount?: number | null;
+  discount_amount?: number | null;
+  payment_reference?: string | null;
+  payment_notes?: string | null;
 };
 
 type ActiveSubscription = {
@@ -41,8 +49,14 @@ type BillingClientProps = {
 
 const successfulStatuses = new Set(["PAID", "SUCCESS", "CAPTURED"]);
 
+function formatPaymentMethod(method: string): string {
+  if (method === "MANUAL") return "Manual";
+  if (method === "RAZORPAY") return "Razorpay";
+  return method;
+}
+
 export function BillingClient({ payments, activeSub }: BillingClientProps) {
-  const handleDownloadInvoice = (paymentId: string) => {
+  const handleViewInvoice = (paymentId: string) => {
     window.open(`/subscription/manage/billing/invoice/${paymentId}`, "_blank");
   };
 
@@ -111,15 +125,9 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                 <thead className="text-xs text-zinc-500 uppercase bg-zinc-50 border-b">
                   <tr>
                     <th className="px-6 py-4 font-bold tracking-wider">Date</th>
-                    <th className="px-6 py-4 font-bold tracking-wider">
-                      Amount
-                    </th>
-                    <th className="px-6 py-4 font-bold tracking-wider">
-                      Method
-                    </th>
-                    <th className="px-6 py-4 font-bold tracking-wider">
-                      Status
-                    </th>
+                    <th className="px-6 py-4 font-bold tracking-wider">Amount</th>
+                    <th className="px-6 py-4 font-bold tracking-wider">Method</th>
+                    <th className="px-6 py-4 font-bold tracking-wider">Status</th>
                     <th className="px-6 py-4 font-bold tracking-wider text-right">
                       Invoice
                     </th>
@@ -128,6 +136,9 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                 <tbody className="divide-y divide-zinc-100">
                   {payments.map((payment) => {
                     const isSuccessful = successfulStatuses.has(payment.status);
+                    const isPendingManual =
+                      payment.status === "PENDING" &&
+                      payment.payment_method === "MANUAL";
 
                     const invoiceTypeLabel =
                       payment.invoice_type === "ADDON"
@@ -135,6 +146,9 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                         : payment.invoice_type === "SUBSCRIPTION"
                           ? "Meal Subscription"
                           : null;
+
+                    // Show invoice button for successful payments and pending manual payments
+                    const showInvoiceButton = isSuccessful || isPendingManual;
 
                     return (
                       <tr
@@ -150,7 +164,7 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-col gap-1">
                             <span className="bg-zinc-100 text-zinc-700 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider w-fit">
-                              {payment.payment_method}
+                              {formatPaymentMethod(payment.payment_method)}
                             </span>
                             {invoiceTypeLabel ? (
                               <span className="text-xs text-zinc-500 font-medium">
@@ -175,19 +189,33 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                             ) : (
                               <Clock className="h-3 w-3" />
                             )}
-                            {payment.status}
+                            {isSuccessful ? "Paid" : payment.status}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
-                          {isSuccessful && (
+                          {showInvoiceButton && (
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleDownloadInvoice(payment.id)}
-                              className="font-bold text-primary hover:text-primary hover:bg-primary/5"
+                              onClick={() => handleViewInvoice(payment.id)}
+                              className={cn(
+                                "font-bold",
+                                isPendingManual
+                                  ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 border-amber-200"
+                                  : "text-primary hover:text-primary hover:bg-primary/5",
+                              )}
                             >
-                              <Download className="h-4 w-4 mr-2" /> PDF
-                              <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
+                              {isPendingManual ? (
+                                <>
+                                  <FileText className="h-4 w-4 mr-2" /> View
+                                  <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="h-4 w-4 mr-2" /> PDF
+                                  <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
+                                </>
+                              )}
                             </Button>
                           )}
                         </td>

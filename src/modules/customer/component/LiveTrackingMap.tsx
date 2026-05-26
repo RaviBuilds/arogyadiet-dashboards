@@ -69,10 +69,7 @@ export function LiveTrackingMap({
 
   // Fetch and refresh driving route whenever rider location updates.
   useEffect(() => {
-    console.log("--- MAP DIAGNOSTICS ---");
-    console.log("1. Rider Location State:", riderLocation);
-    console.log("2. Customer Destination:", { lat: customerLat, lng: customerLng });
-    console.log("3. Order Status:", orderStatus);
+    
 
     if (!isLoaded) return;
     // Strict guards: DirectionsService must not run until BOTH origin and destination are present.
@@ -88,18 +85,7 @@ export function LiveTrackingMap({
 
     const fetchDirections = async () => {
       try {
-        // HEAVY DIAGNOSTICS: verify that the strict guards are not blocking on malformed state.
-        console.log("[LiveTrackingMap] Directions preflight", {
-          isLoaded,
-          orderStatus,
-          riderLocation,
-          customerLat,
-          customerLng,
-          riderLatType: typeof riderLocation?.lat,
-          riderLngType: typeof riderLocation?.lng,
-          customerLatType: typeof customerLat,
-          customerLngType: typeof customerLng,
-        });
+       
 
         // CRITICAL: Coerce all coordinates to strict numbers (stringified decimals can silently fail).
         const originCoords = {
@@ -180,7 +166,6 @@ export function LiveTrackingMap({
         if (error) throw error;
 
         if (data && data.lat && data.lng) {
-          console.log("[LiveTrackingMap] Initial Fetch Success:", data);
           setRiderLocation({ lat: Number(data.lat), lng: Number(data.lng) });
         }
       } catch (err) {
@@ -204,7 +189,6 @@ export function LiveTrackingMap({
         (payload) => {
           const newData = payload.new as any;
           if (newData && newData.lat && newData.lng) {
-            console.log("[LiveTrackingMap] Live Ping Received:", newData);
             setRiderLocation({ lat: Number(newData.lat), lng: Number(newData.lng) });
           }
         }

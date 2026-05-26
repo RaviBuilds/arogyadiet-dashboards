@@ -58,7 +58,6 @@ export default async function CustomerProfilePage() {
     }
   }
 
-  console.log("DB User =>", dbUser);
   // 4. Combine the data to pass into the form
   const initialProfileData = {
     id: customerProfile?.id || null,

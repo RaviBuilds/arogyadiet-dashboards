@@ -63,7 +63,6 @@ export function LoginForm({
       setIsGoogleLoading(false);
     }
   };
-  console.log("PORTAL ROLE from Login Form =>", portalRole);
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>

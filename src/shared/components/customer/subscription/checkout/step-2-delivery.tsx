@@ -24,7 +24,13 @@ import { cn } from "@/lib/utils";
 // 1. IMPORT YOUR MODAL (Adjust path if necessary based on your structure)
 import { AddressManagerModal } from "@/shared/components/customer/address-manager-modal";
 
-export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
+export function DeliveryDetails({
+  data,
+  setData,
+  onNext,
+  onBack,
+  latestSubscription,
+}: any) {
   const [addresses, setAddresses] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
@@ -81,6 +87,12 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
   }, [data.addressId, setData, supabase]);
 
   const minStartDate = useMemo(() => {
+   
+    if(latestSubscription)
+    {
+      const currentEndDate = new Date(latestSubscription.effective_end_on || latestSubscription.ends_on); 
+      return startOfDay(addDays(currentEndDate, 1));
+    }
     const now = new Date();
     const currentHour = now.getHours(); // Local hour (0-23)
 
@@ -96,6 +108,14 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
     fetchAddresses();
   }, [fetchAddresses]);
 
+  useEffect(() => {
+    // Auto-set the start date ONLY if they have a latest subscription and haven't picked a date yet
+    if (latestSubscription && !data.startDate) {
+      setData((prev: any) => ({ ...prev, startDate: minStartDate }));
+    }
+  }, [latestSubscription, minStartDate, data.startDate, setData]);
+
+  
   return (
     <div className="space-y-10 animate-in fade-in slide-in-from-right-4">
       {/* 1. Subscription Start Date */}
@@ -128,6 +148,7 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
               <Calendar
                 mode="single"
                 selected={data.startDate}
+                defaultMonth={data.startDate || minStartDate} 
                 onSelect={(date) => {
                   setData({ ...data, startDate: date });
                   setIsCalendarOpen(false);
@@ -140,13 +161,18 @@ export function DeliveryDetails({ data, setData, onNext, onBack }: any) {
           <p className="text-[11px] text-muted-foreground mt-2 px-1">
             * Note: Tomorrow's meal must be finalized before 5:00 PM today.
           </p>
+          {latestSubscription && (
+            <p className="text-sm text-blue-600 bg-blue-50 p-2 rounded-md border border-blue-100">
+              Your new plan will automatically begin after your current
+              subscription expires.
+            </p>
+          )}
         </div>
       </section>
 
       {/* 2. Address Selection */}
       <section className="space-y-4">
         <div className="flex flex-col md:flex-row gap-2 items-start justify-between md:items-center">
-         
           <h2 className="text-xl font-bold flex items-center gap-2">
             <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
               4

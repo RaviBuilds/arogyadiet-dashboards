@@ -205,7 +205,6 @@ export function MealPlannerClient({
   } | null>(null);
 
   useEffect(() => {
-    console.log("DEBUG: initialOverrides changed:", initialOverrides);
 
     const syncTimer = window.setTimeout(() => {
       setOverrides(initialOverrides);
@@ -286,7 +285,6 @@ export function MealPlannerClient({
         type: "success",
         text: "Meal preferences successfully updated!",
       });
-      console.log("DEBUG: Meal Planner Syncing...");
       router.refresh();
     } else {
       setSaveMessage({

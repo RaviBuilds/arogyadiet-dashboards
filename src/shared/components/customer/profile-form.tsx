@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { MedicalDocumentUploadModal } from "./medical-document-upload-modal";
 
 interface ProfileFormProps {
@@ -59,10 +60,6 @@ export function ProfileForm({
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
   const [isPending, setIsPending] = useState(false);
-  const [message, setMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   const form = useForm<ProfileFormValues>({
@@ -72,7 +69,9 @@ export function ProfileForm({
       no_medical_history_confirmed: !initialData.has_medical_history,
     },
   });
-  console.log("INITIAL DATA =>", initialData);
+
+
+
   useEffect(() => {
     form.reset(
       {
@@ -85,28 +84,47 @@ export function ProfileForm({
 
   const watchedValues = form.watch();
   const hasMedicalHistory = form.watch("has_medical_history");
-  async function onSubmit(data: ProfileFormValues) {
-    setIsPending(true);
-    setMessage(null);
 
-    const result = await updateProfileAction(data);
+async function onSubmit(data: ProfileFormValues) {
+  setIsPending(true);
 
-    setIsPending(false);
+  // --- NEW: Custom Validation for Medical History ---
+  if (data.has_medical_history) {
+    const hasNotes =
+      data.medical_history_notes &&
+      data.medical_history_notes.trim().length > 0;
+    const hasDocs = initialDocuments && initialDocuments.length > 0;
 
-    if (result?.error) {
-      setMessage({ type: "error", text: result.error });
-      return;
+    if (!hasNotes && !hasDocs) {
+      setIsPending(false);
+      toast.error(
+        "Please provide medical notes or upload documents. Otherwise, turn OFF the medical assessment toggle.",
+      );
+      return; // Stop submission
     }
+  } else {
+    // Clean up notes if they toggled it off before saving
+    data.medical_history_notes = "";
+  }
+  // ------------------------------------------------
 
-    setMessage({ type: "success", text: "Profile updated successfully!" });
-    setIsEditing(false);
-    router.refresh();
+  const result = await updateProfileAction(data);
+
+  setIsPending(false);
+
+  if (result?.error) {
+    toast.error(result.error);
+    return;
   }
 
+  toast.success("Profile updated successfully!");
+  setIsEditing(false);
+  router.refresh();
+}
+ 
   const toggleEdit = () => {
     if (isEditing) form.reset(initialData);
     setIsEditing(!isEditing);
-    setMessage(null);
   };
 
   return (
@@ -602,25 +620,6 @@ export function ProfileForm({
             </div>
           )}
         </div>
-
-        {/* Message Banner */}
-        {message && (
-          <div
-            className={cn(
-              "p-4 rounded-lg flex items-center gap-3 text-sm font-medium border",
-              message.type === "success"
-                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                : "bg-red-50 text-red-800 border-red-200",
-            )}
-          >
-            {message.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4" />
-            ) : (
-              <AlertCircle className="h-4 w-4" />
-            )}
-            {message.text}
-          </div>
-        )}
 
         {/* Save Button */}
         {isEditing && (

@@ -46,7 +46,6 @@ export default async function OrderTrackingPage({
       </div>
     );
   }
-  console.log("ORDRe =>", order);
 
   // Safely extract relationships
   const riderProfile = Array.isArray(order.rider)
@@ -77,10 +76,6 @@ export default async function OrderTrackingPage({
     return "Preparing...";
   };
 
-  console.log("Rider Name =>", riderName);
-  console.log("Rider Phone =>", riderPhone);
-  console.log("Rider User =>", riderUser);
-  console.log("Rider riderProfile =>", riderProfile);
 
   return (
     <LiveTrackingClient

@@ -7,8 +7,7 @@ export async function login(
 ) {
   const supabase = await createClient();
 
-  console.log("--- AuthService.login Triggered ---");
-  console.log("Attempting Supabase signInWithPassword for:", email);
+  
 
   // 1. Authenticate with supabase auth
   const { data: authData, error: authError } =
@@ -26,8 +25,6 @@ export async function login(
     throw new Error("Login failed !");
   }
 
-  console.log("Step 1 SUCCESS - Auth User ID:", authData.user.id);
-  console.log("Fetching public.users metadata...");
 
   // 2. Fetch user metadata and verify Role / Active status
   const { data: userData, error: userError } = await supabase
@@ -45,10 +42,7 @@ export async function login(
     throw new Error("User profile setup incomplete.");
   }
 
-  console.log(
-    "Step 2 SUCCESS - User metadata retrieved:",
-    JSON.stringify(userData),
-  );
+
 
   // 3. Check if account is active
   if (!userData.is_active) {
@@ -64,9 +58,7 @@ export async function login(
     ? userData.roles[0]?.code
     : (userData.roles as { code: string })?.code;
 
-  console.log(
-    `Step 4 Checking Boundary - Expected Role: ${expectedRole} | Actual Role: ${userRole}`,
-  );
+ 
 
   // 4. Portal boundary check
   if (userRole !== expectedRole) {
@@ -79,7 +71,7 @@ export async function login(
     );
   }
 
-  console.log("Login completely successful. Returning user.");
+
   return authData.user;
 }
 
