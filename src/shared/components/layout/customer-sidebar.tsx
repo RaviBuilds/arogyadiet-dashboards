@@ -15,6 +15,7 @@ import {
   ShoppingCart,
   ShoppingBag,
   PackageSearch,
+  ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -31,7 +32,11 @@ const mainNavItems: NavItem[] = [
   { name: "My Profile", href: "/profile", icon: User },
   { name: "My Meals", href: "/meals", icon: PackageSearch },
   { name: "New Subscription", href: "/subscription", icon: ShoppingCart },
-  { name: "Shop", href: "/shop", icon: ShoppingBag },
+];
+
+const shopNavItems: NavItem[] = [
+  { name: "Browse Shop", href: "/shop", icon: ShoppingBag },
+  { name: "My Orders", href: "/shop/orders", icon: ClipboardList },
 ];
 
 const manageMealItems: NavItem[] = [
@@ -71,12 +76,13 @@ function NavGroup({
         const Icon = item.icon;
         let isActive = false;
         if (item.href === "/subscription") {
-          // Only highlight if exactly on the storefront OR the checkout flow
           isActive =
             pathname === "/subscription" ||
             pathname.startsWith("/subscription/checkout");
+        } else if (item.href === "/shop") {
+          isActive =
+            pathname === "/shop" || pathname === "/shop/checkout";
         } else {
-          // Normal matching for everything else
           isActive =
             pathname === item.href || pathname.startsWith(item.href + "/");
         }
@@ -134,6 +140,17 @@ function SidebarContent({
           pathname={pathname}
           onNavigate={onNavigate}
         />
+
+        <div>
+          <div className="px-7 mb-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
+            <ShoppingBag className="h-3 w-3" /> Shop
+          </div>
+          <NavGroup
+            items={shopNavItems}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        </div>
 
         <div>
           <div className="px-7 mb-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-2">

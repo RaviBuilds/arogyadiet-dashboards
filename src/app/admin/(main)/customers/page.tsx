@@ -140,6 +140,60 @@ export default async function CustomersPage() {
 
   const stoppedSubs = (rawStoppedSubs || []).map(mapSubRow);
 
+  // Fetch all shop (addon) orders across all customers, newest first
+  const { data: rawShopOrders } = await supabaseAdmin
+    .from("addon_orders")
+    .select(
+      `
+      id,
+      created_at,
+      total_amount,
+      status,
+      target_delivery_date,
+      delivery_order_id,
+      customer_profile_id,
+      delivery_orders (delivery_date),
+      addon_order_items (
+        quantity,
+        unit_price,
+        products (name)
+      ),
+      customer_profiles (
+        users (full_name)
+      )
+    `,
+    )
+    .order("created_at", { ascending: false });
+
+  const shopOrders = (rawShopOrders || []).map((o: any) => {
+    const profile = Array.isArray(o.customer_profiles)
+      ? o.customer_profiles[0]
+      : o.customer_profiles;
+    const user = Array.isArray(profile?.users) ? profile?.users[0] : profile?.users;
+    const delivery = Array.isArray(o.delivery_orders)
+      ? o.delivery_orders[0]
+      : o.delivery_orders;
+    const items = (Array.isArray(o.addon_order_items) ? o.addon_order_items : [])
+      .filter(Boolean)
+      .map((item: any) => ({
+        product_name: item?.products?.name ?? "Product",
+        quantity: item?.quantity ?? 1,
+        unit_price: item?.unit_price ?? 0,
+      }));
+    return {
+      id: o.id as string,
+      created_at: o.created_at as string,
+      customer_profile_id: o.customer_profile_id as string,
+      customer_name: (user?.full_name as string) || "N/A",
+      total_amount: o.total_amount as number | null,
+      status: o.status as string | null,
+      target_delivery_date: o.target_delivery_date as string | null,
+      delivery_order_id: o.delivery_order_id as string | null,
+      scheduled_delivery_date: (delivery?.delivery_date as string) ?? null,
+      items,
+    };
+  });
+
   return (
     <div className="space-y-6 flex flex-col">
       <AdminPageHeader
@@ -152,6 +206,7 @@ export default async function CustomersPage() {
         activeSubscriptions={activeSubs}
         pendingSubscriptions={pendingSubs}
         stoppedSubscriptions={stoppedSubs}
+        shopOrders={shopOrders}
       />
     </div>
   );

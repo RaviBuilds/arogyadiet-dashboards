@@ -19,6 +19,42 @@ const supabaseAdmin = createAdminClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
+export async function adminUpdateAddonOrderDeliveryDate(
+  addonOrderId: string,
+  newDeliveryDate: string,
+) {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split("T")[0];
+
+  if (newDeliveryDate < tomorrowStr) {
+    return { success: false, error: "Delivery date must be tomorrow or later." };
+  }
+
+  const { data: order, error: fetchError } = await supabaseAdmin
+    .from("addon_orders")
+    .select("id, status, delivery_order_id")
+    .eq("id", addonOrderId)
+    .single();
+
+  if (fetchError || !order) return { success: false, error: "Order not found." };
+  if (order.status !== "PAID")
+    return { success: false, error: "Only paid orders can be rescheduled." };
+  if (order.delivery_order_id)
+    return { success: false, error: "This order has already been scheduled and cannot be changed." };
+
+  const { error: updateError } = await supabaseAdmin
+    .from("addon_orders")
+    .update({ target_delivery_date: newDeliveryDate })
+    .eq("id", addonOrderId);
+
+  if (updateError) return { success: false, error: updateError.message };
+
+  revalidatePath("/customers");
+  revalidatePath("/shop/orders");
+  return { success: true };
+}
+
 export async function updateCustomerBasicInfo(
   profileId: string,
   userId: string,
