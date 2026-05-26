@@ -1,15 +1,13 @@
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CustomerDashboard from "@/shared/components/admin/customers/CustomerDashboard";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 
-export const revalidate = 0;
+export const revalidate = false;
 
 export default async function CustomersPage() {
-  const supabase = await createClient();
   const supabaseAdmin = createAdminClient();
 
-  const { data: rawCustomers, error } = await supabase.from("customer_profiles")
+  const { data: rawCustomers, error } = await supabaseAdmin.from("customer_profiles")
     .select(`
       id,
       is_active,

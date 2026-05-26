@@ -50,7 +50,7 @@ export async function adminUpdateAddonOrderDeliveryDate(
 
   if (updateError) return { success: false, error: updateError.message };
 
-  revalidatePath("/customers");
+  revalidatePath("/admin/customers");
   revalidatePath("/shop/orders");
   return { success: true };
 }
