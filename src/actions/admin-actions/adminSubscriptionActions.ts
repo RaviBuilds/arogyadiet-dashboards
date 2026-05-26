@@ -4,6 +4,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { addDays, format, startOfDay } from "date-fns";
+import { sendEmail } from "@/services/emailService";
+import {
+  subscriptionConfirmationEmailHtml,
+  subscriptionConfirmationSubject,
+} from "@/emails/SubscriptionConfirmationEmail";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -123,6 +128,7 @@ export async function addSubscription(
 
     // Resolve plan details and invoice breakdown
     let planId: string | null = null;
+    let planDisplayName = "Custom Plan";
     let totalAmount: number;
     let baseAmount: number;
     let taxAmount: number;
@@ -137,12 +143,14 @@ export async function addSubscription(
 
       const { data: plan, error: planErr } = await supabase
         .from("subscription_plans")
-        .select("price, base_price, tax_amount, duration_days, pause_credits")
+        .select("name, price, base_price, tax_amount, duration_days, pause_credits")
         .eq("id", planId)
         .single();
 
       if (planErr) throw new Error(planErr.message);
       if (!plan) return { success: false, error: "Subscription plan not found." };
+
+      planDisplayName = plan.name ?? "Subscription Plan";
 
       // Use stored base_price / tax_amount from the plan if available,
       // otherwise treat plan.price as the total and reverse-calculate at 5%.
@@ -274,6 +282,14 @@ export async function addSubscription(
         revalidatePath("/admin/customers");
         revalidatePath("/admin/subscriptions");
 
+        await sendSubscriptionEmail(supabase, customerProfileId, {
+          planDisplayName,
+          startsOn,
+          endsOn,
+          totalDays,
+          paymentStatus: isPaid ? "PAID" : "PENDING",
+        });
+
         return { success: true, paymentId: fallbackPayment?.id };
       }
       throw new Error(payErr.message);
@@ -283,11 +299,62 @@ export async function addSubscription(
     revalidatePath("/admin/customers");
     revalidatePath("/admin/subscriptions");
 
+    await sendSubscriptionEmail(supabase, customerProfileId, {
+      planDisplayName,
+      startsOn,
+      endsOn,
+      totalDays,
+      paymentStatus: isPaid ? "PAID" : "PENDING",
+    });
+
     return { success: true, paymentId: newPayment?.id };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
     console.error("addSubscription error:", msg);
     return { success: false, error: msg };
+  }
+}
+
+// ─── email helper ────────────────────────────────────────────────────────────
+
+async function sendSubscriptionEmail(
+  supabase: ReturnType<typeof createAdminClient>,
+  customerProfileId: string,
+  opts: {
+    planDisplayName: string;
+    startsOn: string;
+    endsOn: string;
+    totalDays: number;
+    paymentStatus: string;
+  },
+) {
+  try {
+    const { data: profileData } = await supabase
+      .from("customer_profiles")
+      .select("users ( full_name, email )")
+      .eq("id", customerProfileId)
+      .single();
+
+    const user = Array.isArray(profileData?.users)
+      ? profileData.users[0]
+      : (profileData?.users as any);
+
+    if (!user?.email) return;
+
+    await sendEmail(
+      user.email,
+      subscriptionConfirmationSubject(opts.planDisplayName),
+      subscriptionConfirmationEmailHtml({
+        name: user.full_name || "Valued Customer",
+        planName: opts.planDisplayName,
+        startDate: opts.startsOn,
+        endDate: opts.endsOn,
+        totalDays: opts.totalDays,
+        paymentStatus: opts.paymentStatus,
+      }),
+    );
+  } catch (err) {
+    console.error("[sendSubscriptionEmail] Failed to send email:", err);
   }
 }
 

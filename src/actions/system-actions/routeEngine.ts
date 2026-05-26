@@ -12,6 +12,7 @@ export async function executeAutomatedDispatch(targetDate: string) {
   const { data: settings } = await supabaseAdmin
     .from("system_settings")
     .select("rider_payout_per_km")
+    .eq("id", "global")
     .single();
   const { data: kitchen } = await supabaseAdmin
     .from("kitchens")
@@ -111,12 +112,15 @@ export async function executeAutomatedDispatch(targetDate: string) {
       if (newBatch && !batchError) {
         batchesCreated++;
 
-        // 6. Update Orders
+        // 6. Update Orders with per-leg payout_amount
         const optimalOrderIndices = route.waypoint_order as number[];
+        const legs = route.legs as any[];
 
         for (let i = 0; i < optimalOrderIndices.length; i++) {
           const originalIndex = optimalOrderIndices[i];
           const actualOrder = riderOrders[originalIndex];
+          const legDistanceKm = (legs[i]?.distance?.value || 0) / 1000;
+          const orderPayout = Number((legDistanceKm * payoutPerKm).toFixed(2));
 
           await supabaseAdmin
             .from("delivery_orders")
@@ -125,6 +129,7 @@ export async function executeAutomatedDispatch(targetDate: string) {
               assigned_rider_id: riderId,
               status: "ASSIGNED",
               route_sequence: i + 1,
+              payout_amount: orderPayout,
             })
             .eq("id", actualOrder.id);
         }

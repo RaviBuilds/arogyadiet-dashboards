@@ -1,4 +1,3 @@
-import { Button } from "@/shared/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CustomerDashboard from "@/shared/components/admin/customers/CustomerDashboard";
@@ -146,7 +145,6 @@ export default async function CustomersPage() {
       <AdminPageHeader
         title="Customers"
         description="Manage your subscriber base and account statuses."
-        action={<Button>Create Customer</Button>}
       />
 
       <CustomerDashboard

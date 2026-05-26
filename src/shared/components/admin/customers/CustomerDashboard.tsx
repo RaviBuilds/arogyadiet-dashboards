@@ -61,6 +61,9 @@ import {
   updateCustomerBasicInfo,
   deleteCustomer,
 } from "@/actions/admin-actions/customerActions";
+import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
+import { CustomerOverview } from "./CustomerOverview";
+import { Plus } from "lucide-react";
 
 export interface CustomerData {
   id: string;
@@ -121,6 +124,7 @@ export default function CustomerDashboard({
     return Array.from(plans);
   }, [customers]);
 
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
@@ -342,16 +346,35 @@ export default function CustomerDashboard({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <AdminSubmenu
-        tabs={["Overview", "Customer Directory", "Active Subscriptions", "Pending Subscriptions", "Expired / Stopped"]}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
+      <div className="flex items-center justify-between gap-4">
+        <AdminSubmenu
+          tabs={["Overview", "Customer Directory", "Active Subscriptions", "Pending Subscriptions", "Expired / Stopped"]}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+        <Button
+          onClick={() => setIsCreateModalOpen(true)}
+          className="shrink-0"
+          size="sm"
+        >
+          <Plus className="h-4 w-4 mr-1.5" />
+          Create Customer
+        </Button>
+      </div>
+
+      <AdminCreateCustomerModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
       />
 
       {activeTab === "Overview" ? (
-        <div className="p-10 text-center text-muted-foreground border rounded-xl border-dashed">
-          Customer Overview Analytics will go here
-        </div>
+        <CustomerOverview
+          customers={customers}
+          activeSubscriptions={activeSubscriptions}
+          pendingSubscriptions={pendingSubscriptions}
+          stoppedSubscriptions={stoppedSubscriptions}
+          onNavigate={handleTabChange}
+        />
       ) : activeTab === "Customer Directory" ? (
         <DataTableCard
           header={<SectionHeader title="Customer Directory" icon={Users} />}
