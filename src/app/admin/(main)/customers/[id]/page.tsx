@@ -1,4 +1,4 @@
-import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -6,59 +6,16 @@ import { Customer360Dashboard } from "@/shared/components/admin/customers/Custom
 import { Button } from "@/shared/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 
-interface CustomerProfile {
-  userId: string;
-  id: string;
-  full_name: string;
-  email: string;
-  mobile: string;
-  gender: string;
-  date_of_birth: string;
-  dietary_preference: string;
-  allergies: string;
-  medical_history_notes: string;
-  has_medical_history: boolean;
-  addresses: {
-    id: string;
-    address_line_1: string;
-    address_line_2: string;
-    city: string;
-    state: string;
-    pincode: string;
-    is_default: boolean;
-  }[];
-  medical_documents: {
-    id: string;
-    file_name: string;
-    storage_path: string;
-    uploaded_at: string;
-    signedUrl?: string; // Added for secure viewing
-  }[];
-  subscriptions: {
-    id: string;
-    status: string;
-    starts_on: string;
-    ends_on: string;
-    subscription_plans: {
-      name: string;
-    };
-  }[];
-}
-
 export default async function Customer360Page({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const supabase = createAdminClient();
 
-  // 1. USE ADMIN CLIENT TO SECURELY BYPASS RLS
-  const supabaseAdmin = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
-  const { data, error } = await supabaseAdmin
+  // ── 1. Customer profile ───────────────────────────────────────────────────
+  const { data, error } = await supabase
     .from("customer_profiles")
     .select(
       `
@@ -71,9 +28,9 @@ export default async function Customer360Page({
       medical_history_notes,
       has_medical_history,
       users!inner ( id, full_name, email, mobile ),
-      addresses ( id, tag, street_1, street_2, city, pincode, is_primary ),
+      addresses ( id, tag, street_1, city, pincode, is_primary ),
       medical_documents ( id, file_name, storage_path, uploaded_at, file_size_bytes ),
-      subscriptions ( id, status, starts_on, ends_on, subscription_plans ( name ) )
+      subscriptions ( id, status, starts_on, ends_on, effective_end_on, subscription_plans ( name ) )
       `,
     )
     .eq("id", id)
@@ -84,62 +41,104 @@ export default async function Customer360Page({
     notFound();
   }
 
-  // 2. GENERATE SECURE SIGNED URLS FOR MEDICAL DOCUMENTS
-  let documentsWithUrls: any[] = [];
+  // ── 2. Signed URLs for medical documents ─────────────────────────────────
+  let documentsWithUrls: {
+    id: string;
+    file_name: string;
+    storage_path: string;
+    uploaded_at: string;
+    signedUrl?: string;
+  }[] = [];
+
   if (data.medical_documents && data.medical_documents.length > 0) {
     documentsWithUrls = await Promise.all(
-      data.medical_documents.map(async (doc: any) => {
-        const { data: urlData } = await supabaseAdmin.storage
+      (data.medical_documents as any[]).map(async (doc) => {
+        const { data: urlData } = await supabase.storage
           .from("medical_records")
-          .createSignedUrl(doc.storage_path, 3600); // 1 hour expiry
-
+          .createSignedUrl(doc.storage_path, 3600);
         return {
           id: doc.id,
           file_name: doc.file_name,
           storage_path: doc.storage_path,
           uploaded_at: doc.uploaded_at,
-          signedUrl: urlData?.signedUrl || null,
+          signedUrl: urlData?.signedUrl ?? undefined,
         };
       }),
     );
   }
 
-  // 3. FIX USERS MAPPING (It's an object, not an array)
+  // ── 3. Resolve active subscription (for "Add Subscription" form) ─────────
+  const activeSubscription =
+    (data.subscriptions as any[])?.find((s) => s.status === "ACTIVE") ?? null;
+
+  // ── 4. Fetch lookup data for the subscription form + coupons ─────────────
+  const [
+    { data: subscriptionPlans },
+    { data: mealCategories },
+    { data: coupons },
+  ] = await Promise.all([
+    supabase
+      .from("subscription_plans")
+      .select("id, name, price, duration_days, pause_credits")
+      .eq("is_active", true)
+      .order("price"),
+    supabase.from("meal_categories").select("id, code, name").order("name"),
+    supabase
+      .from("coupons")
+      .select(
+        "id, code, discount_type, discount_value_30_days, discount_value_60_days, discount_value_90_days, discount_value, max_uses, times_used, expires_at, created_at",
+      )
+      .eq("customer_profile_id", id)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  // ── 5. Shape the customer object ──────────────────────────────────────────
   const userData = data.users as any;
 
-  const customerData: CustomerProfile = {
-    userId: userData?.id || "",
+  const customerData = {
+    userId: userData?.id ?? "",
     id: data.id,
-    full_name: userData?.full_name || "N/A",
-    email: userData?.email || "N/A",
-    mobile: userData?.mobile || "N/A",
-    gender: data.gender || "N/A",
-    date_of_birth: data.date_of_birth || "N/A",
-    dietary_preference: data.dietary_preference || "N/A",
-    allergies: data.allergies || "None",
-    medical_history_notes: data.medical_history_notes || "N/A",
-    has_medical_history: data.has_medical_history || false,
-    addresses:
-      data.addresses?.map((addr: any) => ({
-        id: addr.id,
-        address_line_1: addr.street_1,
-        address_line_2: addr.street_2,
-        city: addr.city,
-        state: "N/A",
-        pincode: addr.pincode,
-        is_default: addr.is_primary,
-      })) || [],
+    full_name: userData?.full_name ?? "N/A",
+    email: userData?.email ?? "N/A",
+    mobile: userData?.mobile ?? "N/A",
+    gender: (data.gender as string) ?? "N/A",
+    date_of_birth: (data.date_of_birth as string) ?? "N/A",
+    dietary_preference: (data.dietary_preference as string) ?? "N/A",
+    allergies: (data.allergies as string) ?? "None",
+    medical_history_notes: (data.medical_history_notes as string) ?? "N/A",
+    has_medical_history: (data.has_medical_history as boolean) ?? false,
     medical_documents: documentsWithUrls,
-    subscriptions:
-      data.subscriptions?.map((sub: any) => ({
-        id: sub.id,
-        status: sub.status,
-        starts_on: sub.starts_on,
-        ends_on: sub.ends_on,
-        subscription_plans: {
-          name: sub.subscription_plans?.name || "N/A",
-        },
-      })) || [],
+  };
+
+  // ── 6. Shape lookup data for the Add Subscription form ───────────────────
+  const initialSubscriptionData = {
+    activeSubscription: activeSubscription
+      ? {
+          id: activeSubscription.id as string,
+          effective_end_on:
+            (activeSubscription.effective_end_on as string) ??
+            (activeSubscription.ends_on as string),
+        }
+      : null,
+    subscriptionPlans: (subscriptionPlans ?? []).map((p: any) => ({
+      id: p.id as string,
+      name: p.name as string,
+      price: p.price as number,
+      duration_days: p.duration_days as number,
+      pause_credits: p.pause_credits as number,
+    })),
+    mealCategories: (mealCategories ?? []).map((c: any) => ({
+      id: c.id as string,
+      code: c.code as string,
+      name: c.name as string,
+    })),
+    addresses: ((data.addresses as any[]) ?? []).map((a) => ({
+      id: a.id as string,
+      tag: (a.tag as string) ?? "Home",
+      street_1: a.street_1 as string,
+      city: a.city as string,
+      pincode: a.pincode as string,
+    })),
   };
 
   return (
@@ -155,7 +154,11 @@ export default async function Customer360Page({
           </Button>
         }
       />
-      <Customer360Dashboard customer={customerData} />
+      <Customer360Dashboard
+        customer={customerData}
+        initialSubscriptionData={initialSubscriptionData}
+        initialCoupons={(coupons ?? []) as any[]}
+      />
     </div>
   );
 }

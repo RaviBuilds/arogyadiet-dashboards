@@ -240,7 +240,7 @@ export async function verifyAndActivateSubscriptionAction(
       return categories?.find((c) => c.code === dbCode)?.id || null;
     };
 
-    // 3. Insert Payment Record (Now with 100% accurate invoice amount)
+    // 3. Insert Payment Record (with full invoice breakdown)
     const { data: payment, error: paymentError } = await supabaseAdmin
       .from("payments")
       .insert({
@@ -249,6 +249,13 @@ export async function verifyAndActivateSubscriptionAction(
         amount: exactAmountPaid,
         status: "SUCCESS",
         paid_at: new Date().toISOString(),
+        base_amount: finalBasePrice,
+        tax_percent: gstRate * 100,
+        tax_amount: finalGst,
+        discount_amount: hasValidCoupon
+          ? Math.max(0, plan.base_price - finalBasePrice)
+          : 0,
+        invoice_type: "SUBSCRIPTION",
       })
       .select("id")
       .single();

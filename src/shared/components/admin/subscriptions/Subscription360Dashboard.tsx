@@ -221,7 +221,7 @@ export function Subscription360Dashboard({
                 <CardContent className="p-6 grid gap-6">
                   <div>
                     <h3 className="font-black text-xl text-zinc-900">
-                      {plan?.name || "Unknown Plan"}
+                      {plan?.name || "Custom Plan"}
                     </h3>
                     <p className="text-sm text-muted-foreground">
                       {subscription.total_days} Meals Total

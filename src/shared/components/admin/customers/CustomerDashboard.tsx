@@ -89,14 +89,19 @@ export interface ActiveSubscriptionData {
   ends_on: string;
   pause_credits_total: number;
   pause_credits_used: number;
+  status: string;
 }
 
 export default function CustomerDashboard({
   customers = [],
-  activeSubscriptions = []
+  activeSubscriptions = [],
+  pendingSubscriptions = [],
+  stoppedSubscriptions = [],
 }: {
   customers?: CustomerData[];
   activeSubscriptions?: ActiveSubscriptionData[];
+  pendingSubscriptions?: ActiveSubscriptionData[];
+  stoppedSubscriptions?: ActiveSubscriptionData[];
 }) {
 
   const [activeTab, setActiveTab] = useState("Customer Directory");
@@ -133,7 +138,7 @@ export default function CustomerDashboard({
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    setSearchColumn(tab === "Customer Directory" ? "fullName" : "customer_name"); // Reset search column based on tab
+    setSearchColumn(tab === "Customer Directory" ? "fullName" : "customer_name");
     setSearchTerm("");
   };
 
@@ -174,22 +179,37 @@ export default function CustomerDashboard({
     return result;
   }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterMedical]);
 
-  const filteredActiveSubscriptions = useMemo(() => {
-    let result = activeSubscriptions;
-    if (searchTerm) {
-      const lowerTerm = searchTerm.toLowerCase();
-      result = result.filter((sub) => {
-        if (searchColumn === "customer_name")
-          return sub.customer_name.toLowerCase().includes(lowerTerm);
-        if (searchColumn === "email")
-          return sub.email.toLowerCase().includes(lowerTerm);
-        if (searchColumn === "plan_name")
-          return sub.plan_name.toLowerCase().includes(lowerTerm);
-        return true;
-      });
-    }
-    return result;
-  }, [activeSubscriptions, searchTerm, searchColumn]);
+  const filterSubList = (list: ActiveSubscriptionData[]) => {
+    if (!searchTerm) return list;
+    const lowerTerm = searchTerm.toLowerCase();
+    return list.filter((sub) => {
+      if (searchColumn === "customer_name")
+        return sub.customer_name.toLowerCase().includes(lowerTerm);
+      if (searchColumn === "email")
+        return sub.email.toLowerCase().includes(lowerTerm);
+      if (searchColumn === "plan_name")
+        return sub.plan_name.toLowerCase().includes(lowerTerm);
+      return true;
+    });
+  };
+
+  const filteredActiveSubscriptions = useMemo(
+    () => filterSubList(activeSubscriptions),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeSubscriptions, searchTerm, searchColumn],
+  );
+
+  const filteredPendingSubscriptions = useMemo(
+    () => filterSubList(pendingSubscriptions),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pendingSubscriptions, searchTerm, searchColumn],
+  );
+
+  const filteredStoppedSubscriptions = useMemo(
+    () => filterSubList(stoppedSubscriptions),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stoppedSubscriptions, searchTerm, searchColumn],
+  );
 
   const searchOptions = useMemo(() => {
     if (activeTab === "Customer Directory") {
@@ -199,7 +219,11 @@ export default function CustomerDashboard({
         { value: "email", label: "Email ID" },
         { value: "primary_pincode", label: "Pincode" },
       ];
-    } else if (activeTab === "Active Subscriptions") {
+    } else if (
+      activeTab === "Active Subscriptions" ||
+      activeTab === "Pending Subscriptions" ||
+      activeTab === "Expired / Stopped"
+    ) {
       return [
         { value: "customer_name", label: "Customer Name" },
         { value: "email", label: "Email ID" },
@@ -319,7 +343,7 @@ export default function CustomerDashboard({
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <AdminSubmenu
-        tabs={["Overview", "Customer Directory", "Active Subscriptions"]}
+        tabs={["Overview", "Customer Directory", "Active Subscriptions", "Pending Subscriptions", "Expired / Stopped"]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
       />
@@ -458,24 +482,34 @@ export default function CustomerDashboard({
                         All Statuses
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onClick={() => setFilterStatus("ACTIVE")}
-                        className={
-                          filterStatus === "ACTIVE"
-                            ? "bg-accent font-semibold"
-                            : ""
-                        }
+                        onClick={() => setFilterStatus("Active")}
+                        className={filterStatus === "Active" ? "bg-accent font-semibold" : ""}
                       >
                         Active
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onClick={() => setFilterStatus("EXPIRED")}
-                        className={
-                          filterStatus === "EXPIRED"
-                            ? "bg-accent font-semibold"
-                            : ""
-                        }
+                        onClick={() => setFilterStatus("Pending")}
+                        className={filterStatus === "Pending" ? "bg-accent font-semibold" : ""}
+                      >
+                        Pending
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterStatus("Stopped")}
+                        className={filterStatus === "Stopped" ? "bg-accent font-semibold" : ""}
+                      >
+                        Stopped
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterStatus("Expired")}
+                        className={filterStatus === "Expired" ? "bg-accent font-semibold" : ""}
                       >
                         Expired
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterStatus("No Plan")}
+                        className={filterStatus === "No Plan" ? "bg-accent font-semibold" : ""}
+                      >
+                        No Plan
                       </DropdownMenuItem>
                       {uniquePlans && uniquePlans.length > 0 && (
                         <>
@@ -790,6 +824,215 @@ export default function CustomerDashboard({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-[180px]">
+                          <DropdownMenuItem asChild>
+                            <Link
+                              href={`/subscriptions/${sub.id}`}
+                              className="cursor-pointer font-medium flex items-center"
+                            >
+                              <Eye className="mr-2 h-4 w-4 text-primary" />
+                              View Subscription 360
+                            </Link>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </DataTableCard>
+      ) : activeTab === "Pending Subscriptions" ? (
+        <DataTableCard
+          header={<SectionHeader title="Pending Subscriptions" icon={Users} />}
+          controls={
+            <div className="flex flex-wrap items-center gap-3">
+              <DataSearchFilter
+                searchColumn={searchColumn}
+                onColumnChange={setSearchColumn}
+                searchTerm={searchTerm}
+                onTermChange={setSearchTerm}
+                options={searchOptions}
+              />
+            </div>
+          }
+          actions={
+            <RefreshButton
+              onClick={handleRefreshISR}
+              isLoading={isLoading || isPending}
+            />
+          }
+        >
+          <div className="mx-4 mt-4 mb-2 flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+            <span className="mt-0.5 shrink-0">ℹ️</span>
+            <span>
+              Go to the{" "}
+              <strong>Subscription 360 Dashboard</strong> (via the Actions menu
+              below) to manage or activate pending subscriptions. Pending
+              subscriptions are automatically activated the day before their
+              scheduled start date.
+            </span>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/10">
+                <TableHead>Customer</TableHead>
+                <TableHead>Plan</TableHead>
+                <TableHead>Scheduled Start Date</TableHead>
+                <TableHead>Pause Credits</TableHead>
+                <TableHead className="w-[50px]">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredPendingSubscriptions.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={5}
+                    className="text-center py-12 text-muted-foreground"
+                  >
+                    No pending subscriptions found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredPendingSubscriptions.map((sub) => (
+                  <TableRow key={sub.id} className="hover:bg-muted/30">
+                    <TableCell>
+                      <div className="font-bold">{sub.customer_name}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {sub.email}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {sub.plan_name}
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Total Days: {sub.total_days}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm font-medium">
+                        {new Date(sub.starts_on).toLocaleDateString()}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        Total: {sub.pause_credits_total}
+                      </div>
+                      <div className="text-sm">
+                        Used: {sub.pause_credits_used}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-[200px]">
+                          <DropdownMenuItem asChild>
+                            <Link
+                              href={`/subscriptions/${sub.id}`}
+                              className="cursor-pointer font-medium flex items-center"
+                            >
+                              <Eye className="mr-2 h-4 w-4 text-primary" />
+                              View Subscription 360
+                            </Link>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </DataTableCard>
+      ) : activeTab === "Expired / Stopped" ? (
+        <DataTableCard
+          header={<SectionHeader title="Expired / Stopped Subscriptions" icon={Users} />}
+          controls={
+            <div className="flex flex-wrap items-center gap-3">
+              <DataSearchFilter
+                searchColumn={searchColumn}
+                onColumnChange={setSearchColumn}
+                searchTerm={searchTerm}
+                onTermChange={setSearchTerm}
+                options={searchOptions}
+              />
+            </div>
+          }
+          actions={
+            <RefreshButton
+              onClick={handleRefreshISR}
+              isLoading={isLoading || isPending}
+            />
+          }
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/10">
+                <TableHead>Customer</TableHead>
+                <TableHead>Plan</TableHead>
+                <TableHead>Start Date</TableHead>
+                <TableHead>End Date</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-[50px]">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredStoppedSubscriptions.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="text-center py-12 text-muted-foreground"
+                  >
+                    No expired or stopped subscriptions found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredStoppedSubscriptions.map((sub) => (
+                  <TableRow key={sub.id} className="hover:bg-muted/30">
+                    <TableCell>
+                      <div className="font-bold">{sub.customer_name}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {sub.email}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {sub.plan_name}
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        Total Days: {sub.total_days}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        {sub.starts_on
+                          ? new Date(sub.starts_on).toLocaleDateString()
+                          : "—"}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        {sub.ends_on
+                          ? new Date(sub.ends_on).toLocaleDateString()
+                          : "—"}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={sub.status} variant="outline" />
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-[200px]">
                           <DropdownMenuItem asChild>
                             <Link
                               href={`/subscriptions/${sub.id}`}

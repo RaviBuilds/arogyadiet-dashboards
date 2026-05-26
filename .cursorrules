@@ -1,38 +1,417 @@
-# Arogyadiet Platform - System Architecture & AI Rules
+# Arogyadiet Platform: AI Agent System Prompt & Architecture
 
-## 1. The Prime Directive (Do No Harm)
-You are working on a Modular Monolith. The `customer` and `rider` (deliverypartner) portals are currently stable and in production. **Under no circumstances should you modify, break, or alter the functionality of the `customer` or `rider` modules when building new `admin` features.** If modifying shared files (like `middleware.ts`, `tailwind.config.ts`, or global UI components), you MUST ensure backward compatibility.
+## 1. Project Summary & Prime Directive
+Arogyadiet is a full-stack, multi-tenant SaaS platform managing complex meal subscriptions, daily dietary preferences, and localized delivery logistics. 
 
-## 2. Portal & Role Isolation
-The application uses subdomain routing handled by `middleware.ts`. Each portal has a strict 1:1 relationship with a database role (`users.roles.code`):
-* `customer.localhost` -> `src/app/customer/` -> Role: `CUSTOMER`
-* `deliverypartner.localhost` -> `src/app/rider/` -> Role: `RIDER`
-* `admin.localhost` -> `src/app/admin/` -> Role: `ADMIN`
-* `master.localhost` -> `src/app/master/` -> Role: `MASTER`
+**The Prime Directive:** You are working within a Modular Monolith. Ensure strict portal and role isolation. Never breach the boundaries established by the routing subdomains, and always respect the immutable business logic rules outlined below.
 
-**Rule:** Modules must remain isolated. An `admin` page MUST NOT import components or actions from the `rider` or `customer` folders. Shared utilities must live in `src/components`, `src/lib`, or `src/shared`.
+## 2. Technical Stack
+* **Frontend:** Next.js (App Router), React, TypeScript.
+* **UI/Styling:** Tailwind CSS, Shadcn UI (optimized for data tables/complex forms).
+* **Backend/DB:** Supabase (PostgreSQL).
+* **Data Access:** Server-first architecture utilizing Next.js Server Actions.
+* **Security:** Supabase Auth + PostgreSQL Row Level Security (RLS). Use `createAdminClient` ONLY for explicit system-wide background operations bypassing RLS.
 
-## 3. The "Pincode" Pivot (CRITICAL DATA STRUCTURE)
-We have abandoned the rigid geographical "Zone" model. Do not write code or database queries that reference `zones` or `zone_id`.
-* We now use **Pincode-Based Service Areas**.
-* Riders are mapped to specific pincodes via the `rider_service_areas` table (`area_name`, `pincode`, `rider_id`).
-* When assigning riders or filtering customers, use the `addresses.pincode` matched against `rider_service_areas.pincode`.
+## 3. Core Modules & Subdomain Routing (Middleware Enforced)
+Each portal maps strictly to a specific database role and URL structure:
+* **`customer.localhost` -> `/customer`:** Subscriber portal (manage plans, pause deliveries, select meals).
+* **`deliverypartner.localhost` -> `/rider`:** Mobile-optimized delivery portal (track locations, pincode routes, payouts).
+* **`admin.localhost` -> `/admin`:** Desktop-first control center (Subscription 360 Dashboard).
+* **`master.localhost` -> `/master`:** Top-level system configuration.
 
-## 4. Supabase & Data Access Strategy
-* **Server-First:** Always prefer Server Components and Server Actions (`use server`).
-* **Row Level Security (RLS):** Remember that `public.users` and other operational tables are protected by RLS. When writing Admin Server Actions that require bypassing RLS to manage the whole business, use the Supabase Service Role Key (`@supabase/supabase-js` initialized with `process.env.SUPABASE_SERVICE_ROLE_KEY`), NOT the SSR anon client.
-* **Never expose sensitive data:** Do not pass entire database row objects to Client Components if they contain sensitive fields. Select only what is needed.
+## 4. Immutable Business Logic (CRITICAL)
 
-## 5. UI/UX Standards
-* **Customer Portal:** Mobile-responsive, consumer-friendly, visually polished.
-* **Rider Portal:** Mobile-first, Progressive Web App (PWA) style, high-contrast, large tap targets.
-* **Admin Portal:** Desktop-first, data-dense, horizontal top-navigation (NO sidebar). Uses Shadcn UI Data Tables extensively.
+### A. The Pause Reconciliation Engine
+Do not simply toggle a boolean to pause a meal. You must recalculate the entire subscription timeline. Iteratively scan the calendar, skip paused days, and physically insert/delete rows in `subscription_daily_preferences` to ensure the customer receives their exact allotted meals, dynamically shifting the `effective_end_on` date.
 
-## 6. Standardized Supabase Imports (CRITICAL)
-Do not write new Supabase initialization code or import legacy helpers. The project already has a fully configured and standardized set of clients in `src/lib/supabase/`. You MUST use these exact imports:
-* **Server Components & Standard Server Actions:** `import { createClient } from "@/lib/supabase/server";`
-* **Client Components:** `import { createClient } from "@/lib/supabase/client";`
-* **Admin/Bypass RLS (Server Only):** `import { createAdminClient } from "@/lib/supabase/admin";` (Use this for admin operations that require bypassing RLS, such as viewing/deleting cross-user `medical_documents` or reassigning routes).
-## 7. Immutable Business Logic (CRITICAL)
-* **The 5 PM Cutoff Rule:** Changes to upcoming meals or pauses can only affect `tomorrow` if made before 5:00 PM today. If it is after 5:00 PM, the earliest editable date is `day after tomorrow`. Do not allow UI bypasses of this rule.
-* **The Pause Reconciliation Engine:** When updating pause preferences (`is_paused`), we DO NOT just flip the boolean. You must use the Reconciliation Engine (found in `src/actions/admin-actions/adminMealActions.ts` and `src/actions/manageMealActions.ts`) which loops through the calendar, skips paused days to find the new exactly 30th delivery day, and inserts/deletes `subscription_daily_preferences` rows to dynamically expand/shrink the calendar and shift the `effective_end_on` date. Never overwrite this logic.
+### B. The 5 PM Cutoff Protocol
+Any modifications to meal selections, delivery addresses, or pause schedules for "tomorrow" MUST be locked at 5:00 PM (17:00 IST) today. If the cutoff has passed, force the earliest editable date to the day after tomorrow.
+
+### C. Pincode-Based Delivery & Routing
+* **No Geographic Zones:** Use the dynamic pincode routing architecture.
+* Riders are assigned via `rider_service_areas` (pincodes).
+* Delivery batches/sequences are calculated using Haversine distance mapping from kitchen coordinates to `addresses.lat/lng`.
+* Rider payouts dynamically scale based on route distance and the `rider_payout_per_km` rate.
+
+### D. Unified Meal & Add-on Planner
+The daily planner defaults to base dietary preferences but must cross-reference `delivery_orders` and `addon_orders` to display shop products/add-ons scheduled for delivery on that specific day.
+
+---
+
+## 5. Database Schema Reference
+*WARNING: This schema is for context and query construction only.*
+
+```sql
+CREATE TABLE public.addon_order_items (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  addon_order_id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  quantity integer NOT NULL DEFAULT 1,
+  unit_price numeric NOT NULL,
+  CONSTRAINT addon_order_items_pkey PRIMARY KEY (id),
+  CONSTRAINT addon_order_items_addon_order_id_fkey FOREIGN KEY (addon_order_id) REFERENCES public.addon_orders(id),
+  CONSTRAINT addon_order_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id)
+);
+
+CREATE TABLE public.addon_orders (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  customer_profile_id uuid NOT NULL,
+  payment_id uuid,
+  total_amount numeric NOT NULL,
+  status text DEFAULT 'PENDING'::text CHECK (status = ANY (ARRAY['PENDING'::text, 'PAID'::text, 'DELIVERED'::text, 'CANCELLED'::text])),
+  target_delivery_date date NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  delivery_order_id uuid,
+  CONSTRAINT addon_orders_pkey PRIMARY KEY (id),
+  CONSTRAINT addon_orders_customer_profile_id_fkey FOREIGN KEY (customer_profile_id) REFERENCES public.customer_profiles(id),
+  CONSTRAINT addon_orders_delivery_order_id_fkey FOREIGN KEY (delivery_order_id) REFERENCES public.delivery_orders(id)
+);
+
+CREATE TABLE public.addresses (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tag text DEFAULT 'Home'::text CHECK (tag = ANY (ARRAY['Home'::text, 'Work'::text, 'Other'::text])),
+  street_1 text NOT NULL,
+  street_2 text,
+  landmark text,
+  city text NOT NULL DEFAULT 'Hyderabad'::text,
+  state text NOT NULL DEFAULT 'Telangana'::text,
+  pincode text NOT NULL,
+  is_primary boolean NOT NULL DEFAULT false,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  customer_profile_id uuid,
+  lat numeric,
+  lng numeric,
+  CONSTRAINT addresses_pkey PRIMARY KEY (id),
+  CONSTRAINT addresses_customer_profile_id_fkey FOREIGN KEY (customer_profile_id) REFERENCES public.customer_profiles(id)
+);
+
+CREATE TABLE public.admin_activity_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  admin_id uuid,
+  action_type character varying NOT NULL,
+  entity_type character varying NOT NULL,
+  entity_id character varying,
+  details jsonb,
+  ip_address text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT admin_activity_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT admin_activity_logs_admin_id_fkey FOREIGN KEY (admin_id) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.coupons (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code character varying NOT NULL,
+  customer_profile_id uuid NOT NULL,
+  discount_type character varying NOT NULL CHECK (discount_type::text = ANY (ARRAY['PERCENTAGE'::character varying, 'FLAT'::character varying]::text[])),
+  expires_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  created_by uuid,
+  discount_value_30_days numeric DEFAULT 0,
+  discount_value_60_days numeric DEFAULT 0,
+  discount_value_90_days numeric DEFAULT 0,
+  max_uses integer DEFAULT 1,
+  times_used integer DEFAULT 0,
+  discount_value numeric DEFAULT 0,
+  CONSTRAINT coupons_pkey PRIMARY KEY (id),
+  CONSTRAINT coupons_customer_profile_id_fkey FOREIGN KEY (customer_profile_id) REFERENCES public.customer_profiles(id)
+);
+
+CREATE TABLE public.customer_profiles (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid UNIQUE,
+  customer_code character varying UNIQUE,
+  referred_by character varying,
+  source character varying,
+  date_of_birth date,
+  gender character varying,
+  is_active boolean DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  dietary_preference character varying,
+  allergies text,
+  medical_history_notes text,
+  has_medical_history boolean DEFAULT false,
+  CONSTRAINT customer_profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT customer_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+
+CREATE TABLE public.delivery_batches (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  assigned_rider_id uuid,
+  delivery_date date NOT NULL,
+  total_distance_km numeric,
+  expected_payout numeric,
+  status text DEFAULT 'PENDING'::text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT delivery_batches_pkey PRIMARY KEY (id),
+  CONSTRAINT delivery_batches_assigned_rider_id_fkey FOREIGN KEY (assigned_rider_id) REFERENCES public.rider_profiles(id)
+);
+
+CREATE TABLE public.delivery_orders (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  customer_profile_id uuid,
+  assigned_rider_id uuid,
+  meal_category_id uuid,
+  delivery_address_id uuid,
+  delivery_date date NOT NULL,
+  status text DEFAULT 'ASSIGNED'::text CHECK (status = ANY (ARRAY['ORDER_CREATED'::text, 'MEAL_PREPARED'::text, 'ASSIGNED'::text, 'PICKED'::text, 'OUT_FOR_DELIVERY'::text, 'ON_THE_WAY'::text, 'REACHING_TO_LOCATION'::text, 'DELIVERED'::text, 'FAILED'::text])),
+  payout_amount numeric DEFAULT 0,
+  pickup_marked_at timestamp with time zone,
+  delivered_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  batch_id uuid,
+  route_sequence integer,
+  CONSTRAINT delivery_orders_pkey PRIMARY KEY (id),
+  CONSTRAINT delivery_orders_customer_profile_id_fkey FOREIGN KEY (customer_profile_id) REFERENCES public.customer_profiles(id),
+  CONSTRAINT delivery_orders_assigned_rider_id_fkey FOREIGN KEY (assigned_rider_id) REFERENCES public.rider_profiles(id),
+  CONSTRAINT delivery_orders_meal_category_id_fkey FOREIGN KEY (meal_category_id) REFERENCES public.meal_categories(id),
+  CONSTRAINT delivery_orders_delivery_address_id_fkey FOREIGN KEY (delivery_address_id) REFERENCES public.addresses(id),
+  CONSTRAINT delivery_orders_batch_id_fkey FOREIGN KEY (batch_id) REFERENCES public.delivery_batches(id)
+);
+
+CREATE TABLE public.delivery_status_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  delivery_order_id uuid,
+  status text NOT NULL,
+  note text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT delivery_status_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT delivery_status_logs_delivery_order_id_fkey FOREIGN KEY (delivery_order_id) REFERENCES public.delivery_orders(id)
+);
+
+CREATE TABLE public.kitchens (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL DEFAULT 'Main Kitchen'::text,
+  address_text text,
+  lat numeric NOT NULL,
+  lng numeric NOT NULL,
+  is_active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT kitchens_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.meal_categories (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code character varying NOT NULL UNIQUE,
+  name character varying NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT meal_categories_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.medical_documents (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  customer_profile_id uuid NOT NULL,
+  file_name text NOT NULL,
+  storage_path text NOT NULL,
+  file_size_bytes integer,
+  uploaded_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT medical_documents_pkey PRIMARY KEY (id),
+  CONSTRAINT med_docs_profile_fkey FOREIGN KEY (customer_profile_id) REFERENCES public.customer_profiles(id)
+);
+
+CREATE TABLE public.payments (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  customer_profile_id uuid,
+  subscription_id uuid,
+  payment_method character varying NOT NULL,
+  amount numeric NOT NULL,
+  status character varying DEFAULT 'PENDING'::character varying,
+  paid_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT payments_pkey PRIMARY KEY (id),
+  CONSTRAINT payments_customer_profile_id_fkey FOREIGN KEY (customer_profile_id) REFERENCES public.customer_profiles(id),
+  CONSTRAINT payments_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES public.subscriptions(id)
+);
+
+CREATE TABLE public.products (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  sku character varying UNIQUE,
+  name character varying NOT NULL,
+  description text,
+  category character varying,
+  original_price numeric NOT NULL,
+  sale_price numeric,
+  is_active boolean DEFAULT true,
+  in_stock boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  image_urls ARRAY DEFAULT '{}'::text[],
+  CONSTRAINT products_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.razorpay_transactions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  payment_id uuid UNIQUE,
+  razorpay_order_id character varying UNIQUE,
+  razorpay_payment_id character varying UNIQUE,
+  razorpay_signature text,
+  gateway_status character varying NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT razorpay_transactions_pkey PRIMARY KEY (id),
+  CONSTRAINT razorpay_transactions_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES public.payments(id)
+);
+
+CREATE TABLE public.rider_live_locations (
+  rider_id uuid NOT NULL,
+  lat numeric NOT NULL,
+  lng numeric NOT NULL,
+  updated_at timestamp with time zone DEFAULT now(),
+  tracker_session_id text,
+  CONSTRAINT rider_live_locations_pkey PRIMARY KEY (rider_id),
+  CONSTRAINT rider_live_locations_rider_id_fkey FOREIGN KEY (rider_id) REFERENCES public.rider_profiles(id)
+);
+
+CREATE TABLE public.rider_monthly_summaries (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  rider_id uuid NOT NULL,
+  month integer NOT NULL CHECK (month >= 1 AND month <= 12),
+  year integer NOT NULL,
+  opening_balance numeric NOT NULL DEFAULT 0,
+  total_distance_km numeric NOT NULL DEFAULT 0,
+  total_earnings numeric NOT NULL DEFAULT 0,
+  total_withdrawn numeric NOT NULL DEFAULT 0,
+  net_payable numeric NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'OPEN'::text CHECK (status = ANY (ARRAY['OPEN'::text, 'LOCKED'::text, 'SETTLED'::text])),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT rider_monthly_summaries_pkey PRIMARY KEY (id),
+  CONSTRAINT rider_monthly_summaries_rider_id_fkey FOREIGN KEY (rider_id) REFERENCES public.rider_profiles(id)
+);
+
+CREATE TABLE public.rider_payouts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  rider_id uuid NOT NULL,
+  summary_id uuid NOT NULL,
+  amount_withdrawn numeric NOT NULL,
+  balance_before numeric NOT NULL,
+  balance_after numeric NOT NULL,
+  payment_date timestamp with time zone DEFAULT now(),
+  payment_mode character varying DEFAULT 'Online'::character varying,
+  remarks text,
+  created_by uuid,
+  CONSTRAINT rider_payouts_pkey PRIMARY KEY (id),
+  CONSTRAINT rider_payouts_rider_id_fkey FOREIGN KEY (rider_id) REFERENCES public.rider_profiles(id),
+  CONSTRAINT rider_payouts_summary_id_fkey FOREIGN KEY (summary_id) REFERENCES public.rider_monthly_summaries(id),
+  CONSTRAINT rider_payouts_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
+);
+
+CREATE TABLE public.rider_profiles (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid UNIQUE,
+  employee_code character varying UNIQUE,
+  joining_date date,
+  emergency_contact character varying,
+  is_active boolean DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  is_online boolean DEFAULT false,
+  last_online_at timestamp with time zone,
+  last_offline_at timestamp with time zone,
+  CONSTRAINT rider_profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT rider_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+
+CREATE TABLE public.rider_service_areas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  area_name character varying NOT NULL,
+  pincode character varying NOT NULL UNIQUE,
+  rider_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT rider_service_areas_pkey PRIMARY KEY (id),
+  CONSTRAINT rider_service_areas_rider_id_fkey FOREIGN KEY (rider_id) REFERENCES public.rider_profiles(id)
+);
+
+CREATE TABLE public.roles (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code character varying NOT NULL UNIQUE,
+  name character varying NOT NULL,
+  description text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT roles_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.subscription_daily_preferences (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  subscription_id uuid NOT NULL,
+  customer_profile_id uuid NOT NULL,
+  preference_date date NOT NULL,
+  meal_category_id uuid,
+  delivery_address_id uuid,
+  is_paused boolean DEFAULT false,
+  pause_credit_used boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT subscription_daily_preferences_pkey PRIMARY KEY (id),
+  CONSTRAINT sub_daily_prefs_sub_fkey FOREIGN KEY (subscription_id) REFERENCES public.subscriptions(id),
+  CONSTRAINT sub_daily_prefs_cust_fkey FOREIGN KEY (customer_profile_id) REFERENCES public.customer_profiles(id),
+  CONSTRAINT sub_daily_prefs_meal_fkey FOREIGN KEY (meal_category_id) REFERENCES public.meal_categories(id),
+  CONSTRAINT sub_daily_prefs_addr_fkey FOREIGN KEY (delivery_address_id) REFERENCES public.addresses(id)
+);
+
+CREATE TABLE public.subscription_plans (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code character varying NOT NULL UNIQUE,
+  name character varying NOT NULL,
+  duration_days integer NOT NULL,
+  pause_credits integer NOT NULL,
+  price numeric NOT NULL,
+  currency character varying DEFAULT 'INR'::character varying,
+  is_active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  base_price numeric,
+  tax_amount numeric,
+  recommended boolean DEFAULT false,
+  CONSTRAINT subscription_plans_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.subscriptions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  customer_profile_id uuid,
+  plan_id uuid,
+  subscription_code character varying UNIQUE,
+  starts_on date,
+  ends_on date,
+  effective_end_on date,
+  status character varying DEFAULT 'PENDING'::character varying,
+  total_days integer,
+  consumed_days integer DEFAULT 0,
+  pause_credits_total integer,
+  pause_credits_used integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
+  CONSTRAINT subscriptions_customer_profile_id_fkey FOREIGN KEY (customer_profile_id) REFERENCES public.customer_profiles(id),
+  CONSTRAINT subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.subscription_plans(id)
+);
+
+CREATE TABLE public.system_settings (
+  id text NOT NULL DEFAULT 'global'::text,
+  rider_payout_per_km numeric NOT NULL DEFAULT 16.00,
+  default_dispatch_time time without time zone NOT NULL DEFAULT '17:15:00'::time without time zone,
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT system_settings_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.users (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  auth_user_id uuid UNIQUE,
+  role_id uuid,
+  full_name character varying NOT NULL,
+  email character varying NOT NULL UNIQUE,
+  mobile character varying UNIQUE,
+  avatar_url text,
+  is_email_verified boolean DEFAULT false,
+  is_active boolean DEFAULT true,
+  force_password_change boolean DEFAULT false,
+  last_login_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  created_by uuid,
+  updated_by uuid,
+  CONSTRAINT users_pkey PRIMARY KEY (id),
+  CONSTRAINT users_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id),
+  CONSTRAINT users_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id),
+  CONSTRAINT users_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id),
+  CONSTRAINT users_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id)
+);

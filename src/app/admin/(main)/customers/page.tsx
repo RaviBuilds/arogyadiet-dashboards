@@ -41,11 +41,30 @@ export default async function CustomersPage() {
       if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
     }
 
-    // Find Active Plan
-    const activeSub = customer.subscriptions?.find(
-      (sub: any) => sub.status === "ACTIVE" || sub.status === "PENDING",
+    // Determine status and active plan name with priority: Active > Pending > Stopped > Expired > No Plan
+    const activeSub = customer.subscriptions?.find((s: any) => s.status === "ACTIVE");
+    const pendingSub = customer.subscriptions?.find((s: any) => s.status === "PENDING");
+    const stoppedSub = customer.subscriptions?.find(
+      (s: any) => s.status === "STOPPED" || s.status === "CANCELLED",
     );
-    const activePlanName = activeSub?.subscription_plans?.name || null;
+    const expiredSub = customer.subscriptions?.find((s: any) => s.status === "EXPIRED");
+
+    let displayStatus: string;
+    let activePlanName: string | null = null;
+
+    if (activeSub) {
+      displayStatus = "Active";
+      activePlanName = activeSub.subscription_plans?.name || "Custom Plan";
+    } else if (pendingSub) {
+      displayStatus = "Pending";
+      activePlanName = pendingSub.subscription_plans?.name || "Custom Plan";
+    } else if (stoppedSub) {
+      displayStatus = "Stopped";
+    } else if (expiredSub) {
+      displayStatus = "Expired";
+    } else {
+      displayStatus = "No Plan";
+    }
 
     return {
       id: customer.id,
@@ -55,7 +74,7 @@ export default async function CustomersPage() {
       mobile: customer.users?.mobile || "N/A",
       dietary_preference: customer.dietary_preference || "N/A",
       primary_pincode: primaryAddress?.pincode || "N/A",
-      status: activePlanName ? "Active" : "Expired",
+      status: displayStatus,
       gender: customer.gender || "N/A",
       dateOfBirth: customer.date_of_birth || "",
       age: age,
@@ -69,7 +88,7 @@ export default async function CustomersPage() {
     .from("subscriptions")
     .select(
       `
-      id, starts_on, effective_end_on, ends_on, total_days, pause_credits_total, pause_credits_used,
+      id, starts_on, effective_end_on, ends_on, total_days, pause_credits_total, pause_credits_used, status,
       customer_profiles ( users ( full_name, email ) ),
       subscription_plans ( name )
     `,
@@ -77,7 +96,7 @@ export default async function CustomersPage() {
     .eq("status", "ACTIVE")
     .order("starts_on", { ascending: false });
 
-  const activeSubs = (rawActiveSubs || []).map((sub: any) => {
+  const mapSubRow = (sub: any) => {
     const profile = Array.isArray(sub.customer_profiles)
       ? sub.customer_profiles[0]
       : sub.customer_profiles;
@@ -88,14 +107,39 @@ export default async function CustomersPage() {
       id: sub.id,
       customer_name: user?.full_name || "N/A",
       email: user?.email || "N/A",
-      plan_name: sub.subscription_plans?.name || "N/A",
+      plan_name: sub.subscription_plans?.name || "Custom Plan",
       total_days: sub.total_days || 0,
       starts_on: sub.starts_on,
       ends_on: sub.effective_end_on || sub.ends_on,
       pause_credits_total: sub.pause_credits_total || 0,
       pause_credits_used: sub.pause_credits_used || 0,
+      status: sub.status as string,
     };
-  });
+  };
+
+  const activeSubs = (rawActiveSubs || []).map(mapSubRow);
+
+  const subSelectFields = `
+    id, starts_on, effective_end_on, ends_on, total_days, pause_credits_total, pause_credits_used, status,
+    customer_profiles ( users ( full_name, email ) ),
+    subscription_plans ( name )
+  `;
+
+  const { data: rawPendingSubs } = await supabaseAdmin
+    .from("subscriptions")
+    .select(subSelectFields)
+    .eq("status", "PENDING")
+    .order("starts_on", { ascending: true });
+
+  const pendingSubs = (rawPendingSubs || []).map(mapSubRow);
+
+  const { data: rawStoppedSubs } = await supabaseAdmin
+    .from("subscriptions")
+    .select(subSelectFields)
+    .in("status", ["STOPPED", "CANCELLED", "EXPIRED"])
+    .order("ends_on", { ascending: false });
+
+  const stoppedSubs = (rawStoppedSubs || []).map(mapSubRow);
 
   return (
     <div className="space-y-6 flex flex-col">
@@ -108,6 +152,8 @@ export default async function CustomersPage() {
       <CustomerDashboard
         customers={customers}
         activeSubscriptions={activeSubs}
+        pendingSubscriptions={pendingSubs}
+        stoppedSubscriptions={stoppedSubs}
       />
     </div>
   );

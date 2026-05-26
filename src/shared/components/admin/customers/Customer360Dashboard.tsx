@@ -42,6 +42,14 @@ import { AdminMedicalUploadModal } from "./AdminMedicalUploadModal";
 
 import { Edit, Loader2, Trash2, Eye, FileText } from "lucide-react";
 import { format, isValid } from "date-fns";
+import {
+  AdminAddSubscriptionForm,
+  type InitialSubscriptionData,
+} from "./AdminAddSubscriptionForm";
+import {
+  AdminCouponsTab,
+  type CouponRow,
+} from "./AdminCouponsTab";
 
 interface CustomerProfile {
   userId: string;
@@ -66,8 +74,12 @@ interface CustomerProfile {
 
 export function Customer360Dashboard({
   customer,
+  initialSubscriptionData,
+  initialCoupons,
 }: {
   customer: CustomerProfile;
+  initialSubscriptionData: InitialSubscriptionData;
+  initialCoupons: CouponRow[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -154,9 +166,10 @@ export function Customer360Dashboard({
       <AdminSubmenu
         tabs={[
           "Profile & Medical",
-          "Subscriptions & Pauses",
+          "Add Subscription",
           "Addresses",
           "Billing",
+          "Coupons",
         ]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -322,11 +335,11 @@ export function Customer360Dashboard({
           </div>
         )}
 
-        {/* ... OTHER TABS ... */}
-        {activeTab === "Subscriptions & Pauses" && (
-          <div className="p-8 text-center text-muted-foreground border border-dashed rounded-xl">
-            Subscriptions Module coming soon...
-          </div>
+        {activeTab === "Add Subscription" && (
+          <AdminAddSubscriptionForm
+            customerProfileId={customer.id}
+            initialData={initialSubscriptionData}
+          />
         )}
 
         {activeTab === "Addresses" && (
@@ -339,6 +352,13 @@ export function Customer360Dashboard({
           <div className="p-8 text-center text-muted-foreground border border-dashed rounded-xl">
             Billing Module coming soon...
           </div>
+        )}
+
+        {activeTab === "Coupons" && (
+          <AdminCouponsTab
+            customerProfileId={customer.id}
+            initialCoupons={initialCoupons}
+          />
         )}
       </div>
 
