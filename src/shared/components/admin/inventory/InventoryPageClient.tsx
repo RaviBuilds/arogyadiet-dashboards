@@ -2,125 +2,42 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { ColumnDef } from "@tanstack/react-table";
-import { Loader2, Pencil, Plus } from "lucide-react";
+import { Eye, EyeOff, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
+  adminDeleteProduct,
+  adminToggleProductVisibility,
   adminUpsertProduct,
   AdminInventoryProduct,
 } from "@/actions/admin-actions/inventoryActions";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
-import { StatusBadge } from "@/shared/components/admin/core/StatusBadge";
 import { DataTable } from "@/shared/components/ui/data-table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/shared/components/ui/alert-dialog";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
+import { Switch } from "@/shared/components/ui/switch";
 import { Textarea } from "@/shared/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
+  SheetTrigger,
 } from "@/shared/components/ui/sheet";
-
-const productFormSchema = z
-  .object({
-    id: z.string().uuid().optional(),
-    name: z.string().min(1, "Name is required"),
-    sku: z.string().min(1, "SKU is required"),
-    category: z.string().optional(),
-    originalPrice: z.string().min(1, "Original price is required"),
-    salePrice: z.string().optional(),
-    stockQuantity: z.string().min(1, "Stock quantity is required"),
-    taxPercent: z.string().optional(),
-    shortDescription: z.string().optional(),
-    description: z.string().optional(),
-    imageUrls: z.string().optional(),
-  })
-  .superRefine((data, ctx) => {
-    const originalPrice = Number(data.originalPrice);
-    if (Number.isNaN(originalPrice) || originalPrice < 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Original price must be 0 or greater",
-        path: ["originalPrice"],
-      });
-    }
-
-    const stockQuantity = Number(data.stockQuantity);
-    if (
-      Number.isNaN(stockQuantity) ||
-      stockQuantity < 0 ||
-      !Number.isInteger(stockQuantity)
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Stock quantity must be a whole number of 0 or greater",
-        path: ["stockQuantity"],
-      });
-    }
-
-    if (data.salePrice?.trim()) {
-      const salePrice = Number(data.salePrice);
-      if (Number.isNaN(salePrice) || salePrice < 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Sale price must be 0 or greater",
-          path: ["salePrice"],
-        });
-      }
-    }
-
-    if (data.taxPercent?.trim()) {
-      const taxPercent = Number(data.taxPercent);
-      if (Number.isNaN(taxPercent) || taxPercent < 0 || taxPercent > 100) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Tax percent must be between 0 and 100",
-          path: ["taxPercent"],
-        });
-      }
-    }
-  });
-
-type ProductFormValues = z.infer<typeof productFormSchema>;
-
-const emptyFormValues: ProductFormValues = {
-  name: "",
-  sku: "",
-  category: "",
-  originalPrice: "0",
-  salePrice: "",
-  stockQuantity: "0",
-  taxPercent: "",
-  shortDescription: "",
-  description: "",
-  imageUrls: "",
-};
-
-function productToFormValues(product: AdminInventoryProduct): ProductFormValues {
-  return {
-    id: product.id,
-    name: product.name,
-    sku: product.sku ?? "",
-    category: product.category ?? "",
-    originalPrice: String(product.original_price),
-    salePrice:
-      typeof product.sale_price === "number" ? String(product.sale_price) : "",
-    stockQuantity: String(product.stock_quantity ?? 0),
-    taxPercent:
-      typeof product.tax_percent === "number" ? String(product.tax_percent) : "",
-    shortDescription: product.short_description ?? "",
-    description: product.description ?? "",
-    imageUrls: (product.image_urls ?? []).join(", "),
-  };
-}
 
 interface InventoryPageClientProps {
   products: AdminInventoryProduct[];
@@ -134,51 +51,78 @@ export default function InventoryPageClient({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingProduct, setEditingProduct] =
     useState<AdminInventoryProduct | null>(null);
-
-  const form = useForm<ProductFormValues>({
-    resolver: zodResolver(productFormSchema),
-    defaultValues: emptyFormValues,
-  });
-
-  const openCreateForm = () => {
-    setEditingProduct(null);
-    form.reset(emptyFormValues);
-    setSheetOpen(true);
-  };
-
-  const openEditForm = (product: AdminInventoryProduct) => {
-    setEditingProduct(product);
-    form.reset(productToFormValues(product));
-    setSheetOpen(true);
-  };
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleSheetOpenChange = (open: boolean) => {
     setSheetOpen(open);
     if (!open) {
       setEditingProduct(null);
-      form.reset(emptyFormValues);
     }
   };
 
-  const onSubmit = (values: ProductFormValues) => {
+  const openCreateSheet = () => {
+    setEditingProduct(null);
+  };
+
+  const openEditSheet = (product: AdminInventoryProduct) => {
+    setEditingProduct(product);
+  };
+
+  const handleToggleVisibility = (product: AdminInventoryProduct) => {
+    setTogglingId(product.id);
+    const toastId = toast.loading("Updating product visibility...");
+
     startTransition(async () => {
-      const result = await adminUpsertProduct({
-        id: values.id,
-        name: values.name,
-        sku: values.sku,
-        category: values.category,
-        originalPrice: Number(values.originalPrice),
-        salePrice: values.salePrice?.trim()
-          ? Number(values.salePrice)
-          : null,
-        stockQuantity: Number(values.stockQuantity),
-        taxPercent: values.taxPercent?.trim()
-          ? Number(values.taxPercent)
-          : null,
-        shortDescription: values.shortDescription,
-        description: values.description,
-        imageUrls: values.imageUrls,
-      });
+      const result = await adminToggleProductVisibility(
+        product.id,
+        product.is_active,
+      );
+
+      if (result.success) {
+        toast.success(
+          product.is_active
+            ? "Product hidden from shop."
+            : "Product is now visible in shop.",
+          { id: toastId },
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "Failed to update product visibility.", {
+          id: toastId,
+        });
+      }
+
+      setTogglingId(null);
+    });
+  };
+
+  const handleDeleteProduct = (productId: string) => {
+    setDeletingId(productId);
+    const toastId = toast.loading("Deleting product...");
+
+    startTransition(async () => {
+      const result = await adminDeleteProduct(productId);
+
+      if (result.success) {
+        toast.success("Product deleted successfully.", { id: toastId });
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "Failed to delete product.", {
+          id: toastId,
+        });
+      }
+
+      setDeletingId(null);
+    });
+  };
+
+  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    startTransition(async () => {
+      const formData = new FormData(event.currentTarget);
+      const result = await adminUpsertProduct(formData);
 
       if (result.success) {
         toast.success(
@@ -249,118 +193,213 @@ export default function InventoryPageClient({
       {
         accessorKey: "is_active",
         header: "Status",
-        cell: ({ row }) => (
-          <StatusBadge
-            status={row.original.is_active ? "Active" : "Inactive"}
-          />
-        ),
+        cell: ({ row }) => {
+          const product = row.original;
+          const isToggling = togglingId === product.id;
+
+          return (
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={product.is_active}
+                disabled={isToggling || isPending}
+                onCheckedChange={() => handleToggleVisibility(product)}
+                aria-label={
+                  product.is_active
+                    ? "Hide product from shop"
+                    : "Show product in shop"
+                }
+              />
+              <div className="flex items-center gap-1.5 text-sm">
+                {isToggling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                ) : product.is_active ? (
+                  <Eye className="h-3.5 w-3.5 text-emerald-600" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+                <span
+                  className={
+                    product.is_active
+                      ? "font-medium text-emerald-600"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {product.is_active ? "Active" : "Inactive"}
+                </span>
+              </div>
+            </div>
+          );
+        },
       },
       {
         id: "actions",
         header: "Actions",
-        cell: ({ row }) => (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => openEditForm(row.original)}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            Edit
-          </Button>
-        ),
+        cell: ({ row }) => {
+          const product = row.original;
+          const isDeleting = deletingId === product.id;
+
+          return (
+            <div className="flex items-center gap-2">
+              <SheetTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onPointerDown={() => openEditSheet(product)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
+              </SheetTrigger>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isDeleting || isPending}
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    Delete
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete Product</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete this product?
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={isDeleting}>
+                      Cancel
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      disabled={isDeleting}
+                      onClick={() => handleDeleteProduct(product.id)}
+                    >
+                      {isDeleting ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Deleting...
+                        </>
+                      ) : (
+                        "Delete"
+                      )}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          );
+        },
       },
     ],
-    [],
+    [isPending, togglingId, deletingId],
   );
 
   return (
-    <div className="space-y-6">
-      <AdminPageHeader
-        title="Inventory"
-        description="Manage shop product catalog, stock levels, and availability."
-        action={
-          <Button type="button" onClick={openCreateForm}>
-            <Plus className="h-4 w-4" />
-            Add New Product
-          </Button>
-        }
-      />
-
-      <DataTable
-        columns={columns}
-        data={products}
-        filterColumn="name"
-        filterPlaceholder="Filter products..."
-      />
-
+    <>
       <Sheet open={sheetOpen} onOpenChange={handleSheetOpenChange}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
+        <div className="space-y-6">
+          <AdminPageHeader
+            title="Inventory"
+            description="Manage shop product catalog, stock levels, and availability."
+            action={
+              <SheetTrigger asChild>
+                <Button type="button" onPointerDown={openCreateSheet}>
+                  <Plus className="h-4 w-4" />
+                  Add New Product
+                </Button>
+              </SheetTrigger>
+            }
+          />
+
+          <DataTable
+            columns={columns}
+            data={products}
+            filterColumn="name"
+            filterPlaceholder="Filter products..."
+          />
+        </div>
+
+        <SheetContent
+          side="right"
+          className="w-[400px] sm:max-w-[600px] overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>
               {editingProduct ? "Edit Product" : "Add New Product"}
             </SheetTitle>
-            <SheetDescription>
-              {editingProduct
-                ? "Update product details and save changes."
-                : "Fill in the details below to add a new product."}
-            </SheetDescription>
           </SheetHeader>
 
           <form
-            onSubmit={form.handleSubmit(onSubmit)}
+            key={editingProduct?.id ?? "new-product"}
+            onSubmit={handleFormSubmit}
             className="flex flex-1 flex-col gap-4 px-4 pb-4"
           >
+            {editingProduct ? (
+              <input type="hidden" name="id" value={editingProduct.id} />
+            ) : null}
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="name">Name</Label>
-                <Input id="name" {...form.register("name")} />
-                {form.formState.errors.name ? (
-                  <p className="text-sm text-destructive">
-                    {form.formState.errors.name.message}
-                  </p>
-                ) : null}
+                <Input
+                  id="name"
+                  name="name"
+                  defaultValue={editingProduct?.name ?? ""}
+                  required
+                />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="sku">SKU</Label>
-                <Input id="sku" {...form.register("sku")} />
-                {form.formState.errors.sku ? (
-                  <p className="text-sm text-destructive">
-                    {form.formState.errors.sku.message}
-                  </p>
-                ) : null}
+                <Input
+                  id="sku"
+                  name="sku"
+                  defaultValue={editingProduct?.sku ?? ""}
+                  required
+                />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="category">Category</Label>
-                <Input id="category" {...form.register("category")} />
+                <Input
+                  id="category"
+                  name="category"
+                  defaultValue={editingProduct?.category ?? ""}
+                />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="originalPrice">Original Price</Label>
                 <Input
                   id="originalPrice"
+                  name="originalPrice"
                   type="number"
                   min="0"
                   step="0.01"
-                  {...form.register("originalPrice")}
+                  defaultValue={editingProduct?.original_price ?? 0}
+                  required
                 />
-                {form.formState.errors.originalPrice ? (
-                  <p className="text-sm text-destructive">
-                    {form.formState.errors.originalPrice.message}
-                  </p>
-                ) : null}
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="salePrice">Sale Price</Label>
                 <Input
                   id="salePrice"
+                  name="salePrice"
                   type="number"
                   min="0"
                   step="0.01"
-                  {...form.register("salePrice")}
+                  defaultValue={editingProduct?.sale_price ?? ""}
                 />
               </div>
 
@@ -368,27 +407,25 @@ export default function InventoryPageClient({
                 <Label htmlFor="stockQuantity">Stock Quantity</Label>
                 <Input
                   id="stockQuantity"
+                  name="stockQuantity"
                   type="number"
                   min="0"
                   step="1"
-                  {...form.register("stockQuantity")}
+                  defaultValue={editingProduct?.stock_quantity ?? 0}
+                  required
                 />
-                {form.formState.errors.stockQuantity ? (
-                  <p className="text-sm text-destructive">
-                    {form.formState.errors.stockQuantity.message}
-                  </p>
-                ) : null}
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="taxPercent">Tax Percent</Label>
                 <Input
                   id="taxPercent"
+                  name="taxPercent"
                   type="number"
                   min="0"
                   max="100"
                   step="0.01"
-                  {...form.register("taxPercent")}
+                  defaultValue={editingProduct?.tax_percent ?? ""}
                 />
               </div>
 
@@ -396,8 +433,9 @@ export default function InventoryPageClient({
                 <Label htmlFor="shortDescription">Short Description</Label>
                 <Textarea
                   id="shortDescription"
+                  name="shortDescription"
                   rows={3}
-                  {...form.register("shortDescription")}
+                  defaultValue={editingProduct?.short_description ?? ""}
                 />
               </div>
 
@@ -405,8 +443,9 @@ export default function InventoryPageClient({
                 <Label htmlFor="description">Description</Label>
                 <Textarea
                   id="description"
+                  name="description"
                   rows={5}
-                  {...form.register("description")}
+                  defaultValue={editingProduct?.description ?? ""}
                 />
               </div>
 
@@ -414,11 +453,37 @@ export default function InventoryPageClient({
                 <Label htmlFor="imageUrls">Image URLs</Label>
                 <Input
                   id="imageUrls"
+                  name="imageUrls"
                   placeholder="https://example.com/image-1.jpg, https://example.com/image-2.jpg"
-                  {...form.register("imageUrls")}
+                  defaultValue={(editingProduct?.image_urls ?? []).join(", ")}
                 />
                 <p className="text-xs text-muted-foreground">
                   Enter comma-separated image URLs for the product gallery.
+                </p>
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="image">Upload Image</Label>
+                {editingProduct?.image_urls?.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {editingProduct.image_urls.map((url) => (
+                      <img
+                        key={url}
+                        src={url}
+                        alt={editingProduct.name}
+                        className="h-16 w-16 rounded-md border object-cover"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                <Input
+                  id="image"
+                  name="image"
+                  type="file"
+                  accept="image/*"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Upload a local image to append to the product gallery.
                 </p>
               </div>
             </div>
@@ -440,6 +505,6 @@ export default function InventoryPageClient({
           </form>
         </SheetContent>
       </Sheet>
-    </div>
+    </>
   );
 }
