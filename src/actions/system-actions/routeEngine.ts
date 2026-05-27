@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { resolveAddressCoordinates } from "@/lib/geocoding";
 
 // Initialize the Admin Client to bypass RLS for system tasks
 const supabaseAdmin = createClient(
@@ -7,7 +8,69 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
+const RE_ROUTABLE_STATUSES = ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"];
+
+async function resetPendingRoutingForDate(targetDate: string) {
+  const { data: resetOrders, error: resetError } = await supabaseAdmin
+    .from("delivery_orders")
+    .update({
+      batch_id: null,
+      assigned_rider_id: null,
+      route_sequence: null,
+      payout_amount: 0,
+      status: "ORDER_CREATED",
+    })
+    .eq("delivery_date", targetDate)
+    .in("status", RE_ROUTABLE_STATUSES)
+    .select("id");
+
+  if (resetError) {
+    return { error: resetError.message, ordersReset: 0, batchesRemoved: 0 };
+  }
+
+  const { data: activeBatchRefs } = await supabaseAdmin
+    .from("delivery_orders")
+    .select("batch_id")
+    .eq("delivery_date", targetDate)
+    .not("batch_id", "is", null);
+
+  const activeBatchIds = new Set(
+    activeBatchRefs?.map((order) => order.batch_id).filter(Boolean) ?? [],
+  );
+
+  const { data: pendingBatches } = await supabaseAdmin
+    .from("delivery_batches")
+    .select("id")
+    .eq("delivery_date", targetDate)
+    .eq("status", "PENDING");
+
+  const batchIdsToDelete = (pendingBatches ?? [])
+    .map((batch) => batch.id)
+    .filter((id) => !activeBatchIds.has(id));
+
+  if (batchIdsToDelete.length > 0) {
+    const { error: deleteError } = await supabaseAdmin
+      .from("delivery_batches")
+      .delete()
+      .in("id", batchIdsToDelete);
+
+    if (deleteError) {
+      return { error: deleteError.message, ordersReset: 0, batchesRemoved: 0 };
+    }
+  }
+
+  return {
+    ordersReset: resetOrders?.length ?? 0,
+    batchesRemoved: batchIdsToDelete.length,
+  };
+}
+
 export async function executeAutomatedDispatch(targetDate: string) {
+  const resetResult = await resetPendingRoutingForDate(targetDate);
+  if (resetResult.error) {
+    return { error: `Failed to reset existing routing: ${resetResult.error}` };
+  }
+
   // 1. Fetch Global Configuration using Admin Client
   const { data: settings } = await supabaseAdmin
     .from("system_settings")
@@ -32,10 +95,12 @@ export async function executeAutomatedDispatch(targetDate: string) {
       error: "Google Maps API Key is missing from environment variables.",
     };
 
-  // 2. Fetch all Pending Orders for the Target Date that have GPS coordinates
+  // 2. Fetch all pending orders for the target date (lat/lng optional; pincode fallback used)
   const { data: orders, error: ordersError } = await supabaseAdmin
     .from("delivery_orders")
-    .select(`id, delivery_address_id, addresses ( pincode, lat, lng )`)
+    .select(
+      `id, delivery_address_id, addresses!delivery_address_id ( id, pincode, lat, lng, city, state )`,
+    )
     .eq("delivery_date", targetDate)
     .eq("status", "ORDER_CREATED")
     .is("batch_id", null);
@@ -52,21 +117,60 @@ export async function executeAutomatedDispatch(targetDate: string) {
     serviceAreas?.map((sa) => [sa.pincode, sa.rider_id]),
   );
 
-  // Group valid orders by Rider
+  // Group valid orders by rider (use pincode geocoding when lat/lng are missing)
   const riderGroups = new Map<string, any[]>();
+  const pincodeCache = new Map<string, { lat: number; lng: number }>();
+  let geocodedFromPincode = 0;
+  let skippedNoCoords = 0;
+  let skippedNoRider = 0;
+
   for (const order of orders) {
     const address = Array.isArray(order.addresses)
       ? order.addresses[0]
       : order.addresses;
-    if (!address?.lat || !address?.lng) continue; // Skip orders without GPS
 
-    const riderId = pincodeToRiderMap.get(address.pincode);
-    if (riderId) {
-      if (!riderGroups.has(riderId)) riderGroups.set(riderId, []);
-      riderGroups
-        .get(riderId)!
-        .push({ id: order.id, lat: address.lat, lng: address.lng });
+    const resolved = await resolveAddressCoordinates(
+      address,
+      GOOGLE_API_KEY,
+      pincodeCache,
+    );
+    if (!resolved) {
+      skippedNoCoords++;
+      continue;
     }
+
+    if (resolved.usedPincodeFallback) {
+      geocodedFromPincode++;
+      if (address?.id) {
+        await supabaseAdmin
+          .from("addresses")
+          .update({
+            lat: resolved.coords.lat,
+            lng: resolved.coords.lng,
+          })
+          .eq("id", address.id)
+          .is("lat", null);
+      }
+    }
+
+    const riderId = pincodeToRiderMap.get(address?.pincode || "");
+    if (!riderId) {
+      skippedNoRider++;
+      continue;
+    }
+
+    if (!riderGroups.has(riderId)) riderGroups.set(riderId, []);
+    riderGroups.get(riderId)!.push({
+      id: order.id,
+      lat: resolved.coords.lat,
+      lng: resolved.coords.lng,
+    });
+  }
+
+  if (riderGroups.size === 0) {
+    return {
+      error: `No routable orders for ${targetDate}. ${skippedNoCoords} missing coordinates/pincode, ${skippedNoRider} without assigned rider for their pincode.`,
+    };
   }
 
   let batchesCreated = 0;
@@ -143,5 +247,14 @@ export async function executeAutomatedDispatch(targetDate: string) {
   return {
     success: true,
     message: `Routed ${batchesCreated} batches via Google Maps for ${targetDate}!`,
+    stats: {
+      totalOrders: orders.length,
+      batchesCreated,
+      batchesRemoved: resetResult.batchesRemoved,
+      ordersReset: resetResult.ordersReset,
+      geocodedFromPincode,
+      skippedNoCoords,
+      skippedNoRider,
+    },
   };
 }
