@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { createClient as createAdminClient, type SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/logger";
 
@@ -82,7 +82,7 @@ export async function getRoutingData() {
 }
 
 async function commitRouteChangesForDate(
-  supabaseAdmin: ReturnType<typeof createAdminClient>,
+  supabaseAdmin: SupabaseClient,
   targetDate: string,
   movesMap: Map<string, string | null | undefined>,
   ratePerKm: number,
@@ -127,7 +127,11 @@ async function commitRouteChangesForDate(
     let currentLat = baseLat;
     let currentLng = baseLng;
 
-    const orderUpdates = [];
+    const orderUpdates: {
+      id: string;
+      route_sequence: number;
+      payout_amount: number;
+    }[] = [];
 
     for (let index = 0; index < orderIds.length; index++) {
       const orderId = orderIds[index];
