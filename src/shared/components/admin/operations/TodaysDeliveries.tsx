@@ -17,6 +17,23 @@ import { DataSearchFilter } from "../core/DataSearchFilter";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
 
+const getISTDateString = (offsetDays = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+};
+
+const getDayLabel = (deliveryDate: string) => {
+  if (deliveryDate === getISTDateString()) return "Today";
+  if (deliveryDate === getISTDateString(1)) return "Tomorrow";
+  return deliveryDate;
+};
+
 export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -47,7 +64,8 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   // --- ACTIVE BATCHES LOGIC ---
   const batchSummary = useMemo(() => {
     const batches = new Map();
-    data.forEach(order => {
+    const todayStr = getISTDateString();
+    data.filter(order => order.delivery_date === todayStr).forEach(order => {
       const batchId = order.delivery_batches?.id || "UNBATCHED";
       if (!batches.has(batchId)) {
         batches.set(batchId, {
@@ -103,6 +121,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   const handleExportOrders = () => {
     if (filteredData.length === 0) return;
     const exportData = filteredData.map(row => ({
+      "Day": getDayLabel(row.delivery_date),
       "Customer Name": row.customer_profiles?.users?.full_name || "Unknown",
       "Meal Type": row.meal_categories?.name || "N/A",
       "Assigned Rider": row.rider_profiles?.users?.full_name || "Unassigned",
@@ -167,6 +186,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/10">
+              <TableHead>Day</TableHead>
               <TableHead>Customer</TableHead>
               <TableHead>Meal Type</TableHead>
               <TableHead>Assigned Rider</TableHead>
@@ -179,13 +199,27 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
           <TableBody>
             {filteredData.length === 0 ? (
                <TableRow>
-                 <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
-                   No deliveries scheduled for today matching your criteria.
+                 <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
+                   No deliveries scheduled for today or tomorrow matching your criteria.
                  </TableCell>
                </TableRow>
             ) : (
-              filteredData.map((order, i) => (
+              filteredData.map((order, i) => {
+                const dayLabel = getDayLabel(order.delivery_date);
+                return (
                 <TableRow key={order.id || i} className="hover:bg-muted/30">
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={`text-xs font-medium ${
+                        dayLabel === "Today"
+                          ? "border-primary/30 bg-primary/5 text-primary"
+                          : "border-blue-500/30 bg-blue-500/5 text-blue-600"
+                      }`}
+                    >
+                      {dayLabel}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="font-medium">{order.customer_profiles?.users?.full_name || "Unknown"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{order.meal_categories?.name || "N/A"}</TableCell>
                   <TableCell>{order.rider_profiles?.users?.full_name || "Unassigned"}</TableCell>
@@ -207,7 +241,8 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                     ₹{order.payout_amount || 0}
                   </TableCell>
                 </TableRow>
-              ))
+              );
+              })
             )}
           </TableBody>
         </Table>
