@@ -65,24 +65,34 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   const batchSummary = useMemo(() => {
     const batches = new Map();
     const todayStr = getISTDateString();
-    data.filter(order => order.delivery_date === todayStr).forEach(order => {
+    const tomorrowStr = getISTDateString(1);
+    const relevantDates = new Set([todayStr, tomorrowStr]);
+
+    data
+      .filter((order) => relevantDates.has(order.delivery_date))
+      .forEach((order) => {
       const batchId = order.delivery_batches?.id || "UNBATCHED";
-      if (!batches.has(batchId)) {
-        batches.set(batchId, {
+      const batchKey =
+        batchId === "UNBATCHED"
+          ? `UNBATCHED-${order.delivery_date}`
+          : batchId;
+      if (!batches.has(batchKey)) {
+        batches.set(batchKey, {
           id: batchId,
+          deliveryDate: order.delivery_date,
           status: order.delivery_batches?.status || "PENDING",
           distance: order.delivery_batches?.total_distance_km || 0,
           payout: order.delivery_batches?.expected_payout || 0,
           riderName: order.rider_profiles?.users?.full_name || "Unassigned",
           mealCount: 0,
-          addonCount: 0
+          addonCount: 0,
         });
       }
-      const b = batches.get(batchId);
+      const b = batches.get(batchKey);
       b.mealCount += 1;
       order.addon_orders?.forEach((ao: any) => {
         ao.addon_order_items?.forEach((item: any) => {
-          b.addonCount += (item.quantity || 1);
+          b.addonCount += item.quantity || 1;
         });
       });
     });
@@ -138,8 +148,10 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
 
   const handleExportBatches = () => {
     if (filteredBatchSummary.length === 0) return;
-    const exportData = filteredBatchSummary.map(b => ({
-      "Batch Number": b.id === "UNBATCHED" ? "Unbatched" : b.id.substring(0, 8).toUpperCase(),
+    const exportData = filteredBatchSummary.map((b) => ({
+      Day: getDayLabel(b.deliveryDate),
+      "Batch Number":
+        b.id === "UNBATCHED" ? "Unbatched" : b.id.substring(0, 8).toUpperCase(),
       "Meals Count": b.mealCount,
       "Shop Products Count": b.addonCount,
       "Distance (km)": Number(b.distance).toFixed(2),
@@ -273,6 +285,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/10">
+              <TableHead>Day</TableHead>
               <TableHead>Batch Number</TableHead>
               <TableHead>Meals Count</TableHead>
               <TableHead>Shop Products Count</TableHead>
@@ -306,13 +319,27 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
           <TableBody>
             {filteredBatchSummary.length === 0 ? (
                <TableRow>
-                 <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
+                 <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
                    No batches match your criteria.
                  </TableCell>
                </TableRow>
             ) : (
-              filteredBatchSummary.map((batch, i) => (
-                <TableRow key={batch.id || i} className="hover:bg-muted/30">
+              filteredBatchSummary.map((batch, i) => {
+                const dayLabel = getDayLabel(batch.deliveryDate);
+                return (
+                <TableRow key={`${batch.id}-${batch.deliveryDate}` || i} className="hover:bg-muted/30">
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={`text-xs font-medium ${
+                        dayLabel === "Today"
+                          ? "border-primary/30 bg-primary/5 text-primary"
+                          : "border-blue-500/30 bg-blue-500/5 text-blue-600"
+                      }`}
+                    >
+                      {dayLabel}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="font-mono font-medium">
                     {batch.id === "UNBATCHED" ? "Unbatched" : batch.id.substring(0, 8).toUpperCase()}
                   </TableCell>
@@ -331,7 +358,8 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                     <StatusBadge status={batch.status} variant="outline" />
                   </TableCell>
                 </TableRow>
-              ))
+              );
+              })
             )}
           </TableBody>
         </Table>

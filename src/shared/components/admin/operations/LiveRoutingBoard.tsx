@@ -34,12 +34,53 @@ import {
 } from "@/actions/admin-actions/routingActions";
 import { SectionHeader } from "../core/SectionHeader";
 
+const getISTDateString = (offsetDays = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+};
+
+const getDayLabel = (deliveryDate: string) => {
+  if (deliveryDate === getISTDateString()) return "Today";
+  if (deliveryDate === getISTDateString(1)) return "Tomorrow";
+  return deliveryDate;
+};
+
+const pickDefaultRiders = (orders: RoutingOrder[], riders: RoutingRider[]) => {
+  const riderOrderCounts = new Map<string, number>();
+  orders.forEach((order) => {
+    if (!order.assigned_rider_id) return;
+    riderOrderCounts.set(
+      order.assigned_rider_id,
+      (riderOrderCounts.get(order.assigned_rider_id) || 0) + 1,
+    );
+  });
+
+  const sortedRiderIds = [...riderOrderCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([riderId]) => riderId);
+
+  const riderOne = sortedRiderIds[0] || riders[0]?.id || "";
+  const riderTwo =
+    sortedRiderIds.find((id) => id !== riderOne) ||
+    riders.find((rider) => rider.id !== riderOne)?.id ||
+    "";
+
+  return { riderOne, riderTwo };
+};
+
 export interface RoutingOrder {
   id: string;
   customerName: string;
   pincode: string;
   mealType: string;
   status: string;
+  deliveryDate: string;
   assigned_rider_id: string;
 }
 
@@ -72,8 +113,9 @@ export default function LiveRoutingBoard() {
     setOrders(res.orders);
     setRiders(res.riders);
 
-    if (res.riders.length > 0) setRiderOneId(res.riders[0].id);
-    if (res.riders.length > 1) setRiderTwoId(res.riders[1].id);
+    const { riderOne, riderTwo } = pickDefaultRiders(res.orders, res.riders);
+    setRiderOneId(riderOne);
+    setRiderTwoId(riderTwo);
 
     setIsLoading(false);
   };
@@ -243,7 +285,8 @@ export default function LiveRoutingBoard() {
             className="mb-0"
           />
           <p className="text-sm text-muted-foreground mt-1 ml-8">
-            Compare two riders to drag and drop deliveries between them.
+            Compare two riders to drag and drop deliveries between them. Showing
+            today and tomorrow&apos;s routes.
           </p>
         </div>
 
@@ -372,6 +415,8 @@ function OrderCard({
   onDragStart: (e: React.DragEvent, id: string) => void;
   onDragEnd: (e: React.DragEvent) => void;
 }) {
+  const dayLabel = getDayLabel(order.deliveryDate);
+
   return (
     <div
       draggable
@@ -386,22 +431,34 @@ function OrderCard({
           <GripVertical className="h-4 w-4" />
         </div>
         <div className="flex-1 overflow-hidden">
-          <div className="flex justify-between items-start mb-1.5">
+          <div className="flex justify-between items-start mb-1.5 gap-2">
             <h4
               className="font-semibold text-sm truncate pr-2"
               title={order.customerName}
             >
               {order.customerName}
             </h4>
-            <Badge
-              variant="outline"
-              className={`text-[10px] h-5 whitespace-nowrap ${order.mealType.toUpperCase().includes("VEG") && !order.mealType.toUpperCase().includes("NON") ? "text-green-600 border-green-200 bg-green-50" : "text-red-600 border-red-200 bg-red-50"}`}
-            >
-              {order.mealType.toUpperCase().includes("VEG") &&
-              !order.mealType.toUpperCase().includes("NON")
-                ? "VEG"
-                : "NON-VEG"}
-            </Badge>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <Badge
+                variant="outline"
+                className={`text-[10px] h-5 whitespace-nowrap ${
+                  dayLabel === "Today"
+                    ? "border-primary/30 bg-primary/5 text-primary"
+                    : "border-blue-500/30 bg-blue-500/5 text-blue-600"
+                }`}
+              >
+                {dayLabel}
+              </Badge>
+              <Badge
+                variant="outline"
+                className={`text-[10px] h-5 whitespace-nowrap ${order.mealType.toUpperCase().includes("VEG") && !order.mealType.toUpperCase().includes("NON") ? "text-green-600 border-green-200 bg-green-50" : "text-red-600 border-red-200 bg-red-50"}`}
+              >
+                {order.mealType.toUpperCase().includes("VEG") &&
+                !order.mealType.toUpperCase().includes("NON")
+                  ? "VEG"
+                  : "NON-VEG"}
+              </Badge>
+            </div>
           </div>
 
           <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground mt-1">
