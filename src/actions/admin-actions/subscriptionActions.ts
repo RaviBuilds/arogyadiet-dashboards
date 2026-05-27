@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 
 export async function createSubscriptionPlan(data: { code: string; name: string; duration_days: number; pause_credits: number; base_price: number; tax_amount: number; is_active: boolean; }) {
@@ -18,6 +19,10 @@ export async function createSubscriptionPlan(data: { code: string; name: string;
       is_active: data.is_active,
     });
     if (error) throw error;
+    await logAdminAction("CREATE", "subscription_plan", data.code, {
+      name: data.name,
+      code: data.code,
+    });
     revalidatePath("/subscriptions");
     return { success: true };
   } catch (error: any) {
@@ -39,6 +44,7 @@ export async function updateSubscriptionPlan(planId: string, data: { name: strin
       is_active: data.is_active
     }).eq("id", planId);
     if (error) throw error;
+    await logAdminAction("UPDATE", "subscription_plan", planId, { name: data.name });
     revalidatePath("/subscriptions");
     return { success: true };
   } catch (error: any) {
@@ -54,6 +60,7 @@ export async function deleteSubscriptionPlan(planId: string) {
     if (activeSubs && activeSubs.length > 0) return { success: false, error: "Cannot delete: Plan has active subscribers." };
     const { error: deleteError } = await supabaseAdmin.from("subscription_plans").delete().eq("id", planId);
     if (deleteError) throw deleteError;
+    await logAdminAction("DELETE", "subscription_plan", planId, {});
     revalidatePath("/subscriptions");
     return { success: true };
   } catch (error: any) {
@@ -68,6 +75,9 @@ export async function setRecommendedPlan(planId: string) {
     if (planId && planId !== "NONE") {
       await supabaseAdmin.from("subscription_plans").update({ recommended: true }).eq("id", planId);
     }
+    await logAdminAction("UPDATE", "subscription_plan", planId || "none", {
+      recommended: planId && planId !== "NONE",
+    });
     revalidatePath("/subscriptions");
     return { success: true };
   } catch (error: any) {

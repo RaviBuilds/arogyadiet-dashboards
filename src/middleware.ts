@@ -104,6 +104,9 @@ export async function middleware(request: NextRequest) {
       if (currentSubdomain === "deliverypartner" && roleCode !== "RIDER") {
         return NextResponse.redirect(new URL("/unauthorized", request.url));
       }
+      if (currentSubdomain === "master" && roleCode !== "MASTER_ADMIN") {
+        return NextResponse.redirect(new URL("/unauthorized", request.url));
+      }
     }
   }
 

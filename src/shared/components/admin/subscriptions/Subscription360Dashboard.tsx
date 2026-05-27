@@ -36,12 +36,15 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
+  OctagonX,
+  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import {
   managePendingSubscription,
   updateActiveSubscriptionDates,
+  stopActiveSubscription,
 } from "@/actions/admin-actions/adminLifecycleActions";
 import { AdminPauseClient } from "@/shared/components/admin/subscriptions/AdminPauseClient";
 import { AdminMealPlannerClient } from "@/shared/components/admin/subscriptions/AdminMealPlannerClient";
@@ -102,6 +105,10 @@ export function Subscription360Dashboard({
     starts_on: "",
     pause_credits_total: 0,
   });
+
+  const [isStopModalOpen, setIsStopModalOpen] = useState(false);
+  const [stopConfirmText, setStopConfirmText] = useState("");
+  const STOP_CONFIRM_PHRASE = "STOP";
 
   const todayStr = format(new Date(), "yyyy-MM-dd");
 
@@ -180,6 +187,21 @@ export function Subscription360Dashboard({
         router.refresh();
       } else {
         toast.error(res.error);
+      }
+    });
+  };
+
+  const handleStopSubscription = () => {
+    if (stopConfirmText !== STOP_CONFIRM_PHRASE) return;
+    startTransition(async () => {
+      const res = await stopActiveSubscription(subscription.id);
+      if (res.success) {
+        toast.success("Subscription has been permanently stopped.");
+        setIsStopModalOpen(false);
+        setStopConfirmText("");
+        router.refresh();
+      } else {
+        toast.error(res.error ?? "Failed to stop subscription.");
       }
     });
   };
@@ -382,6 +404,65 @@ export function Subscription360Dashboard({
         {/* LIFECYCLE & HISTORY TAB */}
         {activeTab === "Lifecycle & History" && (
           <div className="space-y-8">
+
+            {/* ── ACTIVE SUBSCRIPTION STATUS SECTION ─────────────────────── */}
+            {subscription.status === "ACTIVE" && (
+              <div>
+                <h3 className="text-lg font-bold flex items-center gap-2 mb-4">
+                  <ShieldAlert className="h-5 w-5 text-red-500" /> Active Subscription Status
+                </h3>
+                <Card className="border-2 border-red-100 bg-red-50/20 shadow-sm">
+                  <CardContent className="p-6">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-green-100 text-green-800 border-green-200">
+                            ACTIVE
+                          </Badge>
+                          <span className="font-bold text-zinc-900">
+                            {subscription.subscription_plans?.name || "Custom Plan"}
+                          </span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Running from{" "}
+                          <span className="font-medium text-zinc-800">
+                            {subscription.starts_on
+                              ? format(new Date(subscription.starts_on), "MMM d, yyyy")
+                              : "N/A"}
+                          </span>{" "}
+                          through{" "}
+                          <span className="font-medium text-zinc-800">
+                            {subscription.effective_end_on
+                              ? format(new Date(subscription.effective_end_on), "MMM d, yyyy")
+                              : "N/A"}
+                          </span>
+                        </p>
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          setStopConfirmText("");
+                          setIsStopModalOpen(true);
+                        }}
+                        className="shrink-0 gap-2"
+                      >
+                        <OctagonX className="h-4 w-4" />
+                        Stop Subscription
+                      </Button>
+                    </div>
+                    <div className="mt-4 bg-red-100/60 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-800">
+                        <strong>Critical action:</strong> Stopping this subscription is permanent and irreversible.
+                        The subscription status will be set to <strong>STOPPED</strong> and cannot be reactivated.
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
             <div>
               <h3 className="text-lg font-bold flex items-center gap-2 mb-4">
                 <Clock className="h-5 w-5 text-amber-500" /> Pending & Queued
@@ -633,6 +714,97 @@ export function Subscription360Dashboard({
             >
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{" "}
               Save Updates
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* STOP ACTIVE SUBSCRIPTION MODAL */}
+      <Dialog
+        open={isStopModalOpen}
+        onOpenChange={(open) => {
+          if (!isPending) {
+            setIsStopModalOpen(open);
+            if (!open) setStopConfirmText("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[460px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <OctagonX className="h-5 w-5" /> Stop Active Subscription
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-5 py-2">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+              <ShieldAlert className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm font-bold text-red-800">
+                  This action is permanent and irreversible.
+                </p>
+                <p className="text-sm text-red-700">
+                  The subscription will be moved to <strong>STOPPED</strong>{" "}
+                  status immediately. It can <strong>never</strong> be returned
+                  to ACTIVE status again.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-zinc-50 border rounded-lg p-4 text-sm space-y-1">
+              <p className="text-zinc-600">You are stopping:</p>
+              <p className="font-bold text-zinc-900">
+                {subscription.subscription_plans?.name || "Custom Plan"}
+              </p>
+              <p className="text-zinc-600">
+                {subscription.starts_on
+                  ? format(new Date(subscription.starts_on), "MMM d, yyyy")
+                  : "N/A"}{" "}
+                →{" "}
+                {subscription.effective_end_on
+                  ? format(new Date(subscription.effective_end_on), "MMM d, yyyy")
+                  : "N/A"}
+              </p>
+            </div>
+
+            <div className="grid gap-2">
+              <Label className="font-medium text-zinc-700">
+                Type{" "}
+                <code className="bg-zinc-100 border border-zinc-200 px-1.5 py-0.5 rounded text-red-700 font-mono text-xs">
+                  {STOP_CONFIRM_PHRASE}
+                </code>{" "}
+                to confirm
+              </Label>
+              <Input
+                value={stopConfirmText}
+                onChange={(e) => setStopConfirmText(e.target.value.toUpperCase())}
+                placeholder={`Type ${STOP_CONFIRM_PHRASE} here`}
+                className="border-red-200 focus-visible:ring-red-400"
+                disabled={isPending}
+              />
+            </div>
+          </div>
+          <DialogFooter className="flex pt-4 border-t gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsStopModalOpen(false);
+                setStopConfirmText("");
+              }}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleStopSubscription}
+              disabled={stopConfirmText !== STOP_CONFIRM_PHRASE || isPending}
+            >
+              {isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <OctagonX className="mr-2 h-4 w-4" />
+              )}
+              Permanently Stop
             </Button>
           </DialogFooter>
         </DialogContent>

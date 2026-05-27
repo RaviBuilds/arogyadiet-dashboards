@@ -528,6 +528,63 @@ export async function validateCouponCode(code: string) {
   }
 }
 
+export async function updateAddonOrderDeliveryDate(
+  addonOrderId: string,
+  newDeliveryDate: string,
+) {
+  try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) throw new Error("Unauthorized");
+
+    const { data: order, error: fetchError } = await supabase
+      .from("addon_orders")
+      .select("id, status, delivery_order_id")
+      .eq("id", addonOrderId)
+      .single();
+
+    if (fetchError || !order) throw new Error("Order not found.");
+    if (order.status !== "PAID")
+      throw new Error("Only paid orders can be rescheduled.");
+    if (order.delivery_order_id)
+      throw new Error(
+        "This order has already been scheduled for delivery and cannot be changed.",
+      );
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split("T")[0];
+
+    if (newDeliveryDate < tomorrowStr)
+      throw new Error("Delivery date must be tomorrow or later.");
+
+    const { error: updateError } = await supabase
+      .from("addon_orders")
+      .update({ target_delivery_date: newDeliveryDate })
+      .eq("id", addonOrderId);
+
+    if (updateError) throw new Error(updateError.message);
+
+    const { revalidatePath } = await import("next/cache");
+    revalidatePath("/shop/orders");
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to update delivery date.",
+    };
+  }
+}
+
 export async function verifyAddonPayment(
   paymentId: string,
   razorpayResponse: {

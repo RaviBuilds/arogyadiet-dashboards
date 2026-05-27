@@ -23,7 +23,9 @@ export async function triggerSystemAutomation(automationName: string) {
         return { success: false, error: `API returned status: ${response.status}` };
       }
 
-      await logAdminAction("SYSTEM_AUTOMATION", "cron_scripts", automationName, { executed_url: dispatchUrl });
+      await logAdminAction("UPDATE", "system_automation", automationName, {
+        executed_url: dispatchUrl,
+      });
       return { success: true };
     }
 
@@ -47,7 +49,9 @@ export async function triggerSystemAutomation(automationName: string) {
     }
 
     // Log the successful execution
-    await logAdminAction("SYSTEM_AUTOMATION", "cron_scripts", automationName, { executed_rpc: rpcFunctionName });
+    await logAdminAction("UPDATE", "system_automation", automationName, {
+      executed_rpc: rpcFunctionName,
+    });
 
     return { success: true };
 

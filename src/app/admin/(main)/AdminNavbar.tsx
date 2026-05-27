@@ -105,12 +105,6 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
           >
             Kitchen & Shop
           </Link>
-          <Link
-            href="/finance"
-            className={`transition-colors hover:text-foreground ${isActive("/finance") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
-          >
-            Finance
-          </Link>
         </nav>
 
         {/* Right: Mobile Menu & Avatar */}
@@ -205,12 +199,6 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
                   className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/catalog") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
                 >
                   Kitchen & Shop
-                </Link>
-                <Link
-                  href="/finance"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/finance") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
-                >
-                  Finance
                 </Link>
               </nav>
             </SheetContent>

@@ -17,9 +17,11 @@ export default function MasterLogin() {
         </a>
         <LoginForm
           socialLogin={false}
-          formTitle="Master Admin Login Portal"
-          portalRole="MASTER"
-          redirectPath="/master/dashboard"
+          showSignup={false}
+          showForgotPassword={false}
+          formTitle="Master Login Portal"
+          portalRole="MASTER_ADMIN"
+          redirectPath="/dashboard"
         />
       </div>
     </div>

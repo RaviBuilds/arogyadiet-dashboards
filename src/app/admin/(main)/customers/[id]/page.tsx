@@ -27,8 +27,8 @@ export default async function Customer360Page({
       allergies,
       medical_history_notes,
       has_medical_history,
-      users!inner ( id, full_name, email, mobile ),
-      addresses ( id, tag, street_1, city, pincode, is_primary ),
+      users!inner ( id, auth_user_id, full_name, email, mobile, is_active ),
+      addresses ( id, tag, street_1, street_2, landmark, city, state, pincode, is_primary, lat, lng ),
       medical_documents ( id, file_name, storage_path, uploaded_at, file_size_bytes ),
       subscriptions ( id, status, starts_on, ends_on, effective_end_on, subscription_plans ( name ) )
       `,
@@ -76,6 +76,7 @@ export default async function Customer360Page({
     { data: subscriptionPlans },
     { data: mealCategories },
     { data: coupons },
+    { data: payments },
   ] = await Promise.all([
     supabase
       .from("subscription_plans")
@@ -90,6 +91,33 @@ export default async function Customer360Page({
       )
       .eq("customer_profile_id", id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("payments")
+      .select(
+        `
+        id,
+        amount,
+        payment_method,
+        status,
+        created_at,
+        paid_at,
+        subscription_id,
+        base_amount,
+        tax_percent,
+        tax_amount,
+        discount_amount,
+        invoice_type,
+        payment_reference,
+        payment_notes,
+        subscriptions (
+          subscription_code,
+          status,
+          subscription_plans ( name )
+        )
+        `,
+      )
+      .eq("customer_profile_id", id)
+      .order("created_at", { ascending: false }),
   ]);
 
   // ── 5. Shape the customer object ──────────────────────────────────────────
@@ -97,6 +125,8 @@ export default async function Customer360Page({
 
   const customerData = {
     userId: userData?.id ?? "",
+    authUserId: userData?.auth_user_id ?? "",
+    isActive: userData?.is_active ?? true,
     id: data.id,
     full_name: userData?.full_name ?? "N/A",
     email: userData?.email ?? "N/A",
@@ -108,7 +138,27 @@ export default async function Customer360Page({
     medical_history_notes: (data.medical_history_notes as string) ?? "N/A",
     has_medical_history: (data.has_medical_history as boolean) ?? false,
     medical_documents: documentsWithUrls,
+    addresses: ((data.addresses as any[]) ?? []).map((a) => ({
+      id: a.id as string,
+      tag: (["Home", "Work", "Other"].includes(a.tag) ? a.tag : "Home") as
+        | "Home"
+        | "Work"
+        | "Other",
+      street_1: (a.street_1 as string) ?? "",
+      street_2: (a.street_2 as string) ?? "",
+      landmark: (a.landmark as string) ?? "",
+      city: (a.city as string) ?? "Hyderabad",
+      state: (a.state as string) ?? "Telangana",
+      pincode: (a.pincode as string) ?? "",
+      is_primary: (a.is_primary as boolean) ?? false,
+      lat: (a.lat as number | null) ?? null,
+      lng: (a.lng as number | null) ?? null,
+    })),
   };
+
+  const hasActiveSubscription = (data.subscriptions as any[])?.some(
+    (s) => s.status === "ACTIVE",
+  ) ?? false;
 
   // ── 6. Shape lookup data for the Add Subscription form ───────────────────
   const initialSubscriptionData = {
@@ -158,6 +208,8 @@ export default async function Customer360Page({
         customer={customerData}
         initialSubscriptionData={initialSubscriptionData}
         initialCoupons={(coupons ?? []) as any[]}
+        billingPayments={(payments ?? []) as any[]}
+        hasActiveSubscription={hasActiveSubscription}
       />
     </div>
   );

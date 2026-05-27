@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import {
@@ -7,8 +8,11 @@ import {
   Calendar,
   Wallet,
   CheckCircle2,
+  Banknote,
+  Clock,
 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { Badge } from "@/shared/components/ui/badge";
 
 export const revalidate = 0;
 
@@ -56,7 +60,15 @@ export default async function RiderEarningsPage() {
     );
   }
 
-  // 4. Calculate Metrics
+  // 4. Fetch Payment History (monthly summaries)
+  const adminClient = createAdminClient();
+  const { data: paymentHistory } = await adminClient
+    .from("rider_monthly_summaries")
+    .select("id, month, year, period_start, period_end, total_earnings, total_deliveries, status, is_custom, paid_at, paid_notes")
+    .eq("rider_id", riderProfile.id)
+    .order("created_at", { ascending: false });
+
+  // 5. Calculate Metrics
   const todayStr = format(new Date(), "yyyy-MM-dd");
   const safeOrders = completedOrders || [];
 
@@ -132,6 +144,81 @@ export default async function RiderEarningsPage() {
             </h3>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Payment History (Monthly Settlements) */}
+      <div>
+        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-3 px-1">
+          Payment History
+        </h3>
+
+        {(!paymentHistory || paymentHistory.length === 0) ? (
+          <div className="bg-zinc-50 border-2 border-dashed border-zinc-200 rounded-2xl p-8 text-center text-zinc-500 font-medium">
+            No payment settlements yet.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {paymentHistory.map((payment: any) => {
+              const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+              const periodLabel = payment.period_start && payment.period_end
+                ? `${format(new Date(payment.period_start), "dd MMM")} — ${format(new Date(payment.period_end), "dd MMM yyyy")}`
+                : `${monthNames[payment.month - 1]} ${payment.year}`;
+              const isPaid = payment.status === "PAID";
+
+              return (
+                <Card key={payment.id} className="border-none shadow-sm rounded-xl">
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-start">
+                      <div className="flex gap-3 items-center">
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${isPaid ? "bg-emerald-100" : "bg-amber-100"}`}>
+                          {isPaid ? (
+                            <Banknote className="h-5 w-5 text-emerald-600" />
+                          ) : (
+                            <Clock className="h-5 w-5 text-amber-600" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-bold text-zinc-900 text-sm">
+                            {periodLabel}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] px-1.5 py-0 ${isPaid ? "bg-emerald-500/10 text-emerald-600 border-emerald-200" : "bg-amber-500/10 text-amber-600 border-amber-200"}`}
+                            >
+                              {isPaid ? "PAID" : "PENDING"}
+                            </Badge>
+                            {payment.is_custom && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-500/10 text-violet-600 border-violet-200">
+                                Custom
+                              </Badge>
+                            )}
+                          </div>
+                          {isPaid && payment.paid_at && (
+                            <p className="text-[11px] text-zinc-400 mt-1">
+                              Paid on {format(new Date(payment.paid_at), "dd MMM yyyy")}
+                              {payment.paid_notes && ` · ${payment.paid_notes}`}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className={`font-black ${isPaid ? "text-emerald-600" : "text-amber-600"}`}>
+                          ₹{Number(payment.total_earnings || 0).toFixed(2)}
+                        </span>
+                        {payment.total_deliveries > 0 && (
+                          <p className="text-[11px] text-zinc-400">
+                            {payment.total_deliveries} deliveries
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Recent Transactions / History */}

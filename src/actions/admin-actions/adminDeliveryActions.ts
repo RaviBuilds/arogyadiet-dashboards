@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 
 export async function bulkUpdateAdminAddressPreferencesAction(
@@ -20,6 +21,9 @@ export async function bulkUpdateAdminAddressPreferencesAction(
       if (error) throw error;
     }
 
+    await logAdminAction("UPDATE", "subscription_address_preferences", subscriptionId, {
+      dates_updated: updates.length,
+    });
     revalidatePath("/admin/subscriptions");
     revalidatePath("/admin/subscriptions/[id]/delivery-routing");
     revalidatePath("/", "layout"); // Ultimate Cache Buster
