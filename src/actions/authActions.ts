@@ -17,12 +17,13 @@ export async function LoginAction(prevState: any, formData: FormData) {
   const redirectPath = formData.get("redirectPath") as string;
 
   let finalRedirectPath = redirectPath;
-
- 
+   
+ // the test line added here
 
   try {
     await login(email, password, portalRole);
-
+   console.log("LoginAction: Login successful");
+  
     // --- NEW: Bypass cookie delay by querying the database directly ---
     const supabaseAdmin = createAdminClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
