@@ -37,9 +37,33 @@ const upsertProductSchema = z.object({
   imageUrls: z.string().optional(),
 });
 
-export type UpsertProductPayload = z.infer<typeof upsertProductSchema>;
-
 type ActionResult = { success: boolean; error?: string };
+
+const INVENTORY_PATH = "/admin/kitchen-shop/inventory";
+
+function getFormString(formData: FormData, key: string): string {
+  const value = formData.get(key);
+  return value?.toString().trim() ?? "";
+}
+
+function getOptionalFormNumber(
+  formData: FormData,
+  key: string,
+): number | null {
+  const raw = getFormString(formData, key);
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function getFormFiles(formData: FormData): File[] {
+  const fromImages = formData.getAll("images");
+  const fromImage = formData.getAll("image");
+
+  return [...fromImages, ...fromImage].filter(
+    (entry): entry is File => entry instanceof File && entry.size > 0,
+  );
+}
 
 export async function adminGetProducts(): Promise<AdminInventoryProduct[]> {
   const supabase = createAdminClient();
@@ -58,21 +82,57 @@ export async function adminGetProducts(): Promise<AdminInventoryProduct[]> {
 }
 
 export async function adminUpsertProduct(
-  payload: UpsertProductPayload,
+  formData: FormData,
 ): Promise<ActionResult> {
-  const parsed = upsertProductSchema.safeParse(payload);
+  const idValue = getFormString(formData, "id");
+
+  const parsed = upsertProductSchema.safeParse({
+    id: idValue || undefined,
+    name: getFormString(formData, "name"),
+    sku: getFormString(formData, "sku"),
+    category: getFormString(formData, "category") || undefined,
+    originalPrice: Number(getFormString(formData, "originalPrice")),
+    salePrice: getOptionalFormNumber(formData, "salePrice"),
+    stockQuantity: Number(getFormString(formData, "stockQuantity")),
+    taxPercent: getOptionalFormNumber(formData, "taxPercent"),
+    shortDescription: getFormString(formData, "shortDescription") || undefined,
+    description: getFormString(formData, "description") || undefined,
+    imageUrls: getFormString(formData, "imageUrls") || undefined,
+  });
 
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0].message };
   }
 
   const data = parsed.data;
-  const supabase = createAdminClient();
+  const supabaseAdmin = createAdminClient();
 
   const image_urls = (data.imageUrls ?? "")
     .split(",")
     .map((url) => url.trim())
     .filter(Boolean);
+
+  const files = getFormFiles(formData);
+
+  for (const [index, file] of files.entries()) {
+    const extension = file.name.split(".").pop() || "jpg";
+    const filename = `${Date.now()}-${index}.${extension}`;
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("product-images")
+      .upload(filename, file);
+
+    if (uploadError) {
+      console.error("Error uploading product image:", uploadError);
+      return { success: false, error: uploadError.message };
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabaseAdmin.storage.from("product-images").getPublicUrl(filename);
+
+    image_urls.push(publicUrl);
+  }
 
   const record: Record<string, unknown> = {
     name: data.name,
@@ -93,7 +153,7 @@ export async function adminUpsertProduct(
     record.id = data.id;
   }
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("products")
     .upsert(record, { onConflict: "id" });
 
@@ -102,6 +162,40 @@ export async function adminUpsertProduct(
     return { success: false, error: error.message };
   }
 
-  revalidatePath("/admin/kitchen-shop/inventory");
+  revalidatePath(INVENTORY_PATH);
+  return { success: true };
+}
+
+export async function adminDeleteProduct(id: string): Promise<ActionResult> {
+  const supabaseAdmin = createAdminClient();
+
+  const { error } = await supabaseAdmin.from("products").delete().eq("id", id);
+
+  if (error) {
+    console.error("Error deleting product:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath(INVENTORY_PATH);
+  return { success: true };
+}
+
+export async function adminToggleProductVisibility(
+  id: string,
+  currentStatus: boolean,
+): Promise<ActionResult> {
+  const supabaseAdmin = createAdminClient();
+
+  const { error } = await supabaseAdmin
+    .from("products")
+    .update({ is_active: !currentStatus, updated_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (error) {
+    console.error("Error toggling product visibility:", error);
+    return { success: false, error: error.message };
+  }
+
+  revalidatePath(INVENTORY_PATH);
   return { success: true };
 }

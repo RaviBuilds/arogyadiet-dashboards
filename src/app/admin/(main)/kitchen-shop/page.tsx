@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function KitchenShopPage() {
-  redirect("/admin/kitchen-shop/inventory");
+  redirect("/kitchen-shop/inventory");
 }

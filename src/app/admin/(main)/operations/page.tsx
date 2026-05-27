@@ -18,8 +18,10 @@ export default async function OperationsPage() {
   };
   const supabase = await createClient();
 
-  // 1. Fetch Today's Dispatch Board
   const today = getISTDateString();
+  const tomorrowStr = getISTDateString(1);
+
+  // 1. Fetch Dispatch Board (today + tomorrow)
   const { data: rawDeliveries } = await supabase
     .from("delivery_orders")
     .select(
@@ -32,10 +34,9 @@ export default async function OperationsPage() {
       addon_orders ( addon_order_items ( quantity ) )
     `,
     )
-    .eq("delivery_date", today);
+    .in("delivery_date", [today, tomorrowStr]);
 
   // 2. Fetch Tomorrow's Planned Deliveries
-  const tomorrowStr = getISTDateString(1);
   
   const { data: rawPlannedDeliveries } = await supabase
     .from("delivery_orders")
