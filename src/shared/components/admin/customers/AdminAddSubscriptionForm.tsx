@@ -70,12 +70,10 @@ export type InitialSubscriptionData = {
   addresses: AddressOption[];
 };
 
-// ─── 5 PM helper (client-side) ───────────────────────────────────────────────
+// ─── Admin start-date helper (no 5 PM cutoff) ────────────────────────────────
 
 function getMinStartDate(activeSubEnd: string | null): Date {
-  const now = new Date();
-  const daysToAdd = now.getHours() >= 17 ? 2 : 1;
-  let min = startOfDay(addDays(now, daysToAdd));
+  let min = startOfDay(addDays(new Date(), 1));
 
   if (activeSubEnd) {
     const afterActive = startOfDay(addDays(new Date(activeSubEnd), 1));

@@ -117,12 +117,7 @@ export function Subscription360Dashboard({
     : format(addDays(new Date(), 1), "yyyy-MM-dd");
 
   const isStartDateEditable = subscription.starts_on > todayStr;
-  const currentHour = new Date().getHours();
-  const daysToAdd = currentHour >= 17 ? 2 : 1;
-  const earliestStartDateStr = format(
-    addDays(new Date(), daysToAdd),
-    "yyyy-MM-dd",
-  );
+  const earliestStartDateStr = format(addDays(new Date(), 1), "yyyy-MM-dd");
 
   const openManageModal = (sub: any) => {
     setSelectedPendingSub(sub);
@@ -171,7 +166,7 @@ export function Subscription360Dashboard({
       activeEditForm.starts_on < earliestStartDateStr
     ) {
       toast.error(
-        `Start date cannot be before ${format(new Date(earliestStartDateStr), "MMM d, yyyy")} due to 5 PM routing cutoff.`,
+        `Start date cannot be before ${format(new Date(earliestStartDateStr), "MMM d, yyyy")}.`,
       );
       return;
     }
@@ -832,8 +827,7 @@ export function Subscription360Dashboard({
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-3">
                 <AlertCircle className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
                 <p className="text-sm text-blue-800">
-                  <strong>5 PM Cutoff Active.</strong> You can change the start
-                  date to any day on or after{" "}
+                  You can change the start date to any day on or after{" "}
                   <strong>
                     {format(new Date(earliestStartDateStr), "MMM d, yyyy")}
                   </strong>

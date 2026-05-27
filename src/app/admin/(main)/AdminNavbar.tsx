@@ -100,8 +100,8 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
             Operations
           </Link>
           <Link
-            href="/catalog"
-            className={`transition-colors hover:text-foreground ${isActive("/catalog") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+            href="/kitchen-shop"
+            className={`transition-colors hover:text-foreground ${isActive("/admin/kitchen-shop") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
           >
             Kitchen & Shop
           </Link>
@@ -195,8 +195,8 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
                   Operations
                 </Link>
                 <Link
-                  href="/catalog"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/catalog") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                  href="/kitchen-shop"
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/admin/kitchen-shop") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
                 >
                   Kitchen & Shop
                 </Link>
