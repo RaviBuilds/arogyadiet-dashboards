@@ -18,9 +18,7 @@ function generateSubscriptionCode(): string {
 }
 
 function getEarliestAllowedStartDate(): Date {
-  const now = new Date();
-  const daysToAdd = now.getHours() >= 17 ? 2 : 1;
-  return startOfDay(addDays(now, daysToAdd));
+  return startOfDay(addDays(new Date(), 1));
 }
 
 // ─── shared base schema ──────────────────────────────────────────────────────
@@ -90,12 +88,11 @@ export async function addSubscription(
   try {
     const start = startOfDay(new Date(startDate));
 
-    // 5 PM cutoff guard
     const earliest = getEarliestAllowedStartDate();
     if (start < earliest) {
       return {
         success: false,
-        error: "Start date violates the 5 PM cutoff rule. Please select a valid date.",
+        error: "Start date cannot be today or in the past.",
       };
     }
 

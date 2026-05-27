@@ -35,7 +35,7 @@ export default async function OperationsPage() {
     .eq("delivery_date", today);
 
   // 2. Fetch Tomorrow's Planned Deliveries
-  const tomorrowStr = getISTDateString(0);
+  const tomorrowStr = getISTDateString(1);
   
   const { data: rawPlannedDeliveries } = await supabase
     .from("delivery_orders")

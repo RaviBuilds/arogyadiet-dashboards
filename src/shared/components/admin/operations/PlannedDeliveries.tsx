@@ -1,13 +1,18 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useTransition, type ReactNode } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Button } from "@/shared/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuPortal, DropdownMenuSubContent } from "@/shared/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/shared/components/ui/dialog";
 import { Badge } from "@/shared/components/ui/badge";
 import { Card } from "@/shared/components/ui/card";
-import { Filter, CalendarClock, MoreHorizontal, UtensilsCrossed, Trash2, MapPin, Loader2, ChefHat, Settings, PlayCircle, CheckCircle2, Clock, ShoppingCart, Network } from "lucide-react";
+import { Filter, CalendarClock, MoreHorizontal, UtensilsCrossed, Trash2, MapPin, Loader2, ChefHat, Settings, PlayCircle, CheckCircle2, Clock, ShoppingCart, Network, CalendarIcon } from "lucide-react";
+import { format, isSameDay } from "date-fns";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/components/ui/popover";
+import { Calendar } from "@/shared/components/ui/calendar";
+import { cn } from "@/lib/utils";
+import { getTomorrowISTDateString, parseISODateString } from "@/lib/dates/ist";
 import { revalidateOperationsPage } from "@/actions/admin-actions/operationsActions";
 import { deletePlannedOrder, updateOrderMeal, getAddressesForOrder, updateOrderAddress } from "@/actions/admin-actions/plannedActions";
 import { triggerSystemAutomation } from "@/actions/admin-actions/systemActions"; 
@@ -20,6 +25,7 @@ import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
+import { ConfirmActionModal } from "../core/ConfirmActionModal";
 
 const getMealLabel = (name?: string) => {
   if (!name) return "N/A";
@@ -52,6 +58,31 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
   // System Automation State
   const [systemToggle, setSystemToggle] = useState(false);
   const [automationStatus, setAutomationStatus] = useState<Record<string, { loading: boolean, lastRun?: string, success?: boolean }>>({});
+  const tomorrowDate = useMemo(() => parseISODateString(getTomorrowISTDateString()), []);
+  const [orderGenTargetDate, setOrderGenTargetDate] = useState<Date>(() => parseISODateString(getTomorrowISTDateString()));
+  const [isOrderGenDateOpen, setIsOrderGenDateOpen] = useState(false);
+
+  const isTomorrowOnly = (date: Date) => isSameDay(date, tomorrowDate);
+
+  // Confirm modal state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    title: string;
+    description: ReactNode;
+    confirmLabel: string;
+    variant: "destructive" | "default";
+    onConfirm: () => void;
+  } | null>(null);
+
+  const openConfirm = (config: NonNullable<typeof confirmConfig>) => {
+    setConfirmConfig(config);
+    setConfirmOpen(true);
+  };
+
+  const closeConfirm = () => {
+    setConfirmOpen(false);
+    setConfirmConfig(null);
+  };
 
   // Derive final filtered data
   const filteredData = useMemo(() => {
@@ -91,13 +122,21 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
   };
 
   const handleDelete = (orderId: string) => {
-    if (!confirm("Are you sure you want to cancel this delivery for tomorrow?")) return;
-    startTransition(async () => {
-      const result = await deletePlannedOrder(orderId);
-      if (result.success) {
-        toast.success("Order cancelled successfully");
-        await revalidateOperationsPage();
-      } else toast.error(result.error || "Failed to cancel order");
+    openConfirm({
+      title: "Cancel Delivery",
+      description: "Are you sure you want to cancel this delivery for tomorrow?",
+      confirmLabel: "Cancel Delivery",
+      variant: "destructive",
+      onConfirm: () => {
+        closeConfirm();
+        startTransition(async () => {
+          const result = await deletePlannedOrder(orderId);
+          if (result.success) {
+            toast.success("Order cancelled successfully");
+            await revalidateOperationsPage();
+          } else toast.error(result.error || "Failed to cancel order");
+        });
+      },
     });
   };
 
@@ -111,21 +150,31 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     });
   };
 
-  // --- SYSTEM AUTOMATION ACTIONS ---
-  const handleRunAutomation = async (automationName: string) => {
-    if (!confirm(`CRITICAL WARNING:\n\nAre you sure you want to force-run the [${automationName}] script?\nRunning this out of schedule can cause duplicate data if not handled carefully.`)) return;
-    
+  const executeRunAutomation = async (automationName: string, targetDate?: string) => {
     setAutomationStatus(prev => ({ ...prev, [automationName]: { ...prev[automationName], loading: true } }));
     
-    const result = await triggerSystemAutomation(automationName);
+    const result = await triggerSystemAutomation(
+      automationName,
+      targetDate ? { targetDate } : undefined,
+    );
     
     if (result.success) {
-      toast.success(`${automationName} executed successfully!`);
-      const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const insertedMsg =
+        "inserted" in result && typeof result.inserted === "number"
+          ? ` (${result.inserted} orders created)`
+          : "";
+      const successDate =
+        "targetDate" in result && result.targetDate ? ` for ${result.targetDate}` : "";
+      toast.success(`${automationName} executed successfully${successDate}${insertedMsg}!`);
+      const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       
       setAutomationStatus(prev => ({
         ...prev, 
-        [automationName]: { loading: false, success: true, lastRun: `Activity done today at ${timeStr}` } 
+        [automationName]: {
+          loading: false,
+          success: true,
+          lastRun: `Activity done today at ${timeStr}${successDate}${insertedMsg}`,
+        },
       }));
       
       await revalidateOperationsPage();
@@ -133,6 +182,35 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
       toast.error(result.error || `Failed to run ${automationName}`);
       setAutomationStatus(prev => ({ ...prev, [automationName]: { ...prev[automationName], loading: false, success: false } }));
     }
+  };
+
+  const requestRunAutomation = (automationName: string, targetDate?: string) => {
+    openConfirm({
+      title: "Critical Warning",
+      description: (
+        <>
+          <p>
+            Are you sure you want to force-run the{" "}
+            <span className="font-semibold text-foreground">[{automationName}]</span> script?
+          </p>
+          {targetDate && (
+            <p>
+              Target delivery date:{" "}
+              <span className="font-semibold text-foreground">{targetDate}</span>
+            </p>
+          )}
+          <p>
+            Running this out of schedule can cause duplicate data if not handled carefully.
+          </p>
+        </>
+      ),
+      confirmLabel: "Run Script",
+      variant: "destructive",
+      onConfirm: () => {
+        closeConfirm();
+        void executeRunAutomation(automationName, targetDate);
+      },
+    });
   };
 
   // --- ADDRESS LOGIC ---
@@ -190,7 +268,8 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     {
       name: "5:15 PM Order Gen",
       icon: Clock,
-      desc: "Forces the generation of tomorrow's delivery orders based on active subscriptions."
+      desc: "Forces the generation of tomorrow's delivery orders based on active subscriptions.",
+      hasDatePicker: true,
     },
     {
       name: "Product Linking",
@@ -378,6 +457,51 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                     <p className="text-xs text-muted-foreground leading-relaxed pr-2 lg:w-[90%]">
                       {script.desc}
                     </p>
+
+                    {"hasDatePicker" in script && script.hasDatePicker && (
+                      <div className="space-y-1.5">
+                        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                          Target delivery date (IST)
+                        </p>
+                        <Popover open={isOrderGenDateOpen} onOpenChange={setIsOrderGenDateOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className={cn(
+                                "h-9 w-full justify-start text-left font-normal",
+                                !orderGenTargetDate && "text-muted-foreground",
+                              )}
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {orderGenTargetDate
+                                ? format(orderGenTargetDate, "PPP")
+                                : "Select date"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={orderGenTargetDate}
+                              month={tomorrowDate}
+                              defaultMonth={tomorrowDate}
+                              onSelect={(date) => {
+                                if (!date || !isTomorrowOnly(date)) return;
+                                setOrderGenTargetDate(date);
+                                setIsOrderGenDateOpen(false);
+                              }}
+                              hidden={(date) => !isTomorrowOnly(date)}
+                              disabled={(date) => !isTomorrowOnly(date)}
+                              hideNavigation
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <p className="text-[10px] text-muted-foreground">
+                          Only tomorrow&apos;s date is available for order generation.
+                        </p>
+                      </div>
+                    )}
                     
                     <div className="mt-1">
                       <Button 
@@ -388,7 +512,14 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                             ? 'border-green-600 text-green-700 hover:bg-green-50' 
                             : 'bg-primary text-primary-foreground'
                         }`}
-                        onClick={() => handleRunAutomation(script.name)} 
+                        onClick={() =>
+                          requestRunAutomation(
+                            script.name,
+                            "hasDatePicker" in script && script.hasDatePicker
+                              ? format(orderGenTargetDate, "yyyy-MM-dd")
+                              : undefined,
+                          )
+                        } 
                         disabled={status.loading}
                       >
                         {status.loading ? (
@@ -517,6 +648,17 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmActionModal
+        isOpen={confirmOpen}
+        onClose={closeConfirm}
+        onConfirm={() => confirmConfig?.onConfirm()}
+        title={confirmConfig?.title}
+        description={confirmConfig?.description}
+        confirmLabel={confirmConfig?.confirmLabel ?? "Confirm"}
+        variant={confirmConfig?.variant ?? "default"}
+        isPending={isPending}
+      />
     </>
   );
 }
