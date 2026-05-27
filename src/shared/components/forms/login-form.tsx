@@ -26,7 +26,8 @@ interface LoginFormProps extends React.ComponentProps<"div"> {
   formTitle?: string;
   portalRole?: string;
   redirectPath?: string;
-  showSignup?: boolean; // <-- NEW PROP
+  showSignup?: boolean;
+  showForgotPassword?: boolean;
 }
 
 export function LoginForm({
@@ -35,7 +36,8 @@ export function LoginForm({
   formTitle = "Login",
   portalRole,
   redirectPath = "/dashboard",
-  showSignup, // <-- DEFAULTS TO TRUE FOR CUSTOMERS
+  showSignup,
+  showForgotPassword = true,
   ...props
 }: LoginFormProps) {
   const [state, formAction, isPending] = useActionState(LoginAction, null);
@@ -114,12 +116,14 @@ export function LoginForm({
               <Field>
                 <div className="flex items-center">
                   <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <Link
-                    href="forgot-password" // <-- Relative path ensures it works on /customer or /rider domains
-                    className="ml-auto text-sm underline-offset-4 hover:underline text-primary"
-                  >
-                    Forgot your password?
-                  </Link>
+                  {showForgotPassword && (
+                    <Link
+                      href="forgot-password"
+                      className="ml-auto text-sm underline-offset-4 hover:underline text-primary"
+                    >
+                      Forgot your password?
+                    </Link>
+                  )}
                 </div>
                 <Input id="password" name="password" type="password" required />
               </Field>

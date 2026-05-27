@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from "@/lib/supabase/server";
+import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 
 // Action to completely remove an order from tomorrow's dispatch
@@ -17,7 +18,7 @@ export async function deletePlannedOrder(orderId: string) {
     return { success: false, error: error.message };
   }
 
-  // Bust the Next.js cache so the UI updates
+  await logAdminAction("DELETE", "delivery_order", orderId, {});
   revalidatePath("/admin/operations");
   return { success: true };
 }
@@ -49,6 +50,9 @@ export async function updateOrderMeal(orderId: string, mealCategoryName: string)
     return { success: false, error: updateError.message };
   }
 
+  await logAdminAction("UPDATE", "delivery_order", orderId, {
+    meal_category: mealCategoryName,
+  });
   revalidatePath("/admin/operations");
   return { success: true };
 }
@@ -96,6 +100,7 @@ export async function updateOrderAddress(orderId: string, addressId: string) {
     return { success: false, error: error.message };
   }
 
+  await logAdminAction("UPDATE", "delivery_order", orderId, { address_id: addressId });
   revalidatePath("/admin/operations");
   return { success: true };
 }

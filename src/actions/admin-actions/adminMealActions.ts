@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js";
+import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { format, addDays } from "date-fns";
 
@@ -25,6 +26,9 @@ export async function adminBulkUpdateMealPreferences(subscriptionId: string, upd
       if (error) throw error;
     }
     
+    await logAdminAction("UPDATE", "subscription_meal_preferences", subscriptionId, {
+      dates_updated: updates.length,
+    });
     revalidatePath("/", "layout");
     return { success: true };
   } catch (error: any) {
@@ -134,6 +138,9 @@ export async function adminBulkUpdatePausePreferences(subscriptionId: string, up
       })
       .eq("id", subscriptionId);
 
+    await logAdminAction("UPDATE", "subscription_pause_preferences", subscriptionId, {
+      dates_updated: updates.length,
+    });
     revalidatePath("/", "layout"); // Ultimate Cache Buster
     return { success: true };
   } catch (error: any) {
@@ -154,6 +161,9 @@ export async function adminBulkUpdateAddressPreferences(subscriptionId: string, 
       if (error) throw error;
     }
     
+    await logAdminAction("UPDATE", "subscription_address_preferences", subscriptionId, {
+      dates_updated: updates.length,
+    });
     revalidatePath("/", "layout");
     return { success: true };
   } catch (error: any) {

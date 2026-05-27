@@ -9,7 +9,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/shared/components/ui/sheet";
-import { Button } from "@/shared/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import Image from "next/image";
 import {
@@ -27,7 +27,7 @@ import {
 } from "@/shared/components/ui/avatar";
 import { createClient } from "@/lib/supabase/client";
 
-interface AdminNavbarProps {
+interface MasterNavbarProps {
   userProfile: {
     id: string;
     fullName: string;
@@ -37,7 +37,7 @@ interface AdminNavbarProps {
   email: string;
 }
 
-export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
+export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) {
   const supabase = createClient();
   const pathname = usePathname();
 
@@ -46,7 +46,6 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
     window.location.href = "/";
   };
 
-  // Helper to check if a path is active
   const isActive = (path: string) => pathname.startsWith(path);
 
   return (
@@ -64,7 +63,7 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
             height={28}
             className="h-auto w-auto"
           />
-          <span className="hidden sm:inline-block">Admin</span>
+          <span className="hidden sm:inline-block">Master</span>
         </Link>
 
         {/* Center: Desktop Navigation */}
@@ -76,34 +75,22 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
             Dashboard
           </Link>
           <Link
-            href="/customers"
-            className={`transition-colors hover:text-foreground ${isActive("/customers") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+            href="/user-management"
+            className={`transition-colors hover:text-foreground ${isActive("/user-management") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
           >
-            Customers
+            User Management
           </Link>
           <Link
-            href="/subscriptions"
-            className={`transition-colors hover:text-foreground ${isActive("/subscriptions") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+            href="/finance"
+            className={`transition-colors hover:text-foreground ${isActive("/finance") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
           >
-            Subscriptions
+            Finance
           </Link>
           <Link
-            href="/riders"
-            className={`transition-colors hover:text-foreground ${isActive("/riders") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+            href="/logs"
+            className={`transition-colors hover:text-foreground ${isActive("/logs") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
           >
-            Riders
-          </Link>
-          <Link
-            href="/operations"
-            className={`transition-colors hover:text-foreground ${isActive("/operations") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
-          >
-            Operations
-          </Link>
-          <Link
-            href="/catalog"
-            className={`transition-colors hover:text-foreground ${isActive("/catalog") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
-          >
-            Kitchen & Shop
+            Logs
           </Link>
         </nav>
 
@@ -119,7 +106,7 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
                 <Avatar className="h-9 w-9">
                   <AvatarImage src={userProfile.avatarUrl || ""} />
                   <AvatarFallback className="bg-primary/10 text-primary font-medium">
-                    {userProfile.fullName?.charAt(0) || "A"}
+                    {userProfile.fullName?.charAt(0) || "M"}
                   </AvatarFallback>
                 </Avatar>
               </Button>
@@ -135,9 +122,6 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
                   </p>
                 </div>
               </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>Profile</DropdownMenuItem>
-              <DropdownMenuItem>Settings</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={handleLogout}
@@ -171,34 +155,22 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
                   Dashboard
                 </Link>
                 <Link
-                  href="/customers"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/customers") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                  href="/user-management"
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/user-management") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
                 >
-                  Customers
+                  User Management
                 </Link>
                 <Link
-                  href="/subscriptions"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/subscriptions") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                  href="/finance"
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/finance") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
                 >
-                  Subscriptions
+                  Finance
                 </Link>
                 <Link
-                  href="/riders"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/riders") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                  href="/logs"
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/logs") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
                 >
-                  Riders
-                </Link>
-                <Link
-                  href="/operations"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/operations") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
-                >
-                  Operations
-                </Link>
-                <Link
-                  href="/catalog"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/catalog") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
-                >
-                  Kitchen & Shop
+                  Logs
                 </Link>
               </nav>
             </SheetContent>

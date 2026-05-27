@@ -2,7 +2,10 @@
 
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
-import type { AddressFormValues } from "@/validations/addressSchema";
+import {
+  addressSchema,
+  type AddressFormValues,
+} from "@/validations/addressSchema";
 import { sendEmail } from "@/services/emailService";
 import {
   welcomeEmailHtml,
@@ -12,6 +15,7 @@ import {
   accountDeletedEmailHtml,
   ACCOUNT_DELETED_EMAIL_SUBJECT,
 } from "@/emails/AccountDeletedEmail";
+import { logAdminAction } from "@/lib/logger";
 
 // Initialize Admin Client
 const supabaseAdmin = createAdminClient(
@@ -50,6 +54,9 @@ export async function adminUpdateAddonOrderDeliveryDate(
 
   if (updateError) return { success: false, error: updateError.message };
 
+  await logAdminAction("UPDATE", "addon_order", addonOrderId, {
+    target_delivery_date: newDeliveryDate,
+  });
   revalidatePath("/admin/customers");
   revalidatePath("/shop/orders");
   return { success: true };
@@ -70,6 +77,7 @@ export async function updateCustomerBasicInfo(
     .eq("id", profileId);
   if (userError || profileError)
     return { success: false, error: "Failed update" };
+  await logAdminAction("UPDATE", "customer", profileId, { section: "basic_info" });
   return { success: true };
 }
 
@@ -85,6 +93,7 @@ export async function updateCustomerDietaryProfile(
     })
     .eq("id", profileId);
   if (error) return { success: false, error: error.message };
+  await logAdminAction("UPDATE", "customer", profileId, { section: "dietary" });
   return { success: true };
 }
 
@@ -100,6 +109,7 @@ export async function updateCustomerMedicalProfile(
     })
     .eq("id", profileId);
   if (error) return { success: false, error: error.message };
+  await logAdminAction("UPDATE", "customer", profileId, { section: "medical" });
   return { success: true };
 }
 
@@ -112,6 +122,7 @@ export async function deleteMedicalDocument(
   if (storageError) return { success: false, error: storageError.message };
   const { error: dbError } = await supabaseAdmin.from("medical_documents").delete().eq("id", docId);
   if (dbError) return { success: false, error: dbError.message };
+  await logAdminAction("DELETE", "medical_document", docId, { profile_id: profileId });
   revalidatePath(`/admin/customers/${profileId}`);
   return { success: true };
 }
@@ -144,6 +155,9 @@ export async function uploadAdminMedicalDocument(formData: FormData) {
     .update({ has_medical_history: true })
     .eq("id", profileId);
 
+  await logAdminAction("CREATE", "medical_document", profileId, {
+    file_name: file.name,
+  });
   revalidatePath(`/admin/customers/${profileId}`);
   return { success: true };
 }
@@ -195,6 +209,7 @@ export async function deleteCustomer(profileId: string, userId: string) {
     );
   }
 
+  await logAdminAction("DELETE", "customer", profileId, { user_id: userId });
   revalidatePath("/admin/customers");
   return { success: true };
 }
@@ -296,6 +311,10 @@ export async function adminCreateCustomerAction(data: AdminCreateCustomerData) {
     }
   }
 
+  await logAdminAction("CREATE", "customer", profileData.id, {
+    email: data.email,
+    full_name: data.fullName,
+  });
   revalidatePath("/admin/customers");
 
   // Send welcome email (non-blocking — failure does not affect account creation)
@@ -345,6 +364,9 @@ export async function adminCreateAddressForCustomer(
   });
 
   if (error) return { success: false, error: error.message };
+  await logAdminAction("CREATE", "customer_address", customerProfileId, {
+    tag: data.tag,
+  });
   return { success: true };
 }
 
@@ -401,6 +423,9 @@ export async function adminUpsertCustomerAddress(
 
   if (error) return { success: false, error: error.message };
 
+  await logAdminAction(addressId ? "UPDATE" : "CREATE", "customer_address", addressId || customerProfileId, {
+    tag: parsed.data.tag,
+  });
   revalidatePath(`/admin/customers/${customerProfileId}`);
   return { success: true };
 }
@@ -417,6 +442,9 @@ export async function adminDeleteCustomerAddress(
 
   if (error) return { success: false, error: error.message };
 
+  await logAdminAction("DELETE", "customer_address", addressId, {
+    customer_profile_id: customerProfileId,
+  });
   revalidatePath(`/admin/customers/${customerProfileId}`);
   return { success: true };
 }
@@ -431,6 +459,7 @@ export async function adminSetCustomerPassword(
     password: newPassword,
   });
   if (error) return { success: false, error: error.message };
+  await logAdminAction("UPDATE", "customer", authUserId, { action: "password_reset" });
   return { success: true };
 }
 
@@ -440,6 +469,9 @@ export async function adminSendPasswordReset(email: string) {
     email,
   });
   if (error) return { success: false, error: error.message };
+  await logAdminAction("UPDATE", "customer", email, {
+    action: "password_reset_email",
+  });
   return { success: true };
 }
 
@@ -484,6 +516,9 @@ export async function adminToggleCustomerActive(
     });
   if (authError) return { success: false, error: authError.message };
 
+  await logAdminAction("UPDATE", "customer", profileId, {
+    is_active: makeActive,
+  });
   revalidatePath(`/admin/customers/${profileId}`);
   revalidatePath("/admin/customers");
   return { success: true };

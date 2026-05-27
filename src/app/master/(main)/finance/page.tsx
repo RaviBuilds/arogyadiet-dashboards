@@ -9,7 +9,7 @@ import {
 
 export const revalidate = 0;
 
-export default async function FinancePage() {
+export default async function MasterFinancePage() {
   const [overviewData, paymentsData, ridersData, settingsData] =
     await Promise.all([
       getFinanceOverview(),

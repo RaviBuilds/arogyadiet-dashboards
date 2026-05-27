@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAdminAction } from "@/lib/logger";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { sendEmail } from "@/services/emailService";
@@ -292,7 +293,12 @@ export async function generateMonthlyPayment(
     return { error: insertErr.message };
   }
 
-  revalidatePath("/admin/finance");
+  await logAdminAction("CREATE", "rider_payment", summary?.id ?? null, {
+    rider_id: riderId,
+    month,
+    year,
+  });
+  revalidatePath("/master/finance");
   return { success: true, summaryId: summary?.id };
 }
 
@@ -377,7 +383,13 @@ export async function createCustomPayment(
     return { error: insertErr.message };
   }
 
-  revalidatePath("/admin/finance");
+  await logAdminAction("CREATE", "rider_payment", summary?.id ?? null, {
+    rider_id: riderId,
+    from_date: fromDate,
+    to_date: toDate,
+    is_custom: true,
+  });
+  revalidatePath("/master/finance");
   return { success: true, summaryId: summary?.id, totalEarnings, totalDeliveries: eligibleOrders.length };
 }
 
@@ -461,7 +473,9 @@ export async function markPaymentAsPaid(summaryId: string, notes: string) {
     }
   }
 
-  revalidatePath("/admin/finance");
+  await logAdminAction("UPDATE", "rider_payment", summaryId, { status: "PAID" });
+
+  revalidatePath("/master/finance");
   revalidatePath("/rider/payout");
   return { success: true };
 }
@@ -502,7 +516,9 @@ export async function updateSystemSettings(settings: {
     return { error: error.message };
   }
 
-  revalidatePath("/admin/finance");
+  await logAdminAction("UPDATE", "system_settings", "global", settings);
+
+  revalidatePath("/master/finance");
   revalidatePath("/admin/operations");
   return { success: true };
 }

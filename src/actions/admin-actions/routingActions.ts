@@ -223,7 +223,9 @@ export async function commitRouteChanges(moves: { orderId: string; newRiderId: s
       }
     }
 
-    await logAdminAction("BULK_REASSIGN_ROUTES", "delivery_orders", "multiple", { total_moves: moves.length });
+    await logAdminAction("UPDATE", "delivery_route", "multiple", {
+      total_moves: moves.length,
+    });
     
     revalidatePath("/admin/operations");
     return { success: true };

@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { addDays, format, startOfDay } from "date-fns";
@@ -290,10 +291,19 @@ export async function addSubscription(
           paymentStatus: isPaid ? "PAID" : "PENDING",
         });
 
+        await logAdminAction("CREATE", "subscription", newSub.id, {
+          customer_profile_id: customerProfileId,
+          status: subscriptionStatus,
+        });
         return { success: true, paymentId: fallbackPayment?.id };
       }
       throw new Error(payErr.message);
     }
+
+    await logAdminAction("CREATE", "subscription", newSub.id, {
+      customer_profile_id: customerProfileId,
+      status: subscriptionStatus,
+    });
 
     revalidatePath(`/admin/customers/${customerProfileId}`);
     revalidatePath("/admin/customers");
@@ -377,6 +387,8 @@ export async function markManualPaymentCollected(
       .eq("status", "PENDING");
 
     if (error) throw new Error(error.message);
+
+    await logAdminAction("UPDATE", "payment", paymentId, { status: "PAID" });
 
     revalidatePath("/admin/customers");
     revalidatePath("/admin/subscriptions");

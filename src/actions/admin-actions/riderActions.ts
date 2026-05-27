@@ -40,7 +40,7 @@ export async function updateRiderDetails(
     return { success: false, error: riderProfileError.message };
   }
 
-  await logAdminAction("UPDATE_RIDER", "users", userId, {
+  await logAdminAction("UPDATE", "rider", userId, {
     full_name: fullName,
     mobile: mobile,
     emergency_contact: emergencyContact,
@@ -81,8 +81,8 @@ const supabaseAdmin = createAdminClient();
       await supabaseAdmin.auth.admin.deleteUser(userId);
     if (authError) throw authError;
 
-    await logAdminAction("DELETE_RIDER", "rider_profiles", riderId, {
-      action: "Deep deleted rider",
+    await logAdminAction("DELETE", "rider", riderId, {
+      user_id: userId,
     });
     revalidatePath("/admin/riders");
     return { success: true };
@@ -154,8 +154,9 @@ export async function onboardRider(formData: {
     });
   if (profileError) return { success: false, error: profileError.message };
 
-  await logAdminAction("ONBOARD_RIDER", "rider_profiles", userId, {
-    employeeCode: formData.employeeCode,
+  await logAdminAction("CREATE", "rider", userId, {
+    employee_code: formData.employeeCode,
+    email: formData.email,
   });
   revalidatePath("/admin/riders");
   return { success: true };
@@ -176,11 +177,18 @@ export async function upsertServiceArea(
         .update({ area_name: areaName, pincode })
         .eq("id", id);
       if (error) throw error;
+      await logAdminAction("UPDATE", "service_area", id, { area_name: areaName, pincode });
     } else {
-      const { error } = await supabaseAdmin
+      const { data: inserted, error } = await supabaseAdmin
         .from("rider_service_areas")
-        .insert({ area_name: areaName, pincode });
+        .insert({ area_name: areaName, pincode })
+        .select("id")
+        .single();
       if (error) throw error;
+      await logAdminAction("CREATE", "service_area", inserted?.id ?? null, {
+        area_name: areaName,
+        pincode,
+      });
     }
 
     revalidatePath("/admin/riders");
@@ -206,6 +214,7 @@ export async function deleteServiceArea(id: string) {
       .eq("id", id);
     if (error) throw error;
 
+    await logAdminAction("DELETE", "service_area", id, {});
     revalidatePath("/admin/riders");
     return { success: true };
   } catch (error: any) {
@@ -229,6 +238,7 @@ export async function updateAreaAssignment(
       .eq("id", areaId);
     if (error) throw error;
 
+    await logAdminAction("UPDATE", "service_area", areaId, { rider_id: riderId });
     revalidatePath("/admin/riders");
     return { success: true };
   } catch (error: any) {

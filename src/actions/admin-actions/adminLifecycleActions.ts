@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 
 export async function managePendingSubscription(
@@ -15,6 +16,7 @@ export async function managePendingSubscription(
       .eq("id", subscriptionId);
 
     if (error) throw error;
+    await logAdminAction("UPDATE", "subscription", subscriptionId, payload);
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message };
@@ -33,6 +35,7 @@ export async function updateActiveSubscriptionDates(
       .eq("id", subscriptionId);
 
     if (error) throw error;
+    await logAdminAction("UPDATE", "subscription", subscriptionId, payload);
     revalidatePath(`/admin/subscriptions/${subscriptionId}`);
     return { success: true };
   } catch (error: any) {
@@ -67,6 +70,9 @@ export async function stopActiveSubscription(subscriptionId: string) {
 
     if (error) throw error;
 
+    await logAdminAction("UPDATE", "subscription", subscriptionId, {
+      status: "STOPPED",
+    });
     revalidatePath(`/admin/subscriptions/${subscriptionId}`);
     return { success: true };
   } catch (error: any) {

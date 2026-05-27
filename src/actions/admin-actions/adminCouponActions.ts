@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -95,6 +96,11 @@ export async function createCoupon(
 
     if (error) throw new Error(error.message);
 
+    await logAdminAction("CREATE", "coupon", d.code, {
+      customer_profile_id: d.customerProfileId,
+      discount_type: d.discountType,
+    });
+
     revalidatePath(`/admin/customers`);
 
     return { success: true };
@@ -122,6 +128,10 @@ export async function deleteCoupon(
       .eq("customer_profile_id", customerProfileId);
 
     if (error) throw new Error(error.message);
+
+    await logAdminAction("DELETE", "coupon", couponId, {
+      customer_profile_id: customerProfileId,
+    });
 
     revalidatePath(`/admin/customers`);
 

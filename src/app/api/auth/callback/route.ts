@@ -61,8 +61,7 @@ export async function GET(request: NextRequest) {
       ? userData.roles[0]?.code
       : (userData.roles as { code: string })?.code;
 
-    // Prevent internal staff (like MASTER) from logging into the Customer portal via OAuth
-    if (userRole === "MASTER") {
+    if (userRole === "MASTER_ADMIN") {
       await supabase.auth.signOut();
       return NextResponse.redirect(
         `${baseOrigin}/login?error=Unauthorized_Role`,
