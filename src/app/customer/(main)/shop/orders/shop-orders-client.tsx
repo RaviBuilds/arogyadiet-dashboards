@@ -37,7 +37,10 @@ import { updateAddonOrderDeliveryDate } from "@/actions/shop-actions";
 type OrderItem = {
   quantity: number;
   unit_price: number | null;
-  products: { name: string; category: string | null } | null;
+  products:
+    | { name: string; category: string | null }
+    | { name: string; category: string | null }[]
+    | null;
 } | null;
 
 type DeliveryOrder = {
@@ -55,6 +58,12 @@ export type ShopOrderRow = {
   delivery_orders?: DeliveryOrder | DeliveryOrder[] | null;
   addon_order_items?: OrderItem[] | null;
 };
+
+function getProductName(products: unknown): string | null {
+  if (!products) return null;
+  if (Array.isArray(products)) return products[0]?.name ?? null;
+  return (products as { name?: string }).name ?? null;
+}
 
 function getTomorrow(): string {
   const d = new Date();
@@ -288,13 +297,13 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
                   {items.length === 0 ? (
                     <span className="text-sm text-zinc-400">—</span>
                   ) : (
-                    items.map((item: any, idx: number) => (
+                    items.map((item, idx) => (
                       <div
                         key={idx}
                         className="flex items-center gap-1.5 text-sm"
                       >
                         <span className="font-medium text-zinc-800">
-                          {item?.products?.name ?? "Product"}
+                          {getProductName(item?.products ?? null) ?? "Product"}
                         </span>
                         <span className="text-zinc-400 text-xs">
                           ×{item?.quantity}
