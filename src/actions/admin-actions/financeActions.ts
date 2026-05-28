@@ -493,7 +493,7 @@ export async function getSystemSettings() {
     .single();
 
   if (error) {
-    return { rider_payout_per_km: 16, default_dispatch_time: "17:15:00" };
+    return { rider_payout_per_km: 16, default_dispatch_time: "00:10:00" };
   }
   return data;
 }

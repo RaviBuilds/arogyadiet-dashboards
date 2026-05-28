@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { format } from "date-fns";
+import { getRiderOperationalDeliveryDate } from "@/lib/dates/ist";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -112,7 +112,7 @@ export default async function RiderDeliveryDetailPage({
   }
   if (!riderProfile.is_online) redirect("/dashboard");
 
-  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const operationalDate = getRiderOperationalDeliveryDate();
   const { data: order, error } = await supabase
     .from("delivery_orders")
     .select(
@@ -128,7 +128,7 @@ export default async function RiderDeliveryDetailPage({
     )
     .eq("id", orderId)
     .eq("assigned_rider_id", riderProfile.id)
-    .eq("delivery_date", todayStr)
+    .eq("delivery_date", operationalDate)
     .single();
 
   if (error || !order) {

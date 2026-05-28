@@ -2,6 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import {
+  getRiderOperationalDeliveryDate,
+  getRiderOverviewHeading,
+  isRiderEveningPreviewIST,
+} from "@/lib/dates/ist";
+import {
   Package,
   CheckCircle2,
   Clock,
@@ -61,7 +66,9 @@ export default async function RiderDashboard() {
   }
 
   const isOnDuty = Boolean(riderProfile.is_online);
-  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const operationalDate = getRiderOperationalDeliveryDate();
+  const overviewHeading = getRiderOverviewHeading();
+  const isEveningPreview = isRiderEveningPreviewIST();
 
   // Fetch today's deliveries only after the rider starts duty
   const { data: todayOrders } = isOnDuty
@@ -69,7 +76,7 @@ export default async function RiderDashboard() {
         .from("delivery_orders")
         .select("id, status, payout_amount")
         .eq("assigned_rider_id", riderProfile.id)
-        .eq("delivery_date", todayStr)
+        .eq("delivery_date", operationalDate)
     : { data: [] };
 
   const orders = todayOrders || [];
@@ -111,7 +118,8 @@ export default async function RiderDashboard() {
               You are offline
             </h2>
             <p className="mt-2 text-sm font-medium text-zinc-500">
-              Toggle On Duty to sync today's assigned route.
+              Toggle On Duty to sync {isEveningPreview ? "tomorrow's" : "today's"}{" "}
+              assigned route.
             </p>
           </CardContent>
         </Card>
@@ -120,7 +128,7 @@ export default async function RiderDashboard() {
       {isOnDuty && (
         <div>
           <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-3 px-1">
-            Today's Overview
+            {overviewHeading}
           </h3>
           <div className="grid grid-cols-2 gap-3 md:gap-4">
             <Card className="border-none shadow-sm bg-white rounded-2xl">
