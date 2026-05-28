@@ -1,16 +1,92 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
 import { generateDailyOrders } from "@/actions/system-actions/orderGeneration";
-import { getTomorrowISTDateString } from "@/lib/dates/ist";
+import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
+
+type ProductLinkingResult = {
+  success: boolean;
+  count?: number;
+  targetDate?: string;
+  error?: string;
+};
+
+export async function runProductLinkingAction(
+  targetDate: string,
+): Promise<ProductLinkingResult> {
+  const today = getISTDateString(0);
+  const tomorrow = getISTDateString(1);
+
+  if (targetDate !== today && targetDate !== tomorrow) {
+    return {
+      success: false,
+      error: `Product linking can only run for today (${today}) or tomorrow (${tomorrow}).`,
+    };
+  }
+
+  const supabase = createAdminClient();
+
+  try {
+    const { data: deliveries, error: delError } = await supabase
+      .from("delivery_orders")
+      .select("id, customer_profile_id")
+      .eq("delivery_date", targetDate)
+      .eq("status", "ORDER_CREATED");
+
+    if (delError) {
+      console.error("Error fetching delivery orders for product linking:", delError);
+      return { success: false, error: delError.message };
+    }
+
+    if (!deliveries?.length) {
+      await logAdminAction("UPDATE", "system_automation", "Product Linking", {
+        executed_action: "runProductLinkingAction",
+        target_date: targetDate,
+        linked: 0,
+      });
+      revalidatePath("/admin/operations");
+      return { success: true, count: 0, targetDate };
+    }
+
+    let updatedCount = 0;
+
+    for (const delivery of deliveries) {
+      const { data: updatedAddons, error: updateError } = await supabase
+        .from("addon_orders")
+        .update({ delivery_order_id: delivery.id })
+        .eq("customer_profile_id", delivery.customer_profile_id)
+        .eq("status", "PAID")
+        .is("delivery_order_id", null)
+        .select("id");
+
+      if (updateError) {
+        console.error("Error linking addon orders:", updateError);
+        return { success: false, error: updateError.message };
+      }
+
+      updatedCount += updatedAddons?.length ?? 0;
+    }
+
+    await logAdminAction("UPDATE", "system_automation", "Product Linking", {
+      executed_action: "runProductLinkingAction",
+      target_date: targetDate,
+      linked: updatedCount,
+    });
+
+    revalidatePath("/admin/operations");
+    return { success: true, count: updatedCount, targetDate };
+  } catch (error: unknown) {
+    console.error("Critical error in runProductLinkingAction:", error);
+    return { success: false, error: "An unexpected server error occurred." };
+  }
+}
 
 export async function triggerSystemAutomation(
   automationName: string,
   options?: { targetDate?: string },
 ) {
-  const supabase = await createClient();
-
   try {
     // AUTOMATION 3: Routing & Batching (API Route)
     if (automationName === "Routing & Batching") {
@@ -66,20 +142,10 @@ export async function triggerSystemAutomation(
       };
     }
 
-    // AUTOMATION 2: Product Linking (Supabase RPC)
+    // AUTOMATION 2: Product Linking
     if (automationName === "Product Linking") {
-      const { error } = await supabase.rpc("run_product_linking");
-
-      if (error) {
-        console.error("Error running RPC run_product_linking:", error);
-        return { success: false, error: error.message };
-      }
-
-      await logAdminAction("UPDATE", "system_automation", automationName, {
-        executed_rpc: "run_product_linking",
-      });
-
-      return { success: true };
+      const targetDate = options?.targetDate ?? getTomorrowISTDateString();
+      return runProductLinkingAction(targetDate);
     }
 
     return { success: false, error: "Unknown automation type." };

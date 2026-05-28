@@ -12,10 +12,10 @@ import { format, isSameDay } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/components/ui/popover";
 import { Calendar } from "@/shared/components/ui/calendar";
 import { cn } from "@/lib/utils";
-import { getTomorrowISTDateString, parseISODateString } from "@/lib/dates/ist";
+import { getISTDateString, getTomorrowISTDateString, parseISODateString } from "@/lib/dates/ist";
 import { revalidateOperationsPage } from "@/actions/admin-actions/operationsActions";
 import { deletePlannedOrder, updateOrderMeal, getAddressesForOrder, updateOrderAddress } from "@/actions/admin-actions/plannedActions";
-import { triggerSystemAutomation } from "@/actions/admin-actions/systemActions"; 
+import { runProductLinkingAction, triggerSystemAutomation } from "@/actions/admin-actions/systemActions";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -59,10 +59,15 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
   const [systemToggle, setSystemToggle] = useState(false);
   const [automationStatus, setAutomationStatus] = useState<Record<string, { loading: boolean, lastRun?: string, success?: boolean }>>({});
   const tomorrowDate = useMemo(() => parseISODateString(getTomorrowISTDateString()), []);
+  const todayDate = useMemo(() => parseISODateString(getISTDateString(0)), []);
   const [orderGenTargetDate, setOrderGenTargetDate] = useState<Date>(() => parseISODateString(getTomorrowISTDateString()));
+  const [productLinkingTargetDate, setProductLinkingTargetDate] = useState<Date>(() => parseISODateString(getTomorrowISTDateString()));
   const [isOrderGenDateOpen, setIsOrderGenDateOpen] = useState(false);
+  const [isProductLinkingDateOpen, setIsProductLinkingDateOpen] = useState(false);
 
   const isTomorrowOnly = (date: Date) => isSameDay(date, tomorrowDate);
+  const isTodayOrTomorrow = (date: Date) =>
+    isSameDay(date, todayDate) || isSameDay(date, tomorrowDate);
 
   // Confirm modal state
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -163,9 +168,13 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
         "inserted" in result && typeof result.inserted === "number"
           ? ` (${result.inserted} orders created)`
           : "";
+      const linkedMsg =
+        "count" in result && typeof result.count === "number"
+          ? ` (${result.count} products linked)`
+          : "";
       const successDate =
         "targetDate" in result && result.targetDate ? ` for ${result.targetDate}` : "";
-      toast.success(`${automationName} executed successfully${successDate}${insertedMsg}!`);
+      toast.success(`${automationName} executed successfully${successDate}${insertedMsg}${linkedMsg}!`);
       const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       
       setAutomationStatus(prev => ({
@@ -173,7 +182,7 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
         [automationName]: {
           loading: false,
           success: true,
-          lastRun: `Activity done today at ${timeStr}${successDate}${insertedMsg}`,
+          lastRun: `Activity done today at ${timeStr}${successDate}${insertedMsg}${linkedMsg}`,
         },
       }));
       
@@ -182,6 +191,54 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
       toast.error(result.error || `Failed to run ${automationName}`);
       setAutomationStatus(prev => ({ ...prev, [automationName]: { ...prev[automationName], loading: false, success: false } }));
     }
+  };
+
+  const executeProductLinking = async (targetDate: string) => {
+    const automationName = "Product Linking";
+    setAutomationStatus(prev => ({ ...prev, [automationName]: { ...prev[automationName], loading: true } }));
+
+    const result = await runProductLinkingAction(targetDate);
+
+    if (result.success) {
+      const count = result.count ?? 0;
+      toast.success(`Successfully linked ${count} products!`);
+      const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+
+      setAutomationStatus(prev => ({
+        ...prev,
+        [automationName]: {
+          loading: false,
+          success: true,
+          lastRun: `Activity done today at ${timeStr} for ${targetDate} (${count} products linked)`,
+        },
+      }));
+
+      await revalidateOperationsPage();
+    } else {
+      toast.error(result.error || "Failed to run Product Linking");
+      setAutomationStatus(prev => ({
+        ...prev,
+        [automationName]: { ...prev[automationName], loading: false, success: false },
+      }));
+    }
+  };
+
+  const requestRunProductLinking = (targetDate: string) => {
+    openConfirm({
+      title: "Confirm Product Linking",
+      description: (
+        <p>
+          Are you sure you want to attach paid add-on products to the planned delivery meals for{" "}
+          <span className="font-semibold text-foreground">{targetDate}</span>?
+        </p>
+      ),
+      confirmLabel: "Run Script",
+      variant: "destructive",
+      onConfirm: () => {
+        closeConfirm();
+        void executeProductLinking(targetDate);
+      },
+    });
   };
 
   const requestRunAutomation = (automationName: string, targetDate?: string) => {
@@ -269,12 +326,13 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
       name: "5:15 PM Order Gen",
       icon: Clock,
       desc: "Forces the generation of tomorrow's delivery orders based on active subscriptions.",
-      hasDatePicker: true,
+      datePickerMode: "tomorrow-only" as const,
     },
     {
       name: "Product Linking",
       icon: ShoppingCart,
-      desc: "Attaches add-on shop products to tomorrow's planned delivery meals."
+      desc: "Attaches add-on shop products to planned delivery meals.",
+      datePickerMode: "today-or-tomorrow" as const,
     },
     {
       name: "Routing & Batching",
@@ -438,6 +496,23 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
             {automationScripts.map((script) => {
               const status = automationStatus[script.name] || {};
               const isSuccess = status.success;
+              const isProductLinking = script.name === "Product Linking";
+              const datePickerMode = "datePickerMode" in script ? script.datePickerMode : undefined;
+              const selectedDate =
+                datePickerMode === "today-or-tomorrow"
+                  ? productLinkingTargetDate
+                  : datePickerMode === "tomorrow-only"
+                    ? orderGenTargetDate
+                    : null;
+              const formattedDate = selectedDate ? format(selectedDate, "yyyy-MM-dd") : undefined;
+              const isDatePickerOpen =
+                datePickerMode === "today-or-tomorrow"
+                  ? isProductLinkingDateOpen
+                  : isOrderGenDateOpen;
+              const setIsDatePickerOpen =
+                datePickerMode === "today-or-tomorrow"
+                  ? setIsProductLinkingDateOpen
+                  : setIsOrderGenDateOpen;
 
               return (
                 <Card 
@@ -458,12 +533,12 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                       {script.desc}
                     </p>
 
-                    {"hasDatePicker" in script && script.hasDatePicker && (
+                    {datePickerMode && (
                       <div className="space-y-1.5">
                         <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
                           Target delivery date (IST)
                         </p>
-                        <Popover open={isOrderGenDateOpen} onOpenChange={setIsOrderGenDateOpen}>
+                        <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
                           <PopoverTrigger asChild>
                             <Button
                               type="button"
@@ -471,34 +546,48 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                               size="sm"
                               className={cn(
                                 "h-9 w-full justify-start text-left font-normal",
-                                !orderGenTargetDate && "text-muted-foreground",
+                                !selectedDate && "text-muted-foreground",
                               )}
                             >
                               <CalendarIcon className="mr-2 h-4 w-4" />
-                              {orderGenTargetDate
-                                ? format(orderGenTargetDate, "PPP")
-                                : "Select date"}
+                              {selectedDate ? format(selectedDate, "PPP") : "Select date"}
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent className="w-auto p-0" align="start">
                             <Calendar
                               mode="single"
-                              selected={orderGenTargetDate}
-                              month={tomorrowDate}
-                              defaultMonth={tomorrowDate}
+                              selected={selectedDate ?? undefined}
+                              month={datePickerMode === "today-or-tomorrow" ? todayDate : tomorrowDate}
+                              defaultMonth={datePickerMode === "today-or-tomorrow" ? todayDate : tomorrowDate}
                               onSelect={(date) => {
-                                if (!date || !isTomorrowOnly(date)) return;
-                                setOrderGenTargetDate(date);
-                                setIsOrderGenDateOpen(false);
+                                if (!date) return;
+                                if (datePickerMode === "tomorrow-only" && !isTomorrowOnly(date)) return;
+                                if (datePickerMode === "today-or-tomorrow" && !isTodayOrTomorrow(date)) return;
+                                if (datePickerMode === "today-or-tomorrow") {
+                                  setProductLinkingTargetDate(date);
+                                } else {
+                                  setOrderGenTargetDate(date);
+                                }
+                                setIsDatePickerOpen(false);
                               }}
-                              hidden={(date) => !isTomorrowOnly(date)}
-                              disabled={(date) => !isTomorrowOnly(date)}
+                              hidden={(date) =>
+                                datePickerMode === "tomorrow-only"
+                                  ? !isTomorrowOnly(date)
+                                  : !isTodayOrTomorrow(date)
+                              }
+                              disabled={(date) =>
+                                datePickerMode === "tomorrow-only"
+                                  ? !isTomorrowOnly(date)
+                                  : !isTodayOrTomorrow(date)
+                              }
                               hideNavigation
                             />
                           </PopoverContent>
                         </Popover>
                         <p className="text-[10px] text-muted-foreground">
-                          Only tomorrow&apos;s date is available for order generation.
+                          {datePickerMode === "tomorrow-only"
+                            ? "Only tomorrow's date is available for order generation."
+                            : "Select today or tomorrow (IST)."}
                         </p>
                       </div>
                     )}
@@ -512,15 +601,14 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                             ? 'border-green-600 text-green-700 hover:bg-green-50' 
                             : 'bg-primary text-primary-foreground'
                         }`}
-                        onClick={() =>
-                          requestRunAutomation(
-                            script.name,
-                            "hasDatePicker" in script && script.hasDatePicker
-                              ? format(orderGenTargetDate, "yyyy-MM-dd")
-                              : undefined,
-                          )
-                        } 
-                        disabled={status.loading}
+                        onClick={() => {
+                          if (isProductLinking && formattedDate) {
+                            requestRunProductLinking(formattedDate);
+                          } else {
+                            requestRunAutomation(script.name, formattedDate);
+                          }
+                        }} 
+                        disabled={status.loading || (datePickerMode !== undefined && !selectedDate)}
                       >
                         {status.loading ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
