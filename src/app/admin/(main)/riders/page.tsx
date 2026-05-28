@@ -25,12 +25,65 @@ export default async function RidersPage() {
   };
   const today = getISTDateString(0);
 
+  const PICKED_UP_ORDER_STATUSES = [
+    "PICKED",
+    "OUT_FOR_DELIVERY",
+    "ON_THE_WAY",
+    "REACHING_TO_LOCATION",
+    "DELIVERED",
+  ];
+
+  const deriveTodayPickupInfo = (todaysBatches: any[]) => {
+    if (todaysBatches.length === 0) {
+      return {
+        latestBatchStatus: "No Batch Assigned",
+        latestBatchTime: "N/A",
+      };
+    }
+
+    const allOrders = todaysBatches.flatMap(
+      (batch) => batch.delivery_orders || [],
+    );
+    const pickedOrders = allOrders.filter(
+      (order) =>
+        order.pickup_marked_at ||
+        PICKED_UP_ORDER_STATUSES.includes(order.status),
+    );
+
+    if (pickedOrders.length > 0) {
+      const pickupTimestamps = pickedOrders
+        .map((order) => order.pickup_marked_at)
+        .filter(Boolean)
+        .map((timestamp) => new Date(timestamp).getTime());
+
+      const earliestPickup =
+        pickupTimestamps.length > 0
+          ? new Date(Math.min(...pickupTimestamps)).toISOString()
+          : null;
+
+      return {
+        latestBatchStatus: "PICKED UP",
+        latestBatchTime: earliestPickup || "N/A",
+      };
+    }
+
+    const activeBatch = todaysBatches.sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )[0];
+
+    return {
+      latestBatchStatus: "NOT YET PICKED UP",
+      latestBatchTime: activeBatch.created_at,
+    };
+  };
+
   // Removed foreignTable order/limit to prevent PostgREST parsing crashes.
   const [ridersRes, areasRes] = await Promise.all([
     supabaseAdmin
       .from("rider_profiles")
       .select(
-        `id, employee_code, is_online, emergency_contact, created_at, joining_date, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
+        `id, employee_code, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
       ),
     supabaseAdmin
       .from("rider_service_areas")
@@ -54,26 +107,19 @@ export default async function RidersPage() {
     );
     let totalOrders = 0,
       completedOrders = 0,
-      expectedEarning = 0,
-      latestBatchStatus = "No Batch Assigned",
-      latestBatchTime = "N/A";
+      expectedEarning = 0;
 
-    if (todaysBatches.length > 0) {
-      const activeBatch = todaysBatches.sort(
-        (a: any, b: any) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      )[0];
-      latestBatchStatus = activeBatch.status;
-      latestBatchTime = activeBatch.created_at;
-      todaysBatches.forEach((batch: any) => {
-        expectedEarning += Number(batch.expected_payout || 0);
-        const orders = batch.delivery_orders || [];
-        totalOrders += orders.length;
-        completedOrders += orders.filter(
-          (o: any) => o.status === "DELIVERED",
-        ).length;
-      });
-    }
+    const { latestBatchStatus, latestBatchTime } =
+      deriveTodayPickupInfo(todaysBatches);
+
+    todaysBatches.forEach((batch: any) => {
+      expectedEarning += Number(batch.expected_payout || 0);
+      const orders = batch.delivery_orders || [];
+      totalOrders += orders.length;
+      completedOrders += orders.filter(
+        (o: any) => o.status === "DELIVERED",
+      ).length;
+    });
 
     const totalEarned =
       rider.rider_monthly_summaries?.reduce(
@@ -101,7 +147,12 @@ export default async function RidersPage() {
       emergency_contact: rider.emergency_contact || "N/A",
       employee_code: rider.employee_code || "N/A",
       is_online: rider.is_online || false,
-      status_updated_at: rider.created_at || new Date().toISOString(),
+      status_updated_at: rider.is_online
+        ? rider.last_online_at || rider.created_at
+        : rider.last_offline_at ||
+          rider.last_online_at ||
+          rider.created_at ||
+          new Date().toISOString(),
       assigned_pincodes: serviceAreas,
       todayCompletedDeliveries: completedOrders,
       todayTotalDeliveries: totalOrders,
