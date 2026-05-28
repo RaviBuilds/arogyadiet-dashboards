@@ -6,9 +6,11 @@ import {
   useJsApiLoader,
   Marker,
 } from "@react-google-maps/api";
-import { createClient } from "@/lib/supabase/client";
 import { MapPin, WifiOff } from "lucide-react";
-import type { LiveTrackingStop } from "@/actions/admin-actions/liveTrackingActions";
+import {
+  getRiderLiveLocation,
+  type LiveTrackingStop,
+} from "@/actions/admin-actions/liveTrackingActions";
 
 const containerStyle = {
   width: "100%",
@@ -18,26 +20,9 @@ const containerStyle = {
 
 const HYDERABAD_CENTER = { lat: 17.385, lng: 78.4867 };
 const GPS_STALE_MS = 90_000;
+const LOCATION_POLL_MS = 5_000;
 
 type RiderCoords = { lat: number; lng: number };
-
-function extractCoordsFromPayload(payload: unknown): RiderCoords | null {
-  const newData = (payload as { new?: unknown } | null | undefined)?.new as
-    | Record<string, unknown>
-    | null
-    | undefined;
-
-  const rawLat = newData?.lat;
-  const rawLng = newData?.lng;
-
-  if (rawLat == null || rawLng == null) return null;
-
-  const lat = Number(rawLat);
-  const lng = Number(rawLng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-  return { lat, lng };
-}
 
 export function AdminLiveTrackingMap({
   riderId,
@@ -48,7 +33,6 @@ export function AdminLiveTrackingMap({
   isRiderOnline: boolean;
   stops: LiveTrackingStop[];
 }) {
-  const supabase = createClient();
   const mapRef = useRef<google.maps.Map | null>(null);
   const [riderLocation, setRiderLocation] = useState<RiderCoords | null>(null);
   const [locationUpdatedAt, setLocationUpdatedAt] = useState<string | null>(
@@ -93,61 +77,30 @@ export function AdminLiveTrackingMap({
   }, [showRiderOnMap, riderLocation, mappableStops]);
 
   useEffect(() => {
-    if (!riderId || !supabase) return;
+    if (!riderId) return;
 
-    const fetchInitialLocation = async () => {
+    let cancelled = false;
+
+    const fetchLocation = async () => {
       try {
-        const { data, error } = await supabase
-          .from("rider_live_locations")
-          .select("lat, lng, updated_at")
-          .eq("rider_id", riderId)
-          .single();
+        const data = await getRiderLiveLocation(riderId);
+        if (cancelled || !data) return;
 
-        if (error) throw error;
-
-        if (data?.lat != null && data?.lng != null) {
-          setRiderLocation({
-            lat: Number(data.lat),
-            lng: Number(data.lng),
-          });
-          setLocationUpdatedAt(data.updated_at ?? null);
-        }
+        setRiderLocation({ lat: data.lat, lng: data.lng });
+        setLocationUpdatedAt(data.updatedAt);
       } catch (err) {
-        console.error("[AdminLiveTrackingMap] initial fetch", err);
+        console.error("[AdminLiveTrackingMap] fetch location", err);
       }
     };
 
-    fetchInitialLocation();
-
-    const channel = supabase
-      .channel(`admin:rider_live_locations:${riderId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "rider_live_locations",
-          filter: `rider_id=eq.${riderId}`,
-        },
-        (payload) => {
-          const coords = extractCoordsFromPayload(payload);
-          if (coords) {
-            setRiderLocation(coords);
-            const newData = payload.new as { updated_at?: string } | undefined;
-            if (newData?.updated_at) {
-              setLocationUpdatedAt(newData.updated_at);
-            } else {
-              setLocationUpdatedAt(new Date().toISOString());
-            }
-          }
-        },
-      )
-      .subscribe();
+    fetchLocation();
+    const interval = setInterval(fetchLocation, LOCATION_POLL_MS);
 
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      clearInterval(interval);
     };
-  }, [riderId, supabase]);
+  }, [riderId]);
 
   useEffect(() => {
     if (isLoaded) fitMapBounds();

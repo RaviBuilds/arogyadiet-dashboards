@@ -17,42 +17,20 @@ import {
   RefreshCw,
   Truck,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { SectionHeader } from "../core/SectionHeader";
 import { AdminLiveTrackingMap } from "./AdminLiveTrackingMap";
 import {
   getAdminLiveTrackingData,
   getLiveTrackingRiders,
   type LiveTrackingPayload,
-  type LiveTrackingPhase,
   type LiveTrackingRiderOption,
   type LiveTrackingStop,
 } from "@/actions/admin-actions/liveTrackingActions";
 import { cn } from "@/lib/utils";
 
-const TERMINAL_STATUSES = ["DELIVERED", "FAILED"];
-
-function recomputePhase(stops: LiveTrackingStop[]): LiveTrackingPhase {
-  if (stops.length === 0) return "not_out";
-
-  const statuses = stops.map((s) => s.status);
-  if (statuses.every((s) => TERMINAL_STATUSES.includes(s))) return "completed";
-
-  const postPickup = [
-    "OUT_FOR_DELIVERY",
-    "ON_THE_WAY",
-    "REACHING_TO_LOCATION",
-    "PICKED",
-    "DELIVERED",
-    "FAILED",
-  ];
-  if (!statuses.some((s) => postPickup.includes(s))) return "not_out";
-
-  return "active";
-}
+const TRACKING_POLL_MS = 10_000;
 
 export default function AdminLiveTracking() {
-  const supabase = createClient();
   const [riders, setRiders] = useState<LiveTrackingRiderOption[]>([]);
   const [selectedRiderId, setSelectedRiderId] = useState<string>("");
   const [payload, setPayload] = useState<LiveTrackingPayload | null>(null);
@@ -81,6 +59,12 @@ export default function AdminLiveTracking() {
     });
   }, []);
 
+  const pollTrackingData = useCallback(async (riderId: string) => {
+    if (!riderId) return;
+    const data = await getAdminLiveTrackingData(riderId);
+    setPayload(data);
+  }, []);
+
   useEffect(() => {
     loadRiders();
   }, [loadRiders]);
@@ -90,52 +74,14 @@ export default function AdminLiveTracking() {
   }, [selectedRiderId, loadTrackingData]);
 
   useEffect(() => {
-    if (!selectedRiderId || !supabase) return;
+    if (!selectedRiderId) return;
 
-    const channel = supabase
-      .channel(`admin:delivery_orders:${selectedRiderId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "delivery_orders",
-          filter: `assigned_rider_id=eq.${selectedRiderId}`,
-        },
-        (event) => {
-          const updated = event.new as {
-            id?: string;
-            status?: string;
-          };
-          if (!updated?.id || !updated.status) return;
+    const interval = setInterval(() => {
+      pollTrackingData(selectedRiderId);
+    }, TRACKING_POLL_MS);
 
-          setPayload((prev) => {
-            if (!prev) return prev;
-
-            const stops = prev.stops.map((stop) =>
-              stop.orderId === updated.id
-                ? {
-                    ...stop,
-                    status: updated.status!,
-                    isDelivered: updated.status === "DELIVERED",
-                  }
-                : stop,
-            );
-
-            return {
-              ...prev,
-              stops,
-              phase: recomputePhase(stops),
-            };
-          });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [selectedRiderId, supabase]);
+    return () => clearInterval(interval);
+  }, [selectedRiderId, pollTrackingData]);
 
   const phase = payload?.phase ?? "not_out";
   const stops = useMemo(

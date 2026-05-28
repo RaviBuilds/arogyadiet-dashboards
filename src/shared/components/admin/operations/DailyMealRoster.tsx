@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo } from "react";
 import {
   Table,
   TableBody,
@@ -21,6 +21,7 @@ import { DataSearchFilter } from "../core/DataSearchFilter";
 import { DateRangeFilter } from "../core/DateRangeFilter";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton } from "../core/ActionButtons";
+import { fetchRosterData } from "@/actions/admin-actions/operationsActions";
 
 export default function DailyMealRoster({
   initialRosterData = [],
@@ -28,7 +29,7 @@ export default function DailyMealRoster({
   initialRosterData?: any[];
 }) {
   const [isLoading, setIsLoading] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [rosterData, setRosterData] = useState(initialRosterData);
 
   // Search State
   const [searchColumn, setSearchColumn] = useState("sub_code");
@@ -42,7 +43,7 @@ export default function DailyMealRoster({
 
   // Filter Logic
   const filteredData = useMemo(() => {
-    let result = initialRosterData;
+    let result = rosterData;
 
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
@@ -74,22 +75,30 @@ export default function DailyMealRoster({
     }
 
     return result;
-  }, [initialRosterData, searchTerm, searchColumn]);
+  }, [rosterData, searchTerm, searchColumn]);
 
-  const handleLoadRange = () => {
+  const handleLoadRange = async () => {
     if (!fromDate || !toDate) {
       toast.error("Please select both From and To dates.");
       return;
     }
 
+    if (fromDate > toDate) {
+      toast.error("From date must be on or before To date.");
+      return;
+    }
+
     setIsLoading(true);
 
-    startTransition(() => {
-      setTimeout(() => {
-        setIsLoading(false);
-        toast.success("Roster data refreshed.");
-      }, 500);
-    });
+    try {
+      const data = await fetchRosterData(fromDate, toDate);
+      setRosterData(data);
+      toast.success("Roster data refreshed.");
+    } catch {
+      toast.error("Failed to load roster data.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleExportExcel = () => {
@@ -170,7 +179,7 @@ export default function DailyMealRoster({
               toDate={toDate}
               onToChange={setToDate}
               onLoad={handleLoadRange}
-              isLoading={isLoading || isPending}
+              isLoading={isLoading}
             />
           </div>
         }

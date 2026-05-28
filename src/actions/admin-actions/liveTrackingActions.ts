@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
 
 function getISTDateString(offsetDays = 0) {
@@ -55,6 +55,12 @@ export type LiveTrackingRiderOption = {
   hint: string;
 };
 
+export type RiderLiveLocation = {
+  lat: number;
+  lng: number;
+  updatedAt: string;
+};
+
 function derivePhase(statuses: string[]): LiveTrackingPhase {
   if (statuses.length === 0) return "not_out";
 
@@ -74,8 +80,37 @@ function derivePhase(statuses: string[]): LiveTrackingPhase {
   return "active";
 }
 
+export async function getRiderLiveLocation(
+  riderId: string,
+): Promise<RiderLiveLocation | null> {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("rider_live_locations")
+    .select("lat, lng, updated_at")
+    .eq("rider_id", riderId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[getRiderLiveLocation]", error);
+    return null;
+  }
+
+  if (data?.lat == null || data?.lng == null) return null;
+
+  const lat = Number(data.lat);
+  const lng = Number(data.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return {
+    lat,
+    lng,
+    updatedAt: data.updated_at ?? new Date().toISOString(),
+  };
+}
+
 export async function getLiveTrackingRiders(): Promise<LiveTrackingRiderOption[]> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const today = getISTDateString();
 
   const { data: orders, error } = await supabase
@@ -137,7 +172,7 @@ export async function getLiveTrackingRiders(): Promise<LiveTrackingRiderOption[]
 export async function getAdminLiveTrackingData(
   riderId: string,
 ): Promise<LiveTrackingPayload | null> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const today = getISTDateString();
 
   const apiKey =
