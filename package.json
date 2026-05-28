@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@capacitor-community/keep-awake": "^8.0.1",
     "@capacitor/core": "^8.3.4",
     "@capacitor/geolocation": "^8.2.0",
     "@googlemaps/js-api-loader": "^2.0.2",

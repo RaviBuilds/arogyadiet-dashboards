@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AlertTriangle } from "lucide-react";
 import { Geolocation } from "@capacitor/geolocation";
+import { KeepAwake } from "@capacitor-community/keep-awake";
 import { Capacitor } from "@capacitor/core";
 
 export type GpsHardwareState = "idle" | "acquiring" | "active" | "error";
@@ -36,6 +37,35 @@ export function LiveLocationTracker({
     onGpsStateChange?.(next);
   };
 
+  // Manage screen wake lock based on delivery activity
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    async function manageScreenWakeLock() {
+      try {
+        if (isDelivering && !isHijacked) {
+          await KeepAwake.keepAwake();
+          console.log("Screen wake lock activated: Screen will stay awake.");
+        } else {
+          await KeepAwake.allowSleep();
+          console.log("Screen wake lock released: Screen can now sleep.");
+        }
+      } catch (err) {
+        console.error("Failed to adjust screen wake lock state:", err);
+      }
+    }
+
+    manageScreenWakeLock();
+
+    return () => {
+      if (Capacitor.isNativePlatform()) {
+        KeepAwake.allowSleep().catch((err) =>
+          console.error("Failed to release wake lock on unmount:", err),
+        );
+      }
+    };
+  }, [isDelivering, isHijacked]);
+
   useEffect(() => {
     if (!isDelivering || isHijacked) return;
 
@@ -51,7 +81,9 @@ export function LiveLocationTracker({
         if (Capacitor.isNativePlatform()) {
           const permissions = await Geolocation.requestPermissions();
           if (permissions.location !== "granted") {
-            setError("Location access was denied. Please enable GPS in device settings.");
+            setError(
+              "Location access was denied. Please enable GPS in device settings.",
+            );
             updateGpsState("error");
             return;
           }
@@ -98,7 +130,7 @@ export function LiveLocationTracker({
                     tracker_session_id: sessionId, // Claim ownership!
                     updated_at: new Date().toISOString(),
                   },
-                  { onConflict: "rider_id" }
+                  { onConflict: "rider_id" },
                 );
 
               if (!claimError) {
@@ -138,19 +170,21 @@ export function LiveLocationTracker({
                   tracker_session_id: sessionId,
                   updated_at: new Date().toISOString(),
                 },
-                { onConflict: "rider_id" }
+                { onConflict: "rider_id" },
               );
 
             if (dbError) {
               console.error("Failed to sync location:", dbError.message);
             }
-          }
+          },
         );
       } catch (err: unknown) {
         console.error("Failed to launch tracker engine:", err);
         updateGpsState("error");
         setError(
-          err instanceof Error ? err.message : "Unknown tracking setup exception",
+          err instanceof Error
+            ? err.message
+            : "Unknown tracking setup exception",
         );
       }
     }
