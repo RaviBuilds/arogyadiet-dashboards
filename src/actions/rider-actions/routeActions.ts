@@ -175,8 +175,17 @@ export async function markBatchPickedUpAction(
     await supabase.from("delivery_status_logs").insert(logs);
   }
 
+  await supabase
+    .from("delivery_batches")
+    .update({ status: "IN_TRANSIT" })
+    .eq("assigned_rider_id", riderId)
+    .eq("delivery_date", deliveryDate)
+    .eq("status", "PENDING");
+
   revalidatePath("/route");
   revalidatePath("/dashboard");
+  revalidatePath("/admin/riders");
+  revalidatePath("/admin/operations");
 
   return { success: true };
 }

@@ -117,10 +117,14 @@ export default function RiderManagement({
           .toUpperCase()
       : "N/A";
 
-  const getPickupBadgeStatus = (status: string) =>
-    ["PICKED_UP", "IN_TRANSIT", "DELIVERED"].includes(status)
-      ? "PICKED UP"
-      : "NOT YET PICKED UP";
+  const getPickupBadgeStatus = (status: string) => {
+    if (status === "No Batch Assigned") return status;
+    if (status === "PICKED UP") return "PICKED UP";
+    if (["PICKED_UP", "IN_TRANSIT", "DELIVERED", "COMPLETED"].includes(status)) {
+      return "PICKED UP";
+    }
+    return "NOT YET PICKED UP";
+  };
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
