@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Table,
   TableBody,
@@ -59,7 +60,7 @@ import { AdminSubmenu } from "../core/AdminSubmenu";
 import {
   revalidateCustomersPage,
   updateCustomerBasicInfo,
-  deleteCustomer,
+  deactivateCustomerAccount,
   adminUpdateAddonOrderDeliveryDate,
 } from "@/actions/admin-actions/customerActions";
 import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
@@ -81,6 +82,7 @@ export interface CustomerData {
   allergies: string | null;
   hasMedicalHistory: boolean;
   activePlanName: string | null;
+  isActive: boolean;
 }
 
 export interface ActiveSubscriptionData {
@@ -122,7 +124,7 @@ export default function CustomerDashboard({
   stoppedSubscriptions?: ActiveSubscriptionData[];
   shopOrders?: ShopOrderAdminData[];
 }) {
-
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState("Customer Directory");
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -133,6 +135,7 @@ export default function CustomerDashboard({
   const [filterDiet, setFilterDiet] = useState<string>("ALL");
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
   const [filterMedical, setFilterMedical] = useState<string>("ALL");
+  const [showArchived, setShowArchived] = useState(false);
 
   // Dynamically extract unique active plans for the filter dropdown
   const uniquePlans = useMemo(() => {
@@ -175,6 +178,10 @@ export default function CustomerDashboard({
   const filteredCustomers = useMemo(() => {
     let result = customers;
 
+    if (!showArchived) {
+      result = result.filter((customer) => customer.isActive);
+    }
+
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter((row) => {
@@ -207,7 +214,7 @@ export default function CustomerDashboard({
     }
 
     return result;
-  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterMedical]);
+  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterMedical, showArchived]);
 
   const filterSubList = (list: ActiveSubscriptionData[]) => {
     if (!searchTerm) return list;
@@ -431,18 +438,20 @@ export default function CustomerDashboard({
     });
   };
 
-  const handleDeleteSubmit = () => {
+  const handleDeactivateSubmit = () => {
     if (!activeCustomer || deleteConfirmCode !== activeCustomer.email) return;
     if (!activeCustomer.userId) return;
 
     startTransition(async () => {
-      const res = await deleteCustomer(
+      const res = await deactivateCustomerAccount(
         activeCustomer.id,
         activeCustomer.userId!,
       );
       if (res.success) {
-        toast.success("Customer completely deleted");
+        toast.success("Customer account deactivated");
         setIsDeleteModalOpen(false);
+        setDeleteConfirmCode("");
+        router.refresh();
       } else toast.error(res.error);
     });
   };
@@ -525,6 +534,14 @@ export default function CustomerDashboard({
                 onTermChange={setSearchTerm}
                 options={searchOptions}
               />
+              <Button
+                type="button"
+                variant={showArchived ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowArchived((prev) => !prev)}
+              >
+                {showArchived ? "Showing Archived" : "Show Archived"}
+              </Button>
             </div>
           }
           actions={
@@ -884,9 +901,10 @@ export default function CustomerDashboard({
                           <DropdownMenuItem
                             className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
                             onClick={() => openDeleteModal(customer)}
+                            disabled={!customer.isActive}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
-                            Delete Customer
+                            Deactivate Customer
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1559,17 +1577,23 @@ export default function CustomerDashboard({
         </DialogContent>
       </Dialog>
 
-      {/* --- DELETE CUSTOMER MODAL --- */}
+      {/* --- DEACTIVATE CUSTOMER MODAL --- */}
       <Dialog open={isDeleteModalOpen} onOpenChange={setIsDeleteModalOpen}>
         <DialogContent className="sm:max-w-[450px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" /> Delete Customer Account
+              <AlertTriangle className="h-5 w-5" /> Deactivate Customer Account
             </DialogTitle>
             <DialogDescription asChild>
-              <div className="pt-2 text-red-600/90 font-medium text-sm">
-                This action cannot be undone. You cannot delete a customer if
-                they have an active or historical subscription.
+              <div className="pt-2 text-muted-foreground font-medium text-sm space-y-2">
+                <p>
+                  This archives the customer account and blocks login. Billing
+                  history, payments, and subscriptions are preserved.
+                </p>
+                <p>
+                  The same email and mobile can be used later to create a new
+                  customer account if they return.
+                </p>
               </div>
             </DialogDescription>
           </DialogHeader>
@@ -1597,7 +1621,7 @@ export default function CustomerDashboard({
             </Button>
             <Button
               variant="destructive"
-              onClick={handleDeleteSubmit}
+              onClick={handleDeactivateSubmit}
               disabled={
                 isPending || deleteConfirmCode !== activeCustomer?.email
               }
@@ -1607,7 +1631,7 @@ export default function CustomerDashboard({
               ) : (
                 <Trash2 className="mr-2 h-4 w-4" />
               )}{" "}
-              Delete Customer
+              Deactivate Customer
             </Button>
           </DialogFooter>
         </DialogContent>

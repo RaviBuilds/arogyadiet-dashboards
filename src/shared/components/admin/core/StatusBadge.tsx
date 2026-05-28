@@ -27,7 +27,7 @@ export function StatusBadge({ status, variant = "solid" }: StatusBadgeProps) {
     colorClass =
       "bg-orange-500/10 text-orange-600 border-orange-200 hover:bg-orange-500/20";
   } else if (
-    ["OUT_FOR_DELIVERY", "PICKED UP", "IN_TRANSIT"].includes(normalized)
+    ["OUT_FOR_DELIVERY", "PICKED UP", "IN_TRANSIT", "REACHING_TO_LOCATION"].includes(normalized)
   ) {
     colorClass =
       "bg-blue-500/10 text-blue-600 border-blue-200 hover:bg-blue-500/20";

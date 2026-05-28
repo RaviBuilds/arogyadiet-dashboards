@@ -13,8 +13,9 @@ import {
   adminSetCustomerPassword,
   adminSendPasswordReset,
   adminToggleCustomerActive,
-  deleteCustomer,
+  deactivateCustomerAccount,
 } from "@/actions/admin-actions/customerActions";
+import { isArchivedCustomerEmail } from "@/lib/customers/customerArchive";
 
 import { AdminSubmenu } from "@/shared/components/admin/core/AdminSubmenu";
 import {
@@ -154,6 +155,7 @@ export function Customer360Dashboard({
   const [pwdForm, setPwdForm] = useState({ password: "", confirm: "", showPwd: false });
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [isAccountActive, setIsAccountActive] = useState(customer.isActive ?? true);
+  const isArchivedAccount = isArchivedCustomerEmail(customer.email);
 
   // Modals State
   const [isPersonalModalOpen, setIsPersonalModalOpen] = useState(false);
@@ -964,7 +966,11 @@ export function Customer360Dashboard({
                 </div>
                 {isAccountActive ? (
                   <p className="text-xs text-muted-foreground">
-                    Deactivating will block the customer from logging in. Their data and subscription history are preserved.
+                    Deactivating archives the account and releases the email for future reuse. Billing history is preserved.
+                  </p>
+                ) : isArchivedAccount ? (
+                  <p className="text-xs text-muted-foreground">
+                    This account is archived. Create a new customer with the original email if they return.
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
@@ -980,7 +986,11 @@ export function Customer360Dashboard({
                   variant={isAccountActive ? "outline" : "default"}
                   className="w-full"
                   size="sm"
-                  disabled={isPending || (isAccountActive && hasActiveSubscription)}
+                  disabled={
+                    isPending ||
+                    isArchivedAccount ||
+                    (isAccountActive && hasActiveSubscription)
+                  }
                   onClick={() =>
                     startTransition(async () => {
                       if (!customer.authUserId) return;
@@ -992,7 +1002,9 @@ export function Customer360Dashboard({
                         makeActive,
                       );
                       if (res.success) {
-                        toast.success(makeActive ? "Account reactivated." : "Account deactivated.");
+                        toast.success(
+                          makeActive ? "Account reactivated." : "Account deactivated.",
+                        );
                         setIsAccountActive(makeActive);
                         router.refresh();
                       } else {
@@ -1008,7 +1020,11 @@ export function Customer360Dashboard({
                   ) : (
                     <UserCheck className="h-3.5 w-3.5 mr-2" />
                   )}
-                  {isAccountActive ? "Deactivate Account" : "Reactivate Account"}
+                  {isArchivedAccount
+                    ? "Account Archived"
+                    : isAccountActive
+                      ? "Deactivate Account"
+                      : "Reactivate Account"}
                 </Button>
               </CardContent>
             </Card>
@@ -1023,13 +1039,18 @@ export function Customer360Dashboard({
               </CardHeader>
               <CardContent className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Permanently delete this customer account. This action{" "}
-                  <span className="font-semibold text-destructive">cannot be undone</span>. All
-                  associated data will be removed.
+                  Deactivate and archive this customer account. Login will be
+                  blocked, but billing history is preserved. The same email can
+                  be used later to create a new customer.
                 </p>
                 {hasActiveSubscription && (
                   <p className="text-xs text-destructive font-medium">
-                    Cannot delete — customer has an active subscription. Cancel the subscription first.
+                    Cannot deactivate — customer has an active subscription. Cancel the subscription first.
+                  </p>
+                )}
+                {isArchivedAccount && (
+                  <p className="text-xs text-muted-foreground font-medium">
+                    This account is already archived.
                   </p>
                 )}
                 <div className="grid gap-1.5">
@@ -1050,22 +1071,27 @@ export function Customer360Dashboard({
                   disabled={
                     isPending ||
                     deleteConfirmName !== customer.full_name ||
-                    hasActiveSubscription
+                    hasActiveSubscription ||
+                    isArchivedAccount ||
+                    !isAccountActive
                   }
                   onClick={() =>
                     startTransition(async () => {
-                      const res = await deleteCustomer(customer.id, customer.userId);
+                      const res = await deactivateCustomerAccount(
+                        customer.id,
+                        customer.userId,
+                      );
                       if (res.success) {
-                        toast.success("Customer account deleted.");
+                        toast.success("Customer account deactivated.");
                         router.push("/customers");
                       } else {
-                        toast.error(res.error ?? "Failed to delete customer.");
+                        toast.error(res.error ?? "Failed to deactivate customer.");
                       }
                     })
                   }
                 >
                   {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-3.5 w-3.5 mr-2" />}
-                  Permanently Delete
+                  Deactivate Account
                 </Button>
               </CardContent>
             </Card>

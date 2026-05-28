@@ -16,6 +16,10 @@ import {
   ACCOUNT_DELETED_EMAIL_SUBJECT,
 } from "@/emails/AccountDeletedEmail";
 import { logAdminAction } from "@/lib/logger";
+import {
+  buildArchivedEmail,
+  isArchivedCustomerEmail,
+} from "@/lib/customers/customerArchive";
 
 // Initialize Admin Client
 const supabaseAdmin = createAdminClient(
@@ -166,52 +170,108 @@ export async function revalidateCustomersPage() {
   revalidatePath("/admin/customers");
 }
 
-export async function deleteCustomer(profileId: string, userId: string) {
-  // Guard: cannot delete a customer with an active subscription
+async function assertNoActiveSubscription(profileId: string) {
   const { count } = await supabaseAdmin
     .from("subscriptions")
     .select("id", { count: "exact", head: true })
     .eq("customer_profile_id", profileId)
     .eq("status", "ACTIVE");
+
   if (count && count > 0) {
     return {
-      success: false,
+      ok: false as const,
       error:
-        "Cannot delete — customer has an active subscription. Cancel the subscription first.",
+        "Cannot deactivate — customer has an active subscription. Cancel the subscription first.",
     };
   }
 
-  // Fetch email + name before deleting (so we can send the notification)
-  const { data: userData } = await supabaseAdmin
+  return { ok: true as const };
+}
+
+export async function deactivateCustomerAccount(
+  profileId: string,
+  userId: string,
+) {
+  const guard = await assertNoActiveSubscription(profileId);
+  if (!guard.ok) {
+    return { success: false, error: guard.error };
+  }
+
+  const { data: userData, error: fetchError } = await supabaseAdmin
     .from("users")
-    .select("email, full_name")
+    .select("email, full_name, mobile, auth_user_id, is_active")
     .eq("id", userId)
     .single();
 
-  const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-  if (authError && !authError.message.includes("User not found")) {
-    return { success: false, error: authError.message };
+  if (fetchError || !userData) {
+    return { success: false, error: "Customer account not found." };
+  }
+
+  if (!userData.is_active && isArchivedCustomerEmail(userData.email)) {
+    return { success: false, error: "Customer account is already archived." };
+  }
+
+  const originalEmail = userData.email;
+  const originalMobile = userData.mobile;
+  const archivedEmail = buildArchivedEmail(profileId);
+
+  if (userData.auth_user_id) {
+    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+      userData.auth_user_id,
+      { email: archivedEmail, ban_duration: "876600h" },
+    );
+    if (authError) {
+      return { success: false, error: authError.message };
+    }
   }
 
   const { error: userError } = await supabaseAdmin
     .from("users")
-    .delete()
+    .update({
+      email: archivedEmail,
+      mobile: null,
+      is_active: false,
+    })
     .eq("id", userId);
 
-  if (userError) return { success: false, error: userError.message };
+  if (userError) {
+    return { success: false, error: userError.message };
+  }
 
-  // Send account-deleted email if we have the customer's email
-  if (userData?.email) {
+  const { error: profileError } = await supabaseAdmin
+    .from("customer_profiles")
+    .update({ is_active: false })
+    .eq("id", profileId);
+
+  if (profileError) {
+    return { success: false, error: profileError.message };
+  }
+
+  if (originalEmail && !isArchivedCustomerEmail(originalEmail)) {
     await sendEmail(
-      userData.email,
+      originalEmail,
       ACCOUNT_DELETED_EMAIL_SUBJECT,
-      accountDeletedEmailHtml({ name: userData.full_name || "Valued Customer" }),
+      accountDeletedEmailHtml({
+        name: userData.full_name || "Valued Customer",
+      }),
     );
   }
 
-  await logAdminAction("DELETE", "customer", profileId, { user_id: userId });
+  await logAdminAction("UPDATE", "customer", profileId, {
+    action: "deactivate",
+    user_id: userId,
+    original_email: originalEmail,
+    original_mobile: originalMobile,
+  });
+
+  revalidatePath(`/admin/customers/${profileId}`);
   revalidatePath("/admin/customers");
   return { success: true };
+}
+
+/** @deprecated Use deactivateCustomerAccount */
+export async function deleteCustomer(profileId: string, userId: string) {
+  return deactivateCustomerAccount(profileId, userId);
 }
 
 // ── Admin Create Customer ─────────────────────────────────────────────────────
@@ -481,43 +541,49 @@ export async function adminToggleCustomerActive(
   authUserId: string,
   makeActive: boolean,
 ) {
-  // Guard: cannot deactivate a customer with an active subscription
   if (!makeActive) {
-    const { count } = await supabaseAdmin
-      .from("subscriptions")
-      .select("id", { count: "exact", head: true })
-      .eq("customer_profile_id", profileId)
-      .eq("status", "ACTIVE");
-    if (count && count > 0) {
-      return {
-        success: false,
-        error:
-          "Cannot deactivate — customer has an active subscription. Cancel the subscription first.",
-      };
-    }
+    return deactivateCustomerAccount(profileId, userId);
+  }
+
+  const { data: userData, error: fetchError } = await supabaseAdmin
+    .from("users")
+    .select("email")
+    .eq("id", userId)
+    .single();
+
+  if (fetchError || !userData) {
+    return { success: false, error: "Customer account not found." };
+  }
+
+  if (isArchivedCustomerEmail(userData.email)) {
+    return {
+      success: false,
+      error:
+        "This account was archived. Create a new customer with the same email instead.",
+    };
   }
 
   const { error: userError } = await supabaseAdmin
     .from("users")
-    .update({ is_active: makeActive })
+    .update({ is_active: true })
     .eq("id", userId);
   if (userError) return { success: false, error: userError.message };
 
   const { error: profileError } = await supabaseAdmin
     .from("customer_profiles")
-    .update({ is_active: makeActive })
+    .update({ is_active: true })
     .eq("id", profileId);
   if (profileError) return { success: false, error: profileError.message };
 
-  // Ban/unban in Supabase Auth
   const { error: authError } =
     await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-      ban_duration: makeActive ? "none" : "876600h",
+      ban_duration: "none",
     });
   if (authError) return { success: false, error: authError.message };
 
   await logAdminAction("UPDATE", "customer", profileId, {
-    is_active: makeActive,
+    action: "reactivate",
+    is_active: true,
   });
   revalidatePath(`/admin/customers/${profileId}`);
   revalidatePath("/admin/customers");

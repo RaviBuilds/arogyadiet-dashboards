@@ -27,6 +27,7 @@ export function LiveLocationTracker({
 
   // Keeps track of whether this phone has officially claimed the database yet
   const hasClaimedSession = useRef(false);
+  const lastUpdateTime = useRef<number>(0);
 
   const updateGpsState = (next: GpsHardwareState) => {
     setGpsState(next);
@@ -49,6 +50,14 @@ export function LiveLocationTracker({
     const watchId = navigator.geolocation.watchPosition(
       async (position) => {
         if (isHijacked) return;
+
+        const now = Date.now();
+        // If 3000ms haven't passed, do not update the database
+        if (now - lastUpdateTime.current < 3000) {
+          return;
+        }
+        // Update the timestamp
+        lastUpdateTime.current = now;
 
         // Hardware is actively providing coordinates.
         updateGpsState("active");

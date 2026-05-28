@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/shared/components/ui/dropdown-menu";
-import { Package, Layers, Filter } from "lucide-react";
-import { revalidateOperationsPage } from "@/actions/admin-actions/operationsActions";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/shared/components/ui/dropdown-menu";
+import { Package, Layers, Filter, ChevronDown, Loader2 } from "lucide-react";
+import { revalidateOperationsPage, updateAdminOrderStatusAction, markAdminBatchPickedUpAction } from "@/actions/admin-actions/operationsActions";
+import { getAdminNextStatusTransition, PRE_PICKUP_ORDER_STATUSES } from "@/lib/delivery/adminOrderStatusTransitions";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -17,6 +18,7 @@ import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
+import { ConfirmActionModal } from "../core/ConfirmActionModal";
 
 const getISTDateString = (offsetDays = 0) => {
   const date = new Date();
@@ -35,6 +37,8 @@ const getDayLabel = (deliveryDate: string) => {
   return deliveryDate;
 };
 
+const PICKED_UP_BATCH_STATUSES = ["IN_TRANSIT", "COMPLETED"];
+
 export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -48,6 +52,22 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   const [batchSearchColumn, setBatchSearchColumn] = useState("batch_id");
   const [batchSearchTerm, setBatchSearchTerm] = useState("");
   const [batchStatusFilter, setBatchStatusFilter] = useState<string[]>([]);
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const [statusConfirmOrder, setStatusConfirmOrder] = useState<{
+    id: string;
+    customerName: string;
+    currentStatus: string;
+    nextStatus: string;
+    actionLabel: string;
+  } | null>(null);
+  const [pendingBatchKey, setPendingBatchKey] = useState<string | null>(null);
+  const [batchPickupConfirm, setBatchPickupConfirm] = useState<{
+    batchId: string;
+    deliveryDate: string;
+    batchLabel: string;
+    riderName: string;
+    mealCount: number;
+  } | null>(null);
 
   // --- DISPATCH BOARD LOGIC ---
   const filteredData = useMemo(() => {
@@ -88,17 +108,31 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
           riderName: order.rider_profiles?.users?.full_name || "Unassigned",
           mealCount: 0,
           addonCount: 0,
+          pendingPickupCount: 0,
         });
       }
       const b = batches.get(batchKey);
       b.mealCount += 1;
+      if (PRE_PICKUP_ORDER_STATUSES.includes(order.status)) {
+        b.pendingPickupCount += 1;
+      }
       order.addon_orders?.forEach((ao: any) => {
         ao.addon_order_items?.forEach((item: any) => {
           b.addonCount += item.quantity || 1;
         });
       });
     });
-    return Array.from(batches.values());
+    return Array.from(batches.values()).map((batch) => ({
+      ...batch,
+      isPickedUp:
+        batch.id !== "UNBATCHED" &&
+        (PICKED_UP_BATCH_STATUSES.includes(batch.status.toUpperCase()) ||
+          batch.pendingPickupCount === 0),
+      canMarkPickup:
+        batch.id !== "UNBATCHED" &&
+        batch.status.toUpperCase() === "PENDING" &&
+        batch.pendingPickupCount > 0,
+    }));
   }, [data]);
 
   const filteredBatchSummary = useMemo(() => {
@@ -172,6 +206,54 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
     const dateStr = order.delivered_at || order.pickup_marked_at || order.created_at;
     if (!dateStr) return "N/A";
     return new Date(dateStr).toLocaleTimeString('en-US', { hour: "2-digit", minute: "2-digit" }).toUpperCase();
+  };
+
+  const handleStatusUpdateConfirm = () => {
+    if (!statusConfirmOrder) return;
+
+    const orderId = statusConfirmOrder.id;
+    setPendingOrderId(orderId);
+
+    startTransition(async () => {
+      const result = await updateAdminOrderStatusAction(orderId);
+      setPendingOrderId(null);
+      setStatusConfirmOrder(null);
+
+      if (result.success) {
+        toast.success(`Order marked as ${statusConfirmOrder.nextStatus.replace(/_/g, " ").toLowerCase()}`);
+        router.refresh();
+      } else {
+        toast.error(result.error || "Failed to update order status");
+      }
+    });
+  };
+
+  const formatStatusLabel = (status: string) =>
+    status.replace(/_/g, " ").toLowerCase();
+
+  const handleBatchPickupConfirm = () => {
+    if (!batchPickupConfirm) return;
+
+    const batchKey = `${batchPickupConfirm.batchId}-${batchPickupConfirm.deliveryDate}`;
+    setPendingBatchKey(batchKey);
+
+    startTransition(async () => {
+      const result = await markAdminBatchPickedUpAction(
+        batchPickupConfirm.batchId,
+        batchPickupConfirm.deliveryDate,
+      );
+      setPendingBatchKey(null);
+      setBatchPickupConfirm(null);
+
+      if (result.success) {
+        toast.success(
+          `Batch picked up. ${result.ordersUpdated ?? 0} order(s) marked out for delivery.`,
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error || "Failed to mark batch pickup");
+      }
+    });
   };
 
   return (
@@ -251,6 +333,49 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                   <TableCell>
                     <StatusBadge status={order.status} />
                     <div className="text-[10px] text-muted-foreground mt-1 ml-1">{getTimeUpdated(order)}</div>
+                    {(() => {
+                      const transition = getAdminNextStatusTransition(order.status);
+                      if (!transition) return null;
+
+                      const customerName =
+                        order.customer_profiles?.users?.full_name || "Unknown";
+                      const isRowPending = pendingOrderId === order.id && isPending;
+
+                      return (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isRowPending}
+                              className="mt-1 h-7 px-2 text-[11px] text-primary hover:text-primary"
+                            >
+                              {isRowPending ? (
+                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              ) : (
+                                <ChevronDown className="mr-1 h-3 w-3" />
+                              )}
+                              Update Status
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start">
+                            <DropdownMenuItem
+                              onClick={() =>
+                                setStatusConfirmOrder({
+                                  id: order.id,
+                                  customerName,
+                                  currentStatus: order.status,
+                                  nextStatus: transition.next,
+                                  actionLabel: transition.label,
+                                })
+                              }
+                            >
+                              {transition.label}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-right font-medium text-foreground">
                     ₹{order.payout_amount || 0}
@@ -317,18 +442,21 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </TableHead>
+              <TableHead>Batch Pickup</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredBatchSummary.length === 0 ? (
                <TableRow>
-                 <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
+                 <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
                    No batches match your criteria.
                  </TableCell>
                </TableRow>
             ) : (
               filteredBatchSummary.map((batch, i) => {
                 const dayLabel = getDayLabel(batch.deliveryDate);
+                const batchKey = `${batch.id}-${batch.deliveryDate}`;
+                const isBatchPending = pendingBatchKey === batchKey && isPending;
                 return (
                 <TableRow key={`${batch.id}-${batch.deliveryDate}` || i} className="hover:bg-muted/30">
                   <TableCell>
@@ -360,6 +488,43 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                   <TableCell>
                     <StatusBadge status={batch.status} variant="outline" />
                   </TableCell>
+                  <TableCell>
+                    {batch.id === "UNBATCHED" ? (
+                      <span className="text-xs text-muted-foreground">N/A</span>
+                    ) : batch.canMarkPickup ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={isBatchPending}
+                        className="h-8 text-xs"
+                        onClick={() =>
+                          setBatchPickupConfirm({
+                            batchId: batch.id,
+                            deliveryDate: batch.deliveryDate,
+                            batchLabel: batch.id.substring(0, 8).toUpperCase(),
+                            riderName: batch.riderName,
+                            mealCount: batch.mealCount,
+                          })
+                        }
+                      >
+                        {isBatchPending ? (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        ) : null}
+                        Mark Batch Pickup
+                      </Button>
+                    ) : batch.isPickedUp ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled
+                        className="h-8 text-xs"
+                      >
+                        Picked
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                 </TableRow>
               );
               })
@@ -367,6 +532,80 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
           </TableBody>
         </Table>
       </DataTableCard>
+
+      <ConfirmActionModal
+        isOpen={!!statusConfirmOrder}
+        onClose={() => {
+          if (!isPending) setStatusConfirmOrder(null);
+        }}
+        onConfirm={handleStatusUpdateConfirm}
+        title={statusConfirmOrder?.actionLabel ?? "Update Order Status"}
+        description={
+          statusConfirmOrder ? (
+            <div className="space-y-2">
+              <p>
+                Update order for{" "}
+                <span className="font-semibold text-foreground">
+                  {statusConfirmOrder.customerName}
+                </span>
+                ?
+              </p>
+              <p>
+                Status will change from{" "}
+                <span className="font-semibold text-foreground">
+                  {formatStatusLabel(statusConfirmOrder.currentStatus)}
+                </span>{" "}
+                to{" "}
+                <span className="font-semibold text-foreground">
+                  {formatStatusLabel(statusConfirmOrder.nextStatus)}
+                </span>
+                .
+              </p>
+            </div>
+          ) : null
+        }
+        confirmLabel={statusConfirmOrder?.actionLabel ?? "Confirm"}
+        isPending={isPending && !!pendingOrderId}
+      />
+
+      <ConfirmActionModal
+        isOpen={!!batchPickupConfirm}
+        onClose={() => {
+          if (!isPending) setBatchPickupConfirm(null);
+        }}
+        onConfirm={handleBatchPickupConfirm}
+        title="Mark Batch Pickup"
+        description={
+          batchPickupConfirm ? (
+            <div className="space-y-2">
+              <p>
+                Mark batch{" "}
+                <span className="font-semibold text-foreground">
+                  {batchPickupConfirm.batchLabel}
+                </span>{" "}
+                as picked up?
+              </p>
+              <p>
+                All{" "}
+                <span className="font-semibold text-foreground">
+                  {batchPickupConfirm.mealCount}
+                </span>{" "}
+                assigned order(s) for rider{" "}
+                <span className="font-semibold text-foreground">
+                  {batchPickupConfirm.riderName}
+                </span>{" "}
+                will move to{" "}
+                <span className="font-semibold text-foreground">
+                  out for delivery
+                </span>
+                . This action cannot be undone.
+              </p>
+            </div>
+          ) : null
+        }
+        confirmLabel="Mark Batch Pickup"
+        isPending={isPending && !!pendingBatchKey}
+      />
     </div>
   );
 }
