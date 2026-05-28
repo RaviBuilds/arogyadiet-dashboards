@@ -189,6 +189,14 @@ export default function DailyMealRoster({
             disabled={filteredData.length === 0}
           />
         }
+        footer={
+          <p className="text-sm text-muted-foreground">
+            Total entries:{" "}
+            <span className="font-semibold text-foreground">
+              {filteredData.length}
+            </span>
+          </p>
+        }
       >
         <Table>
           <TableHeader>

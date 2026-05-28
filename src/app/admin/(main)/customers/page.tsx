@@ -16,7 +16,7 @@ export default async function CustomersPage() {
       date_of_birth,
       allergies,
       has_medical_history,
-      users!inner ( id, full_name, email, mobile ),
+      users!inner ( id, full_name, email, mobile, is_active ),
       addresses ( pincode, is_primary ),
       subscriptions ( status, subscription_plans ( name ) )
     `);
@@ -69,6 +69,8 @@ export default async function CustomersPage() {
       fullName: customer.users?.full_name || "N/A",
       email: customer.users?.email || "N/A",
       mobile: customer.users?.mobile || "N/A",
+      isActive:
+        (customer.is_active ?? true) && (customer.users?.is_active ?? true),
       dietary_preference: customer.dietary_preference || "N/A",
       primary_pincode: primaryAddress?.pincode || "N/A",
       status: displayStatus,
