@@ -6,12 +6,15 @@ import { logAdminAction } from "@/lib/logger";
 import { generateDailyOrders } from "@/actions/system-actions/orderGeneration";
 import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
 
-type ProductLinkingResult = {
-  success: boolean;
-  count?: number;
-  targetDate?: string;
-  error?: string;
-};
+type ProductLinkingResult =
+  | { success: true; count: number; targetDate: string }
+  | { success: false; error: string };
+
+type SystemAutomationResult =
+  | { success: true }
+  | { success: true; targetDate: string; inserted: number; skipped: number }
+  | ProductLinkingResult
+  | { success: false; error: string };
 
 export async function runProductLinkingAction(
   targetDate: string,
@@ -86,7 +89,7 @@ export async function runProductLinkingAction(
 export async function triggerSystemAutomation(
   automationName: string,
   options?: { targetDate?: string },
-) {
+): Promise<SystemAutomationResult> {
   try {
     // AUTOMATION 3: Routing & Batching (API Route)
     if (automationName === "Routing & Batching") {
@@ -124,7 +127,10 @@ export async function triggerSystemAutomation(
       const result = await generateDailyOrders(targetDate);
 
       if (!result.success) {
-        return { success: false, error: result.error };
+        return {
+          success: false,
+          error: result.error ?? "Order generation failed.",
+        };
       }
 
       await logAdminAction("UPDATE", "system_automation", automationName, {
