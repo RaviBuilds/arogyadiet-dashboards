@@ -37,8 +37,7 @@ export async function LoginAction(prevState: any, formData: FormData) {
       .single();
 
     if (userData?.force_password_change) {
-      finalRedirectPath = `/${portalRole.toLowerCase()}/update-password`;
-    } else {
+      finalRedirectPath = "/update-password";
     }
   } catch (error: any) {
     console.error("LoginAction Caught Error:", error.message);
