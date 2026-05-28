@@ -9,6 +9,44 @@ type AddressLike = {
   state?: string | null;
 };
 
+const INDIA_LAT_MIN = 6;
+const INDIA_LAT_MAX = 37;
+const INDIA_LNG_MIN = 68;
+const INDIA_LNG_MAX = 97;
+
+export function isValidDeliveryCoordinate(lat: number, lng: number): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001) return false;
+  return (
+    lat >= INDIA_LAT_MIN &&
+    lat <= INDIA_LAT_MAX &&
+    lng >= INDIA_LNG_MIN &&
+    lng <= INDIA_LNG_MAX
+  );
+}
+
+async function resolveFromPincode(
+  address: AddressLike,
+  apiKey: string,
+  pincodeCache: Map<string, Coordinates>,
+): Promise<Coordinates | null> {
+  if (!address.pincode) return null;
+
+  const cached = pincodeCache.get(address.pincode);
+  if (cached) return cached;
+
+  const coords = await geocodePincode(
+    address.pincode,
+    address.city,
+    address.state,
+    apiKey,
+  );
+  if (!coords) return null;
+
+  pincodeCache.set(address.pincode, coords);
+  return coords;
+}
+
 export async function geocodePincode(
   pincode: string,
   city: string | null | undefined,
@@ -40,27 +78,16 @@ export async function resolveAddressCoordinates(
   if (!address) return null;
 
   if (address.lat != null && address.lng != null) {
-    return {
-      coords: { lat: Number(address.lat), lng: Number(address.lng) },
-      usedPincodeFallback: false,
-    };
+    const lat = Number(address.lat);
+    const lng = Number(address.lng);
+
+    if (isValidDeliveryCoordinate(lat, lng)) {
+      return { coords: { lat, lng }, usedPincodeFallback: false };
+    }
   }
 
-  if (!address.pincode) return null;
+  const pincodeCoords = await resolveFromPincode(address, apiKey, pincodeCache);
+  if (!pincodeCoords) return null;
 
-  const cached = pincodeCache.get(address.pincode);
-  if (cached) {
-    return { coords: cached, usedPincodeFallback: true };
-  }
-
-  const coords = await geocodePincode(
-    address.pincode,
-    address.city,
-    address.state,
-    apiKey,
-  );
-  if (!coords) return null;
-
-  pincodeCache.set(address.pincode, coords);
-  return { coords, usedPincodeFallback: true };
+  return { coords: pincodeCoords, usedPincodeFallback: true };
 }

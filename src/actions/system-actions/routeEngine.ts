@@ -1,14 +1,20 @@
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { computeHaversineRoute, type RoutableOrder } from "@/lib/distance";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
 
-// Initialize the Admin Client to bypass RLS for system tasks
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 const RE_ROUTABLE_STATUSES = ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"];
+
+type GoogleDirectionsRoute = {
+  totalKm: number;
+  expectedPayout: number;
+  legs: { orderId: string; routeSequence: number; payoutAmount: number }[];
+};
 
 async function resetPendingRoutingForDate(targetDate: string) {
   const { data: resetOrders, error: resetError } = await supabaseAdmin
@@ -65,13 +71,94 @@ async function resetPendingRoutingForDate(targetDate: string) {
   };
 }
 
+async function fetchGoogleDirectionsRoute(
+  riderOrders: RoutableOrder[],
+  kitchenLat: number,
+  kitchenLng: number,
+  payoutPerKm: number,
+  apiKey: string,
+): Promise<GoogleDirectionsRoute | null> {
+  const waypointsStr =
+    `optimize:true|` + riderOrders.map((o) => `${o.lat},${o.lng}`).join("|");
+  const kitchenCoords = `${kitchenLat},${kitchenLng}`;
+
+  const mapRes = await fetch(
+    `https://maps.googleapis.com/maps/api/directions/json?origin=${kitchenCoords}&destination=${kitchenCoords}&waypoints=${waypointsStr}&key=${apiKey}`,
+  );
+  const mapData = await mapRes.json();
+
+  if (mapData.status !== "OK") {
+    console.error("Google Maps API Error:", mapData);
+    return null;
+  }
+
+  const route = mapData.routes[0];
+  const totalMeters = route.legs.reduce(
+    (sum: number, leg: { distance: { value: number } }) =>
+      sum + leg.distance.value,
+    0,
+  );
+  const totalKm = Number((totalMeters / 1000).toFixed(2));
+  const expectedPayout = Math.round(totalKm * payoutPerKm);
+
+  const optimalOrderIndices = route.waypoint_order as number[];
+  const legs = route.legs as { distance?: { value?: number } }[];
+
+  const orderedLegs = optimalOrderIndices.map((originalIndex, i) => {
+    const order = riderOrders[originalIndex];
+    const legDistanceKm = (legs[i]?.distance?.value || 0) / 1000;
+
+    return {
+      orderId: order.id,
+      routeSequence: i + 1,
+      payoutAmount: Number((legDistanceKm * payoutPerKm).toFixed(2)),
+    };
+  });
+
+  return { totalKm, expectedPayout, legs: orderedLegs };
+}
+
+async function commitRiderBatch(
+  riderId: string,
+  targetDate: string,
+  route: GoogleDirectionsRoute,
+) {
+  const { data: newBatch, error: batchError } = await supabaseAdmin
+    .from("delivery_batches")
+    .insert({
+      assigned_rider_id: riderId,
+      delivery_date: targetDate,
+      total_distance_km: route.totalKm,
+      expected_payout: route.expectedPayout,
+      status: "PENDING",
+    })
+    .select("id")
+    .single();
+
+  if (!newBatch || batchError) return 0;
+
+  for (const leg of route.legs) {
+    await supabaseAdmin
+      .from("delivery_orders")
+      .update({
+        batch_id: newBatch.id,
+        assigned_rider_id: riderId,
+        status: "ASSIGNED",
+        route_sequence: leg.routeSequence,
+        payout_amount: leg.payoutAmount,
+      })
+      .eq("id", leg.orderId);
+  }
+
+  return route.legs.length;
+}
+
 export async function executeAutomatedDispatch(targetDate: string) {
   const resetResult = await resetPendingRoutingForDate(targetDate);
   if (resetResult.error) {
     return { error: `Failed to reset existing routing: ${resetResult.error}` };
   }
 
-  // 1. Fetch Global Configuration using Admin Client
   const { data: settings } = await supabaseAdmin
     .from("system_settings")
     .select("rider_payout_per_km")
@@ -85,17 +172,19 @@ export async function executeAutomatedDispatch(targetDate: string) {
 
   if (!kitchen) return { error: "No active kitchen found in database." };
 
+  const kitchenLat = Number(kitchen.lat);
+  const kitchenLng = Number(kitchen.lng);
   const payoutPerKm = settings?.rider_payout_per_km || 16;
   const GOOGLE_API_KEY =
     process.env.GOOGLE_MAPS_API_KEY ||
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-  if (!GOOGLE_API_KEY)
+  if (!GOOGLE_API_KEY) {
     return {
       error: "Google Maps API Key is missing from environment variables.",
     };
+  }
 
-  // 2. Fetch all pending orders for the target date (lat/lng optional; pincode fallback used)
   const { data: orders, error: ordersError } = await supabaseAdmin
     .from("delivery_orders")
     .select(
@@ -109,7 +198,6 @@ export async function executeAutomatedDispatch(targetDate: string) {
     return { error: `No pending orders found to route for ${targetDate}.` };
   }
 
-  // 3. Map Pincodes to Riders
   const { data: serviceAreas } = await supabaseAdmin
     .from("rider_service_areas")
     .select("pincode, rider_id");
@@ -117,12 +205,14 @@ export async function executeAutomatedDispatch(targetDate: string) {
     serviceAreas?.map((sa) => [sa.pincode, sa.rider_id]),
   );
 
-  // Group valid orders by rider (use pincode geocoding when lat/lng are missing)
-  const riderGroups = new Map<string, any[]>();
+  const riderGroups = new Map<string, RoutableOrder[]>();
   const pincodeCache = new Map<string, { lat: number; lng: number }>();
   let geocodedFromPincode = 0;
-  let skippedNoCoords = 0;
+  let skippedBadCoords = 0;
   let skippedNoRider = 0;
+  let ordersAssigned = 0;
+  const skippedOrderIds: string[] = [];
+  const routingFallbacks: { riderId: string; orderCount: number }[] = [];
 
   for (const order of orders) {
     const address = Array.isArray(order.addresses)
@@ -135,7 +225,13 @@ export async function executeAutomatedDispatch(targetDate: string) {
       pincodeCache,
     );
     if (!resolved) {
-      skippedNoCoords++;
+      skippedBadCoords++;
+      skippedOrderIds.push(order.id);
+      await supabaseAdmin.from("delivery_status_logs").insert({
+        delivery_order_id: order.id,
+        status: "ORDER_CREATED",
+        note: "Skipped during dispatch: coordinates could not be resolved",
+      });
       continue;
     }
 
@@ -148,8 +244,7 @@ export async function executeAutomatedDispatch(targetDate: string) {
             lat: resolved.coords.lat,
             lng: resolved.coords.lng,
           })
-          .eq("id", address.id)
-          .is("lat", null);
+          .eq("id", address.id);
       }
     }
 
@@ -169,74 +264,41 @@ export async function executeAutomatedDispatch(targetDate: string) {
 
   if (riderGroups.size === 0) {
     return {
-      error: `No routable orders for ${targetDate}. ${skippedNoCoords} missing coordinates/pincode, ${skippedNoRider} without assigned rider for their pincode.`,
+      error: `No routable orders for ${targetDate}. ${skippedBadCoords} missing coordinates/pincode, ${skippedNoRider} without assigned rider for their pincode.`,
     };
   }
 
   let batchesCreated = 0;
 
-  // 4. Process Each Rider's Load via Google Maps API
   for (const [riderId, riderOrders] of Array.from(riderGroups.entries())) {
-    const waypointsStr =
-      `optimize:true|` + riderOrders.map((o) => `${o.lat},${o.lng}`).join("|");
-    const kitchenCoords = `${kitchen.lat},${kitchen.lng}`;
+    if (riderOrders.length === 0) continue;
 
     try {
-      const mapRes = await fetch(
-        `https://maps.googleapis.com/maps/api/directions/json?origin=${kitchenCoords}&destination=${kitchenCoords}&waypoints=${waypointsStr}&key=${GOOGLE_API_KEY}`,
+      let route = await fetchGoogleDirectionsRoute(
+        riderOrders,
+        kitchenLat,
+        kitchenLng,
+        payoutPerKm,
+        GOOGLE_API_KEY,
       );
-      const mapData = await mapRes.json();
 
-      if (mapData.status !== "OK") {
-        console.error("Google Maps API Error:", mapData);
-        continue;
+      if (!route) {
+        route = computeHaversineRoute(
+          riderOrders,
+          kitchenLat,
+          kitchenLng,
+          payoutPerKm,
+        );
+        routingFallbacks.push({
+          riderId,
+          orderCount: riderOrders.length,
+        });
       }
 
-      const route = mapData.routes[0];
-      const totalMeters = route.legs.reduce(
-        (sum: number, leg: any) => sum + leg.distance.value,
-        0,
-      );
-      const totalKm = Number((totalMeters / 1000).toFixed(2));
-      const expectedPayout = Math.round(totalKm * payoutPerKm);
-
-      // 5. Save the Batch
-      const { data: newBatch, error: batchError } = await supabaseAdmin
-        .from("delivery_batches")
-        .insert({
-          assigned_rider_id: riderId,
-          delivery_date: targetDate,
-          total_distance_km: totalKm,
-          expected_payout: expectedPayout,
-          status: "PENDING",
-        })
-        .select("id")
-        .single();
-
-      if (newBatch && !batchError) {
+      const assignedCount = await commitRiderBatch(riderId, targetDate, route);
+      if (assignedCount > 0) {
         batchesCreated++;
-
-        // 6. Update Orders with per-leg payout_amount
-        const optimalOrderIndices = route.waypoint_order as number[];
-        const legs = route.legs as any[];
-
-        for (let i = 0; i < optimalOrderIndices.length; i++) {
-          const originalIndex = optimalOrderIndices[i];
-          const actualOrder = riderOrders[originalIndex];
-          const legDistanceKm = (legs[i]?.distance?.value || 0) / 1000;
-          const orderPayout = Number((legDistanceKm * payoutPerKm).toFixed(2));
-
-          await supabaseAdmin
-            .from("delivery_orders")
-            .update({
-              batch_id: newBatch.id,
-              assigned_rider_id: riderId,
-              status: "ASSIGNED",
-              route_sequence: i + 1,
-              payout_amount: orderPayout,
-            })
-            .eq("id", actualOrder.id);
-        }
+        ordersAssigned += assignedCount;
       }
     } catch (err) {
       console.error("Routing Engine Error:", err);
@@ -246,17 +308,26 @@ export async function executeAutomatedDispatch(targetDate: string) {
   revalidatePath("/rider/route");
   revalidatePath("/admin/operations");
   revalidatePath("/admin/riders");
+
+  const usedFallback = routingFallbacks.length > 0;
+  const routingMethod = usedFallback
+    ? "Google Maps with Haversine fallback"
+    : "Google Maps";
+
   return {
     success: true,
-    message: `Routed ${batchesCreated} batches via Google Maps for ${targetDate}!`,
+    message: `Routed ${batchesCreated} batches via ${routingMethod} for ${targetDate}!`,
     stats: {
       totalOrders: orders.length,
       batchesCreated,
+      ordersAssigned,
       batchesRemoved: resetResult.batchesRemoved,
       ordersReset: resetResult.ordersReset,
       geocodedFromPincode,
-      skippedNoCoords,
+      skippedBadCoords,
       skippedNoRider,
+      skippedOrderIds,
+      routingFallbacks,
     },
   };
 }
