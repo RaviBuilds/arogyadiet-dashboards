@@ -244,6 +244,8 @@ export async function executeAutomatedDispatch(targetDate: string) {
   }
 
   revalidatePath("/rider/route");
+  revalidatePath("/admin/operations");
+  revalidatePath("/admin/riders");
   return {
     success: true,
     message: `Routed ${batchesCreated} batches via Google Maps for ${targetDate}!`,

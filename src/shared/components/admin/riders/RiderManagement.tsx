@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Table,
   TableBody,
@@ -84,6 +85,7 @@ export default function RiderManagement({
   data?: RiderData[];
   allAreas?: any[];
 }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState("Today's Activity");
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -168,6 +170,7 @@ export default function RiderManagement({
   const handleRefreshISR = async () => {
     setIsLoading(true);
     await revalidateRidersPage();
+    router.refresh();
     setIsLoading(false);
     toast.success("Data refreshed successfully");
   };

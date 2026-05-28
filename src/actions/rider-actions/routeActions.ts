@@ -83,6 +83,7 @@ async function updateRiderOrderStatus(
   revalidatePath("/rider/route");
   revalidatePath(`/rider/route/${orderId}`);
   revalidatePath("/rider/dashboard");
+  revalidatePath("/admin/operations");
 
   return { success: true };
 }

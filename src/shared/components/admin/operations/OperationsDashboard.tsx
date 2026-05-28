@@ -5,6 +5,7 @@ import TodaysDeliveries from "@/shared/components/admin/operations/TodaysDeliver
 import PlannedDeliveries from "@/shared/components/admin/operations/PlannedDeliveries";
 import DailyMealRoster from "@/shared/components/admin/operations/DailyMealRoster";
 import LiveRoutingBoard from "@/shared/components/admin/operations/LiveRoutingBoard";
+import AdminLiveTracking from "@/shared/components/admin/operations/AdminLiveTracking";
 import { AdminSubmenu } from "../core/AdminSubmenu";
 
 export default function OperationsDashboard({
@@ -22,6 +23,7 @@ export default function OperationsDashboard({
           "Planned (Tomorrow)",
           "Live Routing",
           "Daily Meal Roster",
+          "Live Tracking",
         ]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -38,8 +40,10 @@ export default function OperationsDashboard({
       {activeTab === "Live Routing" && <LiveRoutingBoard />}
 
       {activeTab === "Daily Meal Roster" && (
-        <DailyMealRoster initialRosterData={rosterData} /> // Fixed the prop error here!
+        <DailyMealRoster initialRosterData={rosterData} />
       )}
+
+      {activeTab === "Live Tracking" && <AdminLiveTracking />}
     </div>
   );
 }
