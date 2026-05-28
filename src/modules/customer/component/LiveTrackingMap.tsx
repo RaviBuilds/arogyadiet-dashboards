@@ -59,6 +59,12 @@ export function LiveTrackingMap({
     lng: number;
   } | null>(null);
 
+  const [initialCenter] = useState(
+    customerLat && customerLng
+      ? { lat: customerLat, lng: customerLng }
+      : { lat: 17.385, lng: 78.4867 },
+  );
+
   const [directionsResponse, setDirectionsResponse] =
     useState<google.maps.DirectionsResult | null>(null);
 
@@ -142,14 +148,7 @@ export function LiveTrackingMap({
     return () => {
       cancelled = true;
     };
-  }, [
-    isLoaded,
-    riderLocation,
-    customerLat,
-    customerLng,
-    orderStatus,
-    onEtaChange,
-  ]);
+  }, [isLoaded, customerLat, customerLng, orderStatus]);
 
   useEffect(() => {
     if (!riderId || !supabase) return;
@@ -224,12 +223,6 @@ export function LiveTrackingMap({
     );
   }
 
-  // Fallback center if rider hasn't pinged yet, or use customer's address
-  const defaultCenter =
-    customerLat && customerLng
-      ? { lat: customerLat, lng: customerLng }
-      : { lat: 17.385, lng: 78.4867 }; // Hyderabad Center
-
   return (
     <div className="rounded-2xl overflow-hidden border-4 border-white shadow-lg relative h-[400px] w-full bg-zinc-100">
       {/* Live Status Badge Overlay */}
@@ -243,7 +236,7 @@ export function LiveTrackingMap({
 
       <GoogleMap
         mapContainerStyle={containerStyle}
-        center={riderLocation || defaultCenter}
+        center={initialCenter}
         zoom={15}
         options={{
           disableDefaultUI: true,
@@ -264,6 +257,7 @@ export function LiveTrackingMap({
             directions={directionsResponse}
             options={{
               suppressMarkers: true,
+              preserveViewport: true,
               polylineOptions: {
                 strokeColor: "#111827",
                 strokeOpacity: 0.9,
