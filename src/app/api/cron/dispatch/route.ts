@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
-import { format, addDays } from "date-fns";
+import { getISTDateString } from "@/lib/dates/ist";
 
+/**
+ * GET /api/cron/dispatch?secret=<CRON_SECRET>&date=YYYY-MM-DD
+ *
+ * Scheduled at ~12:10 AM IST daily (via external cron / Supabase pg_cron).
+ * Assigns riders and creates batches for today's delivery_date unless an explicit date is passed.
+ */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
-  // 1. Basic Security Check
-  // In production, set CRON_SECRET in your .env file
   const secret = searchParams.get("secret");
   const expectedSecret = process.env.CRON_SECRET || "arogya-demo-123";
 
@@ -15,14 +19,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 2. Determine the date. If passing ?date=2026-05-06, use it.
-    // Otherwise, default to tomorrow (since routing at 5:15 PM is usually for the next morning).
-    // Note: If your demo test orders are for "today", just pass ?date=YYYY-MM-DD in the URL!
     const queryDate = searchParams.get("date");
-    const targetDate =
-      queryDate || format(addDays(new Date(), 1), "yyyy-MM-dd");
+    const targetDate = queryDate || getISTDateString(0);
 
-    // 3. Execute the Routing Engine
     const result = await executeAutomatedDispatch(targetDate);
 
     if (result.error) {
@@ -33,7 +32,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({ success: true, data: result }, { status: 200 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Cron Dispatch Error:", error);
     return NextResponse.json(
       { success: false, error: "Internal Server Error" },

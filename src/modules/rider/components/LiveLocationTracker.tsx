@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AlertTriangle } from "lucide-react";
+import { Geolocation } from "@capacitor/geolocation";
+import { Capacitor } from "@capacitor/core";
 
 export type GpsHardwareState = "idle" | "acquiring" | "active" | "error";
 
@@ -41,106 +43,125 @@ export function LiveLocationTracker({
     updateGpsState("acquiring");
     setError(null);
 
-    if (!navigator.geolocation) {
-      setError("Geolocation is not supported by your browser");
-      updateGpsState("error");
-      return;
+    let activeWatchId: string | null = null;
+
+    async function startNativeTracking() {
+      try {
+        // 1. Request hardware permission dynamically if on a native platform
+        if (Capacitor.isNativePlatform()) {
+          const permissions = await Geolocation.requestPermissions();
+          if (permissions.location !== "granted") {
+            setError("Location access was denied. Please enable GPS in device settings.");
+            updateGpsState("error");
+            return;
+          }
+        }
+
+        // 2. Start the native hardware geolocation engine loop
+        activeWatchId = await Geolocation.watchPosition(
+          {
+            enableHighAccuracy: true,
+            maximumAge: 10000,
+            timeout: 5000,
+          },
+          async (position, geoError) => {
+            if (geoError) {
+              console.error("GPS Native Error:", geoError.message);
+              updateGpsState("error");
+              setError("Failed to get GPS signal. Please check permissions.");
+              return;
+            }
+
+            if (!position || isHijacked) return;
+
+            const now = Date.now();
+            // Throttling: If 3000ms haven't passed, ignore this tick
+            if (now - lastUpdateTime.current < 3000) {
+              return;
+            }
+            lastUpdateTime.current = now;
+
+            // Hardware is actively providing coordinates.
+            updateGpsState("active");
+
+            const { latitude, longitude } = position.coords;
+
+            // 1. THE FIRST PING: The device MUST formally claim the database session
+            if (!hasClaimedSession.current) {
+              const { error: claimError } = await supabase
+                .from("rider_live_locations")
+                .upsert(
+                  {
+                    rider_id: riderId,
+                    lat: latitude,
+                    lng: longitude,
+                    tracker_session_id: sessionId, // Claim ownership!
+                    updated_at: new Date().toISOString(),
+                  },
+                  { onConflict: "rider_id" }
+                );
+
+              if (!claimError) {
+                hasClaimedSession.current = true; // Mark as successfully claimed
+              }
+              return; // Done for this ping!
+            }
+
+            // 2. ALL FUTURE PINGS: Verify we still own it before pushing updates
+            const { data: dbCheck } = await supabase
+              .from("rider_live_locations")
+              .select("tracker_session_id")
+              .eq("rider_id", riderId)
+              .maybeSingle();
+
+            // If the DB has an ID, and it's NOT ours, someone else logged in and stole it!
+            if (
+              dbCheck?.tracker_session_id &&
+              dbCheck.tracker_session_id !== sessionId
+            ) {
+              console.warn("Tracking hijacked by another device!");
+              setIsHijacked(true); // Trigger the red UI
+              if (activeWatchId) {
+                await Geolocation.clearWatch({ id: activeWatchId });
+              }
+              return;
+            }
+
+            // 3. SAFE TO PROCEED: We still own the session, save the new coordinates
+            const { error: dbError } = await supabase
+              .from("rider_live_locations")
+              .upsert(
+                {
+                  rider_id: riderId,
+                  lat: latitude,
+                  lng: longitude,
+                  tracker_session_id: sessionId,
+                  updated_at: new Date().toISOString(),
+                },
+                { onConflict: "rider_id" }
+              );
+
+            if (dbError) {
+              console.error("Failed to sync location:", dbError.message);
+            }
+          }
+        );
+      } catch (err: unknown) {
+        console.error("Failed to launch tracker engine:", err);
+        updateGpsState("error");
+        setError(
+          err instanceof Error ? err.message : "Unknown tracking setup exception",
+        );
+      }
     }
 
-    const watchId = navigator.geolocation.watchPosition(
-      async (position) => {
-        if (isHijacked) return;
+    startNativeTracking();
 
-        const now = Date.now();
-        // If 3000ms haven't passed, do not update the database
-        if (now - lastUpdateTime.current < 3000) {
-          return;
-        }
-        // Update the timestamp
-        lastUpdateTime.current = now;
-
-        // Hardware is actively providing coordinates.
-        updateGpsState("active");
-
-        const { latitude, longitude } = position.coords;
-
-        // 1. THE FIRST PING: The device MUST formally claim the database session
-        if (!hasClaimedSession.current) {
-          const { error: claimError } = await supabase
-            .from("rider_live_locations")
-            .upsert(
-              {
-                rider_id: riderId,
-                lat: latitude,
-                lng: longitude,
-                tracker_session_id: sessionId, // Claim ownership!
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "rider_id" },
-            );
-
-          if (!claimError) {
-            hasClaimedSession.current = true; // Mark as successfully claimed
-          }
-          return; // Done for this ping!
-        }
-
-        // 2. ALL FUTURE PINGS: Verify we still own it before pushing updates
-        const { data: dbCheck } = await supabase
-          .from("rider_live_locations")
-          .select("tracker_session_id")
-          .eq("rider_id", riderId)
-          .maybeSingle();
-
-        // If the DB has an ID, and it's NOT ours, someone else logged in and stole it!
-        if (
-          dbCheck?.tracker_session_id &&
-          dbCheck.tracker_session_id !== sessionId
-        ) {
-          console.warn("Tracking hijacked by another device!");
-          setIsHijacked(true); // Trigger the red UI
-          navigator.geolocation.clearWatch(watchId); // Permanently kill the GPS loop for this phone
-          return;
-        }
-
-        // 3. SAFE TO PROCEED: We still own the session, save the new coordinates
-        const { error: dbError } = await supabase
-          .from("rider_live_locations")
-          .upsert(
-            {
-              rider_id: riderId,
-              lat: latitude,
-              lng: longitude,
-              tracker_session_id: sessionId,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "rider_id" },
-          );
-
-        if (dbError) {
-          console.error("Failed to sync location:", dbError.message);
-        }
-      },
-      (geoError) => {
-        const message =
-          geoError instanceof Error
-            ? geoError.message
-            : (geoError as GeolocationPositionError | undefined)?.message ||
-              "Unknown geolocation error";
-        console.error("GPS Error:", message);
-        updateGpsState("error");
-        setError("Failed to get GPS signal. Please check permissions.");
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10000,
-        timeout: 5000,
-      },
-    );
-
-    // Cleanup when leaving page
+    // Cleanup when leaving the page or changing dependencies
     return () => {
-      navigator.geolocation.clearWatch(watchId);
+      if (activeWatchId) {
+        Geolocation.clearWatch({ id: activeWatchId });
+      }
       updateGpsState("idle");
     };
   }, [riderId, isDelivering, isHijacked, sessionId]);
@@ -150,7 +171,6 @@ export function LiveLocationTracker({
       updateGpsState("idle");
       setError(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDelivering]);
 
   if (!isDelivering) return null;

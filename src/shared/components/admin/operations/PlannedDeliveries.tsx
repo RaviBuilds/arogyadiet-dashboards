@@ -61,7 +61,7 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
   const tomorrowDate = useMemo(() => parseISODateString(getTomorrowISTDateString()), []);
   const todayDate = useMemo(() => parseISODateString(getISTDateString(0)), []);
   const [orderGenTargetDate, setOrderGenTargetDate] = useState<Date>(() => parseISODateString(getTomorrowISTDateString()));
-  const [productLinkingTargetDate, setProductLinkingTargetDate] = useState<Date>(() => parseISODateString(getTomorrowISTDateString()));
+  const [productLinkingTargetDate, setProductLinkingTargetDate] = useState<Date>(() => parseISODateString(getISTDateString(0)));
   const [isOrderGenDateOpen, setIsOrderGenDateOpen] = useState(false);
   const [isProductLinkingDateOpen, setIsProductLinkingDateOpen] = useState(false);
 
@@ -337,7 +337,7 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     {
       name: "Routing & Batching",
       icon: Network,
-      desc: "Creates rider batches, sets delivery sequences, and assigns orders for tomorrow."
+      desc: "Creates rider batches, sets delivery sequences, and assigns orders for today (scheduled at 12:10 AM IST)."
     }
   ];
 

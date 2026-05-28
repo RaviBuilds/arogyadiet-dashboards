@@ -1,3 +1,43 @@
+/** Shown in rider empty states when daily routes are not yet available. */
+export const ROUTE_GENERATION_LABEL = "12:10 AM";
+
+/** From 5:00 PM IST, rider UI targets the next calendar day's delivery_date. */
+export const RIDER_DAY_ROLLOVER_HOUR_IST = 17;
+
+/** Returns hour 0–23 in Asia/Kolkata (IST). */
+export function getISTHour(): number {
+  const hourStr = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    hour12: false,
+  }).format(new Date());
+  return Number(hourStr);
+}
+
+/** True between 5:00 PM and midnight IST (evening preview of next batch). */
+export function isRiderEveningPreviewIST(): boolean {
+  return getISTHour() >= RIDER_DAY_ROLLOVER_HOUR_IST;
+}
+
+/** delivery_date filter for rider queries and batch actions (IST operational day). */
+export function getRiderOperationalDeliveryDate(): string {
+  return isRiderEveningPreviewIST()
+    ? getISTDateString(1)
+    : getISTDateString(0);
+}
+
+export function getRiderRouteHeading(): "Today's Route" | "Tomorrow's Route" {
+  return isRiderEveningPreviewIST() ? "Tomorrow's Route" : "Today's Route";
+}
+
+export function getRiderOverviewHeading():
+  | "Today's Overview"
+  | "Tomorrow's Overview" {
+  return isRiderEveningPreviewIST()
+    ? "Tomorrow's Overview"
+    : "Today's Overview";
+}
+
 /** Returns YYYY-MM-DD in Asia/Kolkata (IST), optionally offset by whole days. */
 export function getISTDateString(offsetDays = 0): string {
   const date = new Date();

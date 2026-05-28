@@ -24,7 +24,7 @@ export function SettingsTab({
     String(initialSettings.rider_payout_per_km || 16),
   );
   const [dispatchTime, setDispatchTime] = useState(
-    initialSettings.default_dispatch_time || "17:15",
+    initialSettings.default_dispatch_time || "00:10",
   );
   const [isPending, startTransition] = useTransition();
 

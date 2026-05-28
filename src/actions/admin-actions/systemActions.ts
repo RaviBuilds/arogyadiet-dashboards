@@ -93,9 +93,7 @@ export async function triggerSystemAutomation(
   try {
     // AUTOMATION 3: Routing & Batching (API Route)
     if (automationName === "Routing & Batching") {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const dateStr = tomorrow.toISOString().split("T")[0];
+      const dateStr = getISTDateString(0);
 
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
       const dispatchUrl = `${baseUrl}/api/cron/dispatch?secret=${process.env.CRON_SECRET || "arogya-demo-123"}&date=${dateStr}`;
@@ -150,7 +148,7 @@ export async function triggerSystemAutomation(
 
     // AUTOMATION 2: Product Linking
     if (automationName === "Product Linking") {
-      const targetDate = options?.targetDate ?? getTomorrowISTDateString();
+      const targetDate = options?.targetDate ?? getISTDateString(0);
       return runProductLinkingAction(targetDate);
     }
 

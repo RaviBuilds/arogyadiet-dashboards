@@ -1,6 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { format } from "date-fns";
+import {
+  getRiderOperationalDeliveryDate,
+  getRiderRouteHeading,
+  isRiderEveningPreviewIST,
+  ROUTE_GENERATION_LABEL,
+} from "@/lib/dates/ist";
 import { Package, ChevronRight, AlertCircle, PowerOff } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
@@ -11,6 +16,10 @@ import { RouteGpsIndicator } from "@/modules/rider/components/RouteGpsIndicator"
 export const revalidate = 0;
 
 export default async function RiderRoutePage() {
+  const operationalDate = getRiderOperationalDeliveryDate();
+  const routeHeading = getRiderRouteHeading();
+  const isEveningPreview = isRiderEveningPreviewIST();
+
   const supabase = await createClient();
 
   const {
@@ -68,9 +77,7 @@ export default async function RiderRoutePage() {
     return (
       <div className="p-4 space-y-6 animate-in fade-in slide-in-from-bottom-4">
         <div className="pt-2 pb-2">
-          <h1 className="text-2xl font-black text-zinc-900">
-            Today&apos;s Route
-          </h1>
+          <h1 className="text-2xl font-black text-zinc-900">{routeHeading}</h1>
           <p className="text-zinc-500 font-medium">Route sync is paused</p>
         </div>
 
@@ -83,8 +90,8 @@ export default async function RiderRoutePage() {
               You are offline
             </h2>
             <p className="mt-2 text-sm font-medium text-zinc-500">
-              Toggle On Duty from the dashboard to sync today&apos;s assigned
-              route.
+              Toggle On Duty from the dashboard to sync{" "}
+              {isEveningPreview ? "tomorrow's" : "today's"} assigned route.
             </p>
             <Button asChild className="mt-5 w-full rounded-xl">
               <Link href="/dashboard">Go to Dashboard</Link>
@@ -95,8 +102,8 @@ export default async function RiderRoutePage() {
     );
   }
 
-  // 3. Fetch Today's Orders with Lifecycle Statuses
-  const todayStr = format(new Date(), "yyyy-MM-dd");
+  // 3. Fetch operational-day orders with lifecycle statuses
+  const todayStr = operationalDate;
 
   const { data: orders, error } = await supabase
     .from("delivery_orders")
@@ -212,7 +219,7 @@ export default async function RiderRoutePage() {
     <div className="p-4 space-y-6 animate-in fade-in slide-in-from-bottom-4">
       <div className="pt-2 pb-2 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-zinc-900">Today's Route</h1>
+          <h1 className="text-2xl font-black text-zinc-900">{routeHeading}</h1>
           <p className="text-zinc-500 font-medium">
             {safeOrders.length} total deliveries
           </p>
@@ -228,7 +235,8 @@ export default async function RiderRoutePage() {
           </div>
           <h2 className="text-lg font-bold text-zinc-900">No deliveries yet</h2>
           <p className="text-sm text-zinc-500 mt-2">
-            Check back after 5:15 PM when the daily routes are generated.
+            Check back after {ROUTE_GENERATION_LABEL} when the daily routes are
+            generated.
           </p>
         </div>
       )}
