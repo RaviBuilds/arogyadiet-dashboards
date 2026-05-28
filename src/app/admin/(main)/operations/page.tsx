@@ -2,8 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import OperationsDashboard from "@/shared/components/admin/operations/OperationsDashboard";
 import { fetchRosterData } from "@/actions/admin-actions/operationsActions";
 
-// ENABLES ISR: Cache this page and revalidate every 1 hour (3600 seconds)
-export const revalidate = 3600;
+// Live ops data: fetch fresh on every request (matches riders page)
+export const revalidate = 0;
 
 export default async function OperationsPage() {
   const getISTDateString = (offsetDays = 0) => {

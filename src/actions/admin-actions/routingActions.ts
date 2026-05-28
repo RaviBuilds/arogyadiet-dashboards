@@ -283,6 +283,7 @@ export async function commitRouteChanges(moves: { orderId: string; newRiderId: s
     });
     
     revalidatePath("/admin/operations");
+    revalidatePath("/admin/riders");
     return { success: true };
   } catch (error: any) {
     console.error("Error committing route changes:", error);

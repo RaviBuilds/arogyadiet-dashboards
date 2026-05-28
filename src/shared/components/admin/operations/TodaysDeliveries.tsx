@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
@@ -35,6 +36,7 @@ const getDayLabel = (deliveryDate: string) => {
 };
 
 export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   
@@ -124,6 +126,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   const handleRefreshISR = async () => {
     setIsLoading(true);
     await revalidateOperationsPage();
+    router.refresh();
     setIsLoading(false);
     toast.success("Data refreshed successfully");
   };

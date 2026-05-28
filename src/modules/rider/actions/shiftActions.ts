@@ -57,6 +57,7 @@ export async function setRiderOnlineAction(isOnline: boolean) {
   revalidatePath("/route");
   revalidatePath("/rider/dashboard");
   revalidatePath("/rider/route");
+  revalidatePath("/admin/riders");
 
   return { success: true, isOnline };
 }
