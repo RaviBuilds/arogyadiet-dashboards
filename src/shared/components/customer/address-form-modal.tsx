@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Switch } from "@/components/ui/switch";
@@ -25,6 +26,19 @@ import { saveAddressAction } from "@/actions/addressActions";
 import { addressSchema } from "@/validations/addressSchema";
 import type { AddressFormValues } from "@/validations/addressSchema";
 import type { Address } from "@/services/addressService";
+
+const AddressPickerMap = dynamic(
+  () =>
+    import("./address-picker-map").then((module) => module.AddressPickerMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[220px] w-full bg-zinc-100 animate-pulse rounded-lg flex items-center justify-center text-xs text-zinc-400 font-medium">
+        Loading map...
+      </div>
+    ),
+  },
+);
 
 interface AddressFormModalProps {
   isOpen: boolean;
@@ -91,11 +105,37 @@ export function AddressFormModal({
 
       if (initialData?.lat && initialData?.lng) {
         setLocationStatus("success");
-      } else {
-        setLocationStatus("idle");
+        return;
       }
+
+      setLocationStatus("idle");
+
+      // Silently attempt geolocation for new addresses without stored coords.
+      if (!navigator.geolocation) return;
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          form.setValue("lat", position.coords.latitude, { shouldDirty: true });
+          form.setValue("lng", position.coords.longitude, { shouldDirty: true });
+          setLocationStatus("success");
+        },
+        () => {
+          // Fail silently — map falls back to Hyderabad default center.
+        },
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 },
+      );
     }
   }, [isOpen, initialData, form]);
+
+  const handleCoordinatesChange = useCallback(
+    (lat: number, lng: number) => {
+      form.setValue("lat", lat, { shouldDirty: true });
+      form.setValue("lng", lng, { shouldDirty: true });
+      setLocationStatus("success");
+      setServerError(null);
+    },
+    [form],
+  );
 
   const handleDetectLocation = () => {
     setLocationStatus("loading");
@@ -147,7 +187,7 @@ export function AddressFormModal({
       locationStatus !== "success"
     ) {
       setServerError(
-        "Please detect your location OR check the skip box below.",
+        "Please pin your location on the map, detect your location, OR check the skip box below.",
       );
       return;
     }
@@ -155,7 +195,23 @@ export function AddressFormModal({
     setIsPending(true);
     setServerError(null);
 
-    const result = await saveAddressAction(data);
+    const payload: AddressFormValues = {
+      ...data,
+      lat:
+        data.lat != null && skipLocation
+          ? null
+          : data.lat != null
+            ? Number(data.lat)
+            : null,
+      lng:
+        data.lng != null && skipLocation
+          ? null
+          : data.lng != null
+            ? Number(data.lng)
+            : null,
+    };
+
+    const result = await saveAddressAction(payload);
 
     if (result?.error) {
       setServerError(result.error);
@@ -220,6 +276,15 @@ export function AddressFormModal({
                 </Button>
               )}
             </div>
+
+            {!skipLocation && (
+              <AddressPickerMap
+                lat={form.watch("lat") ?? null}
+                lng={form.watch("lng") ?? null}
+                disabled={skipLocation}
+                onCoordinatesChange={handleCoordinatesChange}
+              />
+            )}
 
             {locationStatus === "error" && !skipLocation && (
               <p className="text-xs font-medium text-red-500 bg-red-50 p-2 rounded">

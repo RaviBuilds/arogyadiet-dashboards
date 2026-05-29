@@ -16,6 +16,7 @@ import {
   ACCOUNT_DELETED_EMAIL_SUBJECT,
 } from "@/emails/AccountDeletedEmail";
 import { logAdminAction } from "@/lib/logger";
+import { deleteCustomerAddress } from "@/lib/address/deleteCustomerAddress";
 import {
   buildArchivedEmail,
   isArchivedCustomerEmail,
@@ -494,13 +495,11 @@ export async function adminDeleteCustomerAddress(
   customerProfileId: string,
   addressId: string,
 ) {
-  const { error } = await supabaseAdmin
-    .from("addresses")
-    .delete()
-    .eq("id", addressId)
-    .eq("customer_profile_id", customerProfileId);
+  const result = await deleteCustomerAddress(customerProfileId, addressId);
 
-  if (error) return { success: false, error: error.message };
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
 
   await logAdminAction("DELETE", "customer_address", addressId, {
     customer_profile_id: customerProfileId,

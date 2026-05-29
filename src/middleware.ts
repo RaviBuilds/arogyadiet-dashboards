@@ -30,10 +30,11 @@ export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   if (portalPath) {
-    const rewriteUrl = new URL(
-      `${portalPath}${url.pathname}${url.search}`,
-      request.url,
-    );
+    const pathname =
+      url.pathname === portalPath || url.pathname.startsWith(`${portalPath}/`)
+        ? url.pathname
+        : `${portalPath}${url.pathname}`;
+    const rewriteUrl = new URL(`${pathname}${url.search}`, request.url);
     response = NextResponse.rewrite(rewriteUrl);
   }
 
