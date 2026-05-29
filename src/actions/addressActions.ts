@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { deleteCustomerAddress } from "@/lib/address/deleteCustomerAddress";
 import { revalidatePath } from "next/cache";
 import { addressSchema, AddressFormValues } from "@/validations/addressSchema";
 
@@ -83,7 +84,7 @@ export async function saveAddressAction(data: AddressFormValues) {
     await supabase.from("addresses").insert(addressData);
   }
 
-  revalidatePath("/customer/profile");
+  revalidatePath("/profile");
 
   return { success: true };
 }
@@ -98,31 +99,28 @@ export async function deleteAddressAction(addressId: string) {
 
   if (!user || error) throw new Error("Unauthorized");
 
-  try {
-    const { data: dbUser } = await supabase
-      .from("users")
-      .select("id")
-      .eq("auth_user_id", user.id)
-      .single();
+  const { data: dbUser } = await supabase
+    .from("users")
+    .select("id")
+    .eq("auth_user_id", user.id)
+    .single();
 
-    const { data: profile } = await supabase
-      .from("customer_profiles")
-      .select("id")
-      .eq("user_id", dbUser?.id)
-      .single();
+  if (!dbUser) return { error: "User not found." };
 
-    const { error: deleteError } = await supabase
-      .from("addresses")
-      .delete()
-      .eq("id", addressId)
-      .eq("customer_profile_id", profile?.id);
+  const { data: profile } = await supabase
+    .from("customer_profiles")
+    .select("id")
+    .eq("user_id", dbUser.id)
+    .single();
 
-    if (deleteError) throw deleteError;
+  if (!profile) return { error: "Customer profile not found." };
 
-    revalidatePath("/customer/profile");
-    return { success: true };
-  } catch (error: any) {
-    console.error("Database error deleting address", error);
-    return { error: "Failed to delete the address please try again." };
+  const result = await deleteCustomerAddress(profile.id, addressId);
+
+  if (!result.success) {
+    return { error: result.error };
   }
+
+  revalidatePath("/profile");
+  return { success: true };
 }

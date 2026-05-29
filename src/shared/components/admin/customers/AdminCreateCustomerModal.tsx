@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -25,10 +26,34 @@ import { Eye, EyeOff, Plus, Trash2, MapPin, Loader2, CheckCircle } from "lucide-
 import { adminCreateCustomerAction } from "@/actions/admin-actions/customerActions";
 import type { AddressFormValues } from "@/validations/addressSchema";
 
+const AddressPickerMap = dynamic(
+  () =>
+    import("@/shared/components/customer/address-picker-map").then(
+      (module) => module.AddressPickerMap,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[220px] w-full animate-pulse rounded-lg bg-muted" />
+    ),
+  },
+);
+
+function parseCoordInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "-" || trimmed === "." || trimmed === "-.") {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 interface AddressEntry extends AddressFormValues {
   _verifiedLocation?: string;
   _isVerifying?: boolean;
   _skipCoords?: boolean;
+  _latInput?: string;
+  _lngInput?: string;
 }
 
 const defaultAddress = (): AddressEntry => ({
@@ -45,6 +70,8 @@ const defaultAddress = (): AddressEntry => ({
   _verifiedLocation: "",
   _isVerifying: false,
   _skipCoords: false,
+  _latInput: "",
+  _lngInput: "",
 });
 
 const STEPS = ["Account Info", "Profile Details", "Addresses"] as const;
@@ -504,6 +531,16 @@ export function AdminCreateCustomerModal({
                             _skipCoords: v,
                             lat: v ? null : addr.lat,
                             lng: v ? null : addr.lng,
+                            _latInput: v
+                              ? ""
+                              : addr.lat != null
+                                ? String(addr.lat)
+                                : (addr._latInput ?? ""),
+                            _lngInput: v
+                              ? ""
+                              : addr.lng != null
+                                ? String(addr.lng)
+                                : (addr._lngInput ?? ""),
                             _verifiedLocation: v ? "" : addr._verifiedLocation,
                           })
                         }
@@ -515,37 +552,69 @@ export function AdminCreateCustomerModal({
 
                     {!addr._skipCoords && (
                       <div className="space-y-2">
+                        <AddressPickerMap
+                          lat={addr.lat ?? null}
+                          lng={addr.lng ?? null}
+                          disabled={addr._skipCoords}
+                          showLocateButton={false}
+                          onCoordinatesChange={(lat, lng) =>
+                            updateAddress(i, {
+                              lat,
+                              lng,
+                              _latInput: String(lat),
+                              _lngInput: String(lng),
+                              _verifiedLocation: "",
+                            })
+                          }
+                        />
+
                         <div className="grid grid-cols-2 gap-3">
                           <div className="grid gap-1.5">
                             <Label className="text-xs">Latitude</Label>
                             <Input
                               className="h-8 text-sm"
-                              type="number"
-                              step="any"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="e.g. 17.4401"
-                              value={addr.lat ?? ""}
-                              onChange={(e) =>
-                                updateAddress(i, {
-                                  lat: e.target.value ? parseFloat(e.target.value) : null,
+                              value={addr._latInput ?? ""}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                const patch: Partial<AddressEntry> = {
+                                  _latInput: value,
                                   _verifiedLocation: "",
-                                })
-                              }
+                                };
+                                const parsed = parseCoordInput(value);
+                                if (parsed !== null) {
+                                  patch.lat = parsed;
+                                } else if (value.trim() === "") {
+                                  patch.lat = null;
+                                }
+                                updateAddress(i, patch);
+                              }}
                             />
                           </div>
                           <div className="grid gap-1.5">
                             <Label className="text-xs">Longitude</Label>
                             <Input
                               className="h-8 text-sm"
-                              type="number"
-                              step="any"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="e.g. 78.4983"
-                              value={addr.lng ?? ""}
-                              onChange={(e) =>
-                                updateAddress(i, {
-                                  lng: e.target.value ? parseFloat(e.target.value) : null,
+                              value={addr._lngInput ?? ""}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                const patch: Partial<AddressEntry> = {
+                                  _lngInput: value,
                                   _verifiedLocation: "",
-                                })
-                              }
+                                };
+                                const parsed = parseCoordInput(value);
+                                if (parsed !== null) {
+                                  patch.lng = parsed;
+                                } else if (value.trim() === "") {
+                                  patch.lng = null;
+                                }
+                                updateAddress(i, patch);
+                              }}
                             />
                           </div>
                         </div>

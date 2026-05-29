@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
+import React, { useState, useTransition, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -79,6 +80,35 @@ import {
   type CouponRow,
 } from "./AdminCouponsTab";
 
+const AddressPickerMap = dynamic(
+  () =>
+    import("@/shared/components/customer/address-picker-map").then(
+      (module) => module.AddressPickerMap,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[220px] w-full animate-pulse rounded-lg bg-muted" />
+    ),
+  },
+);
+
+function parseCoordInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "-" || trimmed === "." || trimmed === "-.") {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatAddressUpdatedAt(iso?: string) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (!isValid(date)) return null;
+  return format(date, "dd MMM yyyy, hh:mm a");
+}
+
 interface CustomerProfile {
   userId: string;
   authUserId?: string;
@@ -115,6 +145,7 @@ interface CustomerAddress {
   is_primary: boolean;
   lat?: number | null;
   lng?: number | null;
+  updated_at?: string;
 }
 
 interface BillingPayment {
@@ -182,6 +213,8 @@ export function Customer360Dashboard({
     lat: null,
     lng: null,
   });
+  const [latInput, setLatInput] = useState("");
+  const [lngInput, setLngInput] = useState("");
   const [deleteAddressState, setDeleteAddressState] = useState({
     isOpen: false,
     addressId: "",
@@ -253,6 +286,22 @@ export function Customer360Dashboard({
     });
   };
 
+  const syncCoordInputs = useCallback(
+    (lat: number | null, lng: number | null) => {
+      setLatInput(lat != null ? String(lat) : "");
+      setLngInput(lng != null ? String(lng) : "");
+    },
+    [],
+  );
+
+  const handleMapCoordinatesChange = useCallback(
+    (lat: number, lng: number) => {
+      setAddressForm((prev) => ({ ...prev, lat, lng }));
+      syncCoordInputs(lat, lng);
+    },
+    [syncCoordInputs],
+  );
+
   const openCreateAddressModal = () => {
     setAddressModalMode("create");
     setAddressForm({
@@ -267,11 +316,14 @@ export function Customer360Dashboard({
       lat: null,
       lng: null,
     });
+    syncCoordInputs(null, null);
     setIsAddressModalOpen(true);
   };
 
   const openEditAddressModal = (address: CustomerAddress) => {
     setAddressModalMode("edit");
+    const lat = address.lat ?? null;
+    const lng = address.lng ?? null;
     setAddressForm({
       id: address.id,
       tag: address.tag,
@@ -282,9 +334,10 @@ export function Customer360Dashboard({
       state: address.state,
       pincode: address.pincode,
       is_primary: address.is_primary,
-      lat: address.lat ?? null,
-      lng: address.lng ?? null,
+      lat,
+      lng,
     });
+    syncCoordInputs(lat, lng);
     setIsAddressModalOpen(true);
   };
 
@@ -663,6 +716,12 @@ export function Customer360Dashboard({
                           {address.state}
                         </Badge>
                       </div>
+                      {formatAddressUpdatedAt(address.updated_at) && (
+                        <p className="text-xs text-gray-500 mt-2">
+                          Last updated:{" "}
+                          {formatAddressUpdatedAt(address.updated_at)}
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -1227,32 +1286,49 @@ export function Customer360Dashboard({
               </div>
             </div>
 
+            <AddressPickerMap
+              lat={addressForm.lat ?? null}
+              lng={addressForm.lng ?? null}
+              showLocateButton={false}
+              onCoordinatesChange={handleMapCoordinatesChange}
+            />
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label>Latitude</Label>
                 <Input
-                  type="number"
-                  value={addressForm.lat ?? ""}
-                  onChange={(e) =>
-                    setAddressForm({
-                      ...addressForm,
-                      lat: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
+                  type="text"
+                  inputMode="decimal"
+                  value={latInput}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setLatInput(value);
+                    const parsed = parseCoordInput(value);
+                    if (parsed !== null) {
+                      setAddressForm((prev) => ({ ...prev, lat: parsed }));
+                    } else if (value.trim() === "") {
+                      setAddressForm((prev) => ({ ...prev, lat: null }));
+                    }
+                  }}
                   placeholder="Optional"
                 />
               </div>
               <div className="grid gap-2">
                 <Label>Longitude</Label>
                 <Input
-                  type="number"
-                  value={addressForm.lng ?? ""}
-                  onChange={(e) =>
-                    setAddressForm({
-                      ...addressForm,
-                      lng: e.target.value ? Number(e.target.value) : null,
-                    })
-                  }
+                  type="text"
+                  inputMode="decimal"
+                  value={lngInput}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setLngInput(value);
+                    const parsed = parseCoordInput(value);
+                    if (parsed !== null) {
+                      setAddressForm((prev) => ({ ...prev, lng: parsed }));
+                    } else if (value.trim() === "") {
+                      setAddressForm((prev) => ({ ...prev, lng: null }));
+                    }
+                  }}
                   placeholder="Optional"
                 />
               </div>

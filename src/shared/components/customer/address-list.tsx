@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { MapPin, Edit, Trash2, Plus } from "lucide-react";
 import type { Address } from "@/services/addressService";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { AddressFormModal } from "./address-form-modal";
 import { deleteAddressAction } from "@/actions/addressActions"; 
 
@@ -31,6 +33,7 @@ interface AddressListProps {
 }
 
 export function AddressList({ addresses, onRefresh }: AddressListProps) {
+  const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
 
@@ -55,11 +58,11 @@ export function AddressList({ addresses, onRefresh }: AddressListProps) {
     const result = await deleteAddressAction(addressToDelete);
 
     if (result?.error) {
-      console.error(result.error);
-      // Optional: Add a toast notification here later
+      toast.error(result.error);
     } else {
-      // SUCCESS! Trigger the refresh so the modal updates instantly
+      toast.success("Address deleted successfully.");
       if (onRefresh) onRefresh();
+      router.refresh();
     }
 
     setIsDeleting(false);

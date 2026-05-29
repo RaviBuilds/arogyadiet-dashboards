@@ -28,7 +28,7 @@ export default async function Customer360Page({
       medical_history_notes,
       has_medical_history,
       users!inner ( id, auth_user_id, full_name, email, mobile, is_active ),
-      addresses ( id, tag, street_1, street_2, landmark, city, state, pincode, is_primary, lat, lng ),
+      addresses ( id, tag, street_1, street_2, landmark, city, state, pincode, is_primary, lat, lng, updated_at ),
       medical_documents ( id, file_name, storage_path, uploaded_at, file_size_bytes ),
       subscriptions ( id, status, starts_on, ends_on, effective_end_on, subscription_plans ( name ) )
       `,
@@ -153,6 +153,7 @@ export default async function Customer360Page({
       is_primary: (a.is_primary as boolean) ?? false,
       lat: (a.lat as number | null) ?? null,
       lng: (a.lng as number | null) ?? null,
+      updated_at: (a.updated_at as string) ?? "",
     })),
   };
 
