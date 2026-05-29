@@ -36,6 +36,7 @@ export function LiveLocationTracker({
     setGpsState(next);
     onGpsStateChange?.(next);
   };
+  console.log("sessionId", sessionId);
 
   // Manage screen wake lock based on delivery activity
   useEffect(() => {
