@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/shared/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/shared/components/ui/dropdown-menu";
 import { Package, Layers, Filter, ChevronDown, Loader2 } from "lucide-react";
 import { revalidateOperationsPage, updateAdminOrderStatusAction, markAdminBatchPickedUpAction } from "@/actions/admin-actions/operationsActions";
 import { getAdminNextStatusTransition, PRE_PICKUP_ORDER_STATUSES } from "@/lib/delivery/adminOrderStatusTransitions";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -38,6 +39,16 @@ const getDayLabel = (deliveryDate: string) => {
 };
 
 const PICKED_UP_BATCH_STATUSES = ["IN_TRANSIT", "COMPLETED"];
+const DISPATCH_STATUS_ORDER = [
+  "ORDER_CREATED",
+  "MEAL_PREPARED",
+  "ASSIGNED",
+  "OUT_FOR_DELIVERY",
+  "REACHING_TO_LOCATION",
+  "DELIVERED",
+  "FAILED",
+  "CANCELLED",
+];
 
 export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   const router = useRouter();
@@ -47,6 +58,9 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   // Dispatch Board State
   const [searchColumn, setSearchColumn] = useState("customer_name");
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterDay, setFilterDay] = useState<"BOTH" | "Today" | "Tomorrow">("BOTH");
+  const [filterRiders, setFilterRiders] = useState<string[]>([]);
+  const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
 
   // Active Batches State
   const [batchSearchColumn, setBatchSearchColumn] = useState("batch_id");
@@ -70,6 +84,26 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   } | null>(null);
 
   // --- DISPATCH BOARD LOGIC ---
+  const uniqueRiders = useMemo(() => {
+    return Array.from(
+      new Set(data.map((order) => order.rider_profiles?.users?.full_name || "Unassigned")),
+    ).sort((a, b) => a.localeCompare(b));
+  }, [data]);
+
+  const uniqueStatuses = useMemo(() => {
+    return Array.from(
+      new Set(data.map((order) => (order.status || "UNKNOWN").toUpperCase())),
+    ).sort((a, b) => {
+      const aIndex = DISPATCH_STATUS_ORDER.indexOf(a);
+      const bIndex = DISPATCH_STATUS_ORDER.indexOf(b);
+      const safeAIndex = aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex;
+      const safeBIndex = bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex;
+
+      if (safeAIndex !== safeBIndex) return safeAIndex - safeBIndex;
+      return a.localeCompare(b);
+    });
+  }, [data]);
+
   const filteredData = useMemo(() => {
     let result = data;
     if (searchTerm) {
@@ -80,8 +114,29 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
         return true;
       });
     }
+
+    if (filterDay !== "BOTH") {
+      const targetDate =
+        filterDay === "Today" ? getISTDateString() : getISTDateString(1);
+      result = result.filter((row) => row.delivery_date === targetDate);
+    }
+
+    if (filterRiders.length > 0) {
+      result = result.filter((row) =>
+        filterRiders.includes(
+          row.rider_profiles?.users?.full_name || "Unassigned",
+        ),
+      );
+    }
+
+    if (filterStatuses.length > 0) {
+      result = result.filter((row) =>
+        filterStatuses.includes((row.status || "UNKNOWN").toUpperCase()),
+      );
+    }
+
     return result;
-  }, [data, searchTerm, searchColumn]);
+  }, [data, searchTerm, searchColumn, filterDay, filterRiders, filterStatuses]);
 
   // --- ACTIVE BATCHES LOGIC ---
   const batchSummary = useMemo(() => {
@@ -283,13 +338,121 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/10">
-              <TableHead>Day</TableHead>
+              <TableHead>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground"
+                    >
+                      <span>Day</span>
+                      <Filter
+                        className={cn(
+                          "ml-2 h-3.5 w-3.5",
+                          filterDay !== "BOTH"
+                            ? "text-primary fill-primary/20"
+                            : "text-muted-foreground/70",
+                        )}
+                      />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[150px]">
+                    <DropdownMenuLabel>Filter by Day</DropdownMenuLabel>
+                    {[
+                      { value: "BOTH", label: "Both Days" },
+                      { value: "Today", label: "Today" },
+                      { value: "Tomorrow", label: "Tomorrow" },
+                    ].map((option) => (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onClick={() =>
+                          setFilterDay(
+                            option.value as "BOTH" | "Today" | "Tomorrow",
+                          )
+                        }
+                        className={
+                          filterDay === option.value
+                            ? "bg-accent font-semibold"
+                            : ""
+                        }
+                      >
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableHead>
               <TableHead>Customer</TableHead>
               <TableHead>Meal Type</TableHead>
-              <TableHead>Assigned Rider</TableHead>
+              <TableHead>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`-ml-3 h-8 transition-colors ${filterRiders.length > 0 ? "bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary" : "data-[state=open]:bg-accent"}`}
+                    >
+                      <span className={filterRiders.length > 0 ? "font-semibold" : ""}>Assigned Rider</span>
+                      {filterRiders.length > 0 && <Badge variant="default" className="ml-2 h-5 px-1.5 text-[10px] rounded-sm">{filterRiders.length}</Badge>}
+                      <Filter className={`ml-2 h-3.5 w-3.5 ${filterRiders.length > 0 ? "text-primary" : "text-muted-foreground"}`} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[200px]">
+                    <DropdownMenuLabel>Filter by Rider</DropdownMenuLabel>
+                    {uniqueRiders.map((rider) => (
+                      <DropdownMenuCheckboxItem
+                        key={rider}
+                        checked={filterRiders.includes(rider)}
+                        onCheckedChange={(checked) =>
+                          setFilterRiders((prev) =>
+                            checked
+                              ? [...prev, rider]
+                              : prev.filter((item) => item !== rider),
+                          )
+                        }
+                      >
+                        {rider}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableHead>
               <TableHead>Seq.</TableHead>
               <TableHead>Batch</TableHead>
-              <TableHead>Status & Time</TableHead>
+              <TableHead>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`-ml-3 h-8 transition-colors ${filterStatuses.length > 0 ? "bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary" : "data-[state=open]:bg-accent"}`}
+                    >
+                      <span className={filterStatuses.length > 0 ? "font-semibold" : ""}>Status & Time</span>
+                      {filterStatuses.length > 0 && <Badge variant="default" className="ml-2 h-5 px-1.5 text-[10px] rounded-sm">{filterStatuses.length}</Badge>}
+                      <Filter className={`ml-2 h-3.5 w-3.5 ${filterStatuses.length > 0 ? "text-primary" : "text-muted-foreground"}`} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[210px]">
+                    <DropdownMenuLabel>Filter by Status</DropdownMenuLabel>
+                    {uniqueStatuses.map((status) => (
+                      <DropdownMenuCheckboxItem
+                        key={status}
+                        checked={filterStatuses.includes(status)}
+                        onCheckedChange={(checked) =>
+                          setFilterStatuses((prev) =>
+                            checked
+                              ? [...prev, status]
+                              : prev.filter((item) => item !== status),
+                          )
+                        }
+                      >
+                        {status.replace(/_/g, " ")}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableHead>
               <TableHead className="text-right">Payout</TableHead>
             </TableRow>
           </TableHeader>

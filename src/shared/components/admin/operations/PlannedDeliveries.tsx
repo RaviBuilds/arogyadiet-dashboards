@@ -37,6 +37,13 @@ const getMealLabel = (name?: string) => {
   return upperName;
 };
 
+type AutomationScriptConfig = {
+  name: string;
+  icon: typeof Clock;
+  desc: string;
+  datePickerMode?: "tomorrow-only" | "today-or-tomorrow";
+};
+
 export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -62,8 +69,11 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
   const todayDate = useMemo(() => parseISODateString(getISTDateString(0)), []);
   const [orderGenTargetDate, setOrderGenTargetDate] = useState<Date>(() => parseISODateString(getTomorrowISTDateString()));
   const [productLinkingTargetDate, setProductLinkingTargetDate] = useState<Date>(() => parseISODateString(getISTDateString(0)));
+  const [routingTargetDate, setRoutingTargetDate] = useState<Date>(() => parseISODateString(getISTDateString(0)));
   const [isOrderGenDateOpen, setIsOrderGenDateOpen] = useState(false);
   const [isProductLinkingDateOpen, setIsProductLinkingDateOpen] = useState(false);
+  const [isRoutingDateOpen, setIsRoutingDateOpen] = useState(false);
+  const [isRoutingRunning, setIsRoutingRunning] = useState(false);
 
   const isTomorrowOnly = (date: Date) => isSameDay(date, tomorrowDate);
   const isTodayOrTomorrow = (date: Date) =>
@@ -223,6 +233,58 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     }
   };
 
+  const executeRoutingBatching = async (targetDate: string) => {
+    const automationName = "Routing & Batching";
+    setIsRoutingRunning(true);
+    setAutomationStatus(prev => ({ ...prev, [automationName]: { ...prev[automationName], loading: true } }));
+
+    try {
+      const res = await fetch(
+        `/api/cron/dispatch?secret=arogya-demo-123&date=${targetDate}`,
+      );
+
+      if (!res.ok) {
+        let message = "Failed to run Routing & Batching";
+
+        try {
+          const payload = await res.json();
+          message = payload?.error || payload?.message || message;
+        } catch {
+          // Keep the default message if the API does not return JSON.
+        }
+
+        throw new Error(message);
+      }
+
+      toast.success(`Routing & Batching completed for ${targetDate}!`);
+      const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+
+      setAutomationStatus(prev => ({
+        ...prev,
+        [automationName]: {
+          loading: false,
+          success: true,
+          lastRun: `Activity done today at ${timeStr} for ${targetDate}`,
+        },
+      }));
+
+      await revalidateOperationsPage();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to run Routing & Batching";
+
+      toast.error(message);
+      setAutomationStatus(prev => ({
+        ...prev,
+        [automationName]: { ...prev[automationName], loading: false, success: false },
+      }));
+    } finally {
+      setIsRoutingRunning(false);
+    }
+  };
+
   const requestRunProductLinking = (targetDate: string) => {
     openConfirm({
       title: "Confirm Product Linking",
@@ -321,12 +383,12 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     XLSX.writeFile(workbook, `Planned_Deliveries_${tomorrow.toISOString().split("T")[0]}.xlsx`);
   };
 
-  const automationScripts = [
+  const automationScripts: AutomationScriptConfig[] = [
     {
-      name: "5:15 PM Order Gen",
+      name: "5:15 PM Order Creation",
       icon: Clock,
-      desc: "Forces the generation of tomorrow's delivery orders based on active subscriptions.",
-      datePickerMode: "tomorrow-only" as const,
+      desc: "Forces the generation of delivery orders based on active subscriptions.",
+      datePickerMode: "today-or-tomorrow" as const,
     },
     {
       name: "Product Linking",
@@ -337,7 +399,8 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     {
       name: "Routing & Batching",
       icon: Network,
-      desc: "Creates rider batches, sets delivery sequences, and assigns orders for today (scheduled at 12:10 AM IST)."
+      desc: "Creates rider batches, sets delivery sequences, and assigns orders for today (scheduled at 12:10 AM IST).",
+      datePickerMode: "today-or-tomorrow" as const,
     }
   ];
 
@@ -496,23 +559,38 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
             {automationScripts.map((script) => {
               const status = automationStatus[script.name] || {};
               const isSuccess = status.success;
+              const isOrderGeneration = script.name === "5:15 PM Order Creation";
               const isProductLinking = script.name === "Product Linking";
+              const isRoutingBatching = script.name === "Routing & Batching";
               const datePickerMode = "datePickerMode" in script ? script.datePickerMode : undefined;
               const selectedDate =
-                datePickerMode === "today-or-tomorrow"
+                isRoutingBatching
+                  ? routingTargetDate
+                  : isOrderGeneration
+                    ? orderGenTargetDate
+                  : datePickerMode === "today-or-tomorrow"
                   ? productLinkingTargetDate
                   : datePickerMode === "tomorrow-only"
                     ? orderGenTargetDate
                     : null;
               const formattedDate = selectedDate ? format(selectedDate, "yyyy-MM-dd") : undefined;
               const isDatePickerOpen =
-                datePickerMode === "today-or-tomorrow"
+                isRoutingBatching
+                  ? isRoutingDateOpen
+                  : isOrderGeneration
+                    ? isOrderGenDateOpen
+                  : datePickerMode === "today-or-tomorrow"
                   ? isProductLinkingDateOpen
                   : isOrderGenDateOpen;
               const setIsDatePickerOpen =
-                datePickerMode === "today-or-tomorrow"
+                isRoutingBatching
+                  ? setIsRoutingDateOpen
+                  : isOrderGeneration
+                    ? setIsOrderGenDateOpen
+                  : datePickerMode === "today-or-tomorrow"
                   ? setIsProductLinkingDateOpen
                   : setIsOrderGenDateOpen;
+              const isScriptRunning = isRoutingBatching ? isRoutingRunning : status.loading;
 
               return (
                 <Card 
@@ -563,7 +641,11 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                                 if (!date) return;
                                 if (datePickerMode === "tomorrow-only" && !isTomorrowOnly(date)) return;
                                 if (datePickerMode === "today-or-tomorrow" && !isTodayOrTomorrow(date)) return;
-                                if (datePickerMode === "today-or-tomorrow") {
+                                if (isRoutingBatching) {
+                                  setRoutingTargetDate(date);
+                                } else if (isOrderGeneration) {
+                                  setOrderGenTargetDate(date);
+                                } else if (datePickerMode === "today-or-tomorrow") {
                                   setProductLinkingTargetDate(date);
                                 } else {
                                   setOrderGenTargetDate(date);
@@ -602,20 +684,22 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
                             : 'bg-primary text-primary-foreground'
                         }`}
                         onClick={() => {
-                          if (isProductLinking && formattedDate) {
+                          if (isRoutingBatching && formattedDate) {
+                            void executeRoutingBatching(formattedDate);
+                          } else if (isProductLinking && formattedDate) {
                             requestRunProductLinking(formattedDate);
                           } else {
                             requestRunAutomation(script.name, formattedDate);
                           }
                         }} 
-                        disabled={status.loading || (datePickerMode !== undefined && !selectedDate)}
+                        disabled={isScriptRunning || (datePickerMode !== undefined && !selectedDate)}
                       >
-                        {status.loading ? (
+                        {isScriptRunning ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         ) : (
                           <PlayCircle className="mr-2 h-4 w-4" />
                         )}
-                        {status.loading ? "Processing..." : "Run Script"}
+                        {isScriptRunning ? "Running..." : "Run Script"}
                       </Button>
                     </div>
                   </div>

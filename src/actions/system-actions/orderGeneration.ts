@@ -10,6 +10,57 @@ type GenerateOrdersResult = {
   error?: string;
 };
 
+async function logOrderGenerationRun({
+  supabaseAdmin,
+  targetDate,
+  totalPreferencesFound,
+  ordersInserted,
+}: {
+  supabaseAdmin: ReturnType<typeof createAdminClient>;
+  targetDate: string;
+  totalPreferencesFound: number;
+  ordersInserted: number;
+}) {
+  const statsPayload = {
+    totalPreferencesFound,
+    ordersInserted,
+    skippedExisting: totalPreferencesFound - ordersInserted,
+  };
+
+  try {
+    const { data: existingLog, error: existingLogError } = await supabaseAdmin
+      .from("automation_logs")
+      .select("run_count")
+      .eq("automation_type", "ORDER_GEN")
+      .eq("target_date", targetDate)
+      .maybeSingle();
+
+    if (existingLogError) {
+      console.error("Error fetching order generation log:", existingLogError);
+      return;
+    }
+
+    const { error: upsertError } = await supabaseAdmin
+      .from("automation_logs")
+      .upsert(
+        {
+          automation_type: "ORDER_GEN",
+          target_date: targetDate,
+          run_count: (existingLog?.run_count ?? 0) + 1,
+          last_run_at: new Date().toISOString(),
+          latest_stats: statsPayload,
+        },
+        { onConflict: "automation_type,target_date" },
+      );
+
+    if (upsertError) {
+      console.error("Error upserting order generation log:", upsertError);
+    }
+  } catch (error) {
+    console.error("Unexpected error logging order generation run:", error);
+  }
+}
+
 /**
  * Creates delivery_orders for active, non-paused subscription preferences on the target date.
  * Mirrors the 5:15 PM order-generation SQL and skips rows that already have an order.
@@ -40,6 +91,13 @@ export async function generateDailyOrders(
   }
 
   if (!preferences?.length) {
+    await logOrderGenerationRun({
+      supabaseAdmin,
+      targetDate,
+      totalPreferencesFound: 0,
+      ordersInserted: 0,
+    });
+
     return { success: true, inserted: 0, skipped: 0, targetDate };
   }
 
@@ -75,6 +133,13 @@ export async function generateDailyOrders(
     }));
 
   if (ordersToInsert.length === 0) {
+    await logOrderGenerationRun({
+      supabaseAdmin,
+      targetDate,
+      totalPreferencesFound: preferences.length,
+      ordersInserted: 0,
+    });
+
     return {
       success: true,
       inserted: 0,
@@ -91,6 +156,13 @@ export async function generateDailyOrders(
     console.error("Error inserting delivery orders:", insertError);
     return { success: false, error: insertError.message, targetDate };
   }
+
+  await logOrderGenerationRun({
+    supabaseAdmin,
+    targetDate,
+    totalPreferencesFound: preferences.length,
+    ordersInserted: ordersToInsert.length,
+  });
 
   return {
     success: true,
