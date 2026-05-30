@@ -11,6 +11,14 @@ import { revalidatePath } from "next/cache";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
+export type AutomationLogRow = {
+  automation_type: string;
+  target_date: string;
+  run_count: number | null;
+  last_run_at: string | null;
+  latest_stats: unknown;
+};
+
 function revalidateOrderStatusPaths(orderId: string) {
   revalidatePath("/admin/operations");
   revalidatePath("/route");
@@ -55,6 +63,28 @@ export async function fetchRosterData(startDate: string, endDate: string) {
   }
 
   return data || [];
+}
+
+export async function getAutomationLogs(
+  startDate: string,
+  endDate: string,
+): Promise<AutomationLogRow[]> {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("automation_logs")
+    .select("automation_type, target_date, run_count, last_run_at, latest_stats")
+    .gte("target_date", startDate)
+    .lte("target_date", endDate)
+    .order("target_date", { ascending: false })
+    .order("last_run_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching automation logs:", error);
+    return [];
+  }
+
+  return (data || []) as AutomationLogRow[];
 }
 
 export async function revalidateOperationsPage() {
@@ -308,4 +338,4 @@ export async function markAdminBatchPickedUpAction(
 
   return { success: true, ordersUpdated: ordersToUpdate.length };
 }
-
+

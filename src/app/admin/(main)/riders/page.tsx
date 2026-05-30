@@ -33,6 +33,17 @@ export default async function RidersPage() {
     "DELIVERED",
   ];
 
+  const DELIVERY_STATUS_PRIORITY = [
+    "FAILED",
+    "CANCELLED",
+    "REACHING_TO_LOCATION",
+    "ON_THE_WAY",
+    "OUT_FOR_DELIVERY",
+    "ASSIGNED",
+    "MEAL_PREPARED",
+    "ORDER_CREATED",
+  ];
+
   const deriveTodayPickupInfo = (todaysBatches: any[]) => {
     if (todaysBatches.length === 0) {
       return {
@@ -78,6 +89,32 @@ export default async function RidersPage() {
     };
   };
 
+  const deriveTodayDeliveryStatus = (todaysBatches: any[]) => {
+    if (todaysBatches.length === 0) {
+      return "No Batch Assigned";
+    }
+
+    const allOrders = todaysBatches.flatMap(
+      (batch) => batch.delivery_orders || [],
+    );
+
+    if (allOrders.length === 0) {
+      return "No Orders";
+    }
+
+    const statuses = allOrders.map((order) => order.status || "UNKNOWN");
+
+    if (statuses.every((status) => status === "DELIVERED")) {
+      return "DELIVERED";
+    }
+
+    return (
+      DELIVERY_STATUS_PRIORITY.find((status) => statuses.includes(status)) ||
+      statuses[0] ||
+      "UNKNOWN"
+    );
+  };
+
   // Removed foreignTable order/limit to prevent PostgREST parsing crashes.
   const [ridersRes, areasRes] = await Promise.all([
     supabaseAdmin
@@ -111,6 +148,7 @@ export default async function RidersPage() {
 
     const { latestBatchStatus, latestBatchTime } =
       deriveTodayPickupInfo(todaysBatches);
+    const todayDeliveryStatus = deriveTodayDeliveryStatus(todaysBatches);
 
     todaysBatches.forEach((batch: any) => {
       expectedEarning += Number(batch.expected_payout || 0);
@@ -159,6 +197,7 @@ export default async function RidersPage() {
       todayEstimatedEarning: expectedEarning,
       latestBatchStatus,
       latestBatchTime,
+      todayDeliveryStatus,
       joiningDate: rider.joining_date || null,
       totalEarned: totalEarned,
       lastPayoutAmount: lastPayoutAmount,

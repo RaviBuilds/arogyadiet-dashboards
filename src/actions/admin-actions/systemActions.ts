@@ -16,6 +16,51 @@ type SystemAutomationResult =
   | ProductLinkingResult
   | { success: false; error: string };
 
+async function logProductLinkingRun({
+  supabase,
+  targetDate,
+  addonsLinked,
+}: {
+  supabase: ReturnType<typeof createAdminClient>;
+  targetDate: string;
+  addonsLinked: number;
+}) {
+  const statsPayload = {
+    addonsLinked,
+  };
+
+  try {
+    const { data: existingLog, error: existingLogError } = await supabase
+      .from("automation_logs")
+      .select("run_count")
+      .eq("automation_type", "PRODUCT_LINKING")
+      .eq("target_date", targetDate)
+      .maybeSingle();
+
+    if (existingLogError) {
+      console.error("Error fetching product linking log:", existingLogError);
+      return;
+    }
+
+    const { error: upsertError } = await supabase.from("automation_logs").upsert(
+      {
+        automation_type: "PRODUCT_LINKING",
+        target_date: targetDate,
+        run_count: (existingLog?.run_count ?? 0) + 1,
+        last_run_at: new Date().toISOString(),
+        latest_stats: statsPayload,
+      },
+      { onConflict: "automation_type,target_date" },
+    );
+
+    if (upsertError) {
+      console.error("Error upserting product linking log:", upsertError);
+    }
+  } catch (error) {
+    console.error("Unexpected error logging product linking run:", error);
+  }
+}
+
 export async function runProductLinkingAction(
   targetDate: string,
 ): Promise<ProductLinkingResult> {
@@ -49,6 +94,13 @@ export async function runProductLinkingAction(
         target_date: targetDate,
         linked: 0,
       });
+
+      await logProductLinkingRun({
+        supabase,
+        targetDate,
+        addonsLinked: 0,
+      });
+
       revalidatePath("/admin/operations");
       return { success: true, count: 0, targetDate };
     }
@@ -61,6 +113,7 @@ export async function runProductLinkingAction(
         .update({ delivery_order_id: delivery.id })
         .eq("customer_profile_id", delivery.customer_profile_id)
         .eq("status", "PAID")
+        .eq("target_delivery_date", targetDate)
         .is("delivery_order_id", null)
         .select("id");
 
@@ -76,6 +129,12 @@ export async function runProductLinkingAction(
       executed_action: "runProductLinkingAction",
       target_date: targetDate,
       linked: updatedCount,
+    });
+
+    await logProductLinkingRun({
+      supabase,
+      targetDate,
+      addonsLinked: updatedCount,
     });
 
     revalidatePath("/admin/operations");
@@ -111,14 +170,18 @@ export async function triggerSystemAutomation(
     }
 
     // AUTOMATION 1: 5:15 PM Order Gen
-    if (automationName === "5:15 PM Order Gen") {
+    if (
+      automationName === "5:15 PM Order Gen" ||
+      automationName === "5:15 PM Order Creation"
+    ) {
+      const today = getISTDateString(0);
       const tomorrow = getTomorrowISTDateString();
       const targetDate = options?.targetDate || tomorrow;
 
-      if (targetDate !== tomorrow) {
+      if (targetDate !== today && targetDate !== tomorrow) {
         return {
           success: false,
-          error: `Order generation can only run for tomorrow (${tomorrow}).`,
+          error: `Order generation can only run for today (${today}) or tomorrow (${tomorrow}).`,
         };
       }
 

@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import OperationsDashboard from "@/shared/components/admin/operations/OperationsDashboard";
-import { fetchRosterData } from "@/actions/admin-actions/operationsActions";
+import {
+  fetchRosterData,
+  getAutomationLogs,
+} from "@/actions/admin-actions/operationsActions";
 
 // Live ops data: fetch fresh on every request (matches riders page)
 export const revalidate = 0;
@@ -54,6 +57,12 @@ export default async function OperationsPage() {
   const endDate = tenDaysFromNow;
 
   const initialRosterData = await fetchRosterData(today, endDate);
+  const automationLogsStartDate = getISTDateString(-5);
+  const initialAutomationLogs = await getAutomationLogs(
+    automationLogsStartDate,
+    today,
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -69,6 +78,7 @@ export default async function OperationsPage() {
         deliveries={rawDeliveries || []}
         plannedDeliveries={rawPlannedDeliveries || []}
         rosterData={initialRosterData}
+        automationLogs={initialAutomationLogs}
       />
     </div>
   );

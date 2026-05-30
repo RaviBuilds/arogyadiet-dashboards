@@ -6,12 +6,14 @@ import PlannedDeliveries from "@/shared/components/admin/operations/PlannedDeliv
 import DailyMealRoster from "@/shared/components/admin/operations/DailyMealRoster";
 import LiveRoutingBoard from "@/shared/components/admin/operations/LiveRoutingBoard";
 import AdminLiveTracking from "@/shared/components/admin/operations/AdminLiveTracking";
+import AutomationLogs from "@/shared/components/admin/operations/AutomationLogs";
 import { AdminSubmenu } from "../core/AdminSubmenu";
 
 export default function OperationsDashboard({
   deliveries,
   plannedDeliveries,
   rosterData,
+  automationLogs,
 }: any) {
   const [activeTab, setActiveTab] = useState("Today's Scheduled");
 
@@ -24,6 +26,7 @@ export default function OperationsDashboard({
           "Live Routing",
           "Daily Meal Roster",
           "Live Tracking",
+          "Automation Logs",
         ]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -44,6 +47,10 @@ export default function OperationsDashboard({
       )}
 
       {activeTab === "Live Tracking" && <AdminLiveTracking />}
+
+      {activeTab === "Automation Logs" && (
+        <AutomationLogs initialLogs={automationLogs} />
+      )}
     </div>
   );
 }

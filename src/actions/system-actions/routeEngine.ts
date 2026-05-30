@@ -1,12 +1,9 @@
-import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { computeHaversineRoute, type RoutableOrder } from "@/lib/distance";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+const supabaseAdmin = createAdminClient();
 
 const RE_ROUTABLE_STATUSES = ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"];
 
@@ -15,6 +12,45 @@ type GoogleDirectionsRoute = {
   expectedPayout: number;
   legs: { orderId: string; routeSequence: number; payoutAmount: number }[];
 };
+
+async function logRoutingRun(
+  targetDate: string,
+  latestStats: Record<string, unknown>,
+) {
+  try {
+    const { data: existingLog, error: existingLogError } = await supabaseAdmin
+      .from("automation_logs")
+      .select("run_count")
+      .eq("automation_type", "ROUTING")
+      .eq("target_date", targetDate)
+      .maybeSingle();
+
+    if (existingLogError) {
+      console.error("Error fetching routing automation log:", existingLogError);
+      return;
+    }
+
+    const newCount = (existingLog?.run_count || 0) + 1;
+    const { error: upsertError } = await supabaseAdmin
+      .from("automation_logs")
+      .upsert(
+        {
+          automation_type: "ROUTING",
+          target_date: targetDate,
+          run_count: newCount,
+          last_run_at: new Date().toISOString(),
+          latest_stats: latestStats,
+        },
+        { onConflict: "automation_type,target_date" },
+      );
+
+    if (upsertError) {
+      console.error("Error upserting routing automation log:", upsertError);
+    }
+  } catch (error) {
+    console.error("Unexpected error logging routing automation run:", error);
+  }
+}
 
 async function resetPendingRoutingForDate(targetDate: string) {
   const { data: resetOrders, error: resetError } = await supabaseAdmin
@@ -194,8 +230,23 @@ export async function executeAutomatedDispatch(targetDate: string) {
     .eq("status", "ORDER_CREATED")
     .is("batch_id", null);
 
-  if (ordersError || !orders || orders.length === 0) {
+  if (ordersError || !orders) {
     return { error: `No pending orders found to route for ${targetDate}.` };
+  }
+
+  if (orders.length === 0) {
+    const emptyRunStats = {
+      totalOrders: 0,
+      batchesCreated: 0,
+    };
+
+    await logRoutingRun(targetDate, emptyRunStats);
+
+    return {
+      success: true,
+      message: `No pending orders found to route for ${targetDate}.`,
+      stats: emptyRunStats,
+    };
   }
 
   const { data: serviceAreas } = await supabaseAdmin
@@ -263,6 +314,19 @@ export async function executeAutomatedDispatch(targetDate: string) {
   }
 
   if (riderGroups.size === 0) {
+    await logRoutingRun(targetDate, {
+      totalOrders: orders.length,
+      batchesCreated: 0,
+      ordersAssigned,
+      batchesRemoved: resetResult.batchesRemoved,
+      ordersReset: resetResult.ordersReset,
+      geocodedFromPincode,
+      skippedBadCoords,
+      skippedNoRider,
+      skippedOrderIds,
+      routingFallbacks,
+    });
+
     return {
       error: `No routable orders for ${targetDate}. ${skippedBadCoords} missing coordinates/pincode, ${skippedNoRider} without assigned rider for their pincode.`,
     };
@@ -313,21 +377,24 @@ export async function executeAutomatedDispatch(targetDate: string) {
   const routingMethod = usedFallback
     ? "Google Maps with Haversine fallback"
     : "Google Maps";
+  const resultStatsObject = {
+    totalOrders: orders.length,
+    batchesCreated,
+    ordersAssigned,
+    batchesRemoved: resetResult.batchesRemoved,
+    ordersReset: resetResult.ordersReset,
+    geocodedFromPincode,
+    skippedBadCoords,
+    skippedNoRider,
+    skippedOrderIds,
+    routingFallbacks,
+  };
+
+  await logRoutingRun(targetDate, resultStatsObject);
 
   return {
     success: true,
     message: `Routed ${batchesCreated} batches via ${routingMethod} for ${targetDate}!`,
-    stats: {
-      totalOrders: orders.length,
-      batchesCreated,
-      ordersAssigned,
-      batchesRemoved: resetResult.batchesRemoved,
-      ordersReset: resetResult.ordersReset,
-      geocodedFromPincode,
-      skippedBadCoords,
-      skippedNoRider,
-      skippedOrderIds,
-      routingFallbacks,
-    },
+    stats: resultStatsObject,
   };
 }

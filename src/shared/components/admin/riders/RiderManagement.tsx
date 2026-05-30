@@ -72,6 +72,7 @@ export interface RiderData {
   todayEstimatedEarning: number;
   latestBatchStatus: string;
   latestBatchTime: string;
+  todayDeliveryStatus: string;
   joiningDate: string | null;
   totalEarned: number | null;
   lastPayoutAmount: number | null;
@@ -118,15 +119,6 @@ export default function RiderManagement({
           .toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
           .toUpperCase()
       : "N/A";
-
-  const getPickupBadgeStatus = (status: string) => {
-    if (status === "No Batch Assigned") return status;
-    if (status === "PICKED UP") return "PICKED UP";
-    if (["PICKED_UP", "IN_TRANSIT", "DELIVERED", "COMPLETED"].includes(status)) {
-      return "PICKED UP";
-    }
-    return "NOT YET PICKED UP";
-  };
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -185,7 +177,7 @@ export default function RiderManagement({
         Mobile: row.mobile,
         "Emergency Contact": row.emergency_contact,
         Status: row.is_online ? "Online" : "Offline",
-        "Batch Status": row.latestBatchStatus,
+        "Delivery Status": row.todayDeliveryStatus,
         "Completed Deliveries": row.todayCompletedDeliveries,
         "Total Deliveries": row.todayTotalDeliveries,
         "Estimated Earning (₹)": row.todayEstimatedEarning,
@@ -341,7 +333,7 @@ export default function RiderManagement({
                   <TableHead>Rider Name</TableHead>
                   <TableHead>Phone Number</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Batch Pickup Status</TableHead>
+                  <TableHead>Delivery Status</TableHead>
                   <TableHead>Deliveries</TableHead>
                   <TableHead>Estimated Earning</TableHead>
                 </TableRow>
@@ -402,20 +394,18 @@ export default function RiderManagement({
                           </div>
                         </TableCell>
                         <TableCell>
-                          {rider.latestBatchStatus === "No Batch Assigned" ? (
+                          {rider.todayDeliveryStatus === "No Batch Assigned" ? (
                             <span className="text-sm text-muted-foreground">
                               No Batch Assigned
                             </span>
                           ) : (
                             <>
                               <StatusBadge
-                                status={getPickupBadgeStatus(
-                                  rider.latestBatchStatus,
-                                )}
+                                status={rider.todayDeliveryStatus}
                                 variant="outline"
                               />
                               <div className="text-[10px] text-muted-foreground mt-1">
-                                {formatTime(rider.latestBatchTime)}
+                                Pickup: {formatTime(rider.latestBatchTime)}
                               </div>
                             </>
                           )}
