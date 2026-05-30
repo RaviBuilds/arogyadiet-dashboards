@@ -33,7 +33,7 @@ async function logProductLinkingRun({
     const { data: existingLog, error: existingLogError } = await supabase
       .from("automation_logs")
       .select("run_count")
-      .eq("automation_type", "PRODUCT_LINKING")
+      .eq("automation_type", "PRODUCT_LINK")
       .eq("target_date", targetDate)
       .maybeSingle();
 
@@ -44,7 +44,7 @@ async function logProductLinkingRun({
 
     const { error: upsertError } = await supabase.from("automation_logs").upsert(
       {
-        automation_type: "PRODUCT_LINKING",
+        automation_type: "PRODUCT_LINK",
         target_date: targetDate,
         run_count: (existingLog?.run_count ?? 0) + 1,
         last_run_at: new Date().toISOString(),

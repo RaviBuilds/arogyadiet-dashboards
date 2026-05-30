@@ -37,7 +37,10 @@ export default function OperationsDashboard({
       )}
 
       {activeTab === "Planned (Tomorrow)" && (
-        <PlannedDeliveries data={plannedDeliveries} />
+        <PlannedDeliveries
+          data={plannedDeliveries}
+          automationLogs={automationLogs}
+        />
       )}
 
       {activeTab === "Live Routing" && <LiveRoutingBoard />}

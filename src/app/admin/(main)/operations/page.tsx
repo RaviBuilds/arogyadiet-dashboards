@@ -4,21 +4,12 @@ import {
   fetchRosterData,
   getAutomationLogs,
 } from "@/actions/admin-actions/operationsActions";
+import { getISTDateString } from "@/lib/dates/ist";
 
 // Live ops data: fetch fresh on every request (matches riders page)
 export const revalidate = 0;
 
 export default async function OperationsPage() {
-  const getISTDateString = (offsetDays = 0) => {
-    const date = new Date();
-    date.setDate(date.getDate() + offsetDays);
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Kolkata",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(date);
-  };
   const supabase = await createClient();
 
   const today = getISTDateString();
@@ -60,7 +51,7 @@ export default async function OperationsPage() {
   const automationLogsStartDate = getISTDateString(-5);
   const initialAutomationLogs = await getAutomationLogs(
     automationLogsStartDate,
-    today,
+    tomorrowStr,
   );
 
   return (
