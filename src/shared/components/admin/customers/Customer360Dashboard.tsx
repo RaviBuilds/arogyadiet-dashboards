@@ -1183,14 +1183,14 @@ export function Customer360Dashboard({
 
       {/* --- ADDRESS MODAL --- */}
       <Dialog open={isAddressModalOpen} onOpenChange={setIsAddressModalOpen}>
-        <DialogContent className="sm:max-w-[620px]">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden sm:max-w-[620px]">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <MapPin className="h-5 w-5 text-primary" />
               {addressModalMode === "create" ? "Add Address" : "Edit Address"}
             </DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="-mx-4 grid min-h-0 flex-1 gap-4 overflow-y-auto px-4 py-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label>Address Tag</Label>
@@ -1349,7 +1349,7 @@ export function Customer360Dashboard({
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button
               variant="outline"
               onClick={() => setIsAddressModalOpen(false)}
