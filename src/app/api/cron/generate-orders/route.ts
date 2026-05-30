@@ -10,7 +10,7 @@ import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  console.log("generate-orders cron job started");
+  console.log("generate-orders cron job started here");
   const secret = searchParams.get("secret");
   const expectedSecret = process.env.CRON_SECRET || "arogya-demo-123";
 

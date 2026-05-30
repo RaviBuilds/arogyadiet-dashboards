@@ -13,7 +13,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/shared/components/ui/
 import { Calendar } from "@/shared/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { getISTDateString, getTomorrowISTDateString, parseISODateString } from "@/lib/dates/ist";
-import { revalidateOperationsPage } from "@/actions/admin-actions/operationsActions";
+import {
+  revalidateOperationsPage,
+  type AutomationLogRow,
+} from "@/actions/admin-actions/operationsActions";
 import { deletePlannedOrder, updateOrderMeal, getAddressesForOrder, updateOrderAddress } from "@/actions/admin-actions/plannedActions";
 import { runProductLinkingAction, triggerSystemAutomation } from "@/actions/admin-actions/systemActions";
 import { toast } from "sonner";
@@ -44,7 +47,125 @@ type AutomationScriptConfig = {
   datePickerMode?: "tomorrow-only" | "today-or-tomorrow";
 };
 
-export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
+type AutomationStatus = {
+  loading: boolean;
+  lastRun?: string;
+  success?: boolean;
+};
+
+const automationTypeToScriptName: Record<string, string> = {
+  ORDER_GEN: "5:15 PM Order Creation",
+  PRODUCT_LINK: "Product Linking",
+  PRODUCT_LINKING: "Product Linking",
+  ROUTING: "Routing & Batching",
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeStats(stats: unknown): Record<string, unknown> {
+  if (isRecord(stats)) return stats;
+
+  if (typeof stats === "string") {
+    try {
+      const parsed = JSON.parse(stats);
+      return isRecord(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function formatStatLabel(key: string) {
+  return key
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatStatValue(value: unknown) {
+  if (value === null || value === undefined) return "N/A";
+  if (Array.isArray(value)) return String(value.length);
+  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
+
+function formatStatsSummary(stats: unknown) {
+  const entries = Object.entries(normalizeStats(stats));
+  if (entries.length === 0) return "";
+
+  return entries
+    .map(([key, value]) => `${formatStatLabel(key)}: ${formatStatValue(value)}`)
+    .join(" | ");
+}
+
+function formatISTRunTime(dateStr?: string | null) {
+  if (!dateStr) return "unknown time";
+
+  return new Date(dateStr).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function formatCurrentISTTime() {
+  return new Date().toLocaleTimeString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function buildInitialAutomationStatus(
+  automationLogs: AutomationLogRow[],
+): Record<string, AutomationStatus> {
+  const latestByScript = new Map<string, AutomationLogRow>();
+
+  automationLogs.forEach((log) => {
+    const scriptName = automationTypeToScriptName[log.automation_type];
+    if (!scriptName) return;
+
+    const existing = latestByScript.get(scriptName);
+    const existingTime = existing?.last_run_at
+      ? new Date(existing.last_run_at).getTime()
+      : 0;
+    const currentTime = log.last_run_at
+      ? new Date(log.last_run_at).getTime()
+      : 0;
+
+    if (!existing || currentTime >= existingTime) {
+      latestByScript.set(scriptName, log);
+    }
+  });
+
+  return Array.from(latestByScript.entries()).reduce<
+    Record<string, AutomationStatus>
+  >((acc, [scriptName, log]) => {
+    const statsSummary = formatStatsSummary(log.latest_stats);
+    const statsText = statsSummary ? `; ${statsSummary}` : "";
+
+    acc[scriptName] = {
+      loading: false,
+      success: true,
+      lastRun: `Last run ${formatISTRunTime(log.last_run_at)} IST for ${log.target_date} (run #${log.run_count ?? 1}${statsText})`,
+    };
+
+    return acc;
+  }, {});
+}
+
+export default function PlannedDeliveries({
+  data = [],
+  automationLogs = [],
+}: {
+  data?: any[];
+  automationLogs?: AutomationLogRow[];
+}) {
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   
@@ -64,7 +185,9 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
 
   // System Automation State
   const [systemToggle, setSystemToggle] = useState(false);
-  const [automationStatus, setAutomationStatus] = useState<Record<string, { loading: boolean, lastRun?: string, success?: boolean }>>({});
+  const [automationStatus, setAutomationStatus] = useState<Record<string, AutomationStatus>>(() =>
+    buildInitialAutomationStatus(automationLogs),
+  );
   const tomorrowDate = useMemo(() => parseISODateString(getTomorrowISTDateString()), []);
   const todayDate = useMemo(() => parseISODateString(getISTDateString(0)), []);
   const [orderGenTargetDate, setOrderGenTargetDate] = useState<Date>(() => parseISODateString(getTomorrowISTDateString()));
@@ -185,14 +308,14 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
       const successDate =
         "targetDate" in result && result.targetDate ? ` for ${result.targetDate}` : "";
       toast.success(`${automationName} executed successfully${successDate}${insertedMsg}${linkedMsg}!`);
-      const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+      const timeStr = formatCurrentISTTime();
       
       setAutomationStatus(prev => ({
         ...prev, 
         [automationName]: {
           loading: false,
           success: true,
-          lastRun: `Activity done today at ${timeStr}${successDate}${insertedMsg}${linkedMsg}`,
+          lastRun: `Activity done today at ${timeStr} IST${successDate}${insertedMsg}${linkedMsg}`,
         },
       }));
       
@@ -212,14 +335,14 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     if (result.success) {
       const count = result.count ?? 0;
       toast.success(`Successfully linked ${count} products!`);
-      const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+      const timeStr = formatCurrentISTTime();
 
       setAutomationStatus(prev => ({
         ...prev,
         [automationName]: {
           loading: false,
           success: true,
-          lastRun: `Activity done today at ${timeStr} for ${targetDate} (${count} products linked)`,
+          lastRun: `Activity done today at ${timeStr} IST for ${targetDate} (${count} products linked)`,
         },
       }));
 
@@ -257,14 +380,14 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
       }
 
       toast.success(`Routing & Batching completed for ${targetDate}!`);
-      const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+      const timeStr = formatCurrentISTTime();
 
       setAutomationStatus(prev => ({
         ...prev,
         [automationName]: {
           loading: false,
           success: true,
-          lastRun: `Activity done today at ${timeStr} for ${targetDate}`,
+          lastRun: `Activity done today at ${timeStr} IST for ${targetDate}`,
         },
       }));
 
@@ -378,9 +501,7 @@ export default function PlannedDeliveries({ data = [] }: { data?: any[] }) {
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Planned Deliveries");
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    XLSX.writeFile(workbook, `Planned_Deliveries_${tomorrow.toISOString().split("T")[0]}.xlsx`);
+    XLSX.writeFile(workbook, `Planned_Deliveries_${getTomorrowISTDateString()}.xlsx`);
   };
 
   const automationScripts: AutomationScriptConfig[] = [

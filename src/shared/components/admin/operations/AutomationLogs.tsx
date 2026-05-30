@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileClock } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -20,7 +20,11 @@ import {
   getAutomationLogs,
   type AutomationLogRow,
 } from "@/actions/admin-actions/operationsActions";
-import { getISTDateString, parseISODateString } from "@/lib/dates/ist";
+import {
+  getISTDateString,
+  getTomorrowISTDateString,
+  parseISODateString,
+} from "@/lib/dates/ist";
 
 function formatTargetDate(dateStr: string) {
   if (!dateStr) return "N/A";
@@ -119,10 +123,35 @@ export default function AutomationLogs({
 }) {
   const [logs, setLogs] = useState<AutomationLogRow[]>(initialLogs);
   const [fromDate, setFromDate] = useState(() => getISTDateString(-5));
-  const [toDate, setToDate] = useState(() => getISTDateString(0));
+  const [toDate, setToDate] = useState(() => getTomorrowISTDateString());
   const [isLoading, setIsLoading] = useState(false);
 
   const sortedLogs = useMemo(() => logs, [logs]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    async function loadLatestLogs() {
+      setIsLoading(true);
+
+      try {
+        const data = await getAutomationLogs(fromDate, toDate);
+        if (isCurrent) setLogs(data);
+      } catch {
+        if (isCurrent) {
+          toast.error("Failed to load automation logs.");
+        }
+      } finally {
+        if (isCurrent) setIsLoading(false);
+      }
+    }
+
+    void loadLatestLogs();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   const handleLoadRange = async () => {
     if (!fromDate || !toDate) {
