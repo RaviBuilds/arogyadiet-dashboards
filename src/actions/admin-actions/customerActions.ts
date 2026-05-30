@@ -3,9 +3,13 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import {
-  addressSchema,
+  createAddressSchema,
   type AddressFormValues,
 } from "@/validations/addressSchema";
+import {
+  assertDeliverablePincode,
+  getServiceAreaPincodesAction,
+} from "@/actions/pincodeActions";
 import { sendEmail } from "@/services/emailService";
 import {
   welcomeEmailHtml,
@@ -392,6 +396,20 @@ export async function adminCreateAddressForCustomer(
   customerProfileId: string,
   data: AddressFormValues,
 ) {
+  const pincodeCheck = await assertDeliverablePincode(data.pincode);
+  if (!pincodeCheck.ok) {
+    return { success: false, error: pincodeCheck.error };
+  }
+
+  const serviceAreaPincodes = await getServiceAreaPincodesAction();
+  const parsed = createAddressSchema(serviceAreaPincodes).safeParse(data);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid address data.",
+    };
+  }
+
   // Enforce max 2 addresses
   const { count } = await supabaseAdmin
     .from("addresses")
@@ -403,7 +421,7 @@ export async function adminCreateAddressForCustomer(
   }
 
   // If setting as primary, clear existing primaries
-  if (data.is_primary) {
+  if (parsed.data.is_primary) {
     await supabaseAdmin
       .from("addresses")
       .update({ is_primary: false })
@@ -412,21 +430,21 @@ export async function adminCreateAddressForCustomer(
 
   const { error } = await supabaseAdmin.from("addresses").insert({
     customer_profile_id: customerProfileId,
-    tag: data.tag,
-    street_1: data.street_1,
-    street_2: data.street_2 || null,
-    landmark: data.landmark || null,
-    city: data.city,
-    state: data.state,
-    pincode: data.pincode,
-    is_primary: data.is_primary,
-    lat: data.lat ?? null,
-    lng: data.lng ?? null,
+    tag: parsed.data.tag,
+    street_1: parsed.data.street_1,
+    street_2: parsed.data.street_2 || null,
+    landmark: parsed.data.landmark || null,
+    city: parsed.data.city,
+    state: parsed.data.state,
+    pincode: parsed.data.pincode,
+    is_primary: parsed.data.is_primary,
+    lat: parsed.data.lat ?? null,
+    lng: parsed.data.lng ?? null,
   });
 
   if (error) return { success: false, error: error.message };
   await logAdminAction("CREATE", "customer_address", customerProfileId, {
-    tag: data.tag,
+    tag: parsed.data.tag,
   });
   return { success: true };
 }
@@ -435,9 +453,18 @@ export async function adminUpsertCustomerAddress(
   customerProfileId: string,
   data: AddressFormValues,
 ) {
-  const parsed = addressSchema.safeParse(data);
+  const pincodeCheck = await assertDeliverablePincode(data.pincode);
+  if (!pincodeCheck.ok) {
+    return { success: false, error: pincodeCheck.error };
+  }
+
+  const serviceAreaPincodes = await getServiceAreaPincodesAction();
+  const parsed = createAddressSchema(serviceAreaPincodes).safeParse(data);
   if (!parsed.success) {
-    return { success: false, error: "Invalid address data." };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid address data.",
+    };
   }
 
   const addressId = parsed.data.id;
