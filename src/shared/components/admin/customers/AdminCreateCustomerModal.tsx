@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import {
@@ -24,6 +24,8 @@ import {
 } from "@/shared/components/ui/select";
 import { Eye, EyeOff, Plus, Trash2, MapPin, Loader2, CheckCircle } from "lucide-react";
 import { adminCreateCustomerAction } from "@/actions/admin-actions/customerActions";
+import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
+import { getPincodeValidationError } from "@/lib/address/validatePincode";
 import type { AddressFormValues } from "@/validations/addressSchema";
 
 const AddressPickerMap = dynamic(
@@ -54,6 +56,7 @@ interface AddressEntry extends AddressFormValues {
   _skipCoords?: boolean;
   _latInput?: string;
   _lngInput?: string;
+  _pincodeError?: string | null;
 }
 
 const defaultAddress = (): AddressEntry => ({
@@ -72,6 +75,7 @@ const defaultAddress = (): AddressEntry => ({
   _skipCoords: false,
   _latInput: "",
   _lngInput: "",
+  _pincodeError: null,
 });
 
 const STEPS = ["Account Info", "Profile Details", "Addresses"] as const;
@@ -108,6 +112,7 @@ export function AdminCreateCustomerModal({
 
   // Step 3: Addresses
   const [addresses, setAddresses] = useState<AddressEntry[]>([]);
+  const [serviceAreaPincodes, setServiceAreaPincodes] = useState<string[]>([]);
 
   const stepIndex = STEPS.indexOf(step);
 
@@ -129,6 +134,31 @@ export function AdminCreateCustomerModal({
     /\S+@\S+\.\S+/.test(account.email) &&
     account.mobile.trim().length >= 10 &&
     account.password.length >= 8;
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    getServiceAreaPincodesAction()
+      .then((pincodes) => {
+        setServiceAreaPincodes(pincodes);
+        setAddresses((prev) =>
+          prev.map((address) =>
+            address._pincodeError
+              ? {
+                  ...address,
+                  _pincodeError: getPincodeValidationError(
+                    address.pincode,
+                    pincodes,
+                  ),
+                }
+              : address,
+          ),
+        );
+      })
+      .catch((error) => {
+        console.error("Failed to load service area pincodes:", error);
+      });
+  }, [isOpen]);
 
   // ── Lat/Lng verify ─────────────────────────────────────────────────────────
   const verifyCoords = async (index: number) => {
@@ -174,6 +204,26 @@ export function AdminCreateCustomerModal({
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = () => {
     startTransition(async () => {
+      const latestServiceAreaPincodes = await getServiceAreaPincodesAction();
+      setServiceAreaPincodes(latestServiceAreaPincodes);
+
+      let firstPincodeError: string | null = null;
+      const validatedAddresses = addresses.map((address) => {
+        const error = getPincodeValidationError(
+          address.pincode,
+          latestServiceAreaPincodes,
+        );
+        if (!firstPincodeError && error) firstPincodeError = error;
+        return { ...address, _pincodeError: error };
+      });
+
+      setAddresses(validatedAddresses);
+
+      if (firstPincodeError) {
+        toast.error(firstPincodeError);
+        return;
+      }
+
       const cleanAddresses: AddressFormValues[] = addresses.map((a) => ({
         id: a.id,
         tag: a.tag,
@@ -436,10 +486,24 @@ export function AdminCreateCustomerModal({
                       <Label className="text-xs">Pincode *</Label>
                       <Input
                         className="h-8 text-sm"
-                        placeholder="500XXX"
+                        placeholder="5xxxxx"
                         value={addr.pincode}
-                        onChange={(e) => updateAddress(i, { pincode: e.target.value })}
+                        onChange={(e) => {
+                          const pincode = e.target.value;
+                          updateAddress(i, {
+                            pincode,
+                            _pincodeError: getPincodeValidationError(
+                              pincode,
+                              serviceAreaPincodes,
+                            ),
+                          });
+                        }}
                       />
+                      {addr._pincodeError && (
+                        <p className="text-xs text-red-500">
+                          {addr._pincodeError}
+                        </p>
+                      )}
                     </div>
                   </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -23,7 +23,8 @@ import {
 } from "@/components/ui/select";
 import { MapPin, Loader2, CheckCircle2, Navigation } from "lucide-react";
 import { saveAddressAction } from "@/actions/addressActions";
-import { addressSchema } from "@/validations/addressSchema";
+import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
+import { createAddressSchema } from "@/validations/addressSchema";
 import type { AddressFormValues } from "@/validations/addressSchema";
 import type { Address } from "@/services/addressService";
 
@@ -64,6 +65,11 @@ export function AddressFormModal({
 
   // NEW: State to allow skipping location detection
   const [skipLocation, setSkipLocation] = useState(false);
+  const [serviceAreaPincodes, setServiceAreaPincodes] = useState<string[]>([]);
+  const addressSchema = useMemo(
+    () => createAddressSchema(serviceAreaPincodes),
+    [serviceAreaPincodes],
+  );
 
   const form = useForm<AddressFormValues>({
     resolver: zodResolver(addressSchema),
@@ -81,6 +87,25 @@ export function AddressFormModal({
       lng: initialData?.lng || null,
     },
   });
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let cancelled = false;
+    getServiceAreaPincodesAction()
+      .then((pincodes) => {
+        if (cancelled) return;
+        setServiceAreaPincodes(pincodes);
+        form.trigger("pincode");
+      })
+      .catch((error) => {
+        console.error("Failed to load service area pincodes:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, form]);
 
   useEffect(() => {
     if (isOpen) {

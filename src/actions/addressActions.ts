@@ -3,7 +3,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { deleteCustomerAddress } from "@/lib/address/deleteCustomerAddress";
 import { revalidatePath } from "next/cache";
-import { addressSchema, AddressFormValues } from "@/validations/addressSchema";
+import {
+  createAddressSchema,
+  type AddressFormValues,
+} from "@/validations/addressSchema";
+import {
+  assertDeliverablePincode,
+  getServiceAreaPincodesAction,
+} from "@/actions/pincodeActions";
 
 // 2. The Server Action
 
@@ -16,9 +23,15 @@ export async function saveAddressAction(data: AddressFormValues) {
 
   if (!user) throw new Error("Unauthorized");
 
-  const parsed = addressSchema.safeParse(data);
+  const pincodeCheck = await assertDeliverablePincode(data.pincode);
+  if (!pincodeCheck.ok) {
+    return { error: pincodeCheck.error };
+  }
+
+  const serviceAreaPincodes = await getServiceAreaPincodesAction();
+  const parsed = createAddressSchema(serviceAreaPincodes).safeParse(data);
   if (!parsed.success) {
-    return { error: "Invalid address data" };
+    return { error: parsed.error.issues[0]?.message ?? "Invalid address data" };
   }
 
   // get internal user

@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useTransition, useCallback } from "react";
+import React, { useState, useTransition, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
+import { getPincodeValidationError } from "@/lib/address/validatePincode";
 import {
   updateCustomerBasicInfo,
   updateCustomerDietaryProfile,
@@ -215,6 +217,10 @@ export function Customer360Dashboard({
   });
   const [latInput, setLatInput] = useState("");
   const [lngInput, setLngInput] = useState("");
+  const [serviceAreaPincodes, setServiceAreaPincodes] = useState<string[]>([]);
+  const [addressPincodeError, setAddressPincodeError] = useState<string | null>(
+    null,
+  );
   const [deleteAddressState, setDeleteAddressState] = useState({
     isOpen: false,
     addressId: "",
@@ -237,6 +243,14 @@ export function Customer360Dashboard({
   });
 
   // Handlers
+  useEffect(() => {
+    getServiceAreaPincodesAction()
+      .then(setServiceAreaPincodes)
+      .catch((error) => {
+        console.error("Failed to load service area pincodes:", error);
+      });
+  }, []);
+
   const handlePersonalSubmit = () =>
     startTransition(async () => {
       const res = await updateCustomerBasicInfo(
@@ -304,6 +318,7 @@ export function Customer360Dashboard({
 
   const openCreateAddressModal = () => {
     setAddressModalMode("create");
+    setAddressPincodeError(null);
     setAddressForm({
       tag: "Home",
       street_1: "",
@@ -322,6 +337,7 @@ export function Customer360Dashboard({
 
   const openEditAddressModal = (address: CustomerAddress) => {
     setAddressModalMode("edit");
+    setAddressPincodeError(null);
     const lat = address.lat ?? null;
     const lng = address.lng ?? null;
     setAddressForm({
@@ -343,6 +359,20 @@ export function Customer360Dashboard({
 
   const handleAddressSubmit = () =>
     startTransition(async () => {
+      const latestServiceAreaPincodes = await getServiceAreaPincodesAction();
+      setServiceAreaPincodes(latestServiceAreaPincodes);
+      const pincodeError = getPincodeValidationError(
+        addressForm.pincode,
+        latestServiceAreaPincodes,
+      );
+
+      if (pincodeError) {
+        setAddressPincodeError(pincodeError);
+        toast.error(pincodeError);
+        return;
+      }
+
+      setAddressPincodeError(null);
       const res = await adminUpsertCustomerAddress(customer.id, addressForm);
       if (res.success) {
         toast.success(
@@ -1184,7 +1214,7 @@ export function Customer360Dashboard({
       {/* --- ADDRESS MODAL --- */}
       <Dialog open={isAddressModalOpen} onOpenChange={setIsAddressModalOpen}>
         <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden sm:max-w-[620px]">
-          <DialogHeader className="shrink-0">
+          <DialogHeader className="shrink-0 border-b pb-4">
             <DialogTitle className="flex items-center gap-2">
               <MapPin className="h-5 w-5 text-primary" />
               {addressModalMode === "create" ? "Add Address" : "Edit Address"}
@@ -1214,14 +1244,23 @@ export function Customer360Dashboard({
                 <Label>Pincode</Label>
                 <Input
                   value={addressForm.pincode}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const pincode = e.target.value;
                     setAddressForm({
                       ...addressForm,
-                      pincode: e.target.value,
-                    })
-                  }
-                  placeholder="500XXX"
+                      pincode,
+                    });
+                    setAddressPincodeError(
+                      getPincodeValidationError(pincode, serviceAreaPincodes),
+                    );
+                  }}
+                  placeholder="5xxxxx"
                 />
+                {addressPincodeError && (
+                  <p className="text-xs text-red-500">
+                    {addressPincodeError}
+                  </p>
+                )}
               </div>
             </div>
 
