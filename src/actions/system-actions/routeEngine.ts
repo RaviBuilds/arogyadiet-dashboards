@@ -1,8 +1,13 @@
 import { revalidatePath } from "next/cache";
-import { computeHaversineRoute, type RoutableOrder } from "@/lib/distance";
+import {
+  calculateHaversineDistanceKm,
+  computeHaversineRoute,
+  type RoutableOrder,
+} from "@/lib/distance";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+// Service-role client only: this engine runs from cron/background jobs and must bypass RLS.
 const supabaseAdmin = createAdminClient();
 
 const RE_ROUTABLE_STATUSES = ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"];
@@ -114,12 +119,57 @@ async function fetchGoogleDirectionsRoute(
   payoutPerKm: number,
   apiKey: string,
 ): Promise<GoogleDirectionsRoute | null> {
-  const waypointsStr =
-    `optimize:true|` + riderOrders.map((o) => `${o.lat},${o.lng}`).join("|");
+  // A. Open routing: pick the farthest delivery (Haversine from kitchen) as the final stop.
+  let farthestOriginalIndex = 0;
+  let maxDistanceKm = -1;
+
+  for (let index = 0; index < riderOrders.length; index++) {
+    const order = riderOrders[index];
+    const distanceKm = calculateHaversineDistanceKm(
+      kitchenLat,
+      kitchenLng,
+      order.lat,
+      order.lng,
+    );
+
+    if (distanceKm > maxDistanceKm) {
+      maxDistanceKm = distanceKm;
+      farthestOriginalIndex = index;
+    }
+  }
+
+  const destinationOrder = riderOrders[farthestOriginalIndex];
+
+  // B. Split remaining orders into Google waypoints; track their original riderOrders indices.
+  const intermediateOrders: RoutableOrder[] = [];
+  const originalIndicesOfIntermediates: number[] = [];
+
+  riderOrders.forEach((order, originalIndex) => {
+    if (originalIndex === farthestOriginalIndex) return;
+
+    intermediateOrders.push(order);
+    originalIndicesOfIntermediates.push(originalIndex);
+  });
+
   const kitchenCoords = `${kitchenLat},${kitchenLng}`;
+  const params = new URLSearchParams({
+    origin: kitchenCoords,
+    destination: `${destinationOrder.lat},${destinationOrder.lng}`,
+    mode: "driving",
+    key: apiKey,
+  });
+
+  if (intermediateOrders.length > 0) {
+    params.set(
+      "waypoints",
+      `optimize:true|${intermediateOrders
+        .map((order) => `${order.lat},${order.lng}`)
+        .join("|")}`,
+    );
+  }
 
   const mapRes = await fetch(
-    `https://maps.googleapis.com/maps/api/directions/json?origin=${kitchenCoords}&destination=${kitchenCoords}&waypoints=${waypointsStr}&key=${apiKey}`,
+    `https://maps.googleapis.com/maps/api/directions/json?${params.toString()}`,
   );
   const mapData = await mapRes.json();
 
@@ -137,16 +187,33 @@ async function fetchGoogleDirectionsRoute(
   const totalKm = Number((totalMeters / 1000).toFixed(2));
   const expectedPayout = Math.round(totalKm * payoutPerKm);
 
-  const optimalOrderIndices = route.waypoint_order as number[];
   const legs = route.legs as { distance?: { value?: number } }[];
 
-  const orderedLegs = optimalOrderIndices.map((originalIndex, i) => {
+  const googleWaypointOrder: number[] =
+    intermediateOrders.length === 0
+      ? []
+      : Array.isArray(route.waypoint_order) && route.waypoint_order.length > 0
+        ? (route.waypoint_order as number[])
+        : intermediateOrders.map((_, index) => index);
+
+  // D. Google's waypoint_order indexes into intermediateOrders only — remap to riderOrders,
+  // then append the farthest stop as the fixed final destination (no return to kitchen).
+  const optimizedIntermediateOriginalIndices = googleWaypointOrder.map(
+    (intermediateIndex) => originalIndicesOfIntermediates[intermediateIndex],
+  );
+  const finalOptimalIndices = [
+    ...optimizedIntermediateOriginalIndices,
+    farthestOriginalIndex,
+  ];
+
+  // E. Build payout legs in visit order using each Directions leg distance.
+  const orderedLegs = finalOptimalIndices.map((originalIndex, legIndex) => {
     const order = riderOrders[originalIndex];
-    const legDistanceKm = (legs[i]?.distance?.value || 0) / 1000;
+    const legDistanceKm = (legs[legIndex]?.distance?.value || 0) / 1000;
 
     return {
       orderId: order.id,
-      routeSequence: i + 1,
+      routeSequence: legIndex + 1,
       payoutAmount: Number((legDistanceKm * payoutPerKm).toFixed(2)),
     };
   });
