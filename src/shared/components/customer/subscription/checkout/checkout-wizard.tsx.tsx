@@ -23,11 +23,13 @@ export function CheckoutWizard({
   profile,
   latestSubscription,
   mealCategories,
+  holidaysByDate = {},
 }: {
   plans: any[];
   profile: any;
   latestSubscription: any;
   mealCategories: any[];
+  holidaysByDate?: Record<string, string>;
 }) {
   const searchParams = useSearchParams();
   const preSelectedPlan = searchParams.get("plan");
@@ -103,6 +105,7 @@ export function CheckoutWizard({
             onNext={nextStep}
             onBack={prevStep}
             mealCategories={mealCategories}
+            holidaysByDate={holidaysByDate}
           />
         )}
         {step === 4 && (

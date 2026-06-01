@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { CheckoutWizard } from "@/shared/components/customer/subscription/checkout/checkout-wizard.tsx";
+import { fetchHolidaysInRange } from "@/actions/admin-actions/holidayActions";
+import { addYears, format } from "date-fns";
 
 export default async function CheckoutPage() {
   const supbase = await createClient();
@@ -18,6 +20,9 @@ export default async function CheckoutPage() {
     .maybeSingle();
 
   //fetch the plan and profile  in parallel
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const holidaysEndStr = format(addYears(new Date(), 2), "yyyy-MM-dd");
+
   const [plansResponse, latestSubscriptionResponse, categoriesResponse] =
     await Promise.all([
       supbase
@@ -39,6 +44,8 @@ export default async function CheckoutPage() {
         .order("code", { ascending: true }),
     ]);
 
+  const holidaysByDate = await fetchHolidaysInRange(todayStr, holidaysEndStr);
+
   return (
     <div className="bg-slate-50/50 min-h-screen">
       <CheckoutWizard
@@ -46,6 +53,7 @@ export default async function CheckoutPage() {
         profile={profileResponse.data}
         latestSubscription={latestSubscriptionResponse.data}
         mealCategories={categoriesResponse.data || []}
+        holidaysByDate={holidaysByDate}
       />
     </div>
   );

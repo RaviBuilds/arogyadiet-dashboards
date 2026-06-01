@@ -232,6 +232,7 @@ export function MealPlannerClient({
   mealCategories,
   maxPauses,
   totalPausesUsed = 0,
+  holidaysByDate = {},
 }: any) {
   const router = useRouter();
   const [overrides, setOverrides] =
@@ -634,6 +635,11 @@ export function MealPlannerClient({
                             ),
                       )}
                     >
+                      {holidaysByDate[dateStr] && (
+                        <span className="text-[9px] md:text-[10px] font-bold leading-tight text-center line-clamp-2 max-w-full px-0.5 mb-0.5 text-zinc-700">
+                          {holidaysByDate[dateStr]}
+                        </span>
+                      )}
                       <span
                         className={cn(
                           "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",

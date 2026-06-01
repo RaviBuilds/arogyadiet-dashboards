@@ -36,6 +36,7 @@ import {
   createSubscriptionPlan,
 } from "@/actions/admin-actions/subscriptionActions";
 import { AdminSubmenu } from "@/shared/components/admin/core/AdminSubmenu";
+import { HolidayCalendarClient } from "@/shared/components/admin/subscriptions/HolidayCalendarClient";
 import { ConfirmDeleteModal } from "@/shared/components/admin/core/ConfirmDeleteModal";
 import {
   Card,
@@ -186,7 +187,7 @@ export function SubscriptionDashboard({
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-500">
       <AdminSubmenu
-        tabs={["Subscription Plans", "Subscription Modeling"]}
+        tabs={["Subscription Plans", "Subscription Modeling", "Holiday Calendar"]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -337,6 +338,8 @@ export function SubscriptionDashboard({
           </Card>
         </div>
       )}
+
+      {activeTab === "Holiday Calendar" && <HolidayCalendarClient />}
 
       {/* CREATE/EDIT PLAN MODAL */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>

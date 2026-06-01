@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { MealPlannerClient } from "@/shared/components/customer/subscription/manage/meal-planner-client";
 import { repairOverLimitPauseCredits } from "@/actions/manageMealActions";
+import { fetchHolidaysInRange } from "@/actions/admin-actions/holidayActions";
 
 export const revalidate = 0;
 
@@ -115,6 +116,11 @@ export default async function ManageMealPlannerPage() {
     }
   });
 
+  const holidaysByDate = await fetchHolidaysInRange(
+    todayStr,
+    activeSub.effective_end_on,
+  );
+
   return (
     <MealPlannerClient
       subscriptionId={activeSub.id}
@@ -125,6 +131,7 @@ export default async function ManageMealPlannerPage() {
       mealCategories={mealCategories || []}
       maxPauses={activeSub.pause_credits_total}
       totalPausesUsed={totalPausesUsed ?? 0}
+      holidaysByDate={holidaysByDate}
     />
   );
 }
