@@ -2,7 +2,12 @@
 
 import { useMemo } from "react";
 import { format, addDays } from "date-fns";
-import { ChevronLeft, Info, RefreshCw } from "lucide-react";
+import {
+  AlertCircle,
+  CalendarCheck,
+  ChevronLeft,
+  RefreshCw,
+} from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -270,38 +275,50 @@ const SkipSvg = ({ className }: { className?: string }) => (
 
 // --- END ILLUSTRATIONS ---
 
-const CYCLE_ORDER = ["Veg", "Non-Veg", "Egg", "Mixed"];
+function getCategoryLabel(code: string, name?: string) {
+  if (code === "CHICKEN") return "Non-Veg";
+  if (code === "VEG") return "Veg";
+  if (code === "EGG") return "Egg";
+  return name || code;
+}
 
-// Map preferences to their specific UI styles and our new SVGs
-const PREF_STYLES: Record<string, any> = {
-  Veg: {
+const CODE_STYLES: Record<string, any> = {
+  VEG: {
     icon: VegSvg,
     color: "text-green-700",
     bg: "bg-green-50",
     border: "border-green-200 hover:border-green-400",
     label: "Veg",
   },
-  "Non-Veg": {
+  CHICKEN: {
     icon: MeatSvg,
     color: "text-red-700",
     bg: "bg-red-50",
     border: "border-red-200 hover:border-red-400",
     label: "Non-Veg",
   },
-  Egg: {
+  EGG: {
     icon: EggSvg,
     color: "text-amber-700",
     bg: "bg-amber-50",
     border: "border-amber-200 hover:border-amber-400",
     label: "Egg",
   },
-  Mixed: {
+  MIXED: {
     icon: MixedSvg,
     color: "text-purple-700",
     bg: "bg-purple-50",
     border: "border-purple-200 hover:border-purple-400",
     label: "Mixed",
   },
+};
+
+const PAUSE_STYLE = {
+  icon: SkipSvg,
+  color: "text-zinc-500",
+  bg: "bg-zinc-50",
+  border: "border-zinc-200 border-dashed hover:border-zinc-400",
+  label: "Pause",
 };
 
 
@@ -313,13 +330,29 @@ export function MealCustomization({
   plans,
   onNext,
   onBack,
+  mealCategories,
 }: any) {
   const selectedPlan = plans?.find((p: any) => p.id === data.planId);
   const baseDuration = selectedPlan?.duration_days || 30;
+  const maxPauses = selectedPlan?.pause_credits || 0;
+  const pausesUsed = data.pausedDates?.length || 0;
+  const isLimitReached = pausesUsed >= maxPauses;
 
+  const PREFERRED_ORDER = ["VEG", "EGG", "CHICKEN"];
+  const sortedCodes = [...mealCategories]
+    .map((c: any) => c.code)
+    .sort((a, b) => {
+      const idxA = PREFERRED_ORDER.indexOf(a);
+      const idxB = PREFERRED_ORDER.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  const cycleOptions = [...sortedCodes, "PAUSE"];
 
-    //Generate the exact dayscalender
-    const totalDaysGenerate = baseDuration + (data.pausedDates?.length || 0)
+  //Generate the exact dayscalender
+  const totalDaysGenerate = baseDuration + (data.pausedDates?.length || 0);
 
   const scheduleDays = useMemo(() => {
     if (!data.startDate) return [];
@@ -338,21 +371,46 @@ export function MealCustomization({
     return months;
   }, [scheduleDays]);
 
+  const endDate =
+    scheduleDays.length > 0 ? scheduleDays[scheduleDays.length - 1] : null;
+
   const handleToggleMeal = (dateString: string) => {
-    if (data.pausedDates?.includes(dateString)) return;
     setData((prev: any) => {
-      const currentPref = prev.mealOverrides?.[dateString] || prev.foodType;
-      const currentIndex = CYCLE_ORDER.indexOf(currentPref);
-      const nextPref = CYCLE_ORDER[(currentIndex + 1) % CYCLE_ORDER.length];
+      const currentState = prev.pausedDates?.includes(dateString)
+        ? "PAUSE"
+        : prev.mealOverrides?.[dateString] || prev.foodType;
+
+      const currentIndex = cycleOptions.indexOf(currentState);
+      const nextPref =
+        cycleOptions[(currentIndex + 1) % cycleOptions.length];
+
+      const newPausedDates = [...(prev.pausedDates || [])];
       const newOverrides = { ...(prev.mealOverrides || {}) };
 
-      if (nextPref === prev.foodType) {
+      if (nextPref === "PAUSE") {
+        if (!newPausedDates.includes(dateString)) {
+          newPausedDates.push(dateString);
+        }
+        delete newOverrides[dateString];
+      } else if (nextPref === prev.foodType) {
+        const pauseIndex = newPausedDates.indexOf(dateString);
+        if (pauseIndex > -1) newPausedDates.splice(pauseIndex, 1);
         delete newOverrides[dateString];
       } else {
+        const pauseIndex = newPausedDates.indexOf(dateString);
+        if (pauseIndex > -1) newPausedDates.splice(pauseIndex, 1);
         newOverrides[dateString] = nextPref;
       }
 
-      return { ...prev, mealOverrides: newOverrides };
+      if (nextPref === "PAUSE" && newPausedDates.length > maxPauses) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        pausedDates: newPausedDates,
+        mealOverrides: newOverrides,
+      };
     });
   };
 
@@ -361,37 +419,120 @@ export function MealCustomization({
       <div className="space-y-2">
         <h2 className="text-xl font-bold flex items-center gap-2">
           <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
-            4
+            3
           </span>
           Meal Planner
         </h2>
         <p className="text-muted-foreground ml-10">
           Your base plan is set to{" "}
-          <strong className="text-foreground">{data.foodType}</strong>. Click on
-          any active date to change its meal type!
+          <strong className="text-foreground">
+            {getCategoryLabel(
+              data.foodType,
+              mealCategories.find((c: any) => c.code === data.foodType)?.name,
+            )}
+          </strong>
+          . Click any date to cycle through meal types or pause a day!
         </p>
       </div>
 
       <div className="ml-0 md:ml-10 space-y-8">
+        <div
+          className={cn(
+            "border rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors",
+            isLimitReached
+              ? "bg-amber-50 border-amber-200"
+              : "bg-blue-50 border-blue-200",
+          )}
+        >
+          <div className="flex items-center gap-3">
+            {isLimitReached ? (
+              <AlertCircle className="h-6 w-6 text-amber-600" />
+            ) : (
+              <CalendarCheck className="h-6 w-6 text-blue-600" />
+            )}
+            <div>
+              <p
+                className={cn(
+                  "text-sm font-semibold",
+                  isLimitReached ? "text-amber-900" : "text-blue-900",
+                )}
+              >
+                Your {baseDuration}-Meal Plan
+              </p>
+              <p
+                className={cn(
+                  "text-xs",
+                  isLimitReached ? "text-amber-700" : "text-blue-700",
+                )}
+              >
+                You have used <strong>{pausesUsed}</strong> of{" "}
+                <strong>{maxPauses}</strong> pause credits.
+                {isLimitReached && " (Limit Reached)"}
+              </p>
+            </div>
+          </div>
+          <div className="text-center sm:text-right">
+            <p
+              className={cn(
+                "text-xs font-medium",
+                isLimitReached ? "text-amber-700" : "text-blue-700",
+              )}
+            >
+              New End Date
+            </p>
+            <p
+              className={cn(
+                "text-lg font-extrabold",
+                isLimitReached ? "text-amber-900" : "text-blue-900",
+              )}
+            >
+              {endDate ? format(endDate, "MMMM do, yyyy") : "..."}
+            </p>
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-center gap-2 md:gap-4 p-3 bg-zinc-50 rounded-lg border text-sm w-fit mx-auto md:mx-0">
           <span className="text-muted-foreground font-medium mr-2 flex items-center gap-1 hidden sm:flex">
             <RefreshCw className="h-4 w-4" /> Cycle:
           </span>
-          {CYCLE_ORDER.map((pref) => {
-            const Icon = PREF_STYLES[pref].icon;
+          {cycleOptions.map((option) => {
+            if (option === "PAUSE") {
+              const Icon = PAUSE_STYLE.icon;
+              return (
+                <div
+                  key="PAUSE"
+                  className={cn(
+                    "flex items-center gap-1.5 px-2 py-1 rounded-md",
+                    PAUSE_STYLE.bg,
+                    PAUSE_STYLE.color,
+                  )}
+                >
+                  <Icon className="h-5 w-5 drop-shadow-sm" />
+                  <span className="font-bold text-xs md:text-sm">
+                    {PAUSE_STYLE.label}
+                  </span>
+                </div>
+              );
+            }
+
+            const category = mealCategories.find(
+              (c: any) => c.code === option,
+            );
+            const style = CODE_STYLES[option] || CODE_STYLES.VEG;
+            const Icon = style.icon;
+            const label = getCategoryLabel(option, category?.name);
+
             return (
               <div
-                key={pref}
+                key={option}
                 className={cn(
                   "flex items-center gap-1.5 px-2 py-1 rounded-md",
-                  PREF_STYLES[pref].bg,
-                  PREF_STYLES[pref].color,
+                  style.bg,
+                  style.color,
                 )}
               >
                 <Icon className="h-5 w-5 drop-shadow-sm" />
-                <span className="font-bold text-xs md:text-sm">
-                  {PREF_STYLES[pref].label}
-                </span>
+                <span className="font-bold text-xs md:text-sm">{label}</span>
               </div>
             );
           })}
@@ -434,31 +575,35 @@ export function MealCustomization({
                     const dateStr = format(date, "yyyy-MM-dd");
                     const isPaused = data.pausedDates?.includes(dateStr);
 
-                    const dayPrefId =
+                    const dayPrefCode =
                       data.mealOverrides?.[dateStr] || data.foodType;
-                    const style = PREF_STYLES[dayPrefId] || PREF_STYLES["Veg"];
+                    const style = isPaused
+                      ? PAUSE_STYLE
+                      : CODE_STYLES[dayPrefCode] || CODE_STYLES.VEG;
                     const Icon = style.icon;
+                    const dayLabel = isPaused
+                      ? PAUSE_STYLE.label
+                      : getCategoryLabel(
+                          dayPrefCode,
+                          mealCategories.find(
+                            (c: any) => c.code === dayPrefCode,
+                          )?.name,
+                        );
 
                     return (
                       <button
                         key={index}
-                        disabled={isPaused} // DISABLE BUTTON IF PAUSED!
                         onClick={() => handleToggleMeal(dateStr)}
                         className={cn(
-                          "flex flex-col items-center justify-center aspect-square p-1 rounded-2xl border-2 transition-all relative select-none",
-                          isPaused
-                            ? "bg-zinc-50 border-zinc-200 border-dashed opacity-60 cursor-not-allowed" // Paused styling
-                            : cn(
-                                style.bg,
-                                style.border,
-                                "group hover:shadow-md hover:-translate-y-0.5",
-                              ), // Active styling
+                          "flex flex-col items-center justify-center aspect-square p-1 rounded-2xl border-2 transition-all relative select-none group hover:shadow-md hover:-translate-y-0.5",
+                          style.bg,
+                          style.border,
                         )}
                       >
                         <span
                           className={cn(
                             "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",
-                            isPaused ? "text-zinc-400" : style.color,
+                            style.color,
                           )}
                         >
                           {format(date, "d")}
@@ -467,26 +612,18 @@ export function MealCustomization({
                         <div
                           className={cn(
                             "flex flex-col items-center justify-center gap-1",
-                            isPaused ? "text-zinc-400" : style.color,
+                            style.color,
                           )}
                         >
-                          {isPaused ? (
-                            <SkipSvg className="h-6 w-6 md:h-8 md:w-8 opacity-50" />
-                          ) : (
-                            <>
-                              <Icon className="h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95" />
-                              <span className="text-[9px] md:text-[11px] font-bold leading-none hidden sm:block">
-                                {style.label}
-                              </span>
-                            </>
-                          )}
+                          <Icon className="h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95" />
+                          <span className="text-[9px] md:text-[11px] font-bold leading-none hidden sm:block">
+                            {dayLabel}
+                          </span>
                         </div>
 
-                        {!isPaused && (
-                          <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                            <RefreshCw className="h-5 w-5 text-zinc-600 opacity-20" />
-                          </div>
-                        )}
+                        <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
+                          <RefreshCw className="h-5 w-5 text-zinc-600 opacity-20" />
+                        </div>
                       </button>
                     );
                   })}

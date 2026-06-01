@@ -18,21 +18,26 @@ export default async function CheckoutPage() {
     .maybeSingle();
 
   //fetch the plan and profile  in parallel
-  const [plansResponse, latestSubscriptionResponse] = await Promise.all([
-    supbase
-      .from("subscription_plans")
-      .select("*")
-      .eq("is_active", true)
-      .order("duration_days", { ascending: true }),
-    supbase
-      .from("subscriptions")
-      .select("id, ends_on, effective_end_on, status")
-      .eq("customer_profile_id", profileResponse.data?.id)
-      .in("status", ["ACTIVE", "QUEUED"])
-      .order("ends_on", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const [plansResponse, latestSubscriptionResponse, categoriesResponse] =
+    await Promise.all([
+      supbase
+        .from("subscription_plans")
+        .select("*")
+        .eq("is_active", true)
+        .order("duration_days", { ascending: true }),
+      supbase
+        .from("subscriptions")
+        .select("id, ends_on, effective_end_on, status")
+        .eq("customer_profile_id", profileResponse.data?.id)
+        .in("status", ["ACTIVE", "PENDING"])
+        .order("ends_on", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supbase
+        .from("meal_categories")
+        .select("id, code, name")
+        .order("code", { ascending: true }),
+    ]);
 
   return (
     <div className="bg-slate-50/50 min-h-screen">
@@ -40,6 +45,7 @@ export default async function CheckoutPage() {
         plans={plansResponse.data || []}
         profile={profileResponse.data}
         latestSubscription={latestSubscriptionResponse.data}
+        mealCategories={categoriesResponse.data || []}
       />
     </div>
   );

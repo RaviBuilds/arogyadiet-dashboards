@@ -55,7 +55,7 @@ export async function updateSubscriptionPlan(planId: string, data: { name: strin
 export async function deleteSubscriptionPlan(planId: string) {
   const supabaseAdmin = createAdminClient();
   try {
-    const { data: activeSubs, error: checkError } = await supabaseAdmin.from("subscriptions").select("id").eq("plan_id", planId).in("status", ["ACTIVE", "PENDING", "QUEUED"]).limit(1);
+    const { data: activeSubs, error: checkError } = await supabaseAdmin.from("subscriptions").select("id").eq("plan_id", planId).in("status", ["ACTIVE", "PENDING"]).limit(1);
     if (checkError) throw checkError;
     if (activeSubs && activeSubs.length > 0) return { success: false, error: "Cannot delete: Plan has active subscribers." };
     const { error: deleteError } = await supabaseAdmin.from("subscription_plans").delete().eq("id", planId);

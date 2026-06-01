@@ -26,7 +26,7 @@ import {
   SelectTrigger as UISelectTrigger,
   SelectValue as UISelectValue,
 } from "@/shared/components/ui/select";
-import { format, addDays } from "date-fns";
+import { format, addDays, parseISO } from "date-fns";
 import {
   MapPin,
   CalendarDays,
@@ -83,9 +83,7 @@ export function Subscription360Dashboard({
     .filter((p: any) => p.is_paused)
     .map((p: any) => p.preference_date);
 
-  const pendingSubs = allCustomerSubs.filter(
-    (s) => s.status === "PENDING" || s.status === "QUEUED",
-  );
+  const pendingSubs = allCustomerSubs.filter((s) => s.status === "PENDING");
   const expiredSubs = allCustomerSubs.filter((s) => s.status === "EXPIRED");
   const stoppedSubs = allCustomerSubs.filter(
     (s) => s.status === "STOPPED" || s.status === "CANCELLED",
@@ -97,7 +95,7 @@ export function Subscription360Dashboard({
   const [selectedPendingSub, setSelectedPendingSub] = useState<any>(null);
   const [pendingForm, setPendingForm] = useState({
     starts_on: "",
-    status: "QUEUED",
+    status: "PENDING",
   });
 
   const [isEditActiveModalOpen, setIsEditActiveModalOpen] = useState(false);
@@ -112,8 +110,12 @@ export function Subscription360Dashboard({
 
   const todayStr = format(new Date(), "yyyy-MM-dd");
 
-  const minPendingStartDateStr = subscription.effective_end_on
-    ? format(addDays(new Date(subscription.effective_end_on), 1), "yyyy-MM-dd")
+  const activeSubscription = allCustomerSubs.find((s) => s.status === "ACTIVE");
+  const minPendingStartDateStr = activeSubscription?.effective_end_on
+    ? format(
+        addDays(parseISO(activeSubscription.effective_end_on), 1),
+        "yyyy-MM-dd",
+      )
     : format(addDays(new Date(), 1), "yyyy-MM-dd");
 
   const isStartDateEditable = subscription.starts_on > todayStr;
@@ -123,7 +125,7 @@ export function Subscription360Dashboard({
     setSelectedPendingSub(sub);
     setPendingForm({
       starts_on: sub.starts_on || minPendingStartDateStr,
-      status: sub.status,
+      status: sub.status === "QUEUED" ? "PENDING" : sub.status,
     });
     setIsManageModalOpen(true);
   };
@@ -460,7 +462,7 @@ export function Subscription360Dashboard({
 
             <div>
               <h3 className="text-lg font-bold flex items-center gap-2 mb-4">
-                <Clock className="h-5 w-5 text-amber-500" /> Pending & Queued
+                <Clock className="h-5 w-5 text-amber-500" /> Pending
                 Subscriptions
               </h3>
               {pendingSubs.length === 0 ? (
@@ -683,8 +685,8 @@ export function Subscription360Dashboard({
                   <UISelectValue />
                 </UISelectTrigger>
                 <UISelectContent>
-                  <UISelectItem value="QUEUED">
-                    Keep Queued / Pending
+                  <UISelectItem value="PENDING">
+                    Keep Pending
                   </UISelectItem>
                   <UISelectItem value="ACTIVE">Mark as ACTIVE</UISelectItem>
                   <UISelectItem value="STOPPED">

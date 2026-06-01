@@ -56,7 +56,7 @@ export default async function Subscription360Page({ params }: { params: Promise<
   const { data: mealCategories } = await supabaseAdmin
     .from("meal_categories")
     .select("id, code, name")
-    .order("name");
+    .order("code", { ascending: true });
 
   const customerUser = Array.isArray(subData.customer_profiles?.users)
     ? subData.customer_profiles.users[0]

@@ -183,7 +183,7 @@ export function CustomerOverview({
     {
       title: "Pending Subscriptions",
       value: metrics.pendingSubscriptionsCount,
-      helper: "Scheduled or queued",
+      helper: "Scheduled (pending)",
       icon: CalendarClock,
       accent: "bg-amber-500/10 text-amber-700 border-amber-200",
     },

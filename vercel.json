@@ -1,0 +1,8 @@
+{
+    "crons": [
+      {
+        "path": "/api/cron/activate-subscriptions?secret=YOUR_SECRET_HERE",
+        "schedule": "30 4 * * *"
+      }
+    ]
+  }

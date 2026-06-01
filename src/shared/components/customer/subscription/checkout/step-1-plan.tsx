@@ -17,19 +17,19 @@ export function PlanSelection({
   setData,
   profilePreference,
   onNext,
+  mealCategories,
 }: any) {
   const [warning, setWarning] = useState<string | null>(null);
 
-  const handleFoodTypeChange = (type: string) => {
-    //if profilee is veg and user selcting somethng else
-    if (profilePreference === "Veg" && type !== "Veg") {
+  const handleFoodTypeChange = (code: string) => {
+    if (profilePreference === "Veg" && code !== "VEG") {
       setWarning(
         "Are you sure? You have updated 'Veg' in your profile details.",
       );
     } else {
       setWarning(null);
     }
-    setData({ ...data, foodType: type });
+    setData({ ...data, foodType: code });
   };
 
   return (
@@ -81,19 +81,33 @@ export function PlanSelection({
           Initial Food Preference
         </h2>
         <div className="flex flex-wrap gap-4">
-          {["Veg", "Non-Veg", "Egg", "Mixed"].map((type) => (
-            <Button
-              key={type}
-              variant={data.foodType === type ? "default" : "outline"}
-              className={cn(
-                "px-10 h-12 font-semibold transition-all",
-                data.foodType === type && "ring-2 ring-primary ring-offset-2",
-              )}
-              onClick={() => handleFoodTypeChange(type)}
-            >
-              {type}
-            </Button>
-          ))}
+          {mealCategories.map((category: any) => {
+            const label =
+              category.code === "CHICKEN"
+                ? "Non-Veg"
+                : category.code === "VEG"
+                  ? "Veg"
+                  : category.code === "EGG"
+                    ? "Egg"
+                    : category.name;
+
+            return (
+              <Button
+                key={category.code}
+                variant={
+                  data.foodType === category.code ? "default" : "outline"
+                }
+                className={cn(
+                  "px-10 h-12 font-semibold transition-all",
+                  data.foodType === category.code &&
+                    "ring-2 ring-primary ring-offset-2",
+                )}
+                onClick={() => handleFoodTypeChange(category.code)}
+              >
+                {label}
+              </Button>
+            );
+          })}
         </div>
 
         {warning && (
