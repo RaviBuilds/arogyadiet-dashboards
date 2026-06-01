@@ -9,7 +9,6 @@ import {
   MapPin,
   User,
   Utensils,
-  PauseCircle,
   Settings2,
   LayoutDashboard,
   ShoppingCart,
@@ -44,11 +43,6 @@ const manageMealItems: NavItem[] = [
     name: "Meal Planner",
     href: "/subscription/manage/planner",
     icon: Utensils,
-  },
-  {
-    name: "Pause Credits",
-    href: "/subscription/manage/pause",
-    icon: PauseCircle,
   },
   {
     name: "Delivery Address",

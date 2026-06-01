@@ -20,7 +20,7 @@ export default async function SubscriptionsPage() {
   const { data: activeSubs } = await supabaseAdmin
     .from("subscriptions")
     .select("id, status, starts_on, ends_on, plan_id, subscription_plans(name)")
-    .in("status", ["ACTIVE", "PENDING", "QUEUED"]); // Adjust statuses based on your DB enums
+    .in("status", ["ACTIVE", "PENDING"]);
 
   return (
     <div className="flex flex-col gap-6">

@@ -26,6 +26,18 @@ export function AdminMealPlannerClient({
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
 
+  const sortedCategories = useMemo(() => {
+    const PREFERRED_ORDER = ["VEG", "EGG", "CHICKEN"];
+    return [...mealCategories].sort((a: any, b: any) => {
+      const idxA = PREFERRED_ORDER.indexOf(a.code);
+      const idxB = PREFERRED_ORDER.indexOf(b.code);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return (a.code || "").localeCompare(b.code || "");
+    });
+  }, [mealCategories]);
+
   // Helper to find the default category based on customer preference
   const defaultCategory = useMemo(() => {
     const prefLower = (customerDietaryPreference || "Veg").toLowerCase();
@@ -311,9 +323,9 @@ export function AdminMealPlannerClient({
                         <SelectValue placeholder="Select Meal..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {mealCategories.map((cat: any) => (
-                          <SelectItem key={cat.id} value={cat.id}>
-                            {cat.name}
+                        {sortedCategories.map((category: any) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.name}
                           </SelectItem>
                         ))}
                       </SelectContent>

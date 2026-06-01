@@ -4,20 +4,32 @@ import { useEffect, useState } from "react";
 import { PlanSelection } from "./step-1-plan";
 import { DeliveryDetails } from "./step-2-delivery";
 import { useSearchParams } from "next/navigation";
-import { PauseSelection } from "./step-3-pause";
 import { MealCustomization } from "./step-4-customization";
 import { OrderPreview } from "./step-5-preview";
 // import { MealPlannerConfig } from "./step-3-planner";
 // import { OrderPreview } from "./step-4-preview";
 
+function resolveInitialFoodType(
+  profilePreference: string | undefined,
+  categories: { code: string }[],
+): string {
+  if (profilePreference === "Veg") return "VEG";
+  if (profilePreference === "Non-Veg") return "CHICKEN";
+  return categories.length > 0 ? categories[0].code : "";
+}
+
 export function CheckoutWizard({
   plans,
   profile,
   latestSubscription,
+  mealCategories,
+  holidaysByDate = {},
 }: {
   plans: any[];
   profile: any;
   latestSubscription: any;
+  mealCategories: any[];
+  holidaysByDate?: Record<string, string>;
 }) {
   const searchParams = useSearchParams();
   const preSelectedPlan = searchParams.get("plan");
@@ -25,7 +37,10 @@ export function CheckoutWizard({
 
   const [checkoutData, setCheckoutData] = useState({
     planId: preSelectedPlan || "",
-    foodType: profile?.dietary_preference || "Veg",
+    foodType: resolveInitialFoodType(
+      profile?.dietary_preference,
+      mealCategories,
+    ),
     startDate: undefined as Date | undefined,
     addressId: "",
     mealOverrides: {} as Record<string, string>,
@@ -51,7 +66,7 @@ export function CheckoutWizard({
 
         {/* Step Progress Bar */}
         <div className="flex items-center justify-center gap-4 mt-6">
-          {[1, 2, 3, 4, 5].map((i) => (
+          {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
               className={`h-2 w-16 rounded-full transition-all ${step >= i ? "bg-primary" : "bg-zinc-200"}`}
@@ -68,6 +83,7 @@ export function CheckoutWizard({
             setData={setCheckoutData}
             profilePreference={profile?.dietary_preference}
             onNext={nextStep}
+            mealCategories={mealCategories}
           />
         )}
 
@@ -82,27 +98,17 @@ export function CheckoutWizard({
         )}
 
         {step === 3 && (
-          <PauseSelection
-            data={checkoutData}
-            setData={setCheckoutData}
-            plans={plans}
-            onNext={nextStep}
-            onBack={prevStep}
-            latestSubscription={latestSubscription}
-          />
-        )}
-
-        {step === 4 && (
           <MealCustomization
             data={checkoutData}
             plans={plans}
             setData={setCheckoutData}
-            onNext={nextStep} // Goes to Payment next!
+            onNext={nextStep}
             onBack={prevStep}
+            mealCategories={mealCategories}
+            holidaysByDate={holidaysByDate}
           />
         )}
-        {/*  step 4 will follow */}
-        {step === 5 && (
+        {step === 4 && (
           <OrderPreview data={checkoutData} plans={plans} onBack={prevStep} />
         )}
       </div>

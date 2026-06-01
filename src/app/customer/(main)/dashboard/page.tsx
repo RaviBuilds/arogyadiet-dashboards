@@ -27,6 +27,7 @@ import {
   AlertTitle,
 } from "@/shared/components/ui/alert";
 import { cn } from "@/lib/utils";
+import { repairOverLimitPauseCredits } from "@/actions/manageMealActions";
 
 export const revalidate = 0;
 
@@ -92,13 +93,32 @@ export default async function CustomerDashboard() {
     );
   }
 
-  // --- Fetch Active Shop Orders (Addon Orders) ---
   const customerProfileId = profile.id;
-  const { data: addonOrders } = await supabase
-    .from("addon_orders")
-    .select(`id, delivery_order_id, delivery_orders(status)`)
-    .eq("customer_profile_id", customerProfileId)
-    .eq("status", "PAID");
+
+  const [
+    { data: addonOrders },
+    { data: subscriptions, error: subError },
+    { data: upcomingSubscriptions },
+  ] = await Promise.all([
+    supabase
+      .from("addon_orders")
+      .select(`id, delivery_order_id, delivery_orders(status)`)
+      .eq("customer_profile_id", customerProfileId)
+      .eq("status", "PAID"),
+    supabase
+      .from("subscriptions")
+      .select(`*, subscription_plans ( name, duration_days )`)
+      .eq("customer_profile_id", profile.id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("subscriptions")
+      .select(
+        `id, starts_on, effective_end_on, status, subscription_code, subscription_plans ( name, duration_days )`,
+      )
+      .eq("customer_profile_id", customerProfileId)
+      .in("status", ["PENDING"])
+      .order("starts_on", { ascending: true }),
+  ]);
 
   // Filter for active/pending shop deliveries
   const activeAddonOrders =
@@ -115,11 +135,7 @@ export default async function CustomerDashboard() {
       );
     }) || [];
 
-  const { data: subscriptions, error: subError } = await supabase
-    .from("subscriptions")
-    .select(`*, subscription_plans ( name, duration_days )`)
-    .eq("customer_profile_id", profile.id)
-    .order("created_at", { ascending: false });
+  const pendingSubscriptions = upcomingSubscriptions ?? [];
 
   if (subError) {
     return (
@@ -174,14 +190,30 @@ export default async function CustomerDashboard() {
     : activeSub.subscription_plans;
   const planName = planDetails?.name || "Custom Plan";
   const safeTotal = activeSub.pause_credits_total || 1;
-  const { count: actualPauseCreditsUsed } = await supabase
+  let { count: actualPauseCreditsUsed } = await supabase
     .from("subscription_daily_preferences")
     .select("*", { count: "exact", head: true })
     .eq("subscription_id", activeSub.id)
     .eq("is_paused", true);
-  const pauseCreditsUsed =
+
+  if ((actualPauseCreditsUsed ?? 0) > safeTotal) {
+    await repairOverLimitPauseCredits(activeSub.id);
+    const { count: repairedCount } = await supabase
+      .from("subscription_daily_preferences")
+      .select("*", { count: "exact", head: true })
+      .eq("subscription_id", activeSub.id)
+      .eq("is_paused", true);
+    actualPauseCreditsUsed = repairedCount;
+  }
+
+  const rawPauseCreditsUsed =
     actualPauseCreditsUsed ?? activeSub.pause_credits_used ?? 0;
+  const pauseCreditsUsed = Math.min(rawPauseCreditsUsed, safeTotal);
   const pausePercentage = Math.round((pauseCreditsUsed / safeTotal) * 100);
+  const pauseCreditsRemaining = Math.max(
+    0,
+    activeSub.pause_credits_total - pauseCreditsUsed,
+  );
 
   // --- Fetch Next 7 Days Deliveries ---
   const todayStr = format(new Date(), "yyyy-MM-dd");
@@ -325,12 +357,80 @@ export default async function CustomerDashboard() {
               />
             </div>
             <p className="text-xs text-zinc-500 mt-4 leading-relaxed">
-              {activeSub.pause_credits_total - pauseCreditsUsed} credits
-              remaining. Pausing a delivery automatically extends your end date.
+              {pauseCreditsRemaining} credits remaining. Pausing a delivery
+              automatically extends your end date.
             </p>
           </CardContent>
         </Card>
       </div>
+
+      {pendingSubscriptions.length > 0 && (
+        <section className="space-y-4">
+          <h3 className="text-xl font-bold text-zinc-900">
+            Upcoming Subscriptions
+          </h3>
+          <div className="grid grid-cols-1 gap-4">
+            {pendingSubscriptions.map((sub) => {
+              const upcomingPlan = Array.isArray(sub.subscription_plans)
+                ? sub.subscription_plans[0]
+                : sub.subscription_plans;
+              const upcomingPlanName = upcomingPlan?.name || "Custom Plan";
+              const durationLabel = upcomingPlan?.duration_days
+                ? ` (${upcomingPlan.duration_days} Days)`
+                : "";
+              const isPending = sub.status === "PENDING";
+
+              return (
+                <Card
+                  key={sub.id}
+                  className="border-2 border-amber-100/80 shadow-sm bg-amber-50/30"
+                >
+                  <CardContent className="p-5">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                      <div className="space-y-2 min-w-0">
+                        <h4 className="text-lg font-bold text-zinc-900">
+                          {upcomingPlanName}
+                          {durationLabel}
+                        </h4>
+                        <p className="text-sm text-zinc-600">
+                          <span className="font-medium">Starts:</span>{" "}
+                          {sub.starts_on
+                            ? format(
+                                parseISO(sub.starts_on),
+                                "MMM do, yyyy",
+                              )
+                            : "N/A"}
+                          <span className="text-zinc-400 mx-2">→</span>
+                          <span className="font-medium">Est. End:</span>{" "}
+                          {sub.effective_end_on
+                            ? format(
+                                parseISO(sub.effective_end_on),
+                                "MMM do, yyyy",
+                              )
+                            : "N/A"}
+                        </p>
+                        <p className="text-xs text-zinc-500 leading-relaxed">
+                          Activates automatically 1 day before the start date.
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "shrink-0 self-start px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border",
+                          isPending
+                            ? "bg-amber-100 text-amber-800 border-amber-200"
+                            : "bg-zinc-100 text-zinc-700 border-zinc-200",
+                        )}
+                      >
+                        {sub.status}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* NEW: Next 7 Days Roster - Upgraded to Premium Grid */}
       <div className="pt-8">

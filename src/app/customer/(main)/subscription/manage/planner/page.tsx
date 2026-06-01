@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { MealPlannerClient } from "@/shared/components/customer/subscription/manage/meal-planner-client";
+import { repairOverLimitPauseCredits } from "@/actions/manageMealActions";
+import { fetchHolidaysInRange } from "@/actions/admin-actions/holidayActions";
 
 export const revalidate = 0;
 
@@ -34,7 +36,7 @@ export default async function ManageMealPlannerPage() {
   // 2. Fetch Active Subscription
   const { data: activeSub } = await supabase
     .from("subscriptions")
-    .select("id, effective_end_on")
+    .select("id, effective_end_on, pause_credits_total, pause_credits_used")
     .eq("customer_profile_id", profile.id)
     .eq("status", "ACTIVE")
     .single();
@@ -50,19 +52,29 @@ export default async function ManageMealPlannerPage() {
     );
   }
 
-  // 3. Fetch Meal Categories (to map names to UUIDs)
-  const { data: categories } = await supabase
-    .from("meal_categories")
-    .select("id, code");
-  const categoryMap: Record<string, string> = {};
+  let totalPausesUsed = 0;
+  const { count: initialPauseCount } = await supabase
+    .from("subscription_daily_preferences")
+    .select("*", { count: "exact", head: true })
+    .eq("subscription_id", activeSub.id)
+    .eq("is_paused", true);
 
-  // Map our UI labels back to DB codes
-  categories?.forEach((c) => {
-    if (c.code === "VEG") categoryMap["Veg"] = c.id;
-    if (c.code === "CHICKEN") categoryMap["Non-Veg"] = c.id;
-    if (c.code === "EGG") categoryMap["Egg"] = c.id;
-    if (c.code === "MIXED") categoryMap["Mixed"] = c.id;
-  });
+  totalPausesUsed = initialPauseCount ?? 0;
+
+  if (totalPausesUsed > (activeSub.pause_credits_total ?? 0)) {
+    await repairOverLimitPauseCredits(activeSub.id);
+    const { count: repairedCount } = await supabase
+      .from("subscription_daily_preferences")
+      .select("*", { count: "exact", head: true })
+      .eq("subscription_id", activeSub.id)
+      .eq("is_paused", true);
+    totalPausesUsed = repairedCount ?? totalPausesUsed;
+  }
+
+  const { data: mealCategories } = await supabase
+    .from("meal_categories")
+    .select("id, code, name")
+    .order("code", { ascending: true });
 
   // 4. Fetch the Daily Roster (From today until end date)
   const todayStr = format(new Date(), "yyyy-MM-dd");
@@ -80,15 +92,13 @@ export default async function ManageMealPlannerPage() {
   const initialOverrides: Record<string, string> = {};
   const pausedDates: string[] = [];
 
-  // Re-map DB codes back to UI labels
-  const reverseMap: Record<string, string> = {
-    VEG: "Veg",
-    CHICKEN: "Non-Veg",
-    EGG: "Egg",
-    MIXED: "Mixed",
-  };
-
-  const baseFoodType = profile.dietary_preference || "Veg";
+  const rawPref = profile.dietary_preference || "Veg";
+  const baseFoodType =
+    rawPref === "Non-Veg"
+      ? "CHICKEN"
+      : rawPref === "Egg"
+        ? "EGG"
+        : "VEG";
 
   dailyPrefs?.forEach((pref) => {
     scheduleDays.push(pref.preference_date);
@@ -96,20 +106,20 @@ export default async function ManageMealPlannerPage() {
     if (pref.is_paused) {
       pausedDates.push(pref.preference_date);
     } else {
-      // Safely handle Supabase returning either an array or a single object
       const category = Array.isArray(pref.meal_categories)
         ? pref.meal_categories[0]
         : pref.meal_categories;
 
-      if (category?.code) {
-        const uiLabel = reverseMap[category.code] || baseFoodType;
-        // Only add to overrides if it differs from the base preference
-        if (uiLabel !== baseFoodType) {
-          initialOverrides[pref.preference_date] = uiLabel;
-        }
+      if (category?.code && category.code !== baseFoodType) {
+        initialOverrides[pref.preference_date] = category.code;
       }
     }
   });
+
+  const holidaysByDate = await fetchHolidaysInRange(
+    todayStr,
+    activeSub.effective_end_on,
+  );
 
   return (
     <MealPlannerClient
@@ -117,8 +127,11 @@ export default async function ManageMealPlannerPage() {
       baseFoodType={baseFoodType}
       scheduleDays={scheduleDays}
       initialOverrides={initialOverrides}
-      pausedDates={pausedDates}
-      categoryMap={categoryMap}
+      initialPausedDates={pausedDates}
+      mealCategories={mealCategories || []}
+      maxPauses={activeSub.pause_credits_total}
+      totalPausesUsed={totalPausesUsed ?? 0}
+      holidaysByDate={holidaysByDate}
     />
   );
 }

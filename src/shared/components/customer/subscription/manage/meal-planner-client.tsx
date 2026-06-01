@@ -3,11 +3,14 @@
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { format, addDays, startOfDay, parseISO, isBefore } from "date-fns";
-import { RefreshCw, Save, Loader2, AlertCircle } from "lucide-react";
+import { RefreshCw, Save, Loader2, AlertCircle, CalendarCheck } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { Alert, AlertDescription } from "@/shared/components/ui/alert";
 import { cn } from "@/lib/utils";
-import { bulkUpdateMealPreferencesAction } from "@/actions/manageMealActions";
+import {
+  bulkUpdateMealPreferencesAction,
+  bulkUpdatePausePreferencesAction,
+} from "@/actions/manageMealActions";
 
 // --- REUSED SVGS ---
 const VegSvg = ({ className }: { className?: string }) => (
@@ -152,31 +155,36 @@ const SkipSvg = ({ className }: { className?: string }) => (
   </svg>
 );
 
-const CYCLE_ORDER = ["Veg", "Non-Veg", "Egg", "Mixed"];
+function getCategoryLabel(code: string, name?: string) {
+  if (code === "CHICKEN") return "Non-Veg";
+  if (code === "VEG") return "Veg";
+  if (code === "EGG") return "Egg";
+  return name || code;
+}
 
 const PREF_STYLES: Record<string, any> = {
-  Veg: {
+  VEG: {
     icon: VegSvg,
     color: "text-green-700",
     bg: "bg-green-50",
     border: "border-green-200 hover:border-green-400",
     label: "Veg",
   },
-  "Non-Veg": {
+  CHICKEN: {
     icon: MeatSvg,
     color: "text-red-700",
     bg: "bg-red-50",
     border: "border-red-200 hover:border-red-400",
     label: "Non-Veg",
   },
-  Egg: {
+  EGG: {
     icon: EggSvg,
     color: "text-amber-700",
     bg: "bg-amber-50",
     border: "border-amber-200 hover:border-amber-400",
     label: "Egg",
   },
-  Mixed: {
+  MIXED: {
     icon: MixedSvg,
     color: "text-purple-700",
     bg: "bg-purple-50",
@@ -185,33 +193,102 @@ const PREF_STYLES: Record<string, any> = {
   },
 };
 
+const PAUSE_STYLE = {
+  icon: SkipSvg,
+  color: "text-zinc-500",
+  bg: "bg-zinc-50",
+  border: "border-zinc-200 border-dashed hover:border-zinc-400",
+  label: "Pause",
+};
+
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+function getNextMealPreference(
+  currentState: string,
+  mealCycle: string[],
+  baseFood: string,
+  limitReached: boolean,
+): string {
+  if (currentState === "PAUSE") {
+    return baseFood;
+  }
+  if (limitReached) {
+    const idx = mealCycle.indexOf(currentState);
+    const safeIdx = idx === -1 ? 0 : idx;
+    return mealCycle[(safeIdx + 1) % mealCycle.length];
+  }
+  const fullCycle = [...mealCycle, "PAUSE"];
+  const idx = fullCycle.indexOf(currentState);
+  const safeIdx = idx === -1 ? 0 : idx;
+  return fullCycle[(safeIdx + 1) % fullCycle.length];
+}
 
 export function MealPlannerClient({
   subscriptionId,
   baseFoodType,
   scheduleDays,
   initialOverrides,
-  pausedDates,
-  categoryMap, // Maps "Veg" to its UUID in the DB
+  initialPausedDates,
+  mealCategories,
+  maxPauses,
+  totalPausesUsed = 0,
+  holidaysByDate = {},
 }: any) {
   const router = useRouter();
   const [overrides, setOverrides] =
     useState<Record<string, string>>(initialOverrides);
+  const [pausedDates, setPausedDates] = useState<string[]>(initialPausedDates);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
 
-  useEffect(() => {
+  const PREFERRED_ORDER = ["VEG", "EGG", "CHICKEN"];
+  const sortedCodes = [...mealCategories]
+    .map((c: any) => c.code)
+    .sort((a, b) => {
+      const idxA = PREFERRED_ORDER.indexOf(a);
+      const idxB = PREFERRED_ORDER.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  const hiddenPausedCount = useMemo(
+    () => Math.max(0, totalPausesUsed - initialPausedDates.length),
+    [totalPausesUsed, initialPausedDates.length],
+  );
+  const pausesUsed = hiddenPausedCount + pausedDates.length;
+  const isLimitReached = pausesUsed >= (maxPauses || 0);
 
+  const mealCycleOptions = useMemo(
+    () => (sortedCodes.length > 0 ? sortedCodes : [baseFoodType]),
+    [sortedCodes, baseFoodType],
+  );
+
+  const cycleOptionsForLegend = useMemo(
+    () =>
+      isLimitReached ? mealCycleOptions : [...mealCycleOptions, "PAUSE"],
+    [mealCycleOptions, isLimitReached],
+  );
+
+  const categoryIdByCode = useMemo(() => {
+    const map: Record<string, string> = {};
+    mealCategories?.forEach((c: any) => {
+      map[c.code] = c.id;
+    });
+    return map;
+  }, [mealCategories]);
+
+  useEffect(() => {
     const syncTimer = window.setTimeout(() => {
       setOverrides(initialOverrides);
+      setPausedDates(initialPausedDates);
     }, 0);
 
     return () => window.clearTimeout(syncTimer);
-  }, [initialOverrides]);
+  }, [initialOverrides, initialPausedDates]);
 
   // --- 5 PM CUT-OFF LOGIC ---
   const minEditableDate = useMemo(() => {
@@ -233,72 +310,130 @@ export function MealPlannerClient({
   }, [scheduleDays]);
 
   const handleToggleMeal = (dateString: string) => {
-    setSaveMessage(null); // Clear previous messages
-    setOverrides((prev) => {
-      const currentPref = prev[dateString] || baseFoodType;
-      const currentIndex = CYCLE_ORDER.indexOf(currentPref);
-      const nextPref = CYCLE_ORDER[(currentIndex + 1) % CYCLE_ORDER.length];
+    const date = parseISO(dateString);
+    if (isBefore(startOfDay(date), minEditableDate)) return;
 
-      const newOverrides = { ...prev };
-      if (nextPref === baseFoodType) {
-        delete newOverrides[dateString]; // Reverts to base
-      } else {
-        newOverrides[dateString] = nextPref;
+    setSaveMessage(null);
+
+    const currentState = pausedDates.includes(dateString)
+      ? "PAUSE"
+      : overrides[dateString] || baseFoodType;
+
+    const nextPref = getNextMealPreference(
+      currentState,
+      mealCycleOptions,
+      baseFoodType,
+      isLimitReached,
+    );
+
+    const newPausedDates = [...pausedDates];
+    const newOverrides = { ...overrides };
+
+    if (nextPref === "PAUSE") {
+      if (!newPausedDates.includes(dateString)) {
+        newPausedDates.push(dateString);
       }
-      return newOverrides;
-    });
+      delete newOverrides[dateString];
+    } else if (nextPref === baseFoodType) {
+      const pauseIndex = newPausedDates.indexOf(dateString);
+      if (pauseIndex > -1) newPausedDates.splice(pauseIndex, 1);
+      delete newOverrides[dateString];
+    } else {
+      const pauseIndex = newPausedDates.indexOf(dateString);
+      if (pauseIndex > -1) newPausedDates.splice(pauseIndex, 1);
+      newOverrides[dateString] = nextPref;
+    }
+
+    setPausedDates(newPausedDates);
+    setOverrides(newOverrides);
   };
 
   const handleSave = async () => {
     setIsSaving(true);
     setSaveMessage(null);
 
-    // Prepare updates by comparing current state to initial state
-    const updates: any[] = [];
+    const mealUpdates: { date: string; categoryId: string | null }[] = [];
+    const pauseUpdates: { date: string; isPaused: boolean }[] = [];
 
-    // Check for changes on every valid schedule day
     scheduleDays.forEach((dateStr: string) => {
-      const initial = initialOverrides[dateStr] || baseFoodType;
-      const current = overrides[dateStr] || baseFoodType;
+      const wasPaused = initialPausedDates.includes(dateStr);
+      const isNowPaused = pausedDates.includes(dateStr);
+      const initialMeal = wasPaused
+        ? null
+        : initialOverrides[dateStr] || baseFoodType;
+      const currentMeal = isNowPaused
+        ? null
+        : overrides[dateStr] || baseFoodType;
 
-      if (initial !== current) {
-        updates.push({
+      if (wasPaused !== isNowPaused) {
+        pauseUpdates.push({ date: dateStr, isPaused: isNowPaused });
+      }
+
+      if (!isNowPaused && initialMeal !== currentMeal) {
+        mealUpdates.push({
           date: dateStr,
-          categoryId: categoryMap[current], // Map UI string to DB UUID
+          categoryId: categoryIdByCode[currentMeal!] || null,
         });
       }
     });
 
-    if (updates.length === 0) {
+    if (mealUpdates.length === 0 && pauseUpdates.length === 0) {
       setSaveMessage({ type: "success", text: "No changes detected." });
       setIsSaving(false);
       return;
     }
 
-    const result = await bulkUpdateMealPreferencesAction(
-      subscriptionId,
-      updates,
-    );
-
-    if (result.success) {
-      setSaveMessage({
-        type: "success",
-        text: "Meal preferences successfully updated!",
-      });
-      router.refresh();
-    } else {
-      setSaveMessage({
-        type: "error",
-        text: "Failed to update meals. Please try again.",
-      });
+    if (pauseUpdates.length > 0) {
+      const pauseResult = await bulkUpdatePausePreferencesAction(
+        subscriptionId,
+        pauseUpdates,
+      );
+      if (!pauseResult.success) {
+        setSaveMessage({
+          type: "error",
+          text:
+            pauseResult.error ||
+            "Failed to update schedule. Please try again.",
+        });
+        setIsSaving(false);
+        return;
+      }
     }
 
+    if (mealUpdates.length > 0) {
+      const mealResult = await bulkUpdateMealPreferencesAction(
+        subscriptionId,
+        mealUpdates,
+      );
+      if (!mealResult.success) {
+        setSaveMessage({
+          type: "error",
+          text: "Failed to update meals. Please try again.",
+        });
+        setIsSaving(false);
+        return;
+      }
+    }
+
+    setSaveMessage({
+      type: "success",
+      text: "Meal planner successfully updated!",
+    });
+    router.refresh();
     setIsSaving(false);
   };
 
-  // Check if there are unsaved changes
-  const hasChanges =
-    JSON.stringify(overrides) !== JSON.stringify(initialOverrides);
+  const hasChanges = scheduleDays.some((dateStr: string) => {
+    const wasPaused = initialPausedDates.includes(dateStr);
+    const isNowPaused = pausedDates.includes(dateStr);
+    const initialMeal = wasPaused
+      ? null
+      : initialOverrides[dateStr] || baseFoodType;
+    const currentMeal = isNowPaused
+      ? null
+      : overrides[dateStr] || baseFoodType;
+    return wasPaused !== isNowPaused || initialMeal !== currentMeal;
+  });
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
@@ -344,26 +479,85 @@ export function MealPlannerClient({
         </Alert>
       )}
 
+      {/* Pause Credit Banner */}
+      <div
+        className={cn(
+          "border rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors",
+          isLimitReached
+            ? "bg-amber-50 border-amber-200"
+            : "bg-blue-50 border-blue-200",
+        )}
+      >
+        <div className="flex items-center gap-3">
+          {isLimitReached ? (
+            <AlertCircle className="h-6 w-6 text-amber-600" />
+          ) : (
+            <CalendarCheck className="h-6 w-6 text-blue-600" />
+          )}
+          <div>
+            <p
+              className={cn(
+                "text-sm font-semibold",
+                isLimitReached ? "text-amber-900" : "text-blue-900",
+              )}
+            >
+              Pause Credit Usage
+            </p>
+            <p
+              className={cn(
+                "text-xs",
+                isLimitReached ? "text-amber-700" : "text-blue-700",
+              )}
+            >
+              You have used <strong>{pausesUsed}</strong> of{" "}
+              <strong>{maxPauses}</strong> available credits.
+              {isLimitReached && " (Limit Reached)"}
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-2 md:gap-4 p-3 bg-zinc-50 rounded-lg border text-sm w-fit">
         <span className="text-muted-foreground font-medium mr-2 flex items-center gap-1 hidden sm:flex">
           <RefreshCw className="h-4 w-4" /> Click date to cycle:
         </span>
-        {CYCLE_ORDER.map((pref) => {
-          const Icon = PREF_STYLES[pref].icon;
+        {cycleOptionsForLegend.map((option) => {
+          if (option === "PAUSE") {
+            const Icon = PAUSE_STYLE.icon;
+            return (
+              <div
+                key="PAUSE"
+                className={cn(
+                  "flex items-center gap-1.5 px-2 py-1 rounded-md",
+                  PAUSE_STYLE.bg,
+                  PAUSE_STYLE.color,
+                )}
+              >
+                <Icon className="h-4 w-4 drop-shadow-sm" />
+                <span className="font-bold text-xs md:text-sm">
+                  {PAUSE_STYLE.label}
+                </span>
+              </div>
+            );
+          }
+
+          const category = mealCategories.find((c: any) => c.code === option);
+          const style = PREF_STYLES[option] || PREF_STYLES.VEG;
+          const Icon = style.icon;
+          const label = getCategoryLabel(option, category?.name);
+
           return (
             <div
-              key={pref}
+              key={option}
               className={cn(
                 "flex items-center gap-1.5 px-2 py-1 rounded-md",
-                PREF_STYLES[pref].bg,
-                PREF_STYLES[pref].color,
+                style.bg,
+                style.color,
               )}
             >
               <Icon className="h-4 w-4 drop-shadow-sm" />
-              <span className="font-bold text-xs md:text-sm">
-                {PREF_STYLES[pref].label}
-              </span>
+              <span className="font-bold text-xs md:text-sm">{label}</span>
             </div>
           );
         })}
@@ -409,12 +603,21 @@ export function MealPlannerClient({
                   const isLockedOut = isBefore(
                     startOfDay(date),
                     minEditableDate,
-                  ); // 5 PM LOGIC APPLIED HERE
-                  const isDisabled = isPaused || isLockedOut;
+                  );
+                  const isDisabled = isLockedOut;
 
-                  const dayPrefId = overrides[dateStr] || baseFoodType;
-                  const style = PREF_STYLES[dayPrefId] || PREF_STYLES["Veg"];
+                  const dayPrefCode = overrides[dateStr] || baseFoodType;
+                  const style = isPaused
+                    ? PAUSE_STYLE
+                    : PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
                   const Icon = style.icon;
+                  const dayLabel = isPaused
+                    ? PAUSE_STYLE.label
+                    : getCategoryLabel(
+                        dayPrefCode,
+                        mealCategories.find((c: any) => c.code === dayPrefCode)
+                          ?.name,
+                      );
 
                   return (
                     <button
@@ -423,21 +626,24 @@ export function MealPlannerClient({
                       onClick={() => handleToggleMeal(dateStr)}
                       className={cn(
                         "flex flex-col items-center justify-center aspect-square p-1 rounded-2xl border-2 transition-all relative select-none",
-                        isPaused
-                          ? "bg-zinc-50 border-zinc-200 border-dashed opacity-60 cursor-not-allowed"
-                          : isLockedOut
-                            ? "bg-zinc-100 border-zinc-200 opacity-60 cursor-not-allowed grayscale"
-                            : cn(
-                                style.bg,
-                                style.border,
-                                "group hover:shadow-md hover:-translate-y-0.5",
-                              ),
+                        isLockedOut
+                          ? "bg-zinc-100 border-zinc-200 opacity-60 cursor-not-allowed grayscale"
+                          : cn(
+                              style.bg,
+                              style.border,
+                              "group hover:shadow-md hover:-translate-y-0.5",
+                            ),
                       )}
                     >
+                      {holidaysByDate[dateStr] && (
+                        <span className="text-[9px] md:text-[10px] font-bold leading-tight text-center line-clamp-2 max-w-full px-0.5 mb-0.5 text-zinc-700">
+                          {holidaysByDate[dateStr]}
+                        </span>
+                      )}
                       <span
                         className={cn(
                           "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",
-                          isDisabled ? "text-zinc-400" : style.color,
+                          isLockedOut ? "text-zinc-400" : style.color,
                         )}
                       >
                         {format(date, "d")}
@@ -446,29 +652,22 @@ export function MealPlannerClient({
                       <div
                         className={cn(
                           "flex flex-col items-center justify-center gap-1",
-                          isDisabled ? "text-zinc-400" : style.color,
+                          isLockedOut ? "text-zinc-400" : style.color,
                         )}
                       >
-                        {isPaused ? (
-                          <SkipSvg className="h-6 w-6 md:h-8 md:w-8 opacity-50" />
-                        ) : (
-                          <>
-                            <Icon className="h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95" />
-                            <span className="text-[9px] md:text-[11px] font-bold leading-none hidden sm:block">
-                              {style.label}
-                            </span>
-                          </>
-                        )}
+                        <Icon className="h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95" />
+                        <span className="text-[9px] md:text-[11px] font-bold leading-none hidden sm:block">
+                          {dayLabel}
+                        </span>
                       </div>
 
-                      {!isDisabled && (
+                      {!isLockedOut && (
                         <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
                           <RefreshCw className="h-5 w-5 text-zinc-600 opacity-50" />
                         </div>
                       )}
 
-                      {/* Lock Icon for dates past cut-off */}
-                      {isLockedOut && !isPaused && (
+                      {isLockedOut && (
                         <div className="absolute top-1 right-1">
                           <AlertCircle className="h-3 w-3 text-zinc-400" />
                         </div>

@@ -36,6 +36,7 @@ import {
   createSubscriptionPlan,
 } from "@/actions/admin-actions/subscriptionActions";
 import { AdminSubmenu } from "@/shared/components/admin/core/AdminSubmenu";
+import { HolidayCalendarClient } from "@/shared/components/admin/subscriptions/HolidayCalendarClient";
 import { ConfirmDeleteModal } from "@/shared/components/admin/core/ConfirmDeleteModal";
 import {
   Card,
@@ -173,8 +174,8 @@ export function SubscriptionDashboard({
   const totalActive = activeSubscriptions.filter(
     (s) => s.status === "ACTIVE",
   ).length;
-  const totalQueued = activeSubscriptions.filter(
-    (s) => s.status === "QUEUED" || s.status === "PENDING",
+  const totalPending = activeSubscriptions.filter(
+    (s) => s.status === "PENDING",
   ).length;
   const planDistribution = plans.map((plan) => ({
     name: plan.name,
@@ -186,7 +187,7 @@ export function SubscriptionDashboard({
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-500">
       <AdminSubmenu
-        tabs={["Subscription Plans", "Subscription Modeling"]}
+        tabs={["Subscription Plans", "Subscription Modeling", "Holiday Calendar"]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -308,12 +309,12 @@ export function SubscriptionDashboard({
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium">
-                  Pending / Queued Subs
+                  Pending Subs
                 </CardTitle>
                 <CalendarDays className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{totalQueued}</div>
+                <div className="text-2xl font-bold">{totalPending}</div>
               </CardContent>
             </Card>
           </div>
@@ -337,6 +338,8 @@ export function SubscriptionDashboard({
           </Card>
         </div>
       )}
+
+      {activeTab === "Holiday Calendar" && <HolidayCalendarClient />}
 
       {/* CREATE/EDIT PLAN MODAL */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>

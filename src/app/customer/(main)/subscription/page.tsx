@@ -41,12 +41,6 @@ export default async function StorefrontPage() {
     .eq("user_id", appUser.id)
     .maybeSingle();
 
-  const { data: activeSubs } = await supabase
-    .from("subscriptions")
-    .select("id")
-    .eq("customer_profile_id", profile?.id)
-    .in("status", ["ACTIVE", "QUEUED"]);
-
   // 3. Fetch Plans
   const { data: plans } = await supabase
     .from("subscription_plans")
@@ -63,11 +57,7 @@ export default async function StorefrontPage() {
     //   );
     // });
 
-  // PROFILE GATE LOGIC
   const isProfileComplete = !!profile?.dietary_preference;
-
-  // PIPELINE LIMIT LOGIC (Max 1 Active, 1 Queued)
-  const hasMaxSubscriptions = (activeSubs?.length || 0) >= 2;
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4">
@@ -100,20 +90,6 @@ export default async function StorefrontPage() {
                 Update Profile Now <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* THE PIPELINE LIMIT WARNING */}
-      {hasMaxSubscriptions && (
-        <Alert className="bg-blue-50 border-blue-200 text-blue-900">
-          <AlertCircle className="h-5 w-5 stroke-blue-600" />
-          <AlertTitle className="font-bold text-base">
-            Subscription Limit Reached
-          </AlertTitle>
-          <AlertDescription>
-            You currently have active and queued subscriptions. You cannot
-            purchase another plan until your current pipeline clears.
           </AlertDescription>
         </Alert>
       )}
@@ -173,10 +149,10 @@ export default async function StorefrontPage() {
                 <Button
                   className="w-full font-bold h-11 text-base"
                   variant={isPopular ? "default" : "outline"}
-                  disabled={!isProfileComplete || hasMaxSubscriptions}
-                  asChild={isProfileComplete && !hasMaxSubscriptions}
+                  disabled={!isProfileComplete}
+                  asChild={isProfileComplete}
                 >
-                  {isProfileComplete && !hasMaxSubscriptions ? (
+                  {isProfileComplete ? (
                     <Link href={`/subscription/checkout?plan=${plan.id}`}>
                       Subscribe Now
                     </Link>

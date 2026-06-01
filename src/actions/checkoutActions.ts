@@ -3,7 +3,8 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js"; // Use server client in production
-import { addDays, format } from "date-fns";
+import { addDays, format, differenceInCalendarDays, parseISO } from "date-fns";
+import { cascadePendingSubscriptionDates } from "@/actions/manageMealActions";
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
   key_secret: process.env.RAZORPAY_KEY_SECRET!,
@@ -272,6 +273,15 @@ export async function verifyAndActivateSubscriptionAction(
     // Generate a readable subscription code
     const subCode = `SUB-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
+    const { data: activeSubs } = await supabaseAdmin
+      .from("subscriptions")
+      .select("id, effective_end_on, ends_on")
+      .eq("customer_profile_id", customerProfileId)
+      .eq("status", "ACTIVE");
+
+    const hasActive = (activeSubs?.length ?? 0) > 0;
+    const subscriptionStatus = hasActive ? "PENDING" : "ACTIVE";
+
     // 5. Insert Subscription Record
     const { data: subscription, error: subError } = await supabaseAdmin
       .from("subscriptions")
@@ -282,7 +292,7 @@ export async function verifyAndActivateSubscriptionAction(
         starts_on: format(start, "yyyy-MM-dd"),
         ends_on: format(end, "yyyy-MM-dd"),
         effective_end_on: format(effectiveEnd, "yyyy-MM-dd"),
-        status: "ACTIVE",
+        status: subscriptionStatus,
         total_days: baseDuration,
         pause_credits_total: plan.pause_credits,
         pause_credits_used: pausesUsed,
@@ -291,6 +301,14 @@ export async function verifyAndActivateSubscriptionAction(
       .single();
 
     if (subError) throw subError;
+
+    if (hasActive && activeSubs) {
+      const baseEnd = activeSubs.reduce((latest, s) => {
+        const end = new Date(s.effective_end_on ?? s.ends_on!);
+        return end > latest ? end : latest;
+      }, new Date(0));
+      await cascadePendingSubscriptionDates(customerProfileId, baseEnd);
+    }
 
     // 6. Link Payment to Subscription
     const { error: paymentUpdateError } = await supabaseAdmin
@@ -314,14 +332,52 @@ export async function verifyAndActivateSubscriptionAction(
     if (transactionError) throw transactionError;
 
     // 8. Generate Daily Preferences (Meal Planner & Paused Dates logic)
+    let prefsStart = start;
+    let shiftedPausedDates = pausedDates as string[];
+    let shiftedMealOverrides = mealOverrides as Record<string, string>;
+
+    if (hasActive) {
+      const { data: cascadedSub, error: cascadedSubError } = await supabaseAdmin
+        .from("subscriptions")
+        .select("starts_on")
+        .eq("id", subscription.id)
+        .single();
+
+      if (cascadedSubError || !cascadedSub) {
+        throw new Error("Failed to load cascaded subscription dates");
+      }
+
+      prefsStart = parseISO(cascadedSub.starts_on);
+      const dayOffset = differenceInCalendarDays(prefsStart, start);
+
+      shiftedPausedDates = pausedDates.map((d: string) =>
+        format(addDays(parseISO(d), dayOffset), "yyyy-MM-dd"),
+      );
+      shiftedMealOverrides = Object.fromEntries(
+        Object.entries(mealOverrides as Record<string, string>).map(
+          ([date, meal]) => [
+            format(addDays(parseISO(date), dayOffset), "yyyy-MM-dd"),
+            meal,
+          ],
+        ),
+      );
+
+      await supabaseAdmin
+        .from("subscription_daily_preferences")
+        .delete()
+        .eq("subscription_id", subscription.id);
+    }
+
     const dailyPreferences = [];
     const totalDaysToGenerate = baseDuration + pausesUsed;
-    let currentDate = start;
+    let currentDate = prefsStart;
 
     for (let i = 0; i < totalDaysToGenerate; i++) {
       const dateStr = format(currentDate, "yyyy-MM-dd");
-      const isPaused = pausedDates.includes(dateStr);
-      const dayMealType = isPaused ? null : mealOverrides[dateStr] || foodType;
+      const isPaused = shiftedPausedDates.includes(dateStr);
+      const dayMealType = isPaused
+        ? null
+        : shiftedMealOverrides[dateStr] || foodType;
 
       dailyPreferences.push({
         subscription_id: subscription.id,
@@ -339,8 +395,7 @@ export async function verifyAndActivateSubscriptionAction(
     const { error: prefsError } = await supabaseAdmin
       .from("subscription_daily_preferences")
       .insert(dailyPreferences);
-    if (prefsError)
-      console.error("Error inserting daily preferences:", prefsError);
+    if (prefsError) throw prefsError;
 
     // 9. Burn the Coupon
     if (couponCode && customerProfileId) {
