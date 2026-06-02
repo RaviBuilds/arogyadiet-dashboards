@@ -28,28 +28,31 @@ import {
   CardTitle,
 } from "@/shared/components/ui/card";
 import Link from "next/link";
+import {
+  type CategoryDeliveryStats,
+  isCategoryComplete,
+  isTerminalOrderStatus,
+} from "@/lib/delivery/orderStatuses";
 
 export const revalidate = 0;
 
-type CategoryDeliveryStats = Record<
-  string,
-  { assigned: number; delivered: number }
->;
+type CategoryStatsByName = Record<string, CategoryDeliveryStats>;
 
 function aggregateByMealCategory(
   orders: Array<{
     status: string;
     meal_category: { name?: string } | { name?: string }[] | null;
   }>,
-): CategoryDeliveryStats {
-  return orders.reduce<CategoryDeliveryStats>((acc, order) => {
+): CategoryStatsByName {
+  return orders.reduce<CategoryStatsByName>((acc, order) => {
     const mealCat = Array.isArray(order.meal_category)
       ? order.meal_category[0]
       : order.meal_category;
     const name = mealCat?.name?.trim() || "Unknown Meal";
-    if (!acc[name]) acc[name] = { assigned: 0, delivered: 0 };
+    if (!acc[name]) acc[name] = { assigned: 0, delivered: 0, failed: 0 };
     acc[name].assigned += 1;
     if (order.status === "DELIVERED") acc[name].delivered += 1;
+    if (order.status === "FAILED") acc[name].failed += 1;
     return acc;
   }, {});
 }
@@ -139,15 +142,11 @@ export default async function RiderDashboard() {
 
   const orders = todayOrders || [];
 
-  const assigned = orders.filter((o) =>
-    ["ORDER_CREATED", "ASSIGNED"].includes(o.status),
-  ).length;
-  const picked = orders.filter((o) =>
-    ["OUT_FOR_DELIVERY", "REACHING_TO_LOCATION"].includes(o.status),
-  ).length;
   const delivered = orders.filter((o) => o.status === "DELIVERED").length;
-
-  const pendingDrops = assigned + picked;
+  const failed = orders.filter((o) => o.status === "FAILED").length;
+  const pendingDrops = orders.filter(
+    (o) => !isTerminalOrderStatus(o.status),
+  ).length;
   const estimatedPayout = orders.reduce(
     (acc, curr) => acc + Number(curr.payout_amount || 0),
     0,
@@ -203,7 +202,8 @@ export default async function RiderDashboard() {
                   Pending Drops
                 </p>
                 <span className="mt-2 rounded-full bg-zinc-50 px-2 py-1 text-[10px] text-zinc-500">
-                  {totalAssigned} Assigned • {delivered} Delivered
+                  {totalAssigned} Assigned • {delivered} Delivered • {failed}{" "}
+                  Failed
                 </span>
               </CardContent>
             </Card>
@@ -242,15 +242,14 @@ export default async function RiderDashboard() {
                   .sort(([a], [b]) => a.localeCompare(b))
                   .map(([categoryName, stats]) => (
                     <div key={categoryName} className="flex items-center">
-                      {stats.delivered < stats.assigned ? (
-                        <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-                      ) : stats.delivered === stats.assigned &&
-                        stats.assigned > 0 ? (
+                      {isCategoryComplete(stats) ? (
                         <CheckCircle2 className="mr-2 h-4 w-4 shrink-0 text-green-600" />
+                      ) : stats.assigned > 0 ? (
+                        <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
                       ) : null}
                       <p className="text-sm font-medium text-zinc-800">
                         {categoryName} ({stats.assigned} assigned /{" "}
-                        {stats.delivered} delivered)
+                        {stats.delivered} delivered / {stats.failed} failed)
                       </p>
                     </div>
                   ))

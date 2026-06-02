@@ -162,12 +162,16 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
           payout: order.delivery_batches?.expected_payout || 0,
           riderName: order.rider_profiles?.users?.full_name || "Unassigned",
           mealCount: 0,
+          deliveredCount: 0,
+          failedCount: 0,
           addonCount: 0,
           pendingPickupCount: 0,
         });
       }
       const b = batches.get(batchKey);
       b.mealCount += 1;
+      if (order.status === "DELIVERED") b.deliveredCount += 1;
+      if (order.status === "FAILED") b.failedCount += 1;
       if (PRE_PICKUP_ORDER_STATUSES.includes(order.status)) {
         b.pendingPickupCount += 1;
       }
@@ -244,7 +248,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
       Day: getDayLabel(b.deliveryDate),
       "Batch Number":
         b.id === "UNBATCHED" ? "Unbatched" : b.id.substring(0, 8).toUpperCase(),
-      "Meals Count": b.mealCount,
+      "Meals Count": `${b.mealCount} (${b.mealCount} assigned / ${b.deliveredCount} delivered / ${b.failedCount} failed)`,
       "Shop Products Count": b.addonCount,
       "Distance (km)": Number(b.distance).toFixed(2),
       "Payout (INR)": Number(b.payout).toFixed(2),
@@ -637,7 +641,13 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                   <TableCell className="font-mono font-medium">
                     {batch.id === "UNBATCHED" ? "Unbatched" : batch.id.substring(0, 8).toUpperCase()}
                   </TableCell>
-                  <TableCell className="font-bold">{batch.mealCount}</TableCell>
+                  <TableCell>
+                    <span className="font-bold">{batch.mealCount}</span>
+                    <p className="mt-0.5 text-xs font-medium text-muted-foreground">
+                      {batch.mealCount} assigned / {batch.deliveredCount}{" "}
+                      delivered / {batch.failedCount} failed
+                    </p>
+                  </TableCell>
                   <TableCell className={`font-medium ${batch.addonCount > 0 ? "text-destructive" : "text-muted-foreground"}`}>
                     {batch.addonCount}
                   </TableCell>
