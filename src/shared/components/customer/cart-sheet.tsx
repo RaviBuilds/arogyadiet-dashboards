@@ -15,6 +15,7 @@ import {
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
 import { Separator } from "@/shared/components/ui/separator";
 import { CartItem } from "@/shared/components/customer/cart-item";
+import { useSyncCartStockFromServer } from "@/shared/hooks/use-sync-cart-stock";
 
 export function CartSheet() {
   const router = useRouter();
@@ -22,6 +23,8 @@ export function CartSheet() {
   const [isMounted, setIsMounted] = useState(false);
   const items = useCartStore((state) => state.items);
   const cartTotal = useCartStore((state) => state.cartTotal);
+
+  useSyncCartStockFromServer(isOpen);
 
   useEffect(() => {
     setIsMounted(true);

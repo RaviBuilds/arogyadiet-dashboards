@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { useCartStore } from "@/store/useCartStore";
+import { useSyncCartStockFromServer } from "@/shared/hooks/use-sync-cart-stock";
 import { createClient } from "@/lib/supabase/client";
 import {
   createAddonCheckoutOrder,
@@ -46,6 +47,8 @@ export default function ShopCheckoutPage() {
   const items = useCartStore((state) => state.items);
   const cartTotal = useCartStore((state) => state.cartTotal);
   const clearCart = useCartStore((state) => state.clearCart);
+
+  useSyncCartStockFromServer(isMounted);
 
   //
   const [isLoadingAddress, setIsLoadingAddress] = useState(true);
