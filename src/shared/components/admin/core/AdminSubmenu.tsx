@@ -60,7 +60,7 @@ export function AdminSubmenu({
   };
 
   return (
-    <div className="flex items-center space-x-2 border-b pb-0 mb-6 overflow-x-auto hide-scrollbar">
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0 border-b pb-0">
       {normalizedTabs.map((tab) => (
         <Button
           key={tab.id}

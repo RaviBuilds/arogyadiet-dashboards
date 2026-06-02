@@ -1,7 +1,20 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { FAILED_DELIVERY_REASONS } from "@/lib/delivery/failedDeliveryReasons";
 import { revalidatePath } from "next/cache";
+
+type ActionResult = { success: true } | { success: false; error: string };
+
+function revalidateRiderOrderPaths(orderId: string) {
+  revalidatePath("/route");
+  revalidatePath(`/route/${orderId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/rider/route");
+  revalidatePath(`/rider/route/${orderId}`);
+  revalidatePath("/rider/dashboard");
+  revalidatePath("/admin/operations");
+}
 
 async function getCurrentRiderProfileId() {
   const supabase = await createClient();
@@ -77,13 +90,7 @@ async function updateRiderOrderStatus(
     });
   }
 
-  revalidatePath("/route");
-  revalidatePath(`/route/${orderId}`);
-  revalidatePath("/dashboard");
-  revalidatePath("/rider/route");
-  revalidatePath(`/rider/route/${orderId}`);
-  revalidatePath("/rider/dashboard");
-  revalidatePath("/admin/operations");
+  revalidateRiderOrderPaths(orderId);
 
   return { success: true };
 }
@@ -133,6 +140,97 @@ export async function markOrderOnTheWayAction(orderId: string) {
 
 export async function markOrderDeliveredAction(orderId: string) {
   return updateRiderOrderStatus(orderId, "DELIVERED", "Meal delivered");
+}
+
+function buildFailureLogNote(reason: string, remark?: string) {
+  const trimmedRemark = remark?.trim();
+  if (trimmedRemark) return `${reason} — ${trimmedRemark}`;
+  return reason;
+}
+
+export async function requestFailedDeliveryAction(
+  orderId: string,
+  reason: string,
+  remark?: string,
+): Promise<ActionResult> {
+  const trimmedReason = reason?.trim();
+  if (!trimmedReason) {
+    return { success: false, error: "Please select a failure reason." };
+  }
+
+  if (
+    !FAILED_DELIVERY_REASONS.includes(
+      trimmedReason as (typeof FAILED_DELIVERY_REASONS)[number],
+    )
+  ) {
+    return { success: false, error: "Invalid failure reason." };
+  }
+
+  let riderProfileId: string;
+  try {
+    riderProfileId = await getCurrentRiderProfileId();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Authentication failed.";
+    return { success: false, error: message };
+  }
+
+  const supabase = await createClient();
+  const newStatus = "PENDING_FAILURE_APPROVAL";
+  const note = buildFailureLogNote(trimmedReason, remark);
+
+  const { data: order, error: fetchError } = await supabase
+    .from("delivery_orders")
+    .select("id, status")
+    .eq("id", orderId)
+    .eq("assigned_rider_id", riderProfileId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("Error fetching delivery order:", fetchError);
+    return { success: false, error: fetchError.message };
+  }
+
+  if (!order) {
+    return { success: false, error: "Delivery not found for this rider." };
+  }
+
+  if (order.status !== "REACHING_TO_LOCATION") {
+    return {
+      success: false,
+      error: `Cannot request failed delivery from ${order.status}.`,
+    };
+  }
+
+  const { data: updatedOrder, error: orderError } = await supabase
+    .from("delivery_orders")
+    .update({ status: newStatus })
+    .eq("id", orderId)
+    .eq("assigned_rider_id", riderProfileId)
+    .select("id")
+    .maybeSingle();
+
+  if (orderError) {
+    console.error("Error requesting failed delivery:", orderError);
+    return { success: false, error: orderError.message };
+  }
+
+  if (!updatedOrder) {
+    return { success: false, error: "Delivery not found for this rider." };
+  }
+
+  const { error: logError } = await supabase.from("delivery_status_logs").insert({
+    delivery_order_id: orderId,
+    status: newStatus,
+    note,
+  });
+
+  if (logError) {
+    console.error("Failed to insert delivery status log:", logError);
+    return { success: false, error: logError.message };
+  }
+
+  revalidateRiderOrderPaths(orderId);
+  return { success: true };
 }
 
 /**

@@ -25,7 +25,7 @@ export function riderPaymentEmailHtml({
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Payment Processed — ArogyaDiet</title>
 </head>
-<body style="margin:0;padding:0;background-color:#f5f5f5;font-family:'Segoe UI',Arial,sans-serif;">
+<body style="margin:0;padding:0;background-color:#f5f5f5;font-family:Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f5;padding:32px 0;">
     <tr>
       <td align="center">

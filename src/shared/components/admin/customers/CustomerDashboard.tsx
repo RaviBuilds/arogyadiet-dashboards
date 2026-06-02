@@ -65,7 +65,7 @@ import {
 } from "@/actions/admin-actions/customerActions";
 import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
 import { CustomerOverview } from "./CustomerOverview";
-import { Plus } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 
 export interface CustomerData {
   id: string;
@@ -493,20 +493,24 @@ export default function CustomerDashboard({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <AdminSubmenu
           tabs={["Overview", "Customer Directory", "Active Subscriptions", "Pending Subscriptions", "Expired / Stopped", "Shop Orders"]}
           activeTab={activeTab}
           onTabChange={handleTabChange}
         />
-        <Button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="shrink-0"
-          size="sm"
-        >
-          <Plus className="h-4 w-4 mr-1.5" />
-          Create Customer
-        </Button>
+        <div className="flex shrink-0 flex-col items-stretch gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/customers/bulk-import">
+              <Upload className="h-4 w-4 mr-1.5" />
+              Bulk import
+            </Link>
+          </Button>
+          <Button onClick={() => setIsCreateModalOpen(true)} size="sm">
+            <Plus className="h-4 w-4 mr-1.5" />
+            Create Customer
+          </Button>
+        </div>
       </div>
 
       <AdminCreateCustomerModal

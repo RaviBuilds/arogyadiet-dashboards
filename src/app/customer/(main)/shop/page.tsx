@@ -1,23 +1,28 @@
 import { createClient } from "@/lib/supabase/server";
+import { fetchCatalogProducts } from "@/lib/products/catalog-queries";
 import { Product } from "@/types/product";
 import ProductCard from "@/shared/components/customer/product-card";
+import { CartStockSync } from "@/shared/components/customer/cart-stock-sync";
 
 export default async function ShopPage() {
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-    .eq("is_active", true);
+  const { data, error } = await fetchCatalogProducts(supabase);
 
   if (error) {
-    console.error("Failed to fetch products:", error);
+    console.error(
+      "Failed to fetch products:",
+      error.message,
+      error.code,
+      error.details,
+    );
   }
 
   const products: Product[] = data ?? [];
 
   return (
     <main className="p-6 lg:p-8">
+      <CartStockSync products={products} />
       <header className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight text-zinc-900">
           ArogyaDiet Shop

@@ -126,6 +126,7 @@ export default async function RiderRoutePage() {
       "ASSIGNED",
       "OUT_FOR_DELIVERY",
       "REACHING_TO_LOCATION",
+      "PENDING_FAILURE_APPROVAL",
     ]);
 
   if (error) {
@@ -146,11 +147,19 @@ export default async function RiderRoutePage() {
   );
 
   const onTheRoad = safeOrders.filter((o) =>
-    ["OUT_FOR_DELIVERY", "REACHING_TO_LOCATION"].includes(o.status),
+    [
+      "OUT_FOR_DELIVERY",
+      "REACHING_TO_LOCATION",
+      "PENDING_FAILURE_APPROVAL",
+    ].includes(o.status),
   );
 
   const isGpsActive = safeOrders.some((o) =>
-    ["OUT_FOR_DELIVERY", "REACHING_TO_LOCATION"].includes(o?.status),
+    [
+      "OUT_FOR_DELIVERY",
+      "REACHING_TO_LOCATION",
+      "PENDING_FAILURE_APPROVAL",
+    ].includes(o?.status),
   );
 
   // Strict Sequential Delivery: sort by route_sequence and unlock only the next active delivery.

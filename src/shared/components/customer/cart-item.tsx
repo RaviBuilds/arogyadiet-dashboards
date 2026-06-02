@@ -12,19 +12,24 @@ interface CartItemProps {
 export function CartItem({ item }: CartItemProps) {
   const addItem = useCartStore((state) => state.addItem);
   const removeItem = useCartStore((state) => state.removeItem);
+  const removeItemCompletely = useCartStore(
+    (state) => state.removeItemCompletely,
+  );
 
   const imageUrls =
     (item as CartItemType & { image_urls?: string[] | null }).image_urls ??
     item.image_url ??
     [];
 
-  const primaryImage = imageUrls[0];
+  const bannerImageUrl =
+    (item as CartItemType & { banner_image_url?: string | null }).banner_image_url ??
+    null;
+
+  const primaryImage = bannerImageUrl ?? imageUrls[0];
   const unitPrice = item.sale_price ?? item.original_price;
 
   const handleRemoveCompletely = () => {
-    for (let i = 0; i < item.quantity; i += 1) {
-      removeItem(item.id);
-    }
+    removeItemCompletely(item.id);
   };
 
   return (
@@ -72,6 +77,7 @@ export function CartItem({ item }: CartItemProps) {
             size="icon"
             className="h-6 w-6 shrink-0"
             onClick={() => addItem(item)}
+            disabled={!item.in_stock}
           >
             <Plus className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
           </Button>

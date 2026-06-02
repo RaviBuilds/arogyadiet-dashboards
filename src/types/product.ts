@@ -7,6 +7,7 @@ export interface Product {
   category: string | null;
   original_price: number;
   sale_price: number | null;
+  tax_percent?: number | null;
   image_url: string[] | null;
   is_active: boolean;
   in_stock: boolean;

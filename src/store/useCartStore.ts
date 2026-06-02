@@ -5,6 +5,8 @@ interface CartStore {
   items: CartItem[];
   addItem: (product: Product) => void;
   removeItem: (productId: string) => void;
+  removeItemCompletely: (productId: string) => void;
+  removeOutOfStockItems: (productIds: string[]) => void;
   clearCart: () => void;
   cartTotal: () => number;
 }
@@ -15,6 +17,10 @@ export const useCartStore = create<CartStore>()(
       items: [],
       addItem: (product) =>
         set((state) => {
+          if (!product.in_stock) {
+            return state;
+          }
+
           const existingProduct = state.items.find(
             (item) => item.id === product.id,
           );
@@ -53,6 +59,21 @@ export const useCartStore = create<CartStore>()(
                 ? { ...item, quantity: item.quantity - 1 }
                 : item,
             ),
+          };
+        }),
+      removeItemCompletely: (productId) =>
+        set((state) => ({
+          items: state.items.filter((item) => item.id !== productId),
+        })),
+      removeOutOfStockItems: (productIds) =>
+        set((state) => {
+          if (productIds.length === 0) {
+            return state;
+          }
+
+          const idsToRemove = new Set(productIds);
+          return {
+            items: state.items.filter((item) => !idsToRemove.has(item.id)),
           };
         }),
       clearCart: () => set({ items: [] }),

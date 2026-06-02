@@ -60,10 +60,18 @@ export default function LiveTrackingClient({
         </Button>
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">Live Tracking</h1>
-          <p className="text-muted-foreground text-sm flex items-center gap-1">
-            <Clock className="h-4 w-4" />
-            {etaText ? `Estimated arrival in ${etaText}` : "Calculating ETA..."}
-          </p>
+          {order.status === "REACHING_TO_LOCATION" ? (
+            <p className="text-muted-foreground text-sm flex items-center gap-1">
+              <Clock className="h-4 w-4" />
+              {etaText
+                ? `Estimated arrival in ${etaText}`
+                : "Calculating ETA..."}
+            </p>
+          ) : order.status === "OUT_FOR_DELIVERY" ? (
+            <p className="text-muted-foreground text-sm">
+              Rider is currently out for delivery.
+            </p>
+          ) : null}
         </div>
       </div>
 

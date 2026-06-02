@@ -19,6 +19,13 @@ export type AutomationLogRow = {
   latest_stats: unknown;
 };
 
+export type PendingFailureApprovalRow = {
+  orderId: string;
+  customerName: string;
+  riderName: string;
+  reason: string;
+};
+
 function revalidateOrderStatusPaths(orderId: string) {
   revalidatePath("/admin/operations");
   revalidatePath("/route");
@@ -208,6 +215,126 @@ export async function markAdminOrderDeliveredAction(
     from: order.status,
     to: newStatus,
     action: "mark_delivered",
+  });
+
+  revalidateOrderStatusPaths(orderId);
+  return { success: true };
+}
+
+export async function approveFailedDeliveryAction(
+  orderId: string,
+): Promise<ActionResult> {
+  const supabase = createAdminClient();
+  const newStatus = "FAILED";
+  const note = "Failed delivery approved by admin";
+
+  const { data: order, error: fetchError } = await supabase
+    .from("delivery_orders")
+    .select("id, status")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("Error fetching delivery order:", fetchError);
+    return { success: false, error: fetchError.message };
+  }
+
+  if (!order) {
+    return { success: false, error: "Delivery order not found." };
+  }
+
+  if (order.status !== "PENDING_FAILURE_APPROVAL") {
+    return {
+      success: false,
+      error: `Cannot approve failed delivery from ${order.status}.`,
+    };
+  }
+
+  const { error: updateError } = await supabase
+    .from("delivery_orders")
+    .update({ status: newStatus })
+    .eq("id", orderId);
+
+  if (updateError) {
+    console.error("Error approving failed delivery:", updateError);
+    return { success: false, error: updateError.message };
+  }
+
+  const { error: logError } = await supabase.from("delivery_status_logs").insert({
+    delivery_order_id: orderId,
+    status: newStatus,
+    note,
+  });
+
+  if (logError) {
+    console.error("Error inserting delivery status log:", logError);
+    return { success: false, error: logError.message };
+  }
+
+  await logAdminAction("UPDATE", "delivery_order", orderId, {
+    from: order.status,
+    to: newStatus,
+    action: "approve_failed_delivery",
+  });
+
+  revalidateOrderStatusPaths(orderId);
+  return { success: true };
+}
+
+export async function rejectFailedDeliveryAction(
+  orderId: string,
+): Promise<ActionResult> {
+  const supabase = createAdminClient();
+  const newStatus = "REACHING_TO_LOCATION";
+  const note = "Failed delivery request rejected by admin";
+
+  const { data: order, error: fetchError } = await supabase
+    .from("delivery_orders")
+    .select("id, status")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("Error fetching delivery order:", fetchError);
+    return { success: false, error: fetchError.message };
+  }
+
+  if (!order) {
+    return { success: false, error: "Delivery order not found." };
+  }
+
+  if (order.status !== "PENDING_FAILURE_APPROVAL") {
+    return {
+      success: false,
+      error: `Cannot reject failed delivery from ${order.status}.`,
+    };
+  }
+
+  const { error: updateError } = await supabase
+    .from("delivery_orders")
+    .update({ status: newStatus })
+    .eq("id", orderId);
+
+  if (updateError) {
+    console.error("Error rejecting failed delivery:", updateError);
+    return { success: false, error: updateError.message };
+  }
+
+  const { error: logError } = await supabase.from("delivery_status_logs").insert({
+    delivery_order_id: orderId,
+    status: newStatus,
+    note,
+  });
+
+  if (logError) {
+    console.error("Error inserting delivery status log:", logError);
+    return { success: false, error: logError.message };
+  }
+
+  await logAdminAction("UPDATE", "delivery_order", orderId, {
+    from: order.status,
+    to: newStatus,
+    action: "reject_failed_delivery",
   });
 
   revalidateOrderStatusPaths(orderId);

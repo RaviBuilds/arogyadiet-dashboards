@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchCatalogProducts } from "@/lib/products/catalog-queries";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -16,7 +17,9 @@ export interface AdminInventoryProduct {
   short_description: string | null;
   description: string | null;
   image_urls: string[] | null;
+  banner_image_url: string | null;
   is_active: boolean;
+  deleted_at: string | null;
   created_at: string;
 }
 
@@ -32,9 +35,7 @@ const upsertProductSchema = z.object({
     .int()
     .min(0, "Stock quantity must be 0 or greater"),
   taxPercent: z.number().min(0).max(100).optional().nullable(),
-  shortDescription: z.string().optional(),
   description: z.string().optional(),
-  imageUrls: z.string().optional(),
 });
 
 type ActionResult = { success: boolean; error?: string };
@@ -68,13 +69,12 @@ function getFormFiles(formData: FormData): File[] {
 export async function adminGetProducts(): Promise<AdminInventoryProduct[]> {
   const supabase = createAdminClient();
 
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const { data, error } = await fetchCatalogProducts(supabase, {
+    activeOnly: false,
+  });
 
   if (error) {
-    console.error("Error fetching products:", error);
+    console.error("Error fetching products:", error.message, error.code);
     return [];
   }
 
@@ -95,9 +95,7 @@ export async function adminUpsertProduct(
     salePrice: getOptionalFormNumber(formData, "salePrice"),
     stockQuantity: Number(getFormString(formData, "stockQuantity")),
     taxPercent: getOptionalFormNumber(formData, "taxPercent"),
-    shortDescription: getFormString(formData, "shortDescription") || undefined,
     description: getFormString(formData, "description") || undefined,
-    imageUrls: getFormString(formData, "imageUrls") || undefined,
   });
 
   if (!parsed.success) {
@@ -107,12 +105,35 @@ export async function adminUpsertProduct(
   const data = parsed.data;
   const supabaseAdmin = createAdminClient();
 
-  const image_urls = (data.imageUrls ?? "")
-    .split(",")
-    .map((url) => url.trim())
+  const image_urls = formData
+    .getAll("existingImageUrls")
+    .map((url) => url.toString().trim())
     .filter(Boolean);
 
+  const bannerImageUrl = getFormString(formData, "bannerImageUrl");
+  const bannerNewFileIndex = Number(getFormString(formData, "bannerNewFileIndex"));
+
+  let short_description: string | null = null;
+
+  if (data.id) {
+    const { data: existingProduct } = await supabaseAdmin
+      .from("products")
+      .select("short_description, deleted_at")
+      .eq("id", data.id)
+      .maybeSingle();
+
+    if (existingProduct?.deleted_at) {
+      return {
+        success: false,
+        error: "This product has been archived and can no longer be edited.",
+      };
+    }
+
+    short_description = existingProduct?.short_description ?? null;
+  }
+
   const files = getFormFiles(formData);
+  const uploadedUrls: string[] = [];
 
   for (const [index, file] of files.entries()) {
     const extension = file.name.split(".").pop() || "jpg";
@@ -131,7 +152,24 @@ export async function adminUpsertProduct(
       data: { publicUrl },
     } = supabaseAdmin.storage.from("product-images").getPublicUrl(filename);
 
+    uploadedUrls.push(publicUrl);
     image_urls.push(publicUrl);
+  }
+
+  let banner_image_url: string | null = null;
+
+  if (
+    Number.isInteger(bannerNewFileIndex) &&
+    bannerNewFileIndex >= 0 &&
+    uploadedUrls[bannerNewFileIndex]
+  ) {
+    banner_image_url = uploadedUrls[bannerNewFileIndex];
+  } else if (bannerImageUrl) {
+    banner_image_url = bannerImageUrl;
+  } else if (uploadedUrls[0]) {
+    banner_image_url = uploadedUrls[0];
+  } else if (image_urls[0]) {
+    banner_image_url = image_urls[0];
   }
 
   const record: Record<string, unknown> = {
@@ -142,9 +180,10 @@ export async function adminUpsertProduct(
     sale_price: data.salePrice ?? null,
     stock_quantity: data.stockQuantity,
     tax_percent: data.taxPercent ?? null,
-    short_description: data.shortDescription?.trim() || null,
+    short_description,
     description: data.description?.trim() || null,
     image_urls,
+    banner_image_url,
     in_stock: data.stockQuantity > 0,
     updated_at: new Date().toISOString(),
   };
@@ -169,10 +208,19 @@ export async function adminUpsertProduct(
 export async function adminDeleteProduct(id: string): Promise<ActionResult> {
   const supabaseAdmin = createAdminClient();
 
-  const { error } = await supabaseAdmin.from("products").delete().eq("id", id);
+  const { error } = await supabaseAdmin
+    .from("products")
+    .update({
+      deleted_at: new Date().toISOString(),
+      is_active: false,
+      in_stock: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .is("deleted_at", null);
 
   if (error) {
-    console.error("Error deleting product:", error);
+    console.error("Error archiving product:", error);
     return { success: false, error: error.message };
   }
 

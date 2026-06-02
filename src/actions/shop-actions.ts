@@ -3,6 +3,11 @@
 import crypto from "crypto";
 import Razorpay from "razorpay";
 import { createClient } from "@/lib/supabase/server";
+import {
+  fetchProductForCheckout,
+  isProductUnavailable,
+} from "@/lib/products/catalog-queries";
+import { calculateShopOrderBreakdown } from "@/lib/pricing/inclusive-tax";
 import { CartItem } from "@/types/product";
 
 const razorpay = new Razorpay({
@@ -85,22 +90,19 @@ export async function processStandaloneCheckout(items: CartItem[]) {
     let true_total = 0;
 
     for (const item of items) {
-      const { data: product, error: productError } = await supabase
-        .from("products")
-        .select("id, original_price, sale_price")
-        .eq("id", item.id)
-        .single();
+      const { data: product, error: productError } =
+        await fetchProductForCheckout(supabase, item.id);
 
-      if (productError || !product) {
-        throw new Error(`Invalid product in cart: ${item.id}`);
+      if (isProductUnavailable(product, productError)) {
+        throw new Error("Product is no longer available.");
       }
 
-      const unitPrice = product.sale_price ?? product.original_price;
+      const unitPrice = product!.sale_price ?? product!.original_price;
       const lineTotal = unitPrice * item.quantity;
       true_total += lineTotal;
 
       verifiedItems.push({
-        product_id: product.id,
+        product_id: product!.id,
         quantity: item.quantity,
         unit_price: unitPrice,
         line_total: lineTotal,
@@ -277,33 +279,37 @@ export async function createAddonCheckoutOrder(
       line_total: number;
     }> = [];
 
-    let subtotal = 0;
+    const orderLines: Array<{ gross: number; taxPercent: number }> = [];
 
     for (const item of items) {
-      const { data: product, error: productError } = await supabase
-        .from("products")
-        .select("id, original_price, sale_price")
-        .eq("id", item.id)
-        .single();
+      const { data: product, error: productError } =
+        await fetchProductForCheckout(supabase, item.id);
 
-      if (productError || !product) {
-        throw new Error(`Invalid product in cart: ${item.id}`);
+      if (isProductUnavailable(product, productError)) {
+        throw new Error("Product is no longer available.");
       }
 
-      const unitPrice = product.sale_price ?? product.original_price;
+      const unitPrice = product!.sale_price ?? product!.original_price;
       const lineTotal = unitPrice * item.quantity;
-      subtotal += lineTotal;
+
+      orderLines.push({
+        gross: lineTotal,
+        taxPercent: Number(product!.tax_percent ?? 0),
+      });
 
       verifiedItems.push({
-        product_id: product.id,
+        product_id: product!.id,
         quantity: item.quantity,
         unit_price: unitPrice,
         line_total: lineTotal,
       });
     }
 
-    let discount = 0;
     let appliedCouponCode: string | null = null;
+    let couponDiscount: {
+      type: "PERCENTAGE" | "FLAT";
+      value: number;
+    } | null = null;
 
     if (couponCode?.trim()) {
       const normalizedCouponCode = couponCode.trim().toUpperCase();
@@ -331,19 +337,24 @@ export async function createAddonCheckoutOrder(
         throw new Error("This coupon has expired.");
       }
 
-      if (coupon.discount_type === "PERCENTAGE") {
-        discount = (subtotal * Number(coupon.discount_value ?? 0)) / 100;
-      } else if (coupon.discount_type === "FLAT") {
-        discount = Number(coupon.discount_value ?? 0);
+      if (
+        coupon.discount_type === "PERCENTAGE" ||
+        coupon.discount_type === "FLAT"
+      ) {
+        couponDiscount = {
+          type: coupon.discount_type,
+          value: Number(coupon.discount_value ?? 0),
+        };
       }
 
-      discount = Math.max(0, Math.min(discount, subtotal));
       appliedCouponCode = normalizedCouponCode;
     }
 
-    const taxableAmount = Math.max(0, subtotal - discount);
-    const gst = taxableAmount * 0.05;
-    const total = taxableAmount + gst;
+    const breakdown = calculateShopOrderBreakdown(
+      orderLines,
+      couponDiscount ?? undefined,
+    );
+    const total = breakdown.total;
 
     const { data: addon_order, error: addonOrderError } = await supabase
       .from("addon_orders")
@@ -372,6 +383,14 @@ export async function createAddonCheckoutOrder(
         amount: total,
         status: "PENDING",
         subscription_id: null,
+        base_amount: breakdown.baseSubtotal,
+        tax_percent:
+          breakdown.displayTaxPercent ??
+          breakdown.effectiveTaxPercent ??
+          0,
+        tax_amount: breakdown.tax,
+        discount_amount: breakdown.discount,
+        invoice_type: "ADDON",
       })
       .select("id")
       .single();
@@ -436,10 +455,11 @@ export async function createAddonCheckoutOrder(
         address: primaryAddress,
       },
       breakdown: {
-        subtotal,
-        discount,
-        gst,
-        total,
+        grossSubtotal: breakdown.grossSubtotal,
+        subtotal: breakdown.baseSubtotal,
+        discount: breakdown.discount,
+        gst: breakdown.tax,
+        total: breakdown.total,
       },
       appliedCouponCode,
     };

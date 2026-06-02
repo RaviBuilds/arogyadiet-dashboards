@@ -15,6 +15,7 @@ import {
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
 import { Separator } from "@/shared/components/ui/separator";
 import { CartItem } from "@/shared/components/customer/cart-item";
+import { useSyncCartStockFromServer } from "@/shared/hooks/use-sync-cart-stock";
 
 export function CartSheet() {
   const router = useRouter();
@@ -22,6 +23,8 @@ export function CartSheet() {
   const [isMounted, setIsMounted] = useState(false);
   const items = useCartStore((state) => state.items);
   const cartTotal = useCartStore((state) => state.cartTotal);
+
+  useSyncCartStockFromServer(isOpen);
 
   useEffect(() => {
     setIsMounted(true);
@@ -82,7 +85,7 @@ export function CartSheet() {
 
             <div className="sticky bottom-0 mt-4 border-t bg-background p-4">
               <div className="mb-3 flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
+                <span className="text-muted-foreground">Total</span>
                 <span className="font-semibold">₹{cartTotal().toFixed(2)}</span>
               </div>
               <Separator className="mb-3" />
