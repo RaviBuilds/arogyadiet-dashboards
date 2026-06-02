@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { tryCompleteDeliveryBatch } from "@/lib/delivery/batchCompletion";
 import { FAILED_DELIVERY_REASONS } from "@/lib/delivery/failedDeliveryReasons";
 import { revalidatePath } from "next/cache";
 
@@ -68,7 +69,7 @@ async function updateRiderOrderStatus(
     .update(updatePayload)
     .eq("id", orderId)
     .eq("assigned_rider_id", riderProfileId)
-    .select("id")
+    .select("id, batch_id, delivery_date")
     .maybeSingle();
 
   if (orderError) throw new Error(orderError.message);
@@ -88,6 +89,14 @@ async function updateRiderOrderStatus(
       newStatus,
       error: logError.message,
     });
+  }
+
+  if (newStatus === "DELIVERED") {
+    await tryCompleteDeliveryBatch(
+      supabase,
+      updatedOrder.batch_id,
+      updatedOrder.delivery_date,
+    );
   }
 
   revalidateRiderOrderPaths(orderId);

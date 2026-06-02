@@ -7,7 +7,12 @@ import {
   getAdminNextStatusTransition,
   PRE_PICKUP_ORDER_STATUSES,
 } from "@/lib/delivery/adminOrderStatusTransitions";
+import {
+  reconcileDeliveryBatchStatuses,
+  tryCompleteDeliveryBatch,
+} from "@/lib/delivery/batchCompletion";
 import { getFailureReasonFromLogs } from "@/lib/delivery/failureApproval";
+import { getISTDateString } from "@/lib/dates/ist";
 import { revalidatePath } from "next/cache";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -148,7 +153,17 @@ export async function fetchPendingFailureApprovals(): Promise<
   });
 }
 
+export async function reconcileDeliveryBatchStatusesAction(): Promise<{
+  batchesCompleted: number;
+}> {
+  const supabase = createAdminClient();
+  const today = getISTDateString();
+  const tomorrow = getISTDateString(1);
+  return reconcileDeliveryBatchStatuses(supabase, [today, tomorrow]);
+}
+
 export async function revalidateOperationsPage() {
+  await reconcileDeliveryBatchStatusesAction();
   revalidatePath("/admin/operations");
 }
 
@@ -221,7 +236,7 @@ export async function markAdminOrderDeliveredAction(
 
   const { data: order, error: fetchError } = await supabase
     .from("delivery_orders")
-    .select("id, status")
+    .select("id, status, batch_id, delivery_date")
     .eq("id", orderId)
     .maybeSingle();
 
@@ -265,6 +280,8 @@ export async function markAdminOrderDeliveredAction(
     return { success: false, error: logError.message };
   }
 
+  await tryCompleteDeliveryBatch(supabase, order.batch_id, order.delivery_date);
+
   await logAdminAction("UPDATE", "delivery_order", orderId, {
     from: order.status,
     to: newStatus,
@@ -272,6 +289,7 @@ export async function markAdminOrderDeliveredAction(
   });
 
   revalidateOrderStatusPaths(orderId);
+  revalidateBatchPickupPaths();
   return { success: true };
 }
 
@@ -284,7 +302,7 @@ export async function approveFailedDeliveryAction(
 
   const { data: order, error: fetchError } = await supabase
     .from("delivery_orders")
-    .select("id, status")
+    .select("id, status, batch_id, delivery_date")
     .eq("id", orderId)
     .maybeSingle();
 
@@ -325,6 +343,8 @@ export async function approveFailedDeliveryAction(
     return { success: false, error: logError.message };
   }
 
+  await tryCompleteDeliveryBatch(supabase, order.batch_id, order.delivery_date);
+
   await logAdminAction("UPDATE", "delivery_order", orderId, {
     from: order.status,
     to: newStatus,
@@ -332,6 +352,7 @@ export async function approveFailedDeliveryAction(
   });
 
   revalidateOrderStatusPaths(orderId);
+  revalidateBatchPickupPaths();
   return { success: true };
 }
 

@@ -4,6 +4,7 @@ import {
   fetchPendingFailureApprovals,
   fetchRosterData,
   getAutomationLogs,
+  reconcileDeliveryBatchStatusesAction,
 } from "@/actions/admin-actions/operationsActions";
 import { getISTDateString } from "@/lib/dates/ist";
 import FailedDeliveryApprovals from "@/shared/components/admin/operations/FailedDeliveryApprovals";
@@ -16,6 +17,8 @@ export default async function OperationsPage() {
 
   const today = getISTDateString();
   const tomorrowStr = getISTDateString(1);
+
+  await reconcileDeliveryBatchStatusesAction();
 
   // 1. Fetch Dispatch Board (today + tomorrow)
   const { data: rawDeliveries } = await supabase

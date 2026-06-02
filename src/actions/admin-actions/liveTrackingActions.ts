@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { TERMINAL_ORDER_STATUSES } from "@/lib/delivery/orderStatuses";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
 
 function getISTDateString(offsetDays = 0) {
@@ -26,8 +27,6 @@ const POST_PICKUP_STATUSES = [
   "DELIVERED",
   "FAILED",
 ] as const;
-
-const TERMINAL_STATUSES = ["DELIVERED", "FAILED"] as const;
 
 export type LiveTrackingPhase = "not_out" | "active" | "completed";
 
@@ -66,7 +65,9 @@ function derivePhase(statuses: string[]): LiveTrackingPhase {
 
   if (
     statuses.every((s) =>
-      TERMINAL_STATUSES.includes(s as (typeof TERMINAL_STATUSES)[number]),
+      TERMINAL_ORDER_STATUSES.includes(
+        s as (typeof TERMINAL_ORDER_STATUSES)[number],
+      ),
     )
   ) {
     return "completed";
