@@ -86,7 +86,7 @@ export default function FailedDeliveryApprovals({
         <TableBody>
           {approvals.map((row) => {
             const isRowPending = isPending && pendingOrderId === row.orderId;
-
+            console.log("row", row);
             return (
               <TableRow key={row.orderId}>
                 <TableCell className="font-medium">{row.riderName}</TableCell>

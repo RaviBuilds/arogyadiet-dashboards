@@ -7,6 +7,7 @@ import {
   getAdminNextStatusTransition,
   PRE_PICKUP_ORDER_STATUSES,
 } from "@/lib/delivery/adminOrderStatusTransitions";
+import { getFailureReasonFromLogs } from "@/lib/delivery/failureApproval";
 import { revalidatePath } from "next/cache";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -92,6 +93,59 @@ export async function getAutomationLogs(
   }
 
   return (data || []) as AutomationLogRow[];
+}
+
+export async function fetchPendingFailureApprovals(): Promise<
+  PendingFailureApprovalRow[]
+> {
+  const supabase = createAdminClient();
+
+  const { data: rawPendingFailures, error } = await supabase
+    .from("delivery_orders")
+    .select(
+      `
+      id,
+      customer_profiles ( users ( full_name ) ),
+      rider_profiles ( users ( full_name ) ),
+      delivery_status_logs ( note, status, created_at )
+    `,
+    )
+    .eq("status", "PENDING_FAILURE_APPROVAL")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching pending failure approvals:", error);
+    return [];
+  }
+
+  return (rawPendingFailures || []).map((order) => {
+    const customerProfile = Array.isArray(order.customer_profiles)
+      ? order.customer_profiles[0]
+      : order.customer_profiles;
+    const customerUser = Array.isArray(customerProfile?.users)
+      ? customerProfile?.users[0]
+      : customerProfile?.users;
+
+    const riderProfile = Array.isArray(order.rider_profiles)
+      ? order.rider_profiles[0]
+      : order.rider_profiles;
+    const riderUser = Array.isArray(riderProfile?.users)
+      ? riderProfile?.users[0]
+      : riderProfile?.users;
+
+    const logs = Array.isArray(order.delivery_status_logs)
+      ? order.delivery_status_logs
+      : order.delivery_status_logs
+        ? [order.delivery_status_logs]
+        : [];
+
+    return {
+      orderId: order.id,
+      customerName: customerUser?.full_name || "Unknown",
+      riderName: riderUser?.full_name || "Unassigned",
+      reason: getFailureReasonFromLogs(logs),
+    };
+  });
 }
 
 export async function revalidateOperationsPage() {
