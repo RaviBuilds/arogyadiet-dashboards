@@ -75,24 +75,31 @@ export function LiveTrackingMap({
 
   // Fetch and refresh driving route whenever rider location updates.
   useEffect(() => {
-    
-
-    if (!isLoaded) return;
-    // Strict guards: DirectionsService must not run until BOTH origin and destination are present.
-    if (!riderLocation) return;
-    if (customerLat == null || customerLng == null) return;
+    const notifyEta = (eta: string | null) => onEtaChange?.(eta);
 
     const canTrack =
       orderStatus === "OUT_FOR_DELIVERY" ||
       orderStatus === "REACHING_TO_LOCATION";
-    if (!canTrack) return;
+
+    if (!canTrack) {
+      notifyEta(null);
+      return;
+    }
+
+    if (!isLoaded) return;
+
+    if (customerLat == null || customerLng == null) {
+      notifyEta(null);
+      return;
+    }
+
+    // DirectionsService must not run until rider origin is present.
+    if (!riderLocation) return;
 
     let cancelled = false;
 
     const fetchDirections = async () => {
       try {
-       
-
         // CRITICAL: Coerce all coordinates to strict numbers (stringified decimals can silently fail).
         const originCoords = {
           lat: Number(riderLocation.lat),
@@ -120,6 +127,7 @@ export function LiveTrackingMap({
               customerLng,
             },
           );
+          if (!cancelled) notifyEta(null);
           return;
         }
 
@@ -134,12 +142,12 @@ export function LiveTrackingMap({
         setDirectionsResponse(response);
 
         const etaText = response.routes?.[0]?.legs?.[0]?.duration?.text ?? null;
-        onEtaChange?.(etaText);
+        notifyEta(etaText);
       } catch (err) {
         console.error("Directions request failed", err);
         if (cancelled) return;
         setDirectionsResponse(null);
-        onEtaChange?.(null);
+        notifyEta(null);
       }
     };
 
@@ -148,7 +156,7 @@ export function LiveTrackingMap({
     return () => {
       cancelled = true;
     };
-  }, [isLoaded, customerLat, customerLng, orderStatus]);
+  }, [isLoaded, customerLat, customerLng, orderStatus, riderLocation, onEtaChange]);
 
   useEffect(() => {
     if (!riderId || !supabase) return;
