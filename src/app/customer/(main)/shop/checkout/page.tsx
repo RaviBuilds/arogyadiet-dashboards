@@ -21,6 +21,7 @@ import {
 } from "@/shared/components/ui/card";
 import { Input } from "@/shared/components/ui/input";
 import { Separator } from "@/shared/components/ui/separator";
+import { calculateShopOrderBreakdown } from "@/lib/pricing/inclusive-tax";
 
 type PrimaryAddress = {
   street_1?: string | null;
@@ -45,7 +46,6 @@ export default function ShopCheckoutPage() {
 
   //functons / values from store
   const items = useCartStore((state) => state.items);
-  const cartTotal = useCartStore((state) => state.cartTotal);
   const clearCart = useCartStore((state) => state.clearCart);
 
   useSyncCartStockFromServer(isMounted);
@@ -134,16 +134,23 @@ export default function ShopCheckoutPage() {
     return null; // Prevent hydration mismatch with persisted cart state
   }
 
-  const subtotal = cartTotal();
-  const rawDiscountAmount =
-    discount.type === "PERCENTAGE"
-      ? (subtotal * discount.value) / 100
-      : discount.type === "FLAT"
-        ? discount.value
-        : 0;
-  const discountAmount = Math.min(Math.max(rawDiscountAmount, 0), subtotal);
-  const gst = (subtotal - discountAmount) * 0.05;
-  const grandTotal = subtotal - discountAmount + gst;
+  const orderLines = items.map((item) => {
+    const unitPrice = item.sale_price ?? item.original_price;
+    return {
+      gross: unitPrice * item.quantity,
+      taxPercent: item.tax_percent ?? 0,
+    };
+  });
+
+  const billing = calculateShopOrderBreakdown(orderLines, {
+    type: discount.type,
+    value: discount.value,
+  });
+
+  const gstLabel =
+    billing.displayTaxPercent != null && billing.displayTaxPercent > 0
+      ? `GST (${billing.displayTaxPercent}%)`
+      : "GST";
 
   const loadRazorpayScript = () => {
     return new Promise<boolean>((resolve) => {
@@ -396,20 +403,20 @@ export default function ShopCheckoutPage() {
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Item Subtotal</span>
-                <span>{formatCurrency(subtotal)}</span>
+                <span>{formatCurrency(billing.baseSubtotal)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Discount</span>
-                <span>-{formatCurrency(discountAmount)}</span>
+                <span>-{formatCurrency(billing.discount)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">GST (5%)</span>
-                <span>{formatCurrency(gst)}</span>
+                <span className="text-muted-foreground">{gstLabel}</span>
+                <span>{formatCurrency(billing.tax)}</span>
               </div>
               <Separator />
               <div className="flex justify-between text-base font-bold">
                 <span>Grand Total</span>
-                <span>{formatCurrency(grandTotal)}</span>
+                <span>{formatCurrency(billing.total)}</span>
               </div>
               <Button
                 type="button"

@@ -54,14 +54,14 @@ export async function fetchProductForCheckout(
 ) {
   const withSoftDelete = await supabase
     .from("products")
-    .select("id, original_price, sale_price, deleted_at")
+    .select("id, original_price, sale_price, tax_percent, deleted_at")
     .eq("id", productId)
     .single();
 
   if (isMissingColumnError(withSoftDelete.error, "deleted_at")) {
     return supabase
       .from("products")
-      .select("id, original_price, sale_price")
+      .select("id, original_price, sale_price, tax_percent")
       .eq("id", productId)
       .single();
   }

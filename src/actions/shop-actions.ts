@@ -7,6 +7,7 @@ import {
   fetchProductForCheckout,
   isProductUnavailable,
 } from "@/lib/products/catalog-queries";
+import { calculateShopOrderBreakdown } from "@/lib/pricing/inclusive-tax";
 import { CartItem } from "@/types/product";
 
 const razorpay = new Razorpay({
@@ -278,7 +279,7 @@ export async function createAddonCheckoutOrder(
       line_total: number;
     }> = [];
 
-    let subtotal = 0;
+    const orderLines: Array<{ gross: number; taxPercent: number }> = [];
 
     for (const item of items) {
       const { data: product, error: productError } =
@@ -290,7 +291,11 @@ export async function createAddonCheckoutOrder(
 
       const unitPrice = product!.sale_price ?? product!.original_price;
       const lineTotal = unitPrice * item.quantity;
-      subtotal += lineTotal;
+
+      orderLines.push({
+        gross: lineTotal,
+        taxPercent: Number(product!.tax_percent ?? 0),
+      });
 
       verifiedItems.push({
         product_id: product!.id,
@@ -300,8 +305,11 @@ export async function createAddonCheckoutOrder(
       });
     }
 
-    let discount = 0;
     let appliedCouponCode: string | null = null;
+    let couponDiscount: {
+      type: "PERCENTAGE" | "FLAT";
+      value: number;
+    } | null = null;
 
     if (couponCode?.trim()) {
       const normalizedCouponCode = couponCode.trim().toUpperCase();
@@ -329,19 +337,24 @@ export async function createAddonCheckoutOrder(
         throw new Error("This coupon has expired.");
       }
 
-      if (coupon.discount_type === "PERCENTAGE") {
-        discount = (subtotal * Number(coupon.discount_value ?? 0)) / 100;
-      } else if (coupon.discount_type === "FLAT") {
-        discount = Number(coupon.discount_value ?? 0);
+      if (
+        coupon.discount_type === "PERCENTAGE" ||
+        coupon.discount_type === "FLAT"
+      ) {
+        couponDiscount = {
+          type: coupon.discount_type,
+          value: Number(coupon.discount_value ?? 0),
+        };
       }
 
-      discount = Math.max(0, Math.min(discount, subtotal));
       appliedCouponCode = normalizedCouponCode;
     }
 
-    const taxableAmount = Math.max(0, subtotal - discount);
-    const gst = taxableAmount * 0.05;
-    const total = taxableAmount + gst;
+    const breakdown = calculateShopOrderBreakdown(
+      orderLines,
+      couponDiscount ?? undefined,
+    );
+    const total = breakdown.total;
 
     const { data: addon_order, error: addonOrderError } = await supabase
       .from("addon_orders")
@@ -370,6 +383,14 @@ export async function createAddonCheckoutOrder(
         amount: total,
         status: "PENDING",
         subscription_id: null,
+        base_amount: breakdown.baseSubtotal,
+        tax_percent:
+          breakdown.displayTaxPercent ??
+          breakdown.effectiveTaxPercent ??
+          0,
+        tax_amount: breakdown.tax,
+        discount_amount: breakdown.discount,
+        invoice_type: "ADDON",
       })
       .select("id")
       .single();
@@ -434,10 +455,11 @@ export async function createAddonCheckoutOrder(
         address: primaryAddress,
       },
       breakdown: {
-        subtotal,
-        discount,
-        gst,
-        total,
+        grossSubtotal: breakdown.grossSubtotal,
+        subtotal: breakdown.baseSubtotal,
+        discount: breakdown.discount,
+        gst: breakdown.tax,
+        total: breakdown.total,
       },
       appliedCouponCode,
     };
