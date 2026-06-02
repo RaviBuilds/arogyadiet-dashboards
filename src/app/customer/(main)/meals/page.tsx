@@ -312,31 +312,11 @@ export default async function MyMealsPage({
                         </div>
                       ) : null}
 
-                      {/* Queue status (muted) */}
-                      {(() => {
-                        const status = todaysOrder?.status;
-                        const isQueued =
-                          status === "OUT_FOR_DELIVERY" ||
-                          status === "REACHING_TO_LOCATION";
-                        if (!isQueued) return null;
-
-                        if (stopsAway === 0) {
-                          return (
-                            <p className="text-muted-foreground mt-1">
-                              Rider is heading to you next. Rider is coming to
-                              deliver your meal.
-                            </p>
-                          );
-                        }
-
-                        return (
-                          <p className="text-muted-foreground mt-1">
-                            Rider finishing previous deliveries. Total{" "}
-                            {stopsAway} previous delivery pending before
-                            reaching you.
-                          </p>
-                        );
-                      })()}
+                      {todaysOrder?.status === "OUT_FOR_DELIVERY" ? (
+                        <p className="text-muted-foreground mt-1">
+                          Rider is currently out for delivery.
+                        </p>
+                      ) : null}
 
                       {(() => {
                         const lines =

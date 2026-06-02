@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { getRiderOperationalDeliveryDate } from "@/lib/dates/ist";
 import {
   ArrowLeft,
-  CheckCircle2,
   MapPin,
   Navigation,
   Phone,
@@ -13,10 +12,12 @@ import { LiveLocationTracker } from "@/modules/rider/components/LiveLocationTrac
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { updateDeliveryStatusAction } from "@/actions/rider-actions/routeActions";
 import {
-  markOrderDeliveredAction,
-  updateDeliveryStatusAction,
-} from "@/actions/rider-actions/routeActions";
+  buildAddonLinesFromOrder,
+  buildDeliveryChecklistItems,
+} from "@/lib/delivery/riderChecklist";
+import { RiderDeliveryActions } from "@/modules/rider/components/RiderDeliveryActions";
 
 export const revalidate = 0;
 
@@ -122,6 +123,7 @@ export default async function RiderDeliveryDetailPage({
       payout_amount,
       delivery_date,
       meal_category:meal_categories ( name ),
+      addon_orders ( addon_order_items ( quantity, products ( name ) ) ),
       delivery_address:addresses ( street_1, street_2, landmark, city, pincode, lat, lng ),
       customer_profile:customer_profiles ( users ( full_name, mobile ) )
     `,
@@ -177,6 +179,13 @@ export default async function RiderDeliveryDetailPage({
 
   const canMarkOnTheWay = order.status === "OUT_FOR_DELIVERY";
   const canMarkDelivered = order.status === "REACHING_TO_LOCATION";
+  const showDeliveryActions =
+    canMarkDelivered || order.status === "PENDING_FAILURE_APPROVAL";
+  const addonLines = buildAddonLinesFromOrder(order);
+  const checklistItems = buildDeliveryChecklistItems(
+    mealCategory?.name || "Meal",
+    addonLines,
+  );
 
   async function markOnTheWay() {
     "use server";
@@ -186,12 +195,6 @@ export default async function RiderDeliveryDetailPage({
       "Rider is reaching to location",
     );
     redirect(`/route/${orderId}`);
-  }
-
-  async function markDelivered() {
-    "use server";
-    await markOrderDeliveredAction(orderId);
-    redirect("/route");
   }
 
   return (
@@ -219,7 +222,8 @@ export default async function RiderDeliveryDetailPage({
                 riderId={riderProfile.id}
                 isDelivering={
                   order.status === "OUT_FOR_DELIVERY" ||
-                  order.status === "REACHING_TO_LOCATION"
+                  order.status === "REACHING_TO_LOCATION" ||
+                  order.status === "PENDING_FAILURE_APPROVAL"
                 }
               />
               <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-700">
@@ -286,13 +290,12 @@ export default async function RiderDeliveryDetailPage({
         </form>
       )}
 
-      {canMarkDelivered && (
-        <form action={markDelivered}>
-          <Button className="h-14 w-full rounded-2xl bg-green-600 text-base font-bold text-white hover:bg-green-700">
-            <CheckCircle2 className="mr-2 h-5 w-5" />
-            Mark Delivered
-          </Button>
-        </form>
+      {showDeliveryActions && (
+        <RiderDeliveryActions
+          orderId={order.id}
+          status={order.status}
+          checklistItems={checklistItems}
+        />
       )}
     </div>
   );
