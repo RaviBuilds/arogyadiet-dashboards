@@ -11,8 +11,20 @@ import {
   Banknote,
   Clock,
 } from "lucide-react";
-import { Card, CardContent } from "@/shared/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/shared/components/ui/card";
 import { Badge } from "@/shared/components/ui/badge";
+import {
+  formatPaidMonthsWindowLabel,
+  formatRiderLeaderboardName,
+  getLast3PaidMonthsWindow,
+  yearMonthKey,
+} from "@/lib/delivery/riderPaidMonthsWindow";
 
 export const revalidate = 0;
 
@@ -60,13 +72,75 @@ export default async function RiderEarningsPage() {
     );
   }
 
-  // 4. Fetch Payment History (monthly summaries)
+  // 4. Fetch Payment History (monthly summaries) + fleet leaderboard data
   const adminClient = createAdminClient();
-  const { data: paymentHistory } = await adminClient
-    .from("rider_monthly_summaries")
-    .select("id, month, year, period_start, period_end, total_earnings, total_deliveries, status, is_custom, paid_at, paid_notes")
-    .eq("rider_id", riderProfile.id)
-    .order("created_at", { ascending: false });
+  const paidMonthsWindow = getLast3PaidMonthsWindow();
+  const paidMonthsWindowKeys = new Set(paidMonthsWindow.map(yearMonthKey));
+  const windowLabel = formatPaidMonthsWindowLabel(paidMonthsWindow);
+
+  const [{ data: paymentHistory }, { data: fleetPaidSummaries }] =
+    await Promise.all([
+      adminClient
+        .from("rider_monthly_summaries")
+        .select(
+          "id, month, year, period_start, period_end, total_earnings, total_deliveries, status, is_custom, paid_at, paid_notes",
+        )
+        .eq("rider_id", riderProfile.id)
+        .order("created_at", { ascending: false }),
+      adminClient
+        .from("rider_monthly_summaries")
+        .select(
+          `
+          rider_id,
+          year,
+          month,
+          net_payable,
+          rider_profiles (
+            users ( full_name )
+          )
+        `,
+        )
+        .eq("status", "PAID"),
+    ]);
+
+  const leaderboardTotals = new Map<
+    string,
+    { riderId: string; displayName: string; total: number }
+  >();
+
+  for (const row of fleetPaidSummaries ?? []) {
+    if (
+      !paidMonthsWindowKeys.has(
+        yearMonthKey({ year: row.year, month: row.month }),
+      )
+    ) {
+      continue;
+    }
+
+    const profile = Array.isArray(row.rider_profiles)
+      ? row.rider_profiles[0]
+      : row.rider_profiles;
+    const users = profile?.users;
+    const userRow = Array.isArray(users) ? users[0] : users;
+    const fullName = userRow?.full_name ?? "Unknown";
+
+    const existing = leaderboardTotals.get(row.rider_id);
+    if (existing) {
+      existing.total += Number(row.net_payable ?? 0);
+    } else {
+      leaderboardTotals.set(row.rider_id, {
+        riderId: row.rider_id,
+        displayName: formatRiderLeaderboardName(fullName),
+        total: Number(row.net_payable ?? 0),
+      });
+    }
+  }
+
+  const topRiders = [...leaderboardTotals.values()]
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+
+  const maxEarnings = Math.max(...topRiders.map((r) => r.total), 1);
 
   // 5. Calculate Metrics
   const todayStr = format(new Date(), "yyyy-MM-dd");
@@ -112,6 +186,39 @@ export default async function RiderEarningsPage() {
           <p className="text-sm font-medium text-green-100 mt-2">
             {format(new Date(), "EEEE, do MMMM")}
           </p>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6 border-none bg-white shadow-sm rounded-2xl">
+        <CardHeader>
+          <CardTitle>🏆 Top Riders (Last 3 Months)</CardTitle>
+          <CardDescription>{windowLabel}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {topRiders.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No paid settlements in this period yet.
+            </p>
+          ) : (
+            topRiders.map((rider, index) => (
+              <div key={rider.riderId} className="flex items-center gap-3">
+                <span className="w-24 shrink-0 truncate text-sm font-medium">
+                  {rider.displayName}
+                </span>
+                <div className="relative h-6 w-full flex-1 rounded-sm bg-zinc-100">
+                  <div
+                    className={`h-full rounded-sm ${index === 0 ? "bg-emerald-500" : "bg-indigo-500"}`}
+                    style={{
+                      width: `${(rider.total / maxEarnings) * 100}%`,
+                    }}
+                  />
+                </div>
+                <span className="w-20 shrink-0 text-right text-sm font-semibold text-zinc-900">
+                  ₹{rider.total.toFixed(2)}
+                </span>
+              </div>
+            ))
+          )}
         </CardContent>
       </Card>
 
