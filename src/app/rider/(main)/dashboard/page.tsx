@@ -30,6 +30,8 @@ import {
 import Link from "next/link";
 import {
   type CategoryDeliveryStats,
+  formatDeliveryCountBreakdown,
+  formatDeliveryCountBreakdownTitleCase,
   isCategoryComplete,
   isTerminalOrderStatus,
 } from "@/lib/delivery/orderStatuses";
@@ -202,8 +204,11 @@ export default async function RiderDashboard() {
                   Pending Drops
                 </p>
                 <span className="mt-2 rounded-full bg-zinc-50 px-2 py-1 text-[10px] text-zinc-500">
-                  {totalAssigned} Assigned • {delivered} Delivered • {failed}{" "}
-                  Failed
+                  {formatDeliveryCountBreakdownTitleCase({
+                    assigned: totalAssigned,
+                    delivered,
+                    failed,
+                  })}
                 </span>
               </CardContent>
             </Card>
@@ -248,8 +253,7 @@ export default async function RiderDashboard() {
                         <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
                       ) : null}
                       <p className="text-sm font-medium text-zinc-800">
-                        {categoryName} ({stats.assigned} assigned /{" "}
-                        {stats.delivered} delivered / {stats.failed} failed)
+                        {categoryName} ({formatDeliveryCountBreakdown(stats)})
                       </p>
                     </div>
                   ))

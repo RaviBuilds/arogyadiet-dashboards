@@ -17,3 +17,26 @@ export function isTerminalOrderStatus(
 export function isCategoryComplete(stats: CategoryDeliveryStats): boolean {
   return stats.assigned > 0 && stats.delivered + stats.failed >= stats.assigned;
 }
+
+export function isBatchCompleteByCounts(stats: {
+  mealCount: number;
+  deliveredCount: number;
+  failedCount: number;
+}): boolean {
+  return (
+    stats.mealCount > 0 &&
+    stats.deliveredCount + stats.failedCount >= stats.mealCount
+  );
+}
+
+export function formatDeliveryCountBreakdown(stats: CategoryDeliveryStats): string {
+  const base = `${stats.assigned} assigned / ${stats.delivered} delivered`;
+  return stats.failed > 0 ? `${base} / ${stats.failed} failed` : base;
+}
+
+export function formatDeliveryCountBreakdownTitleCase(
+  stats: CategoryDeliveryStats,
+): string {
+  const base = `${stats.assigned} Assigned • ${stats.delivered} Delivered`;
+  return stats.failed > 0 ? `${base} • ${stats.failed} Failed` : base;
+}

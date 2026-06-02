@@ -1,6 +1,9 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isTerminalOrderStatus } from "@/lib/delivery/orderStatuses";
+import {
+  isBatchCompleteByCounts,
+  isTerminalOrderStatus,
+} from "@/lib/delivery/orderStatuses";
 
 const INCOMPLETE_BATCH_STATUSES = ["PENDING", "IN_TRANSIT"] as const;
 
@@ -42,11 +45,18 @@ export async function tryCompleteDeliveryBatch(
     return { completed: false, batchId };
   }
 
+  const deliveredCount = orders.filter((o) => o.status === "DELIVERED").length;
+  const failedCount = orders.filter((o) => o.status === "FAILED").length;
   const allTerminal = orders.every((order) =>
     isTerminalOrderStatus(order.status),
   );
+  const completeByCounts = isBatchCompleteByCounts({
+    mealCount: orders.length,
+    deliveredCount,
+    failedCount,
+  });
 
-  if (!allTerminal) {
+  if (!allTerminal && !completeByCounts) {
     return { completed: false, batchId };
   }
 

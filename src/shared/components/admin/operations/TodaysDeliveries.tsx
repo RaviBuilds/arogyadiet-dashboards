@@ -9,6 +9,10 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Package, Layers, Filter, ChevronDown, Loader2 } from "lucide-react";
 import { revalidateOperationsPage, updateAdminOrderStatusAction, markAdminBatchPickedUpAction } from "@/actions/admin-actions/operationsActions";
 import { getAdminNextStatusTransition, PRE_PICKUP_ORDER_STATUSES } from "@/lib/delivery/adminOrderStatusTransitions";
+import {
+  formatDeliveryCountBreakdown,
+  isBatchCompleteByCounts,
+} from "@/lib/delivery/orderStatuses";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -181,17 +185,30 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
         });
       });
     });
-    return Array.from(batches.values()).map((batch) => ({
-      ...batch,
-      isPickedUp:
+    return Array.from(batches.values()).map((batch) => {
+      const displayStatus =
         batch.id !== "UNBATCHED" &&
-        (PICKED_UP_BATCH_STATUSES.includes(batch.status.toUpperCase()) ||
-          batch.pendingPickupCount === 0),
-      canMarkPickup:
-        batch.id !== "UNBATCHED" &&
-        batch.status.toUpperCase() === "PENDING" &&
-        batch.pendingPickupCount > 0,
-    }));
+        isBatchCompleteByCounts({
+          mealCount: batch.mealCount,
+          deliveredCount: batch.deliveredCount,
+          failedCount: batch.failedCount,
+        })
+          ? "COMPLETED"
+          : batch.status;
+
+      return {
+        ...batch,
+        displayStatus,
+        isPickedUp:
+          batch.id !== "UNBATCHED" &&
+          (PICKED_UP_BATCH_STATUSES.includes(displayStatus.toUpperCase()) ||
+            batch.pendingPickupCount === 0),
+        canMarkPickup:
+          batch.id !== "UNBATCHED" &&
+          displayStatus.toUpperCase() === "PENDING" &&
+          batch.pendingPickupCount > 0,
+      };
+    });
   }, [data]);
 
   const filteredBatchSummary = useMemo(() => {
@@ -209,7 +226,9 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
     
     // 2. Status Dropdown Filter
     if (batchStatusFilter.length > 0) {
-      result = result.filter(b => batchStatusFilter.includes(b.status.toUpperCase()));
+      result = result.filter((b) =>
+        batchStatusFilter.includes(b.displayStatus.toUpperCase()),
+      );
     }
     
     return result;
@@ -248,12 +267,16 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
       Day: getDayLabel(b.deliveryDate),
       "Batch Number":
         b.id === "UNBATCHED" ? "Unbatched" : b.id.substring(0, 8).toUpperCase(),
-      "Meals Count": `${b.mealCount} (${b.mealCount} assigned / ${b.deliveredCount} delivered / ${b.failedCount} failed)`,
+      "Meals Count": `${b.mealCount} (${formatDeliveryCountBreakdown({
+        assigned: b.mealCount,
+        delivered: b.deliveredCount,
+        failed: b.failedCount,
+      })})`,
       "Shop Products Count": b.addonCount,
       "Distance (km)": Number(b.distance).toFixed(2),
       "Payout (INR)": Number(b.payout).toFixed(2),
       "Assigned Rider": b.riderName,
-      "Status": b.status
+      "Status": b.displayStatus
     }));
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
@@ -597,7 +620,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
-                    {["PENDING", "COMPLETED"].map((type) => (
+                    {["PENDING", "IN_TRANSIT", "COMPLETED"].map((type) => (
                       <DropdownMenuCheckboxItem 
                         key={type} 
                         checked={batchStatusFilter.includes(type)} 
@@ -644,8 +667,11 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                   <TableCell>
                     <span className="font-bold">{batch.mealCount}</span>
                     <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                      {batch.mealCount} assigned / {batch.deliveredCount}{" "}
-                      delivered / {batch.failedCount} failed
+                      {formatDeliveryCountBreakdown({
+                        assigned: batch.mealCount,
+                        delivered: batch.deliveredCount,
+                        failed: batch.failedCount,
+                      })}
                     </p>
                   </TableCell>
                   <TableCell className={`font-medium ${batch.addonCount > 0 ? "text-destructive" : "text-muted-foreground"}`}>
@@ -659,7 +685,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
                   </TableCell>
                   <TableCell>{batch.riderName}</TableCell>
                   <TableCell>
-                    <StatusBadge status={batch.status} variant="outline" />
+                    <StatusBadge status={batch.displayStatus} variant="outline" />
                   </TableCell>
                   <TableCell>
                     {batch.id === "UNBATCHED" ? (
