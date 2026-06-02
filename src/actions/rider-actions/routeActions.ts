@@ -148,6 +148,37 @@ function buildFailureLogNote(reason: string, remark?: string) {
   return reason;
 }
 
+export async function getRiderDeliveryOrderStatusAction(
+  orderId: string,
+): Promise<{ success: true; status: string } | { success: false; error: string }> {
+  let riderProfileId: string;
+  try {
+    riderProfileId = await getCurrentRiderProfileId();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Authentication failed.";
+    return { success: false, error: message };
+  }
+
+  const supabase = await createClient();
+  const { data: order, error } = await supabase
+    .from("delivery_orders")
+    .select("status")
+    .eq("id", orderId)
+    .eq("assigned_rider_id", riderProfileId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Error fetching delivery order status:", error);
+    return { success: false, error: error.message };
+  }
+
+  if (!order) {
+    return { success: false, error: "Delivery not found for this rider." };
+  }
+
+  return { success: true, status: order.status };
+}
+
 export async function requestFailedDeliveryAction(
   orderId: string,
   reason: string,
