@@ -1,17 +1,20 @@
 import { createClient } from "@/lib/supabase/server";
+import { fetchCatalogProducts } from "@/lib/products/catalog-queries";
 import { Product } from "@/types/product";
 import ProductCard from "@/shared/components/customer/product-card";
 
 export default async function ShopPage() {
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-    .eq("is_active", true);
+  const { data, error } = await fetchCatalogProducts(supabase);
 
   if (error) {
-    console.error("Failed to fetch products:", error);
+    console.error(
+      "Failed to fetch products:",
+      error.message,
+      error.code,
+      error.details,
+    );
   }
 
   const products: Product[] = data ?? [];

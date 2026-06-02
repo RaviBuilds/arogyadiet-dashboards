@@ -1,9 +1,19 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
-import { Eye, EyeOff, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  ImageIcon,
+  Loader2,
+  Package,
+  Pencil,
+  Plus,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -13,6 +23,11 @@ import {
   AdminInventoryProduct,
 } from "@/actions/admin-actions/inventoryActions";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { ProductDescriptionEditor } from "@/shared/components/admin/inventory/ProductDescriptionEditor";
+import {
+  ProductMediaGallery,
+  type ProductMediaGalleryHandle,
+} from "@/shared/components/admin/inventory/ProductMediaGallery";
 import { DataTable } from "@/shared/components/ui/data-table";
 import {
   AlertDialog,
@@ -26,21 +41,56 @@ import {
   AlertDialogTrigger,
 } from "@/shared/components/ui/alert-dialog";
 import { Button } from "@/shared/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/shared/components/ui/dialog";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
+import { Separator } from "@/shared/components/ui/separator";
 import { Switch } from "@/shared/components/ui/switch";
-import { Textarea } from "@/shared/components/ui/textarea";
-import {
-  Sheet,
-  SheetContent,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/shared/components/ui/sheet";
+import { cn } from "@/lib/utils";
 
 interface InventoryPageClientProps {
   products: AdminInventoryProduct[];
+}
+
+function FormSection({
+  title,
+  description,
+  icon: Icon,
+  children,
+  className,
+}: {
+  title: string;
+  description?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn("space-y-4", className)}>
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold leading-none tracking-tight">
+            {title}
+          </h3>
+          {description ? (
+            <p className="mt-1.5 text-xs text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
 }
 
 export default function InventoryPageClient({
@@ -48,24 +98,25 @@ export default function InventoryPageClient({
 }: InventoryPageClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [productModalOpen, setProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] =
     useState<AdminInventoryProduct | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const mediaGalleryRef = useRef<ProductMediaGalleryHandle>(null);
 
-  const handleSheetOpenChange = (open: boolean) => {
-    setSheetOpen(open);
+  const handleProductModalOpenChange = (open: boolean) => {
+    setProductModalOpen(open);
     if (!open) {
       setEditingProduct(null);
     }
   };
 
-  const openCreateSheet = () => {
+  const openCreateModal = () => {
     setEditingProduct(null);
   };
 
-  const openEditSheet = (product: AdminInventoryProduct) => {
+  const openEditModal = (product: AdminInventoryProduct) => {
     setEditingProduct(product);
   };
 
@@ -99,16 +150,16 @@ export default function InventoryPageClient({
 
   const handleDeleteProduct = (productId: string) => {
     setDeletingId(productId);
-    const toastId = toast.loading("Deleting product...");
+    const toastId = toast.loading("Archiving product...");
 
     startTransition(async () => {
       const result = await adminDeleteProduct(productId);
 
       if (result.success) {
-        toast.success("Product deleted successfully.", { id: toastId });
+        toast.success("Product archived successfully.", { id: toastId });
         router.refresh();
       } else {
-        toast.error(result.error ?? "Failed to delete product.", {
+        toast.error(result.error ?? "Failed to archive product.", {
           id: toastId,
         });
       }
@@ -122,6 +173,7 @@ export default function InventoryPageClient({
 
     startTransition(async () => {
       const formData = new FormData(event.currentTarget);
+      mediaGalleryRef.current?.applyToFormData(formData);
       const result = await adminUpsertProduct(formData);
 
       if (result.success) {
@@ -130,7 +182,7 @@ export default function InventoryPageClient({
             ? "Product updated successfully."
             : "Product created successfully.",
         );
-        handleSheetOpenChange(false);
+        handleProductModalOpenChange(false);
         router.refresh();
         return;
       }
@@ -145,7 +197,8 @@ export default function InventoryPageClient({
         id: "image",
         header: "Image",
         cell: ({ row }) => {
-          const imageUrl = row.original.image_urls?.[0];
+          const imageUrl =
+            row.original.banner_image_url ?? row.original.image_urls?.[0];
 
           return imageUrl ? (
             <img
@@ -240,17 +293,17 @@ export default function InventoryPageClient({
 
           return (
             <div className="flex items-center gap-2">
-              <SheetTrigger asChild>
+              <DialogTrigger asChild>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onPointerDown={() => openEditSheet(product)}
+                  onPointerDown={() => openEditModal(product)}
                 >
                   <Pencil className="h-3.5 w-3.5" />
                   Edit
                 </Button>
-              </SheetTrigger>
+              </DialogTrigger>
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -270,9 +323,10 @@ export default function InventoryPageClient({
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Delete Product</AlertDialogTitle>
+                    <AlertDialogTitle>Archive Product</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Are you sure you want to delete this product?
+                      This will hide the product from the shop and inventory
+                      list. Order history will be preserved.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -287,10 +341,10 @@ export default function InventoryPageClient({
                       {isDeleting ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          Deleting...
+                          Archiving...
                         </>
                       ) : (
-                        "Delete"
+                        "Archive"
                       )}
                     </AlertDialogAction>
                   </AlertDialogFooter>
@@ -306,18 +360,21 @@ export default function InventoryPageClient({
 
   return (
     <>
-      <Sheet open={sheetOpen} onOpenChange={handleSheetOpenChange}>
+      <Dialog
+        open={productModalOpen}
+        onOpenChange={handleProductModalOpenChange}
+      >
         <div className="space-y-6">
           <AdminPageHeader
             title="Inventory"
             description="Manage shop product catalog, stock levels, and availability."
             action={
-              <SheetTrigger asChild>
-                <Button type="button" onPointerDown={openCreateSheet}>
+              <DialogTrigger asChild>
+                <Button type="button" onPointerDown={openCreateModal}>
                   <Plus className="h-4 w-4" />
                   Add New Product
                 </Button>
-              </SheetTrigger>
+              </DialogTrigger>
             }
           />
 
@@ -329,166 +386,164 @@ export default function InventoryPageClient({
           />
         </div>
 
-        <SheetContent
-          side="right"
-          className="w-[400px] sm:max-w-[600px] overflow-y-auto"
-        >
-          <SheetHeader>
-            <SheetTitle>
+        <DialogContent className="flex h-[90vh] max-h-[90vh] w-[80vw] max-w-[80vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[80vw]">
+          <DialogHeader className="shrink-0 border-b px-6 py-4">
+            <DialogTitle>
               {editingProduct ? "Edit Product" : "Add New Product"}
-            </SheetTitle>
-          </SheetHeader>
+            </DialogTitle>
+          </DialogHeader>
 
           <form
             key={editingProduct?.id ?? "new-product"}
             onSubmit={handleFormSubmit}
-            className="flex flex-1 flex-col gap-4 px-4 pb-4"
+            className="flex min-h-0 flex-1 flex-col"
           >
             {editingProduct ? (
               <input type="hidden" name="id" value={editingProduct.id} />
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="name">Name</Label>
-                <Input
-                  id="name"
-                  name="name"
-                  defaultValue={editingProduct?.name ?? ""}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="sku">SKU</Label>
-                <Input
-                  id="sku"
-                  name="sku"
-                  defaultValue={editingProduct?.sku ?? ""}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="category">Category</Label>
-                <Input
-                  id="category"
-                  name="category"
-                  defaultValue={editingProduct?.category ?? ""}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="originalPrice">Original Price</Label>
-                <Input
-                  id="originalPrice"
-                  name="originalPrice"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={editingProduct?.original_price ?? 0}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="salePrice">Sale Price</Label>
-                <Input
-                  id="salePrice"
-                  name="salePrice"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={editingProduct?.sale_price ?? ""}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="stockQuantity">Stock Quantity</Label>
-                <Input
-                  id="stockQuantity"
-                  name="stockQuantity"
-                  type="number"
-                  min="0"
-                  step="1"
-                  defaultValue={editingProduct?.stock_quantity ?? 0}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="taxPercent">Tax Percent</Label>
-                <Input
-                  id="taxPercent"
-                  name="taxPercent"
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  defaultValue={editingProduct?.tax_percent ?? ""}
-                />
-              </div>
-
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="shortDescription">Short Description</Label>
-                <Textarea
-                  id="shortDescription"
-                  name="shortDescription"
-                  rows={3}
-                  defaultValue={editingProduct?.short_description ?? ""}
-                />
-              </div>
-
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea
-                  id="description"
-                  name="description"
-                  rows={5}
-                  defaultValue={editingProduct?.description ?? ""}
-                />
-              </div>
-
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="imageUrls">Image URLs</Label>
-                <Input
-                  id="imageUrls"
-                  name="imageUrls"
-                  placeholder="https://example.com/image-1.jpg, https://example.com/image-2.jpg"
-                  defaultValue={(editingProduct?.image_urls ?? []).join(", ")}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Enter comma-separated image URLs for the product gallery.
-                </p>
-              </div>
-
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="image">Upload Image</Label>
-                {editingProduct?.image_urls?.length ? (
-                  <div className="flex flex-wrap gap-2">
-                    {editingProduct.image_urls.map((url) => (
-                      <img
-                        key={url}
-                        src={url}
-                        alt={editingProduct.name}
-                        className="h-16 w-16 rounded-md border object-cover"
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+              <div className="space-y-8">
+                <FormSection
+                  title="Basic Info"
+                  description="Product name, identifiers, and descriptions shown in the shop."
+                  icon={Package}
+                >
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="name">Name</Label>
+                      <Input
+                        id="name"
+                        name="name"
+                        defaultValue={editingProduct?.name ?? ""}
+                        required
                       />
-                    ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="sku">SKU</Label>
+                      <Input
+                        id="sku"
+                        name="sku"
+                        defaultValue={editingProduct?.sku ?? ""}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="category">Category</Label>
+                      <Input
+                        id="category"
+                        name="category"
+                        defaultValue={editingProduct?.category ?? ""}
+                      />
+                    </div>
+
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="description">Description</Label>
+                      <ProductDescriptionEditor
+                        id="description"
+                        name="description"
+                        defaultValue={editingProduct?.description ?? ""}
+                      />
+                    </div>
                   </div>
-                ) : null}
-                <Input
-                  id="image"
-                  name="image"
-                  type="file"
-                  accept="image/*"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Upload a local image to append to the product gallery.
-                </p>
+                </FormSection>
+
+                <Separator />
+
+                <FormSection
+                  title="Pricing & Inventory"
+                  description="Set prices, stock levels, and tax for checkout."
+                  icon={Wallet}
+                >
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="originalPrice">Original Price</Label>
+                      <Input
+                        id="originalPrice"
+                        name="originalPrice"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={editingProduct?.original_price ?? 0}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="salePrice">Sale Price</Label>
+                      <Input
+                        id="salePrice"
+                        name="salePrice"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={editingProduct?.sale_price ?? ""}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="stockQuantity">Stock Quantity</Label>
+                      <Input
+                        id="stockQuantity"
+                        name="stockQuantity"
+                        type="number"
+                        min="0"
+                        step="1"
+                        defaultValue={editingProduct?.stock_quantity ?? 0}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="taxPercent">Tax Percent</Label>
+                      <Input
+                        id="taxPercent"
+                        name="taxPercent"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        defaultValue={editingProduct?.tax_percent ?? ""}
+                      />
+                    </div>
+                  </div>
+                </FormSection>
+
+                <Separator />
+
+                <FormSection
+                  title="Media"
+                  description="Upload product gallery images."
+                  icon={ImageIcon}
+                >
+                  <div className="space-y-2">
+                    <Label>Upload Images</Label>
+                    <ProductMediaGallery
+                      ref={mediaGalleryRef}
+                      existingImages={editingProduct?.image_urls ?? []}
+                      defaultBannerUrl={
+                        editingProduct?.banner_image_url ??
+                        editingProduct?.image_urls?.[0] ??
+                        null
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Upload one or more images. The first image is the banner by
+                      default; use &quot;Set banner&quot; to change it.
+                    </p>
+                  </div>
+                </FormSection>
               </div>
             </div>
 
-            <SheetFooter className="px-0">
+            <DialogFooter className="sticky bottom-0 z-10 shrink-0 gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-backdrop-filter:bg-background/80 sm:flex-row sm:justify-end">
+              <DialogClose asChild>
+                <Button type="button" variant="outline" disabled={isPending}>
+                  Cancel
+                </Button>
+              </DialogClose>
               <Button type="submit" disabled={isPending}>
                 {isPending ? (
                   <>
@@ -501,10 +556,10 @@ export default function InventoryPageClient({
                   "Create Product"
                 )}
               </Button>
-            </SheetFooter>
+            </DialogFooter>
           </form>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

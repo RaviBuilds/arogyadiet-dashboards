@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { Product } from "@/types/product";
 import { useCartStore } from "@/store/useCartStore";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
@@ -40,8 +41,39 @@ export default function ProductCard({ product }: ProductCardProps) {
     product.image_url ??
     [];
 
-  const primaryImage = imageUrls[0];
+  const bannerImageUrl =
+    (product as Product & { banner_image_url?: string | null }).banner_image_url ??
+    null;
+
+  const primaryImage = bannerImageUrl ?? imageUrls[0];
   const hasMultipleImages = imageUrls.length > 1;
+
+  const galleryImages = useMemo(
+    () =>
+      imageUrls.length > 0 ? imageUrls : primaryImage ? [primaryImage] : [],
+    [imageUrls, primaryImage],
+  );
+
+  const [activeImage, setActiveImage] = useState(galleryImages[0] ?? "");
+
+  const productSku = (product as Product & { sku?: string | null }).sku;
+  const taxPercent = (product as Product & { tax_percent?: number | null })
+    .tax_percent;
+
+  const displayPrice = isOnSale
+    ? (product.sale_price as number)
+    : product.original_price;
+
+  const discountPercent =
+    isOnSale && product.original_price > 0
+      ? Math.round((1 - (product.sale_price as number) / product.original_price) * 100)
+      : null;
+
+  useEffect(() => {
+    if (quickViewOpen) {
+      setActiveImage(galleryImages[0] ?? "");
+    }
+  }, [quickViewOpen, galleryImages]);
 
   const handleLightboxOpenChange = (open: boolean) => {
     setLightboxOpen(open);
@@ -243,44 +275,155 @@ export default function ProductCard({ product }: ProductCardProps) {
       </div>
 
       <Dialog open={quickViewOpen} onOpenChange={setQuickViewOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogTitle className="text-2xl font-bold text-zinc-900">
-            {product.name}
-          </DialogTitle>
+        <DialogContent className="max-h-[90vh] w-full max-w-5xl overflow-y-auto p-10 sm:max-w-5xl">
+          <DialogTitle className="sr-only">{product.name}</DialogTitle>
 
-          <div className="flex items-center gap-2">
-            {isOnSale ? (
-              <>
-                <span className="text-sm line-through text-zinc-400">
-                  ₹{product.original_price.toFixed(2)}
-                </span>
-                <span className="text-lg font-bold text-green-600">
-                  ₹{(product.sale_price as number).toFixed(2)}
-                </span>
-              </>
-            ) : (
-              <span className="text-lg font-semibold text-zinc-900">
-                ₹{product.original_price.toFixed(2)}
-              </span>
-            )}
-          </div>
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+            <div>
+              <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl border bg-secondary/10 p-4">
+                {activeImage ? (
+                  <img
+                    src={activeImage}
+                    alt={product.name}
+                    className="h-full w-full object-contain"
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No image available
+                  </p>
+                )}
+              </div>
 
-          {product.short_description ? (
-            <p className="text-sm text-zinc-600">{product.short_description}</p>
-          ) : null}
-
-          <hr className="my-4" />
-
-          {product.description ? (
-            <div className="max-h-[60vh] overflow-y-auto">
-              <div
-                dangerouslySetInnerHTML={{ __html: product.description }}
-                className="prose max-w-none text-sm"
-              />
+              {galleryImages.length > 0 ? (
+                <div className="flex gap-3 overflow-x-auto p-4">
+                  {galleryImages.map((url) => (
+                    <button
+                      key={url}
+                      type="button"
+                      onClick={() => setActiveImage(url)}
+                      className={cn(
+                        "h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-background p-1",
+                        activeImage === url &&
+                          "ring-2 ring-primary ring-offset-2",
+                      )}
+                      aria-label="View product image"
+                    >
+                      <img
+                        src={url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
-          ) : (
-            <p className="text-sm text-zinc-500">No description available.</p>
-          )}
+
+            <div className="flex flex-col">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">
+                  {product.name}
+                </h2>
+                <div className="flex flex-wrap gap-2">
+                  {product.category ? (
+                    <Badge variant="secondary">{product.category}</Badge>
+                  ) : null}
+                  {productSku ? (
+                    <Badge variant="outline">SKU: {productSku}</Badge>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-baseline gap-2">
+                <span className="text-3xl font-bold text-primary">
+                  ₹{displayPrice.toFixed(2)}
+                </span>
+                {isOnSale ? (
+                  <span className="ml-3 text-lg text-muted-foreground line-through">
+                    ₹{product.original_price.toFixed(2)}
+                  </span>
+                ) : null}
+                {discountPercent ? (
+                  <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
+                    -{discountPercent}%
+                  </Badge>
+                ) : null}
+              </div>
+
+              <p
+                className={cn(
+                  "mt-2 text-sm font-medium",
+                  product.in_stock
+                    ? "text-emerald-600"
+                    : "text-muted-foreground",
+                )}
+              >
+                {product.in_stock ? "In Stock" : "Out of stock"}
+              </p>
+
+              {typeof taxPercent === "number" && taxPercent > 0 ? (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Inclusive of all taxes ({taxPercent}%)
+                </p>
+              ) : null}
+
+              {product.description ? (
+                <div
+                  className={cn(
+                    "prose prose-sm dark:prose-invert mt-6 max-w-none break-words overflow-x-hidden text-sm leading-relaxed",
+                    "[&_*]:max-w-full",
+                    "[&_p]:mb-3 [&_strong]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5",
+                    "[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1",
+                  )}
+                  dangerouslySetInnerHTML={{ __html: product.description }}
+                />
+              ) : (
+                <p className="mt-6 text-sm text-muted-foreground">
+                  No description available.
+                </p>
+              )}
+
+              <div className="mt-auto pt-6">
+                {isOutOfStock ? (
+                  <Button type="button" disabled className="w-full">
+                    Out of stock
+                  </Button>
+                ) : !cartItem ? (
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={() => addItem(product)}
+                  >
+                    Add to cart
+                  </Button>
+                ) : (
+                  <div className="flex w-full items-center justify-between rounded-lg bg-green-600 px-3 py-2 text-white">
+                    <button
+                      type="button"
+                      onClick={() => removeItem(product.id)}
+                      className="inline-flex items-center justify-center rounded-md p-1 hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      aria-label="Decrease quantity"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+
+                    <span className="text-sm font-medium">
+                      {cartItem.quantity} in cart
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => addItem(product)}
+                      className="inline-flex items-center justify-center rounded-md p-1 hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      aria-label="Increase quantity"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </article>

@@ -1,0 +1,58 @@
+.product-description-editor .ql-toolbar.ql-snow {
+  border: 0;
+  border-bottom: 1px solid var(--input);
+  padding: 0.375rem 0.5rem;
+  background: transparent;
+}
+
+.product-description-editor .ql-container.ql-snow {
+  border: 0;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.product-description-editor .ql-editor {
+  min-height: 8.75rem;
+  padding: 0.5rem 0.625rem;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+@media (min-width: 768px) {
+  .product-description-editor .ql-editor {
+    font-size: 0.875rem;
+  }
+}
+
+.product-description-editor .ql-editor.ql-blank::before {
+  color: var(--muted-foreground);
+  font-style: normal;
+  left: 0.625rem;
+  right: 0.625rem;
+}
+
+.product-description-editor .ql-toolbar .ql-stroke {
+  stroke: var(--foreground);
+}
+
+.product-description-editor .ql-toolbar .ql-fill {
+  fill: var(--foreground);
+}
+
+.product-description-editor .ql-toolbar button:hover,
+.product-description-editor .ql-toolbar button:focus,
+.product-description-editor .ql-toolbar button.ql-active {
+  color: var(--primary);
+}
+
+.product-description-editor .ql-toolbar button:hover .ql-stroke,
+.product-description-editor .ql-toolbar button:focus .ql-stroke,
+.product-description-editor .ql-toolbar button.ql-active .ql-stroke {
+  stroke: var(--primary);
+}
+
+.product-description-editor .ql-toolbar button:hover .ql-fill,
+.product-description-editor .ql-toolbar button:focus .ql-fill,
+.product-description-editor .ql-toolbar button.ql-active .ql-fill {
+  fill: var(--primary);
+}

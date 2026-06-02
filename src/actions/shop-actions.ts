@@ -3,6 +3,10 @@
 import crypto from "crypto";
 import Razorpay from "razorpay";
 import { createClient } from "@/lib/supabase/server";
+import {
+  fetchProductForCheckout,
+  isProductUnavailable,
+} from "@/lib/products/catalog-queries";
 import { CartItem } from "@/types/product";
 
 const razorpay = new Razorpay({
@@ -85,22 +89,19 @@ export async function processStandaloneCheckout(items: CartItem[]) {
     let true_total = 0;
 
     for (const item of items) {
-      const { data: product, error: productError } = await supabase
-        .from("products")
-        .select("id, original_price, sale_price")
-        .eq("id", item.id)
-        .single();
+      const { data: product, error: productError } =
+        await fetchProductForCheckout(supabase, item.id);
 
-      if (productError || !product) {
-        throw new Error(`Invalid product in cart: ${item.id}`);
+      if (isProductUnavailable(product, productError)) {
+        throw new Error("Product is no longer available.");
       }
 
-      const unitPrice = product.sale_price ?? product.original_price;
+      const unitPrice = product!.sale_price ?? product!.original_price;
       const lineTotal = unitPrice * item.quantity;
       true_total += lineTotal;
 
       verifiedItems.push({
-        product_id: product.id,
+        product_id: product!.id,
         quantity: item.quantity,
         unit_price: unitPrice,
         line_total: lineTotal,
@@ -280,22 +281,19 @@ export async function createAddonCheckoutOrder(
     let subtotal = 0;
 
     for (const item of items) {
-      const { data: product, error: productError } = await supabase
-        .from("products")
-        .select("id, original_price, sale_price")
-        .eq("id", item.id)
-        .single();
+      const { data: product, error: productError } =
+        await fetchProductForCheckout(supabase, item.id);
 
-      if (productError || !product) {
-        throw new Error(`Invalid product in cart: ${item.id}`);
+      if (isProductUnavailable(product, productError)) {
+        throw new Error("Product is no longer available.");
       }
 
-      const unitPrice = product.sale_price ?? product.original_price;
+      const unitPrice = product!.sale_price ?? product!.original_price;
       const lineTotal = unitPrice * item.quantity;
       subtotal += lineTotal;
 
       verifiedItems.push({
-        product_id: product.id,
+        product_id: product!.id,
         quantity: item.quantity,
         unit_price: unitPrice,
         line_total: lineTotal,

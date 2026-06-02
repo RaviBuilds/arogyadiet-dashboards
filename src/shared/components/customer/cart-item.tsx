@@ -18,7 +18,11 @@ export function CartItem({ item }: CartItemProps) {
     item.image_url ??
     [];
 
-  const primaryImage = imageUrls[0];
+  const bannerImageUrl =
+    (item as CartItemType & { banner_image_url?: string | null }).banner_image_url ??
+    null;
+
+  const primaryImage = bannerImageUrl ?? imageUrls[0];
   const unitPrice = item.sale_price ?? item.original_price;
 
   const handleRemoveCompletely = () => {
