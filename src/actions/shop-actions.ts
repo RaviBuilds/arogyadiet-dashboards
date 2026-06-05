@@ -9,7 +9,10 @@ import {
 } from "@/lib/products/catalog-queries";
 import { calculateShopOrderBreakdown } from "@/lib/pricing/inclusive-tax";
 import { CartItem } from "@/types/product";
-import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { notifyAdmins, sendNotificationToUser, buildPushPayload } from "@/lib/notifications";
+import {
+  getCustomerNameByProfileId,
+} from "@/lib/notifications/lookups";
 
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
@@ -673,7 +676,27 @@ export async function verifyAddonPayment(
       .eq("id", paymentId)
       .maybeSingle();
 
+    let productName = "product";
+    let customerName = "Customer";
+
     if (payment?.customer_profile_id) {
+      customerName = await getCustomerNameByProfileId(payment.customer_profile_id);
+
+      const { data: addonOrders } = await supabase
+        .from("addon_orders")
+        .select("addon_order_items(products(name))")
+        .eq("payment_id", paymentId)
+        .limit(1);
+
+      const items = addonOrders?.[0]?.addon_order_items;
+      const firstItem = Array.isArray(items) ? items[0] : items;
+      const product = Array.isArray(firstItem?.products)
+        ? firstItem.products[0]
+        : firstItem?.products;
+      if (product?.name) {
+        productName = product.name;
+      }
+
       const { data: customerProfile } = await supabase
         .from("customer_profiles")
         .select("user_id")
@@ -681,21 +704,32 @@ export async function verifyAddonPayment(
         .maybeSingle();
 
       if (customerProfile?.user_id) {
+        const customerTitle = "Product purchase confirmed!";
+        const customerMessage = `You have purchased product ${productName}, its scheduled for the delivery along with upcoming meals delivery.`;
+
         await sendNotificationToUser(customerProfile.user_id, {
-          title: "Product Purchase Confirmed!",
-          message:
-            "Your product purchase is confirmed and scheduled for delivery.",
+          title: customerTitle,
+          message: customerMessage,
           actionUrl: "/customer/meals",
           sendEmail: false,
+          ...buildPushPayload(
+            customerTitle,
+            customerMessage,
+            `product-purchase-${paymentId}`,
+          ),
         });
       }
     }
 
+    const adminTitle = "Product purchase confirmed!";
+    const adminMessage = `Hi Admin, Customer ${customerName} has purchased the product ${productName}.`;
+
     await notifyAdmins({
-      title: "Product Purchase Confirmed!",
-      message: "A customer has purchased a standalone product.",
-      actionUrl: "/admin/operations",
+      title: adminTitle,
+      message: adminMessage,
+      actionUrl: "/admin/customers",
       sendEmail: false,
+      ...buildPushPayload(adminTitle, adminMessage, `product-purchase-admin-${paymentId}`),
     });
 
     return { success: true };

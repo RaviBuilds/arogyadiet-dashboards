@@ -1,22 +1,64 @@
 import { revalidatePath } from "next/cache";
+import { computeHaversineRoute, type RoutableOrder } from "@/lib/distance";
 import {
-  calculateHaversineDistanceKm,
-  computeHaversineRoute,
-  type RoutableOrder,
-} from "@/lib/distance";
+  buildISTDepartureISO,
+  DEFAULT_RIDER_DEPARTURE_TIME_IST,
+  isFutureISO8601,
+} from "@/lib/dates/ist";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
 import { notifyRoutingAssignmentComplete } from "@/lib/delivery/deliveryStatusNotifications";
+import { computeOptimizedDeliveryRoute } from "@/lib/routing/googleRoutes";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // Service-role client only: this engine runs from cron/background jobs and must bypass RLS.
 const supabaseAdmin = createAdminClient();
 
 const RE_ROUTABLE_STATUSES = ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"];
+const MAX_STOPS_PER_RIDER = 20;
 
-type GoogleDirectionsRoute = {
+type CommittedRoute = {
   totalKm: number;
   expectedPayout: number;
   legs: { orderId: string; routeSequence: number; payoutAmount: number }[];
+};
+
+type CoordinateAuditEntry = {
+  orderId: string;
+  addressId: string | null;
+  pincode: string | null;
+  lat: number;
+  lng: number;
+  usedPincodeFallback: boolean;
+  riderId: string;
+};
+
+type RoutingFallbackEntry = {
+  riderId: string;
+  orderCount: number;
+};
+
+type SpilloverEntry = {
+  orderId: string;
+  riderId: string;
+  reason: "rider_capacity_exceeded";
+};
+
+type RiderDispatchContext = {
+  targetDate: string;
+  kitchenLat: number;
+  kitchenLng: number;
+  payoutPerKm: number;
+  apiKey: string;
+  departureTime?: string;
+};
+
+type RiderDispatchResult = {
+  riderId: string;
+  batchesCreated: number;
+  ordersAssigned: number;
+  fallbacks: RoutingFallbackEntry[];
+  spillover: SpilloverEntry[];
+  error?: string;
 };
 
 async function logRoutingRun(
@@ -113,119 +155,10 @@ async function resetPendingRoutingForDate(targetDate: string) {
   };
 }
 
-async function fetchGoogleDirectionsRoute(
-  riderOrders: RoutableOrder[],
-  kitchenLat: number,
-  kitchenLng: number,
-  payoutPerKm: number,
-  apiKey: string,
-): Promise<GoogleDirectionsRoute | null> {
-  // A. Open routing: pick the farthest delivery (Haversine from kitchen) as the final stop.
-  let farthestOriginalIndex = 0;
-  let maxDistanceKm = -1;
-
-  for (let index = 0; index < riderOrders.length; index++) {
-    const order = riderOrders[index];
-    const distanceKm = calculateHaversineDistanceKm(
-      kitchenLat,
-      kitchenLng,
-      order.lat,
-      order.lng,
-    );
-
-    if (distanceKm > maxDistanceKm) {
-      maxDistanceKm = distanceKm;
-      farthestOriginalIndex = index;
-    }
-  }
-
-  const destinationOrder = riderOrders[farthestOriginalIndex];
-
-  // B. Split remaining orders into Google waypoints; track their original riderOrders indices.
-  const intermediateOrders: RoutableOrder[] = [];
-  const originalIndicesOfIntermediates: number[] = [];
-
-  riderOrders.forEach((order, originalIndex) => {
-    if (originalIndex === farthestOriginalIndex) return;
-
-    intermediateOrders.push(order);
-    originalIndicesOfIntermediates.push(originalIndex);
-  });
-
-  const kitchenCoords = `${kitchenLat},${kitchenLng}`;
-  const params = new URLSearchParams({
-    origin: kitchenCoords,
-    destination: `${destinationOrder.lat},${destinationOrder.lng}`,
-    mode: "driving",
-    key: apiKey,
-  });
-
-  if (intermediateOrders.length > 0) {
-    params.set(
-      "waypoints",
-      `optimize:true|${intermediateOrders
-        .map((order) => `${order.lat},${order.lng}`)
-        .join("|")}`,
-    );
-  }
-
-  const mapRes = await fetch(
-    `https://maps.googleapis.com/maps/api/directions/json?${params.toString()}`,
-  );
-  const mapData = await mapRes.json();
-
-  if (mapData.status !== "OK") {
-    console.error("Google Maps API Error:", mapData);
-    return null;
-  }
-
-  const route = mapData.routes[0];
-  const totalMeters = route.legs.reduce(
-    (sum: number, leg: { distance: { value: number } }) =>
-      sum + leg.distance.value,
-    0,
-  );
-  const totalKm = Number((totalMeters / 1000).toFixed(2));
-  const expectedPayout = Math.round(totalKm * payoutPerKm);
-
-  const legs = route.legs as { distance?: { value?: number } }[];
-
-  const googleWaypointOrder: number[] =
-    intermediateOrders.length === 0
-      ? []
-      : Array.isArray(route.waypoint_order) && route.waypoint_order.length > 0
-        ? (route.waypoint_order as number[])
-        : intermediateOrders.map((_, index) => index);
-
-  // D. Google's waypoint_order indexes into intermediateOrders only — remap to riderOrders,
-  // then append the farthest stop as the fixed final destination (no return to kitchen).
-  const optimizedIntermediateOriginalIndices = googleWaypointOrder.map(
-    (intermediateIndex) => originalIndicesOfIntermediates[intermediateIndex],
-  );
-  const finalOptimalIndices = [
-    ...optimizedIntermediateOriginalIndices,
-    farthestOriginalIndex,
-  ];
-
-  // E. Build payout legs in visit order using each Directions leg distance.
-  const orderedLegs = finalOptimalIndices.map((originalIndex, legIndex) => {
-    const order = riderOrders[originalIndex];
-    const legDistanceKm = (legs[legIndex]?.distance?.value || 0) / 1000;
-
-    return {
-      orderId: order.id,
-      routeSequence: legIndex + 1,
-      payoutAmount: Number((legDistanceKm * payoutPerKm).toFixed(2)),
-    };
-  });
-
-  return { totalKm, expectedPayout, legs: orderedLegs };
-}
-
 async function commitRiderBatch(
   riderId: string,
   targetDate: string,
-  route: GoogleDirectionsRoute,
+  route: CommittedRoute,
 ) {
   const { data: newBatch, error: batchError } = await supabaseAdmin
     .from("delivery_batches")
@@ -255,6 +188,118 @@ async function commitRiderBatch(
   }
 
   return route.legs.length;
+}
+
+async function processRiderDispatch(
+  riderId: string,
+  riderOrders: RoutableOrder[],
+  coordinateAudit: CoordinateAuditEntry[],
+  ctx: RiderDispatchContext,
+): Promise<RiderDispatchResult> {
+  if (riderOrders.length === 0) {
+    return {
+      riderId,
+      batchesCreated: 0,
+      ordersAssigned: 0,
+      fallbacks: [],
+      spillover: [],
+    };
+  }
+
+  const pincodeFallbackCount = coordinateAudit.filter(
+    (entry) => entry.riderId === riderId && entry.usedPincodeFallback,
+  ).length;
+
+  if (pincodeFallbackCount > 0) {
+    console.warn(
+      `[routing] rider ${riderId}: ${pincodeFallbackCount}/${riderOrders.length} stops use pincode centroid coordinates`,
+    );
+  }
+
+  const assignedOrders = riderOrders.slice(0, MAX_STOPS_PER_RIDER);
+  const spilloverOrders = riderOrders.slice(MAX_STOPS_PER_RIDER);
+  const spillover: SpilloverEntry[] = spilloverOrders.map((order) => ({
+    orderId: order.id,
+    riderId,
+    reason: "rider_capacity_exceeded",
+  }));
+
+  if (spillover.length > 0) {
+    console.warn(
+      `[routing] rider ${riderId}: ${spillover.length} orders exceed capacity; manual assignment required`,
+    );
+
+    for (const entry of spillover) {
+      await supabaseAdmin.from("delivery_status_logs").insert({
+        delivery_order_id: entry.orderId,
+        status: "ORDER_CREATED",
+        note: `Skipped during dispatch: rider capacity exceeded (max ${MAX_STOPS_PER_RIDER})`,
+      });
+    }
+  }
+
+  const googleRoute = await computeOptimizedDeliveryRoute(
+    assignedOrders,
+    ctx.kitchenLat,
+    ctx.kitchenLng,
+    ctx.payoutPerKm,
+    ctx.apiKey,
+    ctx.departureTime,
+  );
+
+  let route: CommittedRoute;
+  const fallbacks: RoutingFallbackEntry[] = [];
+
+  if (googleRoute) {
+    route = googleRoute;
+  } else {
+    route = computeHaversineRoute(
+      assignedOrders,
+      ctx.kitchenLat,
+      ctx.kitchenLng,
+      ctx.payoutPerKm,
+    );
+    fallbacks.push({
+      riderId,
+      orderCount: assignedOrders.length,
+    });
+  }
+
+  const assignedCount = await commitRiderBatch(riderId, ctx.targetDate, route);
+
+  return {
+    riderId,
+    batchesCreated: assignedCount > 0 ? 1 : 0,
+    ordersAssigned: assignedCount,
+    fallbacks,
+    spillover,
+  };
+}
+
+async function processRiderDispatchSafe(
+  riderId: string,
+  riderOrders: RoutableOrder[],
+  coordinateAudit: CoordinateAuditEntry[],
+  ctx: RiderDispatchContext,
+): Promise<RiderDispatchResult> {
+  try {
+    return await processRiderDispatch(
+      riderId,
+      riderOrders,
+      coordinateAudit,
+      ctx,
+    );
+  } catch (err) {
+    console.error(`Routing Engine Error for rider ${riderId}:`, err);
+    return {
+      riderId,
+      batchesCreated: 0,
+      ordersAssigned: 0,
+      fallbacks: [],
+      spillover: [],
+      error: err instanceof Error ? err.message : "Unknown routing error",
+    };
+  }
 }
 
 export async function executeAutomatedDispatch(targetDate: string) {
@@ -329,9 +374,8 @@ export async function executeAutomatedDispatch(targetDate: string) {
   let geocodedFromPincode = 0;
   let skippedBadCoords = 0;
   let skippedNoRider = 0;
-  let ordersAssigned = 0;
   const skippedOrderIds: string[] = [];
-  const routingFallbacks: { riderId: string; orderCount: number }[] = [];
+  const coordinateAudit: CoordinateAuditEntry[] = [];
 
   for (const order of orders) {
     const address = Array.isArray(order.addresses)
@@ -373,6 +417,18 @@ export async function executeAutomatedDispatch(targetDate: string) {
       continue;
     }
 
+    const auditEntry: CoordinateAuditEntry = {
+      orderId: order.id,
+      addressId: address?.id ?? null,
+      pincode: address?.pincode ?? null,
+      lat: resolved.coords.lat,
+      lng: resolved.coords.lng,
+      usedPincodeFallback: resolved.usedPincodeFallback,
+      riderId,
+    };
+    coordinateAudit.push(auditEntry);
+    console.info("[routing] resolved order coordinates", auditEntry);
+
     if (!riderGroups.has(riderId)) riderGroups.set(riderId, []);
     riderGroups.get(riderId)!.push({
       id: order.id,
@@ -385,14 +441,14 @@ export async function executeAutomatedDispatch(targetDate: string) {
     await logRoutingRun(targetDate, {
       totalOrders: orders.length,
       batchesCreated: 0,
-      ordersAssigned,
+      ordersAssigned: 0,
       batchesRemoved: resetResult.batchesRemoved,
       ordersReset: resetResult.ordersReset,
       geocodedFromPincode,
       skippedBadCoords,
       skippedNoRider,
       skippedOrderIds,
-      routingFallbacks,
+      coordinateAudit,
     });
 
     return {
@@ -400,40 +456,50 @@ export async function executeAutomatedDispatch(targetDate: string) {
     };
   }
 
-  let batchesCreated = 0;
+  const departureTimeIso = buildISTDepartureISO(targetDate);
+  const departureTime = isFutureISO8601(departureTimeIso)
+    ? departureTimeIso
+    : undefined;
 
-  for (const [riderId, riderOrders] of Array.from(riderGroups.entries())) {
-    if (riderOrders.length === 0) continue;
+  if (!departureTime) {
+    console.warn(
+      `[routing] departure ${departureTimeIso} is in the past; using traffic-aware "now"`,
+    );
+  }
 
-    try {
-      let route = await fetchGoogleDirectionsRoute(
+  const dispatchCtx: RiderDispatchContext = {
+    targetDate,
+    kitchenLat,
+    kitchenLng,
+    payoutPerKm,
+    apiKey: GOOGLE_API_KEY,
+    departureTime,
+  };
+
+  const riderResults = await Promise.all(
+    Array.from(riderGroups.entries()).map(([riderId, riderOrders]) =>
+      processRiderDispatchSafe(
+        riderId,
         riderOrders,
-        kitchenLat,
-        kitchenLng,
-        payoutPerKm,
-        GOOGLE_API_KEY,
-      );
+        coordinateAudit,
+        dispatchCtx,
+      ),
+    ),
+  );
 
-      if (!route) {
-        route = computeHaversineRoute(
-          riderOrders,
-          kitchenLat,
-          kitchenLng,
-          payoutPerKm,
-        );
-        routingFallbacks.push({
-          riderId,
-          orderCount: riderOrders.length,
-        });
-      }
+  let batchesCreated = 0;
+  let ordersAssigned = 0;
+  const routingFallbacks: RoutingFallbackEntry[] = [];
+  const riderErrors: { riderId: string; error: string }[] = [];
+  const unassignedSpillover: SpilloverEntry[] = [];
 
-      const assignedCount = await commitRiderBatch(riderId, targetDate, route);
-      if (assignedCount > 0) {
-        batchesCreated++;
-        ordersAssigned += assignedCount;
-      }
-    } catch (err) {
-      console.error("Routing Engine Error:", err);
+  for (const result of riderResults) {
+    batchesCreated += result.batchesCreated;
+    ordersAssigned += result.ordersAssigned;
+    routingFallbacks.push(...result.fallbacks);
+    unassignedSpillover.push(...result.spillover);
+    if (result.error) {
+      riderErrors.push({ riderId: result.riderId, error: result.error });
     }
   }
 
@@ -442,13 +508,20 @@ export async function executeAutomatedDispatch(targetDate: string) {
   revalidatePath("/admin/riders");
 
   const usedFallback = routingFallbacks.length > 0;
+  const trafficLabel = departureTime
+    ? `${DEFAULT_RIDER_DEPARTURE_TIME_IST.slice(0, 5)} IST traffic`
+    : "current traffic";
   const routingMethod = usedFallback
-    ? "Google Maps with Haversine fallback"
-    : "Google Maps";
+    ? `Google Routes (TWO_WHEELER, ${trafficLabel}) with Haversine fallback`
+    : `Google Routes (TWO_WHEELER, ${trafficLabel})`;
   const resultStatsObject = {
     totalOrders: orders.length,
     batchesCreated,
     ordersAssigned,
+    unassignedSpillover,
+    spilloverCount: unassignedSpillover.length,
+    riderErrors,
+    departureTime: departureTime ?? null,
     batchesRemoved: resetResult.batchesRemoved,
     ordersReset: resetResult.ordersReset,
     geocodedFromPincode,
@@ -456,6 +529,7 @@ export async function executeAutomatedDispatch(targetDate: string) {
     skippedNoRider,
     skippedOrderIds,
     routingFallbacks,
+    coordinateAudit,
   };
 
   await logRoutingRun(targetDate, resultStatsObject);
@@ -464,9 +538,14 @@ export async function executeAutomatedDispatch(targetDate: string) {
     await notifyRoutingAssignmentComplete(targetDate);
   }
 
+  const spilloverNote =
+    unassignedSpillover.length > 0
+      ? ` ${unassignedSpillover.length} order(s) need manual assignment (rider capacity).`
+      : "";
+
   return {
     success: true,
-    message: `Routed ${batchesCreated} batches via ${routingMethod} for ${targetDate}!`,
+    message: `Routed ${batchesCreated} batches via ${routingMethod} for ${targetDate}!${spilloverNote}`,
     stats: resultStatsObject,
   };
 }

@@ -20,6 +20,24 @@ export interface NotificationPayload {
   sendEmail?: boolean;
   sendPush?: boolean;
   emailStrategy?: "shared" | "individual";
+  /** When true, notifyAdmins skips in-app inserts (email/push only). */
+  skipInApp?: boolean;
+}
+
+export function buildPushPayload(
+  title: string,
+  message: string,
+  topic: string,
+): Pick<
+  NotificationPayload,
+  "headings" | "contents" | "web_push_topic" | "sendPush"
+> {
+  return {
+    headings: { en: title },
+    contents: { en: message },
+    web_push_topic: topic,
+    sendPush: true,
+  };
 }
 
 const ADMIN_ROLE_CODES = ["ADMIN", "MASTER_ADMIN", "SUPER_ADMIN"] as const;
@@ -211,12 +229,14 @@ export async function notifyAdmins(payload: NotificationPayload): Promise<void> 
       return;
     }
 
-    const { error: insertError } = await supabaseAdmin
-      .from("notifications")
-      .insert(admins.map((admin) => toNotificationRow(admin.id, payload)));
+    if (!payload.skipInApp) {
+      const { error: insertError } = await supabaseAdmin
+        .from("notifications")
+        .insert(admins.map((admin) => toNotificationRow(admin.id, payload)));
 
-    if (insertError) {
-      console.error("notifyAdmins insert error:", insertError);
+      if (insertError) {
+        console.error("notifyAdmins insert error:", insertError);
+      }
     }
 
     if (payload.sendEmail && admins.length > 0) {

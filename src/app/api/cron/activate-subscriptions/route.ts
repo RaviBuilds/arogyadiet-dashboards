@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { getCustomerNameByProfileId } from "@/lib/notifications/lookups";
 import { notifySubscriptionStopped } from "@/lib/subscription/subscriptionNotifications";
 import { format, addDays } from "date-fns";
 
@@ -64,9 +65,13 @@ export async function GET(request: Request) {
           });
         }
 
+        const customerName = await getCustomerNameByProfileId(
+          sub.customer_profile_id,
+        );
+
         await notifyAdmins({
           title: "Pending Subscription Activated!",
-          message: "A pending subscription has been activated for a customer.",
+          message: `Hi Admin, Pending subscription has been activated for the customer ${customerName}.`,
           actionUrl: "/admin/customers",
           sendEmail: false,
         });

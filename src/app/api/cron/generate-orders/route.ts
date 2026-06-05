@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { generateDailyOrders } from "@/actions/system-actions/orderGeneration";
 import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
-import { notifyAdmins } from "@/lib/notifications";
+import { buildPushPayload, notifyAdmins } from "@/lib/notifications";
+import { notifyCustomersMealsOrderCreated } from "@/lib/notifications/orderNotifications";
 
 /**
  * GET /api/cron/generate-orders?secret=<CRON_SECRET>&date=YYYY-MM-DD
@@ -44,13 +45,25 @@ export async function GET(request: Request) {
     }
 
     try {
+      const adminTitle = "Order Creation Automation Result!";
+      const adminMessage =
+        "Hi admin, please check the 5:15 pm automation result of order creation.";
+
       await notifyAdmins({
-        title: "Order Creation Automation Result!",
-        message: "Please check the 5:15 pm automation result.",
+        title: adminTitle,
+        message: adminMessage,
         actionUrl: "/admin/operations",
         sendEmail: true,
         emailStrategy: "shared",
+        ...buildPushPayload(adminTitle, adminMessage, `order-gen-${targetDate}`),
       });
+
+      if (result.affectedCustomerProfileIds?.length) {
+        await notifyCustomersMealsOrderCreated(
+          result.affectedCustomerProfileIds,
+          targetDate,
+        );
+      }
     } catch (notifyError) {
       console.error("Order creation notification error:", notifyError);
     }

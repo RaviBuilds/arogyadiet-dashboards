@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js"; // Use server client in pr
 import { addDays, format, differenceInCalendarDays, parseISO } from "date-fns";
 import { cascadePendingSubscriptionDates } from "@/actions/manageMealActions";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { getCustomerNameByProfileId } from "@/lib/notifications/lookups";
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
   key_secret: process.env.RAZORPAY_KEY_SECRET!,
@@ -429,19 +430,22 @@ export async function verifyAndActivateSubscriptionAction(
       .eq("id", customerProfileId)
       .maybeSingle();
 
+    const customerName = await getCustomerNameByProfileId(customerProfileId);
+    const planName = plan.name ?? "subscription plan";
+
     if (customerProfile?.user_id) {
       await sendNotificationToUser(customerProfile.user_id, {
         title: "Subscription Started!",
         message:
-          "Thanks for purchasing a subscription. Click here to view how to manage your planner.",
+          "Thanks for purchasing subscription. Know how to manage your subscription. Click here to view invoice.",
         actionUrl: "/customer/subscription/manage/planner",
         sendEmail: true,
       });
     }
 
     await notifyAdmins({
-      title: "New Subscription Started!",
-      message: "A customer has successfully purchased a new subscription.",
+      title: "Subscription Started!",
+      message: `Hi Admin, Subscription ${planName} purchased by ${customerName} customer.`,
       actionUrl: "/admin/subscriptions",
       sendEmail: true,
       emailStrategy: "shared",

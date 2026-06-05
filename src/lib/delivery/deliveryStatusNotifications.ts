@@ -1,9 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  buildPushPayload,
   notifyAdmins,
   sendNotificationToUser,
-  type NotificationPayload,
 } from "@/lib/notifications";
+import { getRiderNameByProfileId } from "@/lib/notifications/lookups";
 
 async function resolveCustomerUserId(
   customerProfileId: string,
@@ -45,48 +46,47 @@ async function resolveOrderContext(orderId: string) {
   return order;
 }
 
-function pushFields(
-  title: string,
-  message: string,
-  topic: string,
-): Pick<
-  NotificationPayload,
-  "headings" | "contents" | "web_push_topic" | "sendPush"
-> {
-  return {
-    headings: { en: title },
-    contents: { en: message },
-    web_push_topic: topic,
-    sendPush: true,
-  };
-}
-
 export async function notifyOutForDeliveryForBatch(
   riderProfileId: string,
   orderIds: string[],
 ): Promise<void> {
   try {
-    const supabaseAdmin = createAdminClient();
+    const riderName = await getRiderNameByProfileId(riderProfileId);
+    const adminTitle = "Meal Out for delivery";
+    const adminMessage = `Hi admin, Rider ${riderName} picked the batch.`;
 
     await notifyAdmins({
-      title: "Meal Out for delivery",
-      message: "Rider picked the batch.",
+      title: adminTitle,
+      message: adminMessage,
       actionUrl: "/admin/operations",
       sendEmail: false,
+      ...buildPushPayload(
+        adminTitle,
+        adminMessage,
+        `out-for-delivery-admin-${riderProfileId}`,
+      ),
     });
 
     const riderUserId = await resolveRiderUserId(riderProfileId);
     if (riderUserId) {
+      const riderTitle = "Meal Out for delivery";
+      const riderMessage = "Meal picked and out for delivery.";
       await sendNotificationToUser(riderUserId, {
-        title: "Meal Out for delivery",
-        message: "Meal picked and out for delivery.",
+        title: riderTitle,
+        message: riderMessage,
         actionUrl: "/rider/dashboard",
         sendEmail: false,
+        ...buildPushPayload(
+          riderTitle,
+          riderMessage,
+          `out-for-delivery-rider-${riderProfileId}`,
+        ),
       });
     }
 
     if (orderIds.length === 0) return;
 
+    const supabaseAdmin = createAdminClient();
     const { data: orders, error } = await supabaseAdmin
       .from("delivery_orders")
       .select("customer_profile_id")
@@ -111,7 +111,7 @@ export async function notifyOutForDeliveryForBatch(
           message,
           actionUrl: "/customer/meals",
           sendEmail: false,
-          ...pushFields(
+          ...buildPushPayload(
             title,
             message,
             `out-for-delivery-${order.customer_profile_id}`,
@@ -135,13 +135,14 @@ export async function notifyReachingToLocation(orderId: string): Promise<void> {
       );
       if (customerUserId) {
         const title = "Rider is approaching!";
-        const message = "Rider is near your location.";
+        const message =
+          "Rider is near to your location and reaching in a while.";
         await sendNotificationToUser(customerUserId, {
           title,
           message,
           actionUrl: "/customer/meals",
           sendEmail: false,
-          ...pushFields(title, message, `reaching-${orderId}`),
+          ...buildPushPayload(title, message, `reaching-${orderId}`),
         });
       }
     }
@@ -149,11 +150,14 @@ export async function notifyReachingToLocation(orderId: string): Promise<void> {
     if (order.assigned_rider_id) {
       const riderUserId = await resolveRiderUserId(order.assigned_rider_id);
       if (riderUserId) {
+        const title = "Marked Reaching to location";
+        const message = "Marked Reaching to location.";
         await sendNotificationToUser(riderUserId, {
-          title: "Marked Reaching to location.",
-          message: "Marked Reaching to location.",
+          title,
+          message,
           actionUrl: "/rider/dashboard",
           sendEmail: false,
+          ...buildPushPayload(title, message, `reaching-rider-${orderId}`),
         });
       }
     }
@@ -180,13 +184,13 @@ export async function notifyDelivered(orderId: string): Promise<void> {
       );
       if (customerUserId) {
         const title = "Your order delivered!";
-        const message = "Meal has been delivered.";
+        const message = "Your meal has been delivered!";
         await sendNotificationToUser(customerUserId, {
           title,
           message,
           actionUrl: "/customer/meals",
           sendEmail: false,
-          ...pushFields(title, message, `delivered-${orderId}`),
+          ...buildPushPayload(title, message, `delivered-${orderId}`),
         });
       }
     }
@@ -194,11 +198,14 @@ export async function notifyDelivered(orderId: string): Promise<void> {
     if (order.assigned_rider_id) {
       const riderUserId = await resolveRiderUserId(order.assigned_rider_id);
       if (riderUserId) {
+        const title = "Your order delivered!";
+        const message = "Your meal has been delivered!";
         await sendNotificationToUser(riderUserId, {
-          title: "Order delivered successfully.",
-          message: "Order delivered successfully.",
+          title,
+          message,
           actionUrl: "/rider/dashboard",
           sendEmail: false,
+          ...buildPushPayload(title, message, `delivered-rider-${orderId}`),
         });
       }
     }
@@ -220,11 +227,14 @@ export async function notifyBatchCompleted(batchId: string): Promise<void> {
 
     const riderUserId = await resolveRiderUserId(batch.assigned_rider_id);
     if (riderUserId) {
+      const title = "Batch Delivery Completed!";
+      const message = "You have successfully completed the batch delivery!";
       await sendNotificationToUser(riderUserId, {
-        title: "Batch Delivery Completed!",
-        message: "You have successfully completed the batch delivery.",
+        title,
+        message,
         actionUrl: "/rider/dashboard",
         sendEmail: false,
+        ...buildPushPayload(title, message, `batch-completed-${batchId}`),
       });
     }
   } catch (err) {
@@ -238,12 +248,17 @@ export async function notifyRoutingAssignmentComplete(
   try {
     const supabaseAdmin = createAdminClient();
 
+    const adminTitle = "Routing Automation Result";
+    const adminMessage =
+      "Hi Admin, Routing is completed, below mentioned is the result.";
+
     await notifyAdmins({
-      title: "Routing Automation Result",
-      message: "Routing is completed. Batches assigned.",
+      title: adminTitle,
+      message: adminMessage,
       actionUrl: "/admin/operations",
       sendEmail: true,
       emailStrategy: "shared",
+      ...buildPushPayload(adminTitle, adminMessage, `routing-admin-${targetDate}`),
     });
 
     const { data: assignedOrders, error } = await supabaseAdmin
@@ -271,13 +286,13 @@ export async function notifyRoutingAssignmentComplete(
       if (riderUserId) {
         const title = "Batch Assigned!";
         const message =
-          "A batch has been assigned to you and is ready for pickup.";
+          "Batch has been assigned for you and ready to pickup.";
         await sendNotificationToUser(riderUserId, {
           title,
           message,
           actionUrl: "/rider/dashboard",
           sendEmail: false,
-          ...pushFields(
+          ...buildPushPayload(
             title,
             message,
             `batch-assigned-${riderProfileId}-${targetDate}`,
@@ -289,11 +304,18 @@ export async function notifyRoutingAssignmentComplete(
     for (const customerProfileId of customerProfileIds) {
       const customerUserId = await resolveCustomerUserId(customerProfileId);
       if (customerUserId) {
+        const title = "Meals Assigned to Rider";
+        const message = "Your upcoming meal has been assigned to rider.";
         await sendNotificationToUser(customerUserId, {
-          title: "Meals Assigned to Rider",
-          message: "Your upcoming meal has been assigned to a rider.",
+          title,
+          message,
           actionUrl: "/customer/meals",
           sendEmail: false,
+          ...buildPushPayload(
+            title,
+            message,
+            `meals-assigned-${customerProfileId}-${targetDate}`,
+          ),
         });
       }
     }
@@ -322,7 +344,7 @@ export async function notifyFailedDeliveryApproved(
           message,
           actionUrl: "/customer/meals",
           sendEmail: false,
-          ...pushFields(title, message, `failed-delivery-approved-${orderId}`),
+          ...buildPushPayload(title, message, `failed-delivery-approved-${orderId}`),
         });
       }
     }
@@ -330,14 +352,18 @@ export async function notifyFailedDeliveryApproved(
     if (order.assigned_rider_id) {
       const riderUserId = await resolveRiderUserId(order.assigned_rider_id);
       if (riderUserId) {
-        const title = "Failed Delivery Approved";
-        const message = "Admin approved the failed delivery for this order.";
+        const title = "Failed Delivery Approved!";
+        const message = "Failed delivery has been approved by the admin.";
         await sendNotificationToUser(riderUserId, {
           title,
           message,
           actionUrl: "/rider/dashboard",
           sendEmail: false,
-          ...pushFields(title, message, `failed-delivery-approved-rider-${orderId}`),
+          ...buildPushPayload(
+            title,
+            message,
+            `failed-delivery-approved-rider-${orderId}`,
+          ),
         });
       }
     }
@@ -365,7 +391,7 @@ export async function notifyFailedDeliveryRejected(
           message,
           actionUrl: "/customer/meals",
           sendEmail: false,
-          ...pushFields(title, message, `failed-delivery-rejected-${orderId}`),
+          ...buildPushPayload(title, message, `failed-delivery-rejected-${orderId}`),
         });
       }
     }
@@ -373,15 +399,18 @@ export async function notifyFailedDeliveryRejected(
     if (order.assigned_rider_id) {
       const riderUserId = await resolveRiderUserId(order.assigned_rider_id);
       if (riderUserId) {
-        const title = "Failed Delivery Request Rejected";
-        const message =
-          "Admin rejected the failed delivery request. Please continue delivery.";
+        const title = "Failed Delivery Rejected!";
+        const message = "Failed delivery has been rejected by the admin.";
         await sendNotificationToUser(riderUserId, {
           title,
           message,
           actionUrl: "/rider/dashboard",
           sendEmail: false,
-          ...pushFields(title, message, `failed-delivery-rejected-rider-${orderId}`),
+          ...buildPushPayload(
+            title,
+            message,
+            `failed-delivery-rejected-rider-${orderId}`,
+          ),
         });
       }
     }

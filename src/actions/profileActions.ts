@@ -1,7 +1,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { buildPushPayload, notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { getCustomerNameByUserId } from "@/lib/notifications/lookups";
 import { revalidatePath } from "next/cache";
 
 export async function updateProfileAction(formData: any) {
@@ -63,24 +64,26 @@ export async function updateProfileAction(formData: any) {
   }
 
   const profileTitle = "Profile Updated!";
-  const profileMessage = "Your profile has been updated successfully.";
+  const profileMessage = "Your Profile has been updated successfully!";
 
   await sendNotificationToUser(dbUser.id, {
     title: profileTitle,
     message: profileMessage,
-    actionUrl: "/profile",
+    actionUrl: "/customer/profile",
     sendEmail: false,
-    headings: { en: profileTitle },
-    contents: { en: profileMessage },
-    web_push_topic: `profile-updated-${dbUser.id}`,
-    sendPush: true,
+    ...buildPushPayload(profileTitle, profileMessage, `profile-updated-${dbUser.id}`),
   });
 
+  const customerName = await getCustomerNameByUserId(dbUser.id);
+  const adminTitle = "Customer profile updated!";
+  const adminMessage = `Hi Admin, Customer ${customerName} has just updated the profile.`;
+
   await notifyAdmins({
-    title: "Customer profile updated!",
-    message: "A customer just updated their profile.",
+    title: adminTitle,
+    message: adminMessage,
     actionUrl: "/admin/customers",
     sendEmail: false,
+    ...buildPushPayload(adminTitle, adminMessage, `profile-updated-admin-${dbUser.id}`),
   });
 
   // 4. Clear cache to force fresh data fetch on next load

@@ -8,7 +8,7 @@ import {
   notifyReachingToLocation,
 } from "@/lib/delivery/deliveryStatusNotifications";
 import { FAILED_DELIVERY_REASONS } from "@/lib/delivery/failedDeliveryReasons";
-import { notifyAdmins } from "@/lib/notifications";
+import { buildPushPayload, notifyAdmins } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -285,12 +285,17 @@ export async function requestFailedDeliveryAction(
     return { success: false, error: logError.message };
   }
 
+  const failedTitle = "Failed Delivery Approval";
+  const failedMessage =
+    "Hi Admin, Rider sent failed delivery approval request.";
+
   await notifyAdmins({
-    title: "Failed Delivery Request",
-    message: "A rider requested a failed delivery. Approval required.",
-    actionUrl: "/operations",
+    title: failedTitle,
+    message: failedMessage,
+    actionUrl: "/admin/operations",
     sendEmail: true,
     emailStrategy: "individual",
+    ...buildPushPayload(failedTitle, failedMessage, `failed-delivery-${orderId}`),
   });
 
   revalidateRiderOrderPaths(orderId);

@@ -11,6 +11,7 @@ import {
   subscriptionConfirmationSubject,
 } from "@/emails/SubscriptionConfirmationEmail";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { getCustomerNameByProfileId } from "@/lib/notifications/lookups";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -293,7 +294,7 @@ export async function addSubscription(
           customer_profile_id: customerProfileId,
           status: subscriptionStatus,
         });
-        await notifyManualSubscriptionAdded(customerProfileId);
+        await notifyManualSubscriptionAdded(customerProfileId, planDisplayName);
         return { success: true, paymentId: fallbackPayment?.id };
       }
       throw new Error(payErr.message);
@@ -316,7 +317,7 @@ export async function addSubscription(
       paymentStatus: isPaid ? "PAID" : "PENDING",
     });
 
-    await notifyManualSubscriptionAdded(customerProfileId);
+    await notifyManualSubscriptionAdded(customerProfileId, planDisplayName);
 
     return { success: true, paymentId: newPayment?.id };
   } catch (err: unknown) {
@@ -328,7 +329,10 @@ export async function addSubscription(
 
 // ─── email helper ────────────────────────────────────────────────────────────
 
-async function notifyManualSubscriptionAdded(customerProfileId: string) {
+async function notifyManualSubscriptionAdded(
+  customerProfileId: string,
+  planDisplayName: string,
+) {
   const supabase = createAdminClient();
   const { data: profile } = await supabase
     .from("customer_profiles")
@@ -336,18 +340,21 @@ async function notifyManualSubscriptionAdded(customerProfileId: string) {
     .eq("id", customerProfileId)
     .maybeSingle();
 
+  const customerName = await getCustomerNameByProfileId(customerProfileId);
+
   if (profile?.user_id) {
     await sendNotificationToUser(profile.user_id, {
       title: "Subscription Started!",
-      message: "An administrator has added a subscription to your account.",
+      message:
+        "Thanks for purchasing subscription. Know how to manage your subscription. Click here to view invoice.",
       actionUrl: "/customer/subscription/manage/planner",
       sendEmail: true,
     });
   }
 
   await notifyAdmins({
-    title: "Subscription Manually Added",
-    message: "A subscription was manually added to a customer account.",
+    title: "Subscription Started!",
+    message: `Hi Admin, Subscription ${planDisplayName} purchased by ${customerName} customer.`,
     actionUrl: "/admin/subscriptions",
     sendEmail: true,
     emailStrategy: "shared",

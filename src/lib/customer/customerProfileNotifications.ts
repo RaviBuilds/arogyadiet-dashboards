@@ -1,5 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import {
+  buildPushPayload,
+  notifyAdmins,
+  sendNotificationToUser,
+} from "@/lib/notifications";
+import { getCustomerNameByUserId } from "@/lib/notifications/lookups";
 
 export type AdminProfileSection =
   | "basic_info"
@@ -30,42 +35,39 @@ function getAdminProfileNotificationCopy(
     case "basic_info":
       return {
         title: "Profile Updated!",
-        message: "Your personal details were updated by an administrator.",
+        message: "Your Profile has been updated successfully!",
       };
     case "dietary":
       return {
-        title: "Diet Preferences Updated!",
-        message:
-          "Your allergies and diet preferences were updated by an administrator.",
+        title: "Profile Updated!",
+        message: "Your Profile has been updated successfully!",
       };
     case "medical":
       return {
-        title: "Medical Profile Updated!",
-        message: "Your medical information was updated by an administrator.",
+        title: "Profile Updated!",
+        message: "Your Profile has been updated successfully!",
       };
     case "medical_document":
       return {
-        title: "Medical Document Updated!",
-        message:
-          "A medical document on your profile was updated by an administrator.",
+        title: "Profile Updated!",
+        message: "Your Profile has been updated successfully!",
       };
     case "address":
       if (options?.isAddressDelete) {
         return {
-          title: "Delivery address removed",
-          message:
-            "A delivery address was removed from your profile by an administrator.",
+          title: "Profile Updated!",
+          message: "Your Profile has been updated successfully!",
         };
       }
       if (options?.isAddressEdit) {
         return {
-          title: "Delivery address updated",
-          message: `Your delivery address${options.addressTag ? ` (${options.addressTag})` : ""} was updated by an administrator.`,
+          title: "Profile Updated!",
+          message: "Your Profile has been updated successfully!",
         };
       }
       return {
-        title: "Delivery address saved",
-        message: `A new delivery address${options?.addressTag ? ` (${options.addressTag})` : ""} was added to your profile by an administrator.`,
+        title: "Profile Updated!",
+        message: "Your Profile has been updated successfully!",
       };
   }
 }
@@ -80,23 +82,25 @@ export async function notifyAdminCustomerProfileUpdated(
   },
 ): Promise<void> {
   const { title, message } = getAdminProfileNotificationCopy(section, options);
+  const customerName = await getCustomerNameByUserId(userId);
 
   await sendNotificationToUser(userId, {
     title,
     message,
-    actionUrl: "/profile",
+    actionUrl: "/customer/profile",
     sendEmail: false,
-    headings: { en: title },
-    contents: { en: message },
-    web_push_topic: `admin-profile-${section}-${userId}`,
-    sendPush: true,
+    ...buildPushPayload(title, message, `admin-profile-${section}-${userId}`),
   });
 
+  const adminTitle = "Customer profile updated!";
+  const adminMessage = `Hi Admin, Customer's ${customerName} profile has been updated.`;
+
   await notifyAdmins({
-    title: "Customer profile updated (admin)",
-    message: `You updated a customer's ${section.replace("_", " ")}.`,
+    title: adminTitle,
+    message: adminMessage,
     actionUrl: "/admin/customers",
     sendEmail: false,
+    ...buildPushPayload(adminTitle, adminMessage, `admin-profile-admin-${userId}`),
   });
 }
 
@@ -104,50 +108,52 @@ export async function notifyAddressSaved(
   userId: string,
   options: { isEdit: boolean; tag?: string },
 ): Promise<void> {
-  const title = options.isEdit ? "Delivery address updated" : "Delivery address saved";
-  const message = options.isEdit
-    ? `Your delivery address${options.tag ? ` (${options.tag})` : ""} has been updated.`
-    : `Your new delivery address${options.tag ? ` (${options.tag})` : ""} has been saved.`;
+  const title = "Profile Updated!";
+  const message = "Your Profile has been updated successfully!";
+  const customerName = await getCustomerNameByUserId(userId);
 
   await sendNotificationToUser(userId, {
     title,
     message,
-    actionUrl: "/profile",
+    actionUrl: "/customer/profile",
     sendEmail: false,
-    headings: { en: title },
-    contents: { en: message },
-    web_push_topic: `address-saved-${userId}`,
-    sendPush: true,
+    ...buildPushPayload(title, message, `address-saved-${userId}`),
   });
 
+  const adminTitle = "Customer profile updated!";
+  const adminMessage = `Hi Admin, Customer ${customerName} has just updated the profile.`;
+
   await notifyAdmins({
-    title: "Customer address updated",
-    message: "A customer updated a delivery address.",
+    title: adminTitle,
+    message: adminMessage,
     actionUrl: "/admin/customers",
     sendEmail: false,
+    ...buildPushPayload(adminTitle, adminMessage, `address-saved-admin-${userId}`),
   });
 }
 
 export async function notifyAddressDeleted(userId: string): Promise<void> {
-  const title = "Delivery address removed";
-  const message = "A delivery address has been removed from your profile.";
+  const title = "Profile Updated!";
+  const message = "Your Profile has been updated successfully!";
+  const customerName = await getCustomerNameByUserId(userId);
 
   await sendNotificationToUser(userId, {
     title,
     message,
-    actionUrl: "/profile",
+    actionUrl: "/customer/profile",
     sendEmail: false,
-    headings: { en: title },
-    contents: { en: message },
-    web_push_topic: `address-deleted-${userId}`,
-    sendPush: true,
+    ...buildPushPayload(title, message, `address-deleted-${userId}`),
   });
 
+  const adminTitle = "Customer profile updated!";
+  const adminMessage = `Hi Admin, Customer ${customerName} has just updated the profile.`;
+
   await notifyAdmins({
-    title: "Customer address removed",
-    message: "A customer removed a delivery address.",
+    title: adminTitle,
+    message: adminMessage,
     actionUrl: "/admin/customers",
     sendEmail: false,
+    ...buildPushPayload(adminTitle, adminMessage, `address-deleted-admin-${userId}`),
   });
 }
 
@@ -155,24 +161,31 @@ export async function notifyDeliveryAddressesUpdated(
   userId: string,
   subscriptionId: string,
 ): Promise<void> {
-  const title = "Delivery schedule updated";
-  const message = "Your upcoming delivery addresses have been updated.";
+  const title = "Meal Planner Updated!";
+  const message =
+    "You have successfully updated meals planner for future dates.";
+  const customerName = await getCustomerNameByUserId(userId);
 
   await sendNotificationToUser(userId, {
     title,
     message,
-    actionUrl: "/subscription/manage/address",
+    actionUrl: "/customer/subscription/manage/planner",
     sendEmail: false,
-    headings: { en: title },
-    contents: { en: message },
-    web_push_topic: `delivery-schedule-${subscriptionId}`,
-    sendPush: true,
+    ...buildPushPayload(title, message, `delivery-schedule-${subscriptionId}`),
   });
 
+  const adminTitle = "Meal Planner Updated!";
+  const adminMessage = `Hi Admin, Customer ${customerName}, updated the meal planner.`;
+
   await notifyAdmins({
-    title: "Customer delivery schedule updated",
-    message: "A customer updated delivery addresses on their meal schedule.",
+    title: adminTitle,
+    message: adminMessage,
     actionUrl: "/admin/customers",
     sendEmail: false,
+    ...buildPushPayload(
+      adminTitle,
+      adminMessage,
+      `delivery-schedule-admin-${subscriptionId}`,
+    ),
   });
 }

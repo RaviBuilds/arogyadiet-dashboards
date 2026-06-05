@@ -59,3 +59,19 @@ export function parseISODateString(dateStr: string): Date {
   const [year, month, day] = dateStr.split("-").map(Number);
   return new Date(year, month - 1, day);
 }
+
+/** Expected kitchen departure for morning delivery runs (IST wall-clock). */
+export const DEFAULT_RIDER_DEPARTURE_TIME_IST = "05:00:00";
+
+/** Builds an RFC 3339 timestamp for Routes API departureTime on a delivery date. */
+export function buildISTDepartureISO(
+  targetDate: string,
+  time = DEFAULT_RIDER_DEPARTURE_TIME_IST,
+): string {
+  const normalized = time.length === 5 ? `${time}:00` : time;
+  return `${targetDate}T${normalized}+05:30`;
+}
+
+export function isFutureISO8601(iso: string): boolean {
+  return new Date(iso).getTime() > Date.now();
+}

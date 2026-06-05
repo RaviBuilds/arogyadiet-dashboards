@@ -36,11 +36,11 @@ export async function GET(request: Request) {
     try {
       await notifyAdmins({
         title: "Product Link Automation",
-        message:
-          "Products have been successfully linked with tomorrow's delivery.",
+        message: `Hi Admin, we have linked ${result.count ?? 0} of the products with tomorrow's delivery.`,
         actionUrl: "/admin/operations",
         sendEmail: true,
         emailStrategy: "shared",
+        skipInApp: true,
       });
     } catch (notifyError) {
       console.error("Product link notification error:", notifyError);
