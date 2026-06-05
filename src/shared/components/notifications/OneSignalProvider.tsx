@@ -1,13 +1,13 @@
 "use client";
 
 import Script from "next/script";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 type OneSignalClient = {
   init: (options: {
     appId: string;
-    allowLocalhostAsSecureOrigin?: boolean;
-    serviceWorkerPath?: string;
+    safari_web_id?: string;
+    notifyButton?: { enable: boolean };
   }) => Promise<void>;
   login: (externalId: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -24,34 +24,12 @@ const ONESIGNAL_APP_ID = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 const ONESIGNAL_SCRIPT_SRC =
   "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
 
-function isLocalSubdomainDev(): boolean {
-  if (typeof window === "undefined") return false;
-  if (process.env.NODE_ENV !== "development") return false;
-
-  const hostname = window.location.hostname;
-  return hostname !== "localhost" && hostname.endsWith(".localhost");
-}
-
 export function OneSignalProvider({ userId }: { userId: string | null }) {
   const initStartedRef = useRef(false);
   const lastUserIdRef = useRef<string | null>(null);
-  const [shouldLoadScript, setShouldLoadScript] = useState(true);
-
-  useEffect(() => {
-    if (isLocalSubdomainDev()) {
-      setShouldLoadScript(false);
-    }
-  }, []);
 
   useEffect(() => {
     if (!ONESIGNAL_APP_ID || typeof window === "undefined") return;
-
-    if (isLocalSubdomainDev()) {
-      console.warn(
-        "OneSignal skipped: local subdomain hostname does not match OneSignal site configuration.",
-      );
-      return;
-    }
 
     const syncUser = async (OneSignal: OneSignalClient) => {
       try {
@@ -79,19 +57,19 @@ export function OneSignalProvider({ userId }: { userId: string | null }) {
           try {
             await OneSignal.init({
               appId: ONESIGNAL_APP_ID,
-              allowLocalhostAsSecureOrigin: process.env.NODE_ENV === "development",
-              serviceWorkerPath: "/OneSignalSDKWorker.js",
+              safari_web_id: process.env.NEXT_PUBLIC_ONESIGNAL_SAFARI_ID,
+              notifyButton: { enable: false },
             });
             window.OneSignal = OneSignal;
           } catch (err) {
-            console.warn("OneSignal initialization caught silently:", err);
+            console.warn("OneSignal initialization failed:", err);
             return;
           }
         }
 
         await syncUser(OneSignal);
       } catch (error) {
-        console.warn("OneSignal failed to load gracefully:", error);
+        console.warn("OneSignal initialization failed:", error);
       }
     };
 
@@ -106,7 +84,7 @@ export function OneSignalProvider({ userId }: { userId: string | null }) {
         void runWithOneSignal(OneSignal);
       });
     } catch (error) {
-      console.warn("OneSignal failed to load gracefully:", error);
+      console.warn("OneSignal initialization failed:", error);
     }
   }, [userId]);
 
@@ -121,7 +99,7 @@ export function OneSignalProvider({ userId }: { userId: string | null }) {
     };
   }, []);
 
-  if (!ONESIGNAL_APP_ID || !shouldLoadScript) {
+  if (!ONESIGNAL_APP_ID) {
     return null;
   }
 
