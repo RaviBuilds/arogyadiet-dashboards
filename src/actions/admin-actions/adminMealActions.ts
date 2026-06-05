@@ -6,7 +6,8 @@ import {
   processPausePreferenceUpdates,
 } from "@/actions/manageMealActions";
 import { logAdminAction } from "@/lib/logger";
-import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { buildPushPayload, notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { getCustomerNameBySubscriptionId } from "@/lib/notifications/lookups";
 import { revalidatePath } from "next/cache";
 
 // Use raw admin client to match the customer portal\'s elevated transaction permissions
@@ -54,26 +55,33 @@ async function notifyAdminMealPlannerUpdated(
   adminMealPlannerNotifyTimestamps.set(dedupeKey, now);
 
   const userId = await resolveUserIdFromSubscription(subscriptionId);
+  const customerName = await getCustomerNameBySubscriptionId(subscriptionId);
+
   if (userId) {
     const title = "Meal Planner Updated!";
-    const message = "Your meal planner was updated by an administrator.";
+    const message = "Admin successfully updated meals planner.";
     await sendNotificationToUser(userId, {
       title,
       message,
-      actionUrl: "/subscription/manage/planner",
+      actionUrl: "/customer/subscription/manage/planner",
       sendEmail: false,
-      headings: { en: title },
-      contents: { en: message },
-      web_push_topic: `admin-meal-planner-${subscriptionId}`,
-      sendPush: true,
+      ...buildPushPayload(title, message, `admin-meal-planner-${subscriptionId}`),
     });
   }
 
+  const adminTitle = "Meal Planner Updated!";
+  const adminMessage = `Meal Planner updated for customer ${customerName}.`;
+
   await notifyAdmins({
-    title: "Meal Planner Updated!",
-    message: "You updated the meal planner for a customer.",
+    title: adminTitle,
+    message: adminMessage,
     actionUrl: "/admin/customers",
     sendEmail: false,
+    ...buildPushPayload(
+      adminTitle,
+      adminMessage,
+      `admin-meal-planner-admin-${subscriptionId}`,
+    ),
   });
 }
 

@@ -11,8 +11,9 @@ import {
   differenceInCalendarDays,
   parseISO,
 } from "date-fns";
-import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { buildPushPayload, notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { notifyDeliveryAddressesUpdated } from "@/lib/customer/customerProfileNotifications";
+import { getCustomerNameBySubscriptionId } from "@/lib/notifications/lookups";
 
 const supabaseAdmin = createSupabaseAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -58,21 +59,35 @@ async function notifyCustomerMealPlannerUpdated(
   customerMealPlannerNotifyTimestamps.set(dedupeKey, now);
 
   const userId = await resolveUserIdFromSubscription(subscriptionId);
+  const customerName = await getCustomerNameBySubscriptionId(subscriptionId);
+
   if (userId) {
+    const title = "Meal Planner Updated!";
+    const message =
+      "You have successfully updated meals planner for future dates.";
+
     await sendNotificationToUser(userId, {
-      title: "Meal Planner Updated!",
-      message:
-        "You have successfully updated your meal planner for future dates.",
+      title,
+      message,
       actionUrl: "/customer/subscription/manage/planner",
       sendEmail: false,
+      ...buildPushPayload(title, message, `customer-meal-planner-${subscriptionId}`),
     });
   }
 
+  const adminTitle = "Meal Planner Updated!";
+  const adminMessage = `Hi Admin, Customer ${customerName}, updated the meal planner.`;
+
   await notifyAdmins({
-    title: "Meal Planner Updated!",
-    message: "A customer updated their meal planner dates.",
+    title: adminTitle,
+    message: adminMessage,
     actionUrl: "/admin/customers",
     sendEmail: false,
+    ...buildPushPayload(
+      adminTitle,
+      adminMessage,
+      `customer-meal-planner-admin-${subscriptionId}`,
+    ),
   });
 }
 

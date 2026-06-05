@@ -1,5 +1,6 @@
 import { RiderBottomNav } from "@/shared/components/layout/rider-bottom-nav";
 import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
+import { NotificationBell } from "@/components/shared/NotificationBell";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -30,12 +31,13 @@ export default async function RiderLayout({
         The top header can be very minimal for the rider, 
         just showing the brand or connection status.
       */}
-      <header className=" border-b border-zinc-200 h-14 flex items-center justify-center px-4 sticky top-0 z-40">
+      <header className=" border-b border-zinc-200 h-14 flex items-center justify-between px-4 sticky top-0 z-40">
         <img
           src="/logo.png"
           alt="ArogyaDiet"
           className="h-13 w-auto object-contain"
         />
+        <NotificationBell userId={profile?.id ?? null} />
       </header>
 
       {/* Main Content Area: padding bottom to account for the fixed nav bar */}

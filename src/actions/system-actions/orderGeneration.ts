@@ -7,6 +7,7 @@ type GenerateOrdersResult = {
   inserted?: number;
   skipped?: number;
   targetDate?: string;
+  affectedCustomerProfileIds?: string[];
   error?: string;
 };
 
@@ -169,5 +170,8 @@ export async function generateDailyOrders(
     inserted: ordersToInsert.length,
     skipped: preferences.length - ordersToInsert.length,
     targetDate,
+    affectedCustomerProfileIds: [
+      ...new Set(ordersToInsert.map((order) => order.customer_profile_id)),
+    ],
   };
 }
