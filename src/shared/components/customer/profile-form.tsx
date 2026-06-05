@@ -46,6 +46,7 @@ import {
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh";
 import { MedicalDocumentUploadModal } from "./medical-document-upload-modal";
 
 interface ProfileFormProps {
@@ -118,6 +119,7 @@ async function onSubmit(data: ProfileFormValues) {
   }
 
   toast.success("Profile updated successfully!");
+  dispatchNotificationsRefresh();
   setIsEditing(false);
   router.refresh();
 }

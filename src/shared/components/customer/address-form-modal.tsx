@@ -27,6 +27,7 @@ import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
 import { createAddressSchema } from "@/validations/addressSchema";
 import type { AddressFormValues } from "@/validations/addressSchema";
 import type { Address } from "@/services/addressService";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh";
 
 const AddressPickerMap = dynamic(
   () =>
@@ -244,6 +245,7 @@ export function AddressFormModal({
     } else {
       setIsPending(false);
       form.reset();
+      dispatchNotificationsRefresh();
       if (onSuccess) onSuccess();
       else onClose();
     }

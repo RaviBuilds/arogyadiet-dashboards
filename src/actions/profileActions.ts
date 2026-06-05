@@ -62,11 +62,18 @@ export async function updateProfileAction(formData: any) {
     return { error: "Failed to save dietary preferences." };
   }
 
+  const profileTitle = "Profile Updated!";
+  const profileMessage = "Your profile has been updated successfully.";
+
   await sendNotificationToUser(dbUser.id, {
-    title: "Profile Updated!",
-    message: "Your profile has been updated successfully.",
-    actionUrl: "/customer/profile",
+    title: profileTitle,
+    message: profileMessage,
+    actionUrl: "/profile",
     sendEmail: false,
+    headings: { en: profileTitle },
+    contents: { en: profileMessage },
+    web_push_topic: `profile-updated-${dbUser.id}`,
+    sendPush: true,
   });
 
   await notifyAdmins({

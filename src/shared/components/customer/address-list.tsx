@@ -15,7 +15,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AddressFormModal } from "./address-form-modal";
-import { deleteAddressAction } from "@/actions/addressActions"; 
+import { deleteAddressAction } from "@/actions/addressActions";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh"; 
 
 import {
   AlertDialog,
@@ -61,6 +62,7 @@ export function AddressList({ addresses, onRefresh }: AddressListProps) {
       toast.error(result.error);
     } else {
       toast.success("Address deleted successfully.");
+      dispatchNotificationsRefresh();
       if (onRefresh) onRefresh();
       router.refresh();
     }

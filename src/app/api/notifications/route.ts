@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const NOTIFICATION_SELECT =
   "id, user_id, title, message, action_url, is_read, created_at, type";
@@ -38,7 +39,7 @@ async function resolveAuthenticatedUserId(): Promise<{
 
   if (authError) {
     console.error(
-      "GET /api/notifications auth error:",
+      "/api/notifications auth error:",
       formatDbError(authError),
     );
     return { userId: null, unauthenticated: true };
@@ -48,7 +49,8 @@ async function resolveAuthenticatedUserId(): Promise<{
     return { userId: null, unauthenticated: true };
   }
 
-  const { data: profile, error: profileError } = await supabase
+  const supabaseAdmin = createAdminClient();
+  const { data: profile, error: profileError } = await supabaseAdmin
     .from("users")
     .select("id")
     .eq("auth_user_id", user.id)
@@ -56,10 +58,17 @@ async function resolveAuthenticatedUserId(): Promise<{
 
   if (profileError) {
     console.error(
-      "GET /api/notifications profile lookup error:",
+      "/api/notifications profile lookup error:",
       formatDbError(profileError),
     );
     return { userId: null, unauthenticated: false };
+  }
+
+  if (!profile?.id) {
+    console.warn(
+      "/api/notifications: authenticated session but no users row for auth_user_id",
+      user.id,
+    );
   }
 
   return { userId: profile?.id ?? null, unauthenticated: false };
@@ -69,15 +78,23 @@ export async function GET() {
   try {
     const { userId, unauthenticated } = await resolveAuthenticatedUserId();
 
-    if (unauthenticated || !userId) {
+    if (unauthenticated) {
       return NextResponse.json({
         notifications: [] as NotificationRow[],
         unreadCount: 0,
       });
     }
 
-    const supabase = await createClient();
-    const { data, error } = await supabase
+    if (!userId) {
+      console.warn("GET /api/notifications: no internal user id resolved");
+      return NextResponse.json({
+        notifications: [] as NotificationRow[],
+        unreadCount: 0,
+      });
+    }
+
+    const supabaseAdmin = createAdminClient();
+    const { data, error } = await supabaseAdmin
       .from("notifications")
       .select(NOTIFICATION_SELECT)
       .eq("user_id", userId)
@@ -97,6 +114,12 @@ export async function GET() {
 
     const notifications = (data ?? []) as NotificationRow[];
     const unreadCount = notifications.filter((n) => !n.is_read).length;
+
+    if (notifications.length === 0) {
+      console.info(
+        `GET /api/notifications: user ${userId} has no notification rows`,
+      );
+    }
 
     return NextResponse.json({ notifications, unreadCount });
   } catch (err) {
@@ -128,8 +151,8 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const supabase = await createClient();
-    const { error } = await supabase
+    const supabaseAdmin = createAdminClient();
+    const { error } = await supabaseAdmin
       .from("notifications")
       .update({ is_read: true })
       .eq("id", notificationId)
