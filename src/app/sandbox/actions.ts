@@ -7,7 +7,7 @@ export async function triggerTestPush(userId: string) {
   if (!trimmedUserId) {
     return { error: "User ID is required" };
   }
-
+ console.log("trimmedUserId", trimmedUserId);
   await sendNotificationToUser(trimmedUserId, {
     title: "Test Notification",
     message: "Matrix Complete: Your backend is fully functional! 🚀",
