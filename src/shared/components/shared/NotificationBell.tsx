@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -14,6 +14,8 @@ import {
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { NOTIFICATIONS_REFRESH_EVENT } from "@/lib/notifications/refresh";
+
+const POLL_INTERVAL_MS = 30_000;
 
 type NotificationRecord = {
   id: string;
@@ -53,21 +55,16 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   );
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const hasLoadedOnceRef = useRef(false);
 
-  useEffect(() => {
-    const handleRefresh = () => setRefreshKey((k) => k + 1);
-    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, handleRefresh);
-    return () => {
-      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, handleRefresh);
-    };
-  }, []);
+  const fetchNotifications = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const silent = options?.silent ?? false;
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchNotifications() {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
 
       try {
         const response = await fetch("/api/notifications", {
@@ -75,8 +72,6 @@ export function NotificationBell({ userId }: NotificationBellProps) {
           credentials: "include",
           headers: { Accept: "application/json" },
         });
-
-        if (cancelled) return;
 
         if (!response.ok) {
           let detail: unknown = null;
@@ -89,9 +84,10 @@ export function NotificationBell({ userId }: NotificationBellProps) {
             "NotificationBell fetch error:",
             formatFetchError(detail),
           );
-          setNotifications([]);
-          setUnreadCount(0);
-          setLoading(false);
+          if (!silent) {
+            setNotifications([]);
+            setUnreadCount(0);
+          }
           return;
         }
 
@@ -105,27 +101,58 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         setUnreadCount(
           payload.unreadCount ?? rows.filter((n) => !n.is_read).length,
         );
+        hasLoadedOnceRef.current = true;
       } catch (err) {
-        if (cancelled) return;
         console.error(
           "NotificationBell fetch error:",
           err instanceof Error ? err.message : formatFetchError(err),
         );
-        setNotifications([]);
-        setUnreadCount(0);
+        if (!silent) {
+          setNotifications([]);
+          setUnreadCount(0);
+        }
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
       }
+    },
+    [],
+  );
 
-      if (!cancelled) {
-        setLoading(false);
-      }
-    }
-
+  useEffect(() => {
     void fetchNotifications();
+  }, [userId, fetchNotifications]);
+
+  useEffect(() => {
+    const handleRefresh = () => {
+      void fetchNotifications({ silent: hasLoadedOnceRef.current });
+    };
+    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, handleRefresh);
+    return () => {
+      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, handleRefresh);
+    };
+  }, [fetchNotifications]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void fetchNotifications({ silent: true });
+    }, POLL_INTERVAL_MS);
 
     return () => {
-      cancelled = true;
+      window.clearInterval(intervalId);
     };
-  }, [userId, refreshKey]);
+  }, [fetchNotifications]);
+
+  const handlePopoverOpenChange = useCallback(
+    (open: boolean) => {
+      setPopoverOpen(open);
+      if (open) {
+        void fetchNotifications({ silent: hasLoadedOnceRef.current });
+      }
+    },
+    [fetchNotifications],
+  );
 
   const handleNotificationClick = useCallback(
     (notification: NotificationRecord) => {
@@ -174,7 +201,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   const badgeLabel = unreadCount > 9 ? "9+" : String(unreadCount);
 
   return (
-    <Popover>
+    <Popover open={popoverOpen} onOpenChange={handlePopoverOpenChange}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="size-4" />

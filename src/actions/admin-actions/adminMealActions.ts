@@ -55,11 +55,17 @@ async function notifyAdminMealPlannerUpdated(
 
   const userId = await resolveUserIdFromSubscription(subscriptionId);
   if (userId) {
+    const title = "Meal Planner Updated!";
+    const message = "Your meal planner was updated by an administrator.";
     await sendNotificationToUser(userId, {
-      title: "Meal Planner Updated!",
-      message: "Your meal planner was updated by an administrator.",
-      actionUrl: "/customer/subscription/manage/planner",
+      title,
+      message,
+      actionUrl: "/subscription/manage/planner",
       sendEmail: false,
+      headings: { en: title },
+      contents: { en: message },
+      web_push_topic: `admin-meal-planner-${subscriptionId}`,
+      sendPush: true,
     });
   }
 

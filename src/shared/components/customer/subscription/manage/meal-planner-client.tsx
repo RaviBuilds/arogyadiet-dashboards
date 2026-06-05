@@ -11,6 +11,7 @@ import {
   bulkUpdateMealPreferencesAction,
   bulkUpdatePausePreferencesAction,
 } from "@/actions/manageMealActions";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh";
 
 // --- REUSED SVGS ---
 const VegSvg = ({ className }: { className?: string }) => (
@@ -419,6 +420,7 @@ export function MealPlannerClient({
       type: "success",
       text: "Meal planner successfully updated!",
     });
+    dispatchNotificationsRefresh();
     router.refresh();
     setIsSaving(false);
   };
