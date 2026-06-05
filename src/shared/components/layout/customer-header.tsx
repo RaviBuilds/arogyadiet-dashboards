@@ -15,13 +15,19 @@ import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { buttonVariants } from "@/shared/components/ui/button";
 import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NotificationBell } from "@/components/shared/NotificationBell";
 
 interface CustomerHeaderProps {
   userEmail: string;
   userName?: string | null;
+  userId?: string | null;
 }
 
-export function CustomerHeader({ userEmail, userName }: CustomerHeaderProps) {
+export function CustomerHeader({
+  userEmail,
+  userName,
+  userId,
+}: CustomerHeaderProps) {
   const displayString = userName || userEmail || "U";
   const initial = displayString.charAt(0).toUpperCase();
 
@@ -69,7 +75,7 @@ export function CustomerHeader({ userEmail, userName }: CustomerHeaderProps) {
       </div>
 
       {/* THE FIX: Added shrink-0 so the avatar never gets pushed off screen */}
-      <div className="flex items-center gap-4 shrink-0">
+      <div className="flex items-center gap-3 shrink-0">
         <CartSheet />
         <div className="hidden sm:flex flex-col items-end text-sm">
           <span className="font-medium leading-none mb-1">
@@ -79,6 +85,7 @@ export function CustomerHeader({ userEmail, userName }: CustomerHeaderProps) {
             {userEmail}
           </span>
         </div>
+        {userId ? <NotificationBell userId={userId} /> : null}
         <Avatar className="h-9 w-9 border shadow-sm shrink-0">
           <AvatarFallback className="bg-primary/10 text-primary font-semibold">
             {initial}

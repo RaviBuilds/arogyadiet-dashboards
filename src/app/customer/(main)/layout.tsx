@@ -41,7 +41,11 @@ export default async function CustomerLayout({
 
       {/* Added min-w-0 to allow text truncation inside flex children */}
       <div className="flex flex-col w-full min-w-0 flex-1 overflow-x-hidden print:block print:overflow-visible">
-        <CustomerHeader userEmail={user.email || ""} userName={userName} />
+        <CustomerHeader
+          userEmail={user.email || ""}
+          userName={userName}
+          userId={profile?.id ?? null}
+        />
         <main className="flex-1 p-4 md:p-6 lg:p-8 w-full min-w-0 print:p-0">
           {children}
         </main>

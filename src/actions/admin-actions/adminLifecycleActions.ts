@@ -8,6 +8,7 @@ import {
   cascadePendingSubscriptionDates,
   rebuildPendingSubscriptionPreferences,
 } from "@/actions/manageMealActions";
+import { notifySubscriptionStopped } from "@/lib/subscription/subscriptionNotifications";
 
 export async function managePendingSubscription(
   subscriptionId: string,
@@ -107,6 +108,13 @@ export async function managePendingSubscription(
       });
     }
 
+    if (normalizedStatus === "STOPPED") {
+      await notifySubscriptionStopped(
+        existing.customer_profile_id,
+        subscriptionId,
+      );
+    }
+
     revalidatePath(`/admin/subscriptions/${subscriptionId}`);
     revalidatePath("/", "layout");
 
@@ -148,7 +156,7 @@ export async function stopActiveSubscription(subscriptionId: string) {
   try {
     const { data: existing, error: fetchError } = await supabaseAdmin
       .from("subscriptions")
-      .select("id, status")
+      .select("id, status, customer_profile_id")
       .eq("id", subscriptionId)
       .single();
 
@@ -164,6 +172,11 @@ export async function stopActiveSubscription(subscriptionId: string) {
       .eq("status", "ACTIVE");
 
     if (error) throw error;
+
+    await notifySubscriptionStopped(
+      existing.customer_profile_id,
+      subscriptionId,
+    );
 
     await logAdminAction("UPDATE", "subscription", subscriptionId, {
       status: "STOPPED",
