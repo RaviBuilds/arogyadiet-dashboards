@@ -13,6 +13,7 @@ import {
 } from "@/shared/components/ui/popover";
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { NOTIFICATIONS_REFRESH_EVENT } from "@/lib/notifications/refresh";
 
 type NotificationRecord = {
   id: string;
@@ -52,6 +53,15 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   );
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const handleRefresh = () => setRefreshKey((k) => k + 1);
+    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, handleRefresh);
+    return () => {
+      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, handleRefresh);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,7 +125,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, refreshKey]);
 
   const handleNotificationClick = useCallback(
     (notification: NotificationRecord) => {

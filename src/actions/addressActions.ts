@@ -11,6 +11,10 @@ import {
   assertDeliverablePincode,
   getServiceAreaPincodesAction,
 } from "@/actions/pincodeActions";
+import {
+  notifyAddressDeleted,
+  notifyAddressSaved,
+} from "@/lib/customer/customerProfileNotifications";
 
 // 2. The Server Action
 
@@ -88,7 +92,9 @@ export async function saveAddressAction(data: AddressFormValues) {
     lng: parsed.data.lng,
   };
 
-  if (parsed.data.id) {
+  const isEdit = Boolean(parsed.data.id);
+
+  if (isEdit) {
     await supabase
       .from("addresses")
       .update(addressData)
@@ -96,6 +102,11 @@ export async function saveAddressAction(data: AddressFormValues) {
   } else {
     await supabase.from("addresses").insert(addressData);
   }
+
+  await notifyAddressSaved(dbUser.id, {
+    isEdit,
+    tag: parsed.data.tag,
+  });
 
   revalidatePath("/profile");
 
@@ -133,6 +144,8 @@ export async function deleteAddressAction(addressId: string) {
   if (!result.success) {
     return { error: result.error };
   }
+
+  await notifyAddressDeleted(dbUser.id);
 
   revalidatePath("/profile");
   return { success: true };

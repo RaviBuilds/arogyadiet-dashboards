@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { Alert, AlertDescription } from "@/shared/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { bulkUpdateAddressPreferencesAction } from "@/actions/manageMealActions";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh";
 
 // --- DYNAMIC COLOR THEMES FOR ADDRESSES ---
 const ADDRESS_THEMES = [
@@ -108,6 +109,7 @@ export function AddressSwitcherClient({
         type: "success",
         text: "Delivery addresses updated successfully!",
       });
+      dispatchNotificationsRefresh();
       router.refresh();
     } else {
       setSaveMessage({ type: "error", text: "Update failed." });

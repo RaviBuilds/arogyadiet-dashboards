@@ -12,6 +12,7 @@ import {
   parseISO,
 } from "date-fns";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { notifyDeliveryAddressesUpdated } from "@/lib/customer/customerProfileNotifications";
 
 const supabaseAdmin = createSupabaseAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -623,6 +624,11 @@ export async function bulkUpdateAddressPreferencesAction(
         .eq("preference_date", update.date);
 
       if (error) throw error;
+    }
+
+    const userId = await resolveUserIdFromSubscription(subscriptionId);
+    if (userId) {
+      await notifyDeliveryAddressesUpdated(userId, subscriptionId);
     }
 
     revalidatePath("/dashboard");
