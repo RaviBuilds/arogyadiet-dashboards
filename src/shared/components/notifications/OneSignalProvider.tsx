@@ -2,6 +2,7 @@
 
 import Script from "next/script";
 import { useEffect, useRef } from "react";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh";
 
 type OneSignalClient = {
   init: (options: {
@@ -17,6 +18,14 @@ type OneSignalClient = {
   Notifications?: {
     isPushSupported: () => boolean;
     permission: boolean;
+    addEventListener: (
+      event: "foregroundWillDisplay",
+      listener: (event: { preventDefault?: () => void }) => void,
+    ) => void;
+    removeEventListener: (
+      event: "foregroundWillDisplay",
+      listener: (event: { preventDefault?: () => void }) => void,
+    ) => void;
   };
   User?: {
     PushSubscription?: {
@@ -35,6 +44,19 @@ declare global {
 const ONESIGNAL_APP_ID = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 const ONESIGNAL_SCRIPT_SRC =
   "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
+
+function registerForegroundRefreshListener(OneSignal: OneSignalClient) {
+  if (!OneSignal.Notifications?.addEventListener) return;
+
+  const onForegroundDisplay = () => {
+    dispatchNotificationsRefresh();
+  };
+
+  OneSignal.Notifications.addEventListener(
+    "foregroundWillDisplay",
+    onForegroundDisplay,
+  );
+}
 
 export function OneSignalProvider({ userId }: { userId: string | null }) {
   const initStartedRef = useRef(false);
@@ -72,6 +94,8 @@ export function OneSignalProvider({ userId }: { userId: string | null }) {
               safari_web_id: process.env.NEXT_PUBLIC_ONESIGNAL_SAFARI_ID,
               notifyButton: { enable: false },
             });
+
+            registerForegroundRefreshListener(OneSignal);
 
             const canPrompt =
               OneSignal.Slidedown &&

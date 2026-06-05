@@ -22,6 +22,10 @@ import {
 import { logAdminAction } from "@/lib/logger";
 import { deleteCustomerAddress } from "@/lib/address/deleteCustomerAddress";
 import {
+  notifyAdminCustomerProfileUpdated,
+  resolveUserIdFromProfile,
+} from "@/lib/customer/customerProfileNotifications";
+import {
   buildArchivedEmail,
   isArchivedCustomerEmail,
 } from "@/lib/customers/customerArchive";
@@ -87,6 +91,7 @@ export async function updateCustomerBasicInfo(
   if (userError || profileError)
     return { success: false, error: "Failed update" };
   await logAdminAction("UPDATE", "customer", profileId, { section: "basic_info" });
+  await notifyAdminCustomerProfileUpdated(userId, "basic_info");
   return { success: true };
 }
 
@@ -103,6 +108,10 @@ export async function updateCustomerDietaryProfile(
     .eq("id", profileId);
   if (error) return { success: false, error: error.message };
   await logAdminAction("UPDATE", "customer", profileId, { section: "dietary" });
+  const dietaryUserId = await resolveUserIdFromProfile(profileId);
+  if (dietaryUserId) {
+    await notifyAdminCustomerProfileUpdated(dietaryUserId, "dietary");
+  }
   return { success: true };
 }
 
@@ -119,6 +128,10 @@ export async function updateCustomerMedicalProfile(
     .eq("id", profileId);
   if (error) return { success: false, error: error.message };
   await logAdminAction("UPDATE", "customer", profileId, { section: "medical" });
+  const medicalUserId = await resolveUserIdFromProfile(profileId);
+  if (medicalUserId) {
+    await notifyAdminCustomerProfileUpdated(medicalUserId, "medical");
+  }
   return { success: true };
 }
 
@@ -132,6 +145,10 @@ export async function deleteMedicalDocument(
   const { error: dbError } = await supabaseAdmin.from("medical_documents").delete().eq("id", docId);
   if (dbError) return { success: false, error: dbError.message };
   await logAdminAction("DELETE", "medical_document", docId, { profile_id: profileId });
+  const docDeleteUserId = await resolveUserIdFromProfile(profileId);
+  if (docDeleteUserId) {
+    await notifyAdminCustomerProfileUpdated(docDeleteUserId, "medical_document");
+  }
   revalidatePath(`/admin/customers/${profileId}`);
   return { success: true };
 }
@@ -167,6 +184,9 @@ export async function uploadAdminMedicalDocument(formData: FormData) {
   await logAdminAction("CREATE", "medical_document", profileId, {
     file_name: file.name,
   });
+  if (userId) {
+    await notifyAdminCustomerProfileUpdated(userId, "medical_document");
+  }
   revalidatePath(`/admin/customers/${profileId}`);
   return { success: true };
 }
@@ -514,6 +534,13 @@ export async function adminUpsertCustomerAddress(
   await logAdminAction(addressId ? "UPDATE" : "CREATE", "customer_address", addressId || customerProfileId, {
     tag: parsed.data.tag,
   });
+  const addressUserId = await resolveUserIdFromProfile(customerProfileId);
+  if (addressUserId) {
+    await notifyAdminCustomerProfileUpdated(addressUserId, "address", {
+      isAddressEdit: Boolean(addressId),
+      addressTag: parsed.data.tag,
+    });
+  }
   revalidatePath(`/admin/customers/${customerProfileId}`);
   return { success: true };
 }
@@ -531,6 +558,12 @@ export async function adminDeleteCustomerAddress(
   await logAdminAction("DELETE", "customer_address", addressId, {
     customer_profile_id: customerProfileId,
   });
+  const deleteAddressUserId = await resolveUserIdFromProfile(customerProfileId);
+  if (deleteAddressUserId) {
+    await notifyAdminCustomerProfileUpdated(deleteAddressUserId, "address", {
+      isAddressDelete: true,
+    });
+  }
   revalidatePath(`/admin/customers/${customerProfileId}`);
   return { success: true };
 }
