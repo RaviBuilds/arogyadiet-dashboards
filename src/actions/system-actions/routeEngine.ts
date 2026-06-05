@@ -5,6 +5,7 @@ import {
   type RoutableOrder,
 } from "@/lib/distance";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
+import { notifyRoutingAssignmentComplete } from "@/lib/delivery/deliveryStatusNotifications";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // Service-role client only: this engine runs from cron/background jobs and must bypass RLS.
@@ -458,6 +459,10 @@ export async function executeAutomatedDispatch(targetDate: string) {
   };
 
   await logRoutingRun(targetDate, resultStatsObject);
+
+  if (ordersAssigned > 0) {
+    await notifyRoutingAssignmentComplete(targetDate);
+  }
 
   return {
     success: true,

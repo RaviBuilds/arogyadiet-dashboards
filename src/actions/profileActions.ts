@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 
 export async function updateProfileAction(formData: any) {
@@ -60,6 +61,20 @@ export async function updateProfileAction(formData: any) {
     console.error("Profile Upsert Error:", profileUpsertError);
     return { error: "Failed to save dietary preferences." };
   }
+
+  await sendNotificationToUser(dbUser.id, {
+    title: "Profile Updated!",
+    message: "Your profile has been updated successfully.",
+    actionUrl: "/customer/profile",
+    sendEmail: false,
+  });
+
+  await notifyAdmins({
+    title: "Customer profile updated!",
+    message: "A customer just updated their profile.",
+    actionUrl: "/admin/customers",
+    sendEmail: false,
+  });
 
   // 4. Clear cache to force fresh data fetch on next load
   revalidatePath("/profile");

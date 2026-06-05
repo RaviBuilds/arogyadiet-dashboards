@@ -6,6 +6,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (request.nextUrl.pathname.startsWith("/sandbox")) {
+    return NextResponse.next();
+  }
+
   const url = request.nextUrl;
   const hostname = request.headers.get("host") || "";
 

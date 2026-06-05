@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import AdminNavbar from "./AdminNavbar";
+import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
 
 export default async function AdminLayout({
   children,
@@ -36,7 +37,7 @@ export default async function AdminLayout({
 
   const { data: userProfileData } = await supabase
     .from("users")
-    .select("full_name, avatar_url, roles(code)")
+    .select("id, full_name, avatar_url, roles(code)")
     .eq("auth_user_id", user.id)
     .single();
 
@@ -51,7 +52,7 @@ export default async function AdminLayout({
   if (roleCode !== "ADMIN") return redirect("/unauthorized");
 
   const userProfile = {
-    id: user.id,
+    id: userProfileData?.id ?? "",
     fullName: userProfileData?.full_name || "Admin",
     avatarUrl: userProfileData?.avatar_url || "",
     roleCode: roleCode,
@@ -59,6 +60,7 @@ export default async function AdminLayout({
 
   return (
     <div className="flex min-h-screen flex-col bg-muted/20">
+      <OneSignalProvider userId={userProfile.id || null} />
       <AdminNavbar userProfile={userProfile} email={user.email!} />
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
         {children}

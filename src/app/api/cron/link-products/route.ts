@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runProductLinkingAction } from "@/actions/admin-actions/systemActions";
 import { getISTDateString } from "@/lib/dates/ist";
+import { notifyAdmins } from "@/lib/notifications";
 
 /**
  * GET /api/cron/link-products?secret=<CRON_SECRET>&date=YYYY-MM-DD
@@ -30,6 +31,19 @@ export async function GET(request: Request) {
         { success: false, error: result.error },
         { status: 400 },
       );
+    }
+
+    try {
+      await notifyAdmins({
+        title: "Product Link Automation",
+        message:
+          "Products have been successfully linked with tomorrow's delivery.",
+        actionUrl: "/admin/operations",
+        sendEmail: true,
+        emailStrategy: "shared",
+      });
+    } catch (notifyError) {
+      console.error("Product link notification error:", notifyError);
     }
 
     return NextResponse.json(

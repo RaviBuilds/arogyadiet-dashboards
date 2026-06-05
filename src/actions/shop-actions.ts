@@ -9,6 +9,7 @@ import {
 } from "@/lib/products/catalog-queries";
 import { calculateShopOrderBreakdown } from "@/lib/pricing/inclusive-tax";
 import { CartItem } from "@/types/product";
+import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
@@ -665,6 +666,37 @@ export async function verifyAddonPayment(
       throw new Error(
         `Addon Order Update Error: ${addonOrderUpdateError.message}`,
       );
+
+    const { data: payment } = await supabase
+      .from("payments")
+      .select("customer_profile_id")
+      .eq("id", paymentId)
+      .maybeSingle();
+
+    if (payment?.customer_profile_id) {
+      const { data: customerProfile } = await supabase
+        .from("customer_profiles")
+        .select("user_id")
+        .eq("id", payment.customer_profile_id)
+        .maybeSingle();
+
+      if (customerProfile?.user_id) {
+        await sendNotificationToUser(customerProfile.user_id, {
+          title: "Product Purchase Confirmed!",
+          message:
+            "Your product purchase is confirmed and scheduled for delivery.",
+          actionUrl: "/customer/meals",
+          sendEmail: false,
+        });
+      }
+    }
+
+    await notifyAdmins({
+      title: "Product Purchase Confirmed!",
+      message: "A customer has purchased a standalone product.",
+      actionUrl: "/admin/operations",
+      sendEmail: false,
+    });
 
     return { success: true };
   } catch (error) {

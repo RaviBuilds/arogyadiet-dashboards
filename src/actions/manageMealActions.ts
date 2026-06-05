@@ -11,11 +11,69 @@ import {
   differenceInCalendarDays,
   parseISO,
 } from "date-fns";
+import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 
 const supabaseAdmin = createSupabaseAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
+
+const MEAL_PLANNER_NOTIFY_DEDUPE_MS = 2000;
+const customerMealPlannerNotifyTimestamps = new Map<string, number>();
+
+async function resolveUserIdFromSubscription(
+  subscriptionId: string,
+): Promise<string | null> {
+  const { data: sub, error: subError } = await supabaseAdmin
+    .from("subscriptions")
+    .select("customer_profile_id")
+    .eq("id", subscriptionId)
+    .maybeSingle();
+
+  if (subError || !sub?.customer_profile_id) return null;
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("customer_profiles")
+    .select("user_id")
+    .eq("id", sub.customer_profile_id)
+    .maybeSingle();
+
+  if (profileError || !profile?.user_id) return null;
+  return profile.user_id;
+}
+
+async function notifyCustomerMealPlannerUpdated(
+  subscriptionId: string,
+): Promise<void> {
+  const dedupeKey = `customer-meal-planner:${subscriptionId}`;
+  const now = Date.now();
+  const lastSent = customerMealPlannerNotifyTimestamps.get(dedupeKey);
+  if (
+    lastSent !== undefined &&
+    now - lastSent < MEAL_PLANNER_NOTIFY_DEDUPE_MS
+  ) {
+    return;
+  }
+  customerMealPlannerNotifyTimestamps.set(dedupeKey, now);
+
+  const userId = await resolveUserIdFromSubscription(subscriptionId);
+  if (userId) {
+    await sendNotificationToUser(userId, {
+      title: "Meal Planner Updated!",
+      message:
+        "You have successfully updated your meal planner for future dates.",
+      actionUrl: "/customer/subscription/manage/planner",
+      sendEmail: false,
+    });
+  }
+
+  await notifyAdmins({
+    title: "Meal Planner Updated!",
+    message: "A customer updated their meal planner dates.",
+    actionUrl: "/admin/customers",
+    sendEmail: false,
+  });
+}
 
 type PreferenceUpdatePayload = {
   meal_category_id?: string | null;
@@ -267,6 +325,8 @@ export async function bulkUpdateMealPreferencesAction(
         throw new Error(`No daily preference found for ${update.date}`);
       }
     }
+
+    await notifyCustomerMealPlannerUpdated(subscriptionId);
 
     revalidatePath("/dashboard");
     revalidatePath("/subscription");
@@ -528,6 +588,8 @@ export async function bulkUpdatePausePreferencesAction(
       result.customerProfileId,
       result.newEffectiveEndOn,
     );
+
+    await notifyCustomerMealPlannerUpdated(subscriptionId);
 
     revalidatePath("/dashboard");
     revalidatePath("/subscription");

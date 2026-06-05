@@ -26,6 +26,7 @@ import {
   AvatarImage,
 } from "@/shared/components/ui/avatar";
 import { createClient } from "@/lib/supabase/client";
+import { NotificationBell } from "@/components/shared/NotificationBell";
 
 interface AdminNavbarProps {
   userProfile: {
@@ -109,6 +110,9 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
 
         {/* Right: Mobile Menu & Avatar */}
         <div className="flex items-center space-x-3">
+          {userProfile.id ? (
+            <NotificationBell userId={userProfile.id} />
+          ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
