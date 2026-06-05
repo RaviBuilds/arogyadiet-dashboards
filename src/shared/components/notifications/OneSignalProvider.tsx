@@ -11,6 +11,18 @@ type OneSignalClient = {
   }) => Promise<void>;
   login: (externalId: string) => Promise<void>;
   logout: () => Promise<void>;
+  Slidedown?: {
+    promptPush: (options?: { force?: boolean }) => Promise<void>;
+  };
+  Notifications?: {
+    isPushSupported: () => boolean;
+    permission: boolean;
+  };
+  User?: {
+    PushSubscription?: {
+      optedIn?: boolean;
+    };
+  };
 };
 
 declare global {
@@ -60,6 +72,20 @@ export function OneSignalProvider({ userId }: { userId: string | null }) {
               safari_web_id: process.env.NEXT_PUBLIC_ONESIGNAL_SAFARI_ID,
               notifyButton: { enable: false },
             });
+
+            const canPrompt =
+              OneSignal.Slidedown &&
+              OneSignal.Notifications?.isPushSupported?.() !== false &&
+              !OneSignal.User?.PushSubscription?.optedIn;
+
+            try {
+              if (canPrompt && OneSignal.Slidedown) {
+                await OneSignal.Slidedown.promptPush();
+              }
+            } catch (promptError) {
+              console.warn("OneSignal permission prompt failed:", promptError);
+            }
+
             window.OneSignal = OneSignal;
           } catch (err) {
             console.warn("OneSignal initialization failed:", err);
