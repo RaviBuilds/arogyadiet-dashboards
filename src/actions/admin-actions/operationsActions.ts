@@ -13,6 +13,8 @@ import {
 } from "@/lib/delivery/batchCompletion";
 import {
   notifyDelivered,
+  notifyFailedDeliveryApproved,
+  notifyFailedDeliveryRejected,
   notifyOutForDeliveryForBatch,
   notifyReachingToLocation,
 } from "@/lib/delivery/deliveryStatusNotifications";
@@ -354,6 +356,8 @@ export async function approveFailedDeliveryAction(
 
   await tryCompleteDeliveryBatch(supabase, order.batch_id, order.delivery_date);
 
+  await notifyFailedDeliveryApproved(orderId);
+
   await logAdminAction("UPDATE", "delivery_order", orderId, {
     from: order.status,
     to: newStatus,
@@ -414,6 +418,8 @@ export async function rejectFailedDeliveryAction(
     console.error("Error inserting delivery status log:", logError);
     return { success: false, error: logError.message };
   }
+
+  await notifyFailedDeliveryRejected(orderId);
 
   await logAdminAction("UPDATE", "delivery_order", orderId, {
     from: order.status,

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient, type SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/logger";
+import { notifyRoutingAssignmentComplete } from "@/lib/delivery/deliveryStatusNotifications";
 
 function getISTDateString(offsetDays = 0) {
   const date = new Date();
@@ -281,7 +282,11 @@ export async function commitRouteChanges(moves: { orderId: string; newRiderId: s
     await logAdminAction("UPDATE", "delivery_route", "multiple", {
       total_moves: moves.length,
     });
-    
+
+    for (const targetDate of affectedDates) {
+      await notifyRoutingAssignmentComplete(targetDate);
+    }
+
     revalidatePath("/admin/operations");
     revalidatePath("/admin/riders");
     return { success: true };

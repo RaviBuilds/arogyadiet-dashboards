@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import {
@@ -27,12 +26,26 @@ type NotificationRecord = {
 };
 
 export interface NotificationBellProps {
-  userId: string;
+  userId?: string;
+}
+
+function formatFetchError(detail: unknown): string {
+  if (detail == null) return "Unknown error";
+  if (typeof detail === "string") return detail;
+  if (detail instanceof Error) return detail.message;
+  if (typeof detail === "object" && "error" in detail) {
+    const err = (detail as { error?: unknown }).error;
+    if (typeof err === "string") return err;
+  }
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return "Failed to load notifications";
+  }
 }
 
 export function NotificationBell({ userId }: NotificationBellProps) {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
 
   const [notifications, setNotifications] = useState<NotificationRecord[]>(
     [],
@@ -46,28 +59,55 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     async function fetchNotifications() {
       setLoading(true);
 
-      const { data, error } = await supabase
-        .from("notifications")
-        .select(
-          "id, user_id, title, message, action_url, is_read, created_at, type",
-        )
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(20);
+      try {
+        const response = await fetch("/api/notifications", {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (error) {
-        console.error("NotificationBell fetch error:", error);
+        if (!response.ok) {
+          let detail: unknown = null;
+          try {
+            detail = await response.json();
+          } catch {
+            detail = { status: response.status, statusText: response.statusText };
+          }
+          console.error(
+            "NotificationBell fetch error:",
+            formatFetchError(detail),
+          );
+          setNotifications([]);
+          setUnreadCount(0);
+          setLoading(false);
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          notifications?: NotificationRecord[];
+          unreadCount?: number;
+        };
+
+        const rows = payload.notifications ?? [];
+        setNotifications(rows);
+        setUnreadCount(
+          payload.unreadCount ?? rows.filter((n) => !n.is_read).length,
+        );
+      } catch (err) {
+        if (cancelled) return;
+        console.error(
+          "NotificationBell fetch error:",
+          err instanceof Error ? err.message : formatFetchError(err),
+        );
         setNotifications([]);
         setUnreadCount(0);
-      } else {
-        const rows = (data ?? []) as NotificationRecord[];
-        setNotifications(rows);
-        setUnreadCount(rows.filter((n) => !n.is_read).length);
       }
 
-      setLoading(false);
+      if (!cancelled) {
+        setLoading(false);
+      }
     }
 
     void fetchNotifications();
@@ -75,7 +115,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     return () => {
       cancelled = true;
     };
-  }, [userId, supabase]);
+  }, [userId]);
 
   const handleNotificationClick = useCallback(
     (notification: NotificationRecord) => {
@@ -87,23 +127,38 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         );
         setUnreadCount((c) => Math.max(0, c - 1));
 
-        void supabase
-          .from("notifications")
-          .update({ is_read: true })
-          .eq("id", notification.id)
-          .eq("user_id", userId)
-          .then(({ error }) => {
-            if (error) {
-              console.error("NotificationBell mark read error:", error);
+        void fetch("/api/notifications", {
+          method: "PATCH",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ id: notification.id }),
+        }).then(async (response) => {
+          if (!response.ok) {
+            let detail: unknown = null;
+            try {
+              detail = await response.json();
+            } catch {
+              detail = {
+                status: response.status,
+                statusText: response.statusText,
+              };
             }
-          });
+            console.error(
+              "NotificationBell mark read error:",
+              formatFetchError(detail),
+            );
+          }
+        });
       }
 
       if (notification.action_url) {
         router.push(notification.action_url);
       }
     },
-    [router, supabase, userId],
+    [router],
   );
 
   const badgeLabel = unreadCount > 9 ? "9+" : String(unreadCount);

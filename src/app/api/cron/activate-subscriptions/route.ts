@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
+import { notifySubscriptionStopped } from "@/lib/subscription/subscriptionNotifications";
 import { format, addDays } from "date-fns";
 
 /**
@@ -86,6 +87,12 @@ export async function GET(request: Request) {
         { success: false, error: stopError.message },
         { status: 500 },
       );
+    }
+
+    if (stopped?.length) {
+      for (const sub of stopped) {
+        await notifySubscriptionStopped(sub.customer_profile_id, sub.id);
+      }
     }
 
     const summary = {

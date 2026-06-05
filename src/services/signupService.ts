@@ -116,5 +116,5 @@ export async function createCustomerFromOAth(
 
   }
 
-  return true;
+  return userData.id;
 }

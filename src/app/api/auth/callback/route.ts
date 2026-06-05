@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createCustomerFromOAth } from "@/services/signupService";
+import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 
 export async function GET(request: NextRequest) {
   // 1. Get the true hostname directly from headers (Handles subdomains perfectly)
@@ -43,7 +44,22 @@ export async function GET(request: NextRequest) {
       const email = session.user.email || "";
       const fullName = session.user.user_metadata?.full_name || "Customer";
 
-      await createCustomerFromOAth(authUserId, email, fullName);
+      const newUserId = await createCustomerFromOAth(authUserId, email, fullName);
+
+      await sendNotificationToUser(newUserId, {
+        title: "Welcome to ArogyaDiet!",
+        message: "Welcome to ArogyaDiet! Please complete your profile.",
+        actionUrl: "/customer/profile",
+        sendEmail: true,
+      });
+
+      await notifyAdmins({
+        title: "New Customer Signup",
+        message: "A new customer has signed up.",
+        actionUrl: "/admin/customers",
+        sendEmail: true,
+        emailStrategy: "shared",
+      });
     } catch (error) {
       await supabase.auth.signOut();
       return NextResponse.redirect(`${baseOrigin}/login?error=Signup_Failed`);
