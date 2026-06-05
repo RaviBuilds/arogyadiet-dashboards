@@ -10,6 +10,15 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const pathname = request.nextUrl.pathname;
+
+  if (
+    pathname === "/OneSignalSDKWorker.js" ||
+    pathname === "/OneSignalSDKUpdaterWorker.js"
+  ) {
+    return NextResponse.next();
+  }
+
   const url = request.nextUrl;
   const hostname = request.headers.get("host") || "";
 
