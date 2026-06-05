@@ -1,5 +1,8 @@
 import { revalidatePath } from "next/cache";
-import { computeHaversineRoute, type RoutableOrder } from "@/lib/distance";
+import {
+  computeOpenLoopHaversineRoute,
+  type RoutableOrder,
+} from "@/lib/distance";
 import {
   buildISTDepartureISO,
   DEFAULT_RIDER_DEPARTURE_TIME_IST,
@@ -7,7 +10,7 @@ import {
 } from "@/lib/dates/ist";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
 import { notifyRoutingAssignmentComplete } from "@/lib/delivery/deliveryStatusNotifications";
-import { computeOptimizedDeliveryRoute } from "@/lib/routing/googleRoutes";
+import { computeOpenLoopRoute } from "@/lib/routing/googleRoutes";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // Service-role client only: this engine runs from cron/background jobs and must bypass RLS.
@@ -238,12 +241,12 @@ async function processRiderDispatch(
     }
   }
 
-  const googleRoute = await computeOptimizedDeliveryRoute(
-    assignedOrders,
+  const googleRoute = await computeOpenLoopRoute(
     ctx.kitchenLat,
     ctx.kitchenLng,
-    ctx.payoutPerKm,
+    assignedOrders,
     ctx.apiKey,
+    ctx.payoutPerKm,
     ctx.departureTime,
   );
 
@@ -253,7 +256,7 @@ async function processRiderDispatch(
   if (googleRoute) {
     route = googleRoute;
   } else {
-    route = computeHaversineRoute(
+    route = computeOpenLoopHaversineRoute(
       assignedOrders,
       ctx.kitchenLat,
       ctx.kitchenLng,

@@ -1,4 +1,7 @@
-import type { RoutableOrder } from "@/lib/distance";
+import {
+  calculateHaversineDistanceKm,
+  type RoutableOrder,
+} from "@/lib/distance";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -70,6 +73,39 @@ const DETAILS_FIELD_MASK = [
   "routes.legs.startLocation.latLng",
 ].join(",");
 
+function haversineDistanceKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  return calculateHaversineDistanceKm(lat1, lng1, lat2, lng2);
+}
+
+export function findFarthestStopIndex(
+  kitchenLat: number,
+  kitchenLng: number,
+  stops: RouteStop[],
+): number {
+  let farthestIndex = 0;
+  let maxDistance = -1;
+
+  for (let i = 0; i < stops.length; i++) {
+    const distance = haversineDistanceKm(
+      kitchenLat,
+      kitchenLng,
+      stops[i].lat,
+      stops[i].lng,
+    );
+    if (distance > maxDistance) {
+      maxDistance = distance;
+      farthestIndex = i;
+    }
+  }
+
+  return farthestIndex;
+}
+
 function toWaypoint(lat: number, lng: number) {
   return {
     location: {
@@ -120,16 +156,25 @@ function buildOptimizedIndex(
   return Array.from({ length: stopCount }, (_, index) => index);
 }
 
+function identityIndex(stopCount: number): number[] {
+  return Array.from({ length: stopCount }, (_, index) => index);
+}
+
 export type FixedOrderRoutePreview = {
   encodedPolyline: string;
   totalDistanceMeters: number;
   totalDurationSeconds: number;
 };
 
+type RouteShape = "closed_loop" | "open_loop" | "fixed_order_open";
+
 type FetchGoogleRoutesOptions = {
   departureTime?: string;
   optimizeWaypointOrder?: boolean;
-  fixedOrderOpenRoute?: boolean;
+  routeShape?: RouteShape;
+  /** Used when routeShape is open_loop with >= 2 stops */
+  farthestStop?: RouteStop;
+  intermediateStops?: RouteStop[];
 };
 
 async function fetchGoogleRoutes(
@@ -144,12 +189,13 @@ async function fetchGoogleRoutes(
 
   const optimizeWaypointOrder = options.optimizeWaypointOrder ?? true;
   const kitchenWaypoint = toWaypoint(kitchenLat, kitchenLng);
+  const routeShape = options.routeShape ?? "closed_loop";
 
   let origin = kitchenWaypoint;
   let destination = kitchenWaypoint;
   let intermediates: ReturnType<typeof toWaypoint>[] = [];
 
-  if (options.fixedOrderOpenRoute) {
+  if (routeShape === "fixed_order_open") {
     if (stops.length === 1) {
       destination = toWaypoint(stops[0].lat, stops[0].lng);
     } else {
@@ -158,6 +204,19 @@ async function fetchGoogleRoutes(
       intermediates = stops
         .slice(0, -1)
         .map((stop) => toWaypoint(stop.lat, stop.lng));
+    }
+  } else if (routeShape === "open_loop") {
+    if (stops.length === 1) {
+      destination = toWaypoint(stops[0].lat, stops[0].lng);
+    } else {
+      const farthest = options.farthestStop ?? stops[stops.length - 1];
+      const intermediateStops =
+        options.intermediateStops ??
+        stops.filter((stop) => stop.id !== farthest.id);
+      destination = toWaypoint(farthest.lat, farthest.lng);
+      intermediates = intermediateStops.map((stop) =>
+        toWaypoint(stop.lat, stop.lng),
+      );
     }
   } else {
     intermediates = stops.map((stop) => toWaypoint(stop.lat, stop.lng));
@@ -204,10 +263,15 @@ async function fetchGoogleRoutes(
   return data.routes[0];
 }
 
+type BuildRouteOptions = {
+  assumeStopsInVisitOrder?: boolean;
+};
+
 function buildRouteFromGoogleResponse(
   route: GoogleRoute,
   stops: RouteStop[],
   payoutPerKm: number,
+  options: BuildRouteOptions = {},
 ): OptimizedRouteResult | null {
   const apiLegs = route.legs ?? [];
   const stopCount = stops.length;
@@ -220,10 +284,12 @@ function buildRouteFromGoogleResponse(
     return null;
   }
 
-  const optimizedWaypointIndex = buildOptimizedIndex(
-    stopCount,
-    route.optimizedIntermediateWaypointIndex,
-  );
+  const optimizedWaypointIndex = options.assumeStopsInVisitOrder
+    ? identityIndex(stopCount)
+    : buildOptimizedIndex(
+        stopCount,
+        route.optimizedIntermediateWaypointIndex,
+      );
 
   const outboundLegs = apiLegs.slice(0, stopCount);
   const totalMeters = outboundLegs.reduce(
@@ -252,6 +318,75 @@ function buildRouteFromGoogleResponse(
   };
 }
 
+function orderStopsOpenLoop(
+  kitchenLat: number,
+  kitchenLng: number,
+  stops: RouteStop[],
+  googleRoute: GoogleRoute,
+): RouteStop[] {
+  if (stops.length <= 1) return [...stops];
+
+  const farthestIndex = findFarthestStopIndex(kitchenLat, kitchenLng, stops);
+  const farthest = stops[farthestIndex];
+  const intermediateStops = stops.filter((_, i) => i !== farthestIndex);
+
+  const intermediateCount = intermediateStops.length;
+  const googleOrder = buildOptimizedIndex(
+    intermediateCount,
+    googleRoute.optimizedIntermediateWaypointIndex,
+  );
+
+  const orderedStops: RouteStop[] = [
+    ...googleOrder.map((j) => intermediateStops[j]),
+    farthest,
+  ];
+
+  return orderedStops;
+}
+
+export async function computeOpenLoopRoute(
+  kitchenLat: number,
+  kitchenLng: number,
+  stops: RouteStop[],
+  apiKey: string,
+  payoutPerKm: number,
+  departureTime?: string,
+): Promise<OptimizedRouteResult | null> {
+  if (stops.length === 0) return null;
+
+  const fetchOptions: FetchGoogleRoutesOptions = {
+    departureTime,
+    routeShape: "open_loop",
+    optimizeWaypointOrder: stops.length > 1,
+  };
+
+  if (stops.length >= 2) {
+    const farthestIndex = findFarthestStopIndex(kitchenLat, kitchenLng, stops);
+    fetchOptions.farthestStop = stops[farthestIndex];
+    fetchOptions.intermediateStops = stops.filter((_, i) => i !== farthestIndex);
+  }
+
+  const route = await fetchGoogleRoutes(
+    kitchenLat,
+    kitchenLng,
+    stops,
+    apiKey,
+    BASE_FIELD_MASK,
+    fetchOptions,
+  );
+
+  if (!route) return null;
+
+  const orderedStops =
+    stops.length <= 1
+      ? [...stops]
+      : orderStopsOpenLoop(kitchenLat, kitchenLng, stops, route);
+
+  return buildRouteFromGoogleResponse(route, orderedStops, payoutPerKm, {
+    assumeStopsInVisitOrder: true,
+  });
+}
+
 export async function computeOptimizedDeliveryRoute(
   riderOrders: RoutableOrder[],
   kitchenLat: number,
@@ -260,18 +395,14 @@ export async function computeOptimizedDeliveryRoute(
   apiKey: string,
   departureTime?: string,
 ): Promise<OptimizedRouteResult | null> {
-  const route = await fetchGoogleRoutes(
+  return computeOpenLoopRoute(
     kitchenLat,
     kitchenLng,
     riderOrders,
     apiKey,
-    BASE_FIELD_MASK,
-    { departureTime },
+    payoutPerKm,
+    departureTime,
   );
-
-  if (!route) return null;
-
-  return buildRouteFromGoogleResponse(route, riderOrders, payoutPerKm);
 }
 
 export async function computeOptimizedRouteDetails(
@@ -282,22 +413,46 @@ export async function computeOptimizedRouteDetails(
   payoutPerKm = 0,
   departureTime?: string,
 ): Promise<OptimizedRouteDetails | null> {
+  if (stops.length === 0) return null;
+
+  const fetchOptions: FetchGoogleRoutesOptions = {
+    departureTime,
+    routeShape: "open_loop",
+    optimizeWaypointOrder: stops.length > 1,
+  };
+
+  if (stops.length >= 2) {
+    const farthestIndex = findFarthestStopIndex(kitchenLat, kitchenLng, stops);
+    fetchOptions.farthestStop = stops[farthestIndex];
+    fetchOptions.intermediateStops = stops.filter((_, i) => i !== farthestIndex);
+  }
+
   const route = await fetchGoogleRoutes(
     kitchenLat,
     kitchenLng,
     stops,
     apiKey,
     DETAILS_FIELD_MASK,
-    { departureTime },
+    fetchOptions,
   );
 
   if (!route) return null;
 
-  const baseResult = buildRouteFromGoogleResponse(route, stops, payoutPerKm);
+  const orderedStops =
+    stops.length <= 1
+      ? [...stops]
+      : orderStopsOpenLoop(kitchenLat, kitchenLng, stops, route);
+
+  const baseResult = buildRouteFromGoogleResponse(
+    route,
+    orderedStops,
+    payoutPerKm,
+    { assumeStopsInVisitOrder: true },
+  );
   if (!baseResult) return null;
 
   const apiLegs = route.legs ?? [];
-  const stopCount = stops.length;
+  const stopCount = orderedStops.length;
   const outboundLegs = apiLegs.slice(0, stopCount);
 
   const legDetails: RouteLegDetail[] = outboundLegs.map((leg) => ({
@@ -336,7 +491,7 @@ export async function computeFixedOrderRoutePreview(
     {
       departureTime,
       optimizeWaypointOrder: false,
-      fixedOrderOpenRoute: true,
+      routeShape: "fixed_order_open",
     },
   );
 
