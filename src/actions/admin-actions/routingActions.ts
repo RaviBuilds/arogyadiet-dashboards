@@ -5,6 +5,9 @@ import { createClient as createAdminClient, type SupabaseClient } from "@supabas
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/logger";
 import { notifyRoutingAssignmentComplete } from "@/lib/delivery/deliveryStatusNotifications";
+import { buildISTDepartureISO, isFutureISO8601 } from "@/lib/dates/ist";
+import { computeOpenLoopHaversineRoute } from "@/lib/distance";
+import { computeOpenLoopRoute } from "@/lib/routing/googleRoutes";
 
 function getISTDateString(offsetDays = 0) {
   const date = new Date();
@@ -15,18 +18,6 @@ function getISTDateString(offsetDays = 0) {
     month: "2-digit",
     day: "2-digit",
   }).format(date);
-}
-
-// Helper function to calculate straight-line distance in km (Haversine formula)
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; // Radius of the earth in km
-  const dLat = (lat2 - lat1) * (Math.PI / 180);
-  const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
 }
 
 export async function getRoutingData() {
@@ -82,13 +73,152 @@ export async function getRoutingData() {
   return { orders, riders };
 }
 
+async function commitRiderRouteForDate(
+  supabaseAdmin: SupabaseClient,
+  targetDate: string,
+  riderId: string,
+  orderIds: string[],
+  allCurrentOrders: {
+    id: string;
+    assigned_rider_id: string | null;
+    batch_id: string | null;
+    addresses: { lat: number | null; lng: number | null } | { lat: number | null; lng: number | null }[] | null;
+  }[],
+  existingBatches: { id: string; assigned_rider_id: string }[] | null,
+  kitchenLat: number,
+  kitchenLng: number,
+  ratePerKm: number,
+  apiKey: string | undefined,
+  departureTime: string | undefined,
+) {
+  let batchId = existingBatches?.find((b) => b.assigned_rider_id === riderId)?.id;
+
+  const routableStops: { id: string; lat: number; lng: number }[] = [];
+
+  for (const orderId of orderIds) {
+    const orderData = allCurrentOrders.find((o) => o.id === orderId);
+    const addr = Array.isArray(orderData?.addresses)
+      ? orderData.addresses[0]
+      : orderData?.addresses;
+
+    const lat = addr?.lat != null ? Number(addr.lat) : NaN;
+    const lng = addr?.lng != null ? Number(addr.lng) : NaN;
+
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      routableStops.push({ id: orderId, lat, lng });
+    } else {
+      console.warn(
+        `[routing] order ${orderId}: missing coordinates; excluded from open-loop optimization`,
+      );
+    }
+  }
+
+  let totalBatchDistance = 0;
+  let totalBatchPayout = 0;
+  const orderUpdates: {
+    id: string;
+    route_sequence: number;
+    payout_amount: number;
+  }[] = [];
+
+  if (routableStops.length > 0) {
+    let route =
+      apiKey != null
+        ? await computeOpenLoopRoute(
+            kitchenLat,
+            kitchenLng,
+            routableStops,
+            apiKey,
+            ratePerKm,
+            departureTime,
+          )
+        : null;
+
+    if (!route) {
+      route = computeOpenLoopHaversineRoute(
+        routableStops,
+        kitchenLat,
+        kitchenLng,
+        ratePerKm,
+      );
+    }
+
+    totalBatchDistance = route.totalKm;
+    totalBatchPayout = route.expectedPayout;
+
+    for (const leg of route.legs) {
+      orderUpdates.push({
+        id: leg.orderId,
+        route_sequence: leg.routeSequence,
+        payout_amount: leg.payoutAmount,
+      });
+    }
+  }
+
+  const optimizedIds = new Set(orderUpdates.map((u) => u.id));
+  let nextSequence = orderUpdates.length + 1;
+  for (const orderId of orderIds) {
+    if (!optimizedIds.has(orderId)) {
+      orderUpdates.push({
+        id: orderId,
+        route_sequence: nextSequence++,
+        payout_amount: 0,
+      });
+    }
+  }
+
+  totalBatchDistance = Number(totalBatchDistance.toFixed(2));
+  totalBatchPayout = Number(totalBatchPayout.toFixed(2));
+
+  if (!batchId) {
+    const { data: newBatch, error: batchCreateErr } = await supabaseAdmin
+      .from("delivery_batches")
+      .insert({
+        assigned_rider_id: riderId,
+        delivery_date: targetDate,
+        status: "PENDING",
+        total_distance_km: totalBatchDistance,
+        expected_payout: totalBatchPayout,
+      })
+      .select("id")
+      .single();
+
+    if (batchCreateErr) throw batchCreateErr;
+    batchId = newBatch.id;
+  } else {
+    await supabaseAdmin
+      .from("delivery_batches")
+      .update({
+        total_distance_km: totalBatchDistance,
+        expected_payout: totalBatchPayout,
+      })
+      .eq("id", batchId);
+  }
+
+  for (const update of orderUpdates) {
+    const { error: updateOrderErr } = await supabaseAdmin
+      .from("delivery_orders")
+      .update({
+        assigned_rider_id: riderId,
+        batch_id: batchId,
+        route_sequence: update.route_sequence,
+        payout_amount: update.payout_amount,
+      })
+      .eq("id", update.id);
+
+    if (updateOrderErr) throw updateOrderErr;
+  }
+}
+
 async function commitRouteChangesForDate(
   supabaseAdmin: SupabaseClient,
   targetDate: string,
   movesMap: Map<string, string | null | undefined>,
   ratePerKm: number,
-  baseLat: number,
-  baseLng: number,
+  kitchenLat: number,
+  kitchenLng: number,
+  apiKey: string | undefined,
+  departureTime: string | undefined,
 ) {
   const { data: allCurrentOrders, error: fetchOrdersErr } = await supabaseAdmin
     .from("delivery_orders")
@@ -120,95 +250,23 @@ async function commitRouteChangesForDate(
 
   if (fetchBatchesErr) throw fetchBatchesErr;
 
-  for (const [riderId, orderIds] of riderOrdersMap.entries()) {
-    let batchId = existingBatches?.find((b) => b.assigned_rider_id === riderId)?.id;
-
-    let totalBatchDistance = 0;
-    let totalBatchPayout = 0;
-    let currentLat = baseLat;
-    let currentLng = baseLng;
-
-    const orderUpdates: {
-      id: string;
-      route_sequence: number;
-      payout_amount: number;
-    }[] = [];
-
-    for (let index = 0; index < orderIds.length; index++) {
-      const orderId = orderIds[index];
-      const orderData = allCurrentOrders.find((o) => o.id === orderId);
-
-      const addr = Array.isArray(orderData?.addresses)
-        ? orderData.addresses[0]
-        : orderData?.addresses;
-
-      const destLat = addr?.lat ? Number(addr.lat) : currentLat;
-      const destLng = addr?.lng ? Number(addr.lng) : currentLng;
-
-      const straightLineDist = calculateDistance(
-        currentLat,
-        currentLng,
-        destLat,
-        destLng,
-      );
-      const roadDistance = straightLineDist * 1.3;
-
-      totalBatchDistance += roadDistance;
-      const orderPayout = Number((roadDistance * ratePerKm).toFixed(2));
-      totalBatchPayout += orderPayout;
-
-      currentLat = destLat;
-      currentLng = destLng;
-
-      orderUpdates.push({
-        id: orderId,
-        route_sequence: index + 1,
-        payout_amount: orderPayout,
-      });
-    }
-
-    totalBatchDistance = Number(totalBatchDistance.toFixed(2));
-    totalBatchPayout = Number(totalBatchPayout.toFixed(2));
-
-    if (!batchId) {
-      const { data: newBatch, error: batchCreateErr } = await supabaseAdmin
-        .from("delivery_batches")
-        .insert({
-          assigned_rider_id: riderId,
-          delivery_date: targetDate,
-          status: "PENDING",
-          total_distance_km: totalBatchDistance,
-          expected_payout: totalBatchPayout,
-        })
-        .select("id")
-        .single();
-
-      if (batchCreateErr) throw batchCreateErr;
-      batchId = newBatch.id;
-    } else {
-      await supabaseAdmin
-        .from("delivery_batches")
-        .update({
-          total_distance_km: totalBatchDistance,
-          expected_payout: totalBatchPayout,
-        })
-        .eq("id", batchId);
-    }
-
-    for (const update of orderUpdates) {
-      const { error: updateOrderErr } = await supabaseAdmin
-        .from("delivery_orders")
-        .update({
-          assigned_rider_id: riderId,
-          batch_id: batchId,
-          route_sequence: update.route_sequence,
-          payout_amount: update.payout_amount,
-        })
-        .eq("id", update.id);
-
-      if (updateOrderErr) throw updateOrderErr;
-    }
-  }
+  await Promise.all(
+    Array.from(riderOrdersMap.entries()).map(([riderId, orderIds]) =>
+      commitRiderRouteForDate(
+        supabaseAdmin,
+        targetDate,
+        riderId,
+        orderIds,
+        allCurrentOrders,
+        existingBatches,
+        kitchenLat,
+        kitchenLng,
+        ratePerKm,
+        apiKey,
+        departureTime,
+      ),
+    ),
+  );
 
   if (unassignedOrderIds.length > 0) {
     const { error: unassignErr } = await supabaseAdmin
@@ -252,8 +310,12 @@ export async function commitRouteChanges(moves: { orderId: string; newRiderId: s
     const ratePerKm = Number(settings?.rider_payout_per_km || 16.00);
 
     const { data: kitchen } = await supabaseAdmin.from("kitchens").select("lat, lng").eq("is_active", true).limit(1).single();
-    const baseLat = kitchen?.lat ? Number(kitchen.lat) : 17.3850;
-    const baseLng = kitchen?.lng ? Number(kitchen.lng) : 78.4867;
+    const kitchenLat = kitchen?.lat ? Number(kitchen.lat) : 17.3850;
+    const kitchenLng = kitchen?.lng ? Number(kitchen.lng) : 78.4867;
+
+    const apiKey =
+      process.env.GOOGLE_MAPS_API_KEY ||
+      process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
     const movesMap = new Map(moves.map((m) => [m.orderId, m.newRiderId]));
 
@@ -269,13 +331,20 @@ export async function commitRouteChanges(moves: { orderId: string; newRiderId: s
     ];
 
     for (const targetDate of affectedDates) {
+      const departureTimeIso = buildISTDepartureISO(targetDate);
+      const departureTime = isFutureISO8601(departureTimeIso)
+        ? departureTimeIso
+        : undefined;
+
       await commitRouteChangesForDate(
         supabaseAdmin,
         targetDate,
         movesMap,
         ratePerKm,
-        baseLat,
-        baseLng,
+        kitchenLat,
+        kitchenLng,
+        apiKey,
+        departureTime,
       );
     }
 
