@@ -2,7 +2,13 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { tryCompleteDeliveryBatch } from "@/lib/delivery/batchCompletion";
+import {
+  notifyDelivered,
+  notifyOutForDeliveryForBatch,
+  notifyReachingToLocation,
+} from "@/lib/delivery/deliveryStatusNotifications";
 import { FAILED_DELIVERY_REASONS } from "@/lib/delivery/failedDeliveryReasons";
+import { notifyAdmins } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -99,6 +105,12 @@ async function updateRiderOrderStatus(
     );
   }
 
+  if (newStatus === "REACHING_TO_LOCATION") {
+    await notifyReachingToLocation(orderId);
+  } else if (newStatus === "DELIVERED") {
+    await notifyDelivered(orderId);
+  }
+
   revalidateRiderOrderPaths(orderId);
 
   return { success: true };
@@ -132,6 +144,10 @@ export async function updateDeliveryStatusAction(
     });
 
   if (logError) throw new Error(logError.message);
+
+  if (newStatus === "REACHING_TO_LOCATION") {
+    await notifyReachingToLocation(orderId);
+  }
 
   revalidatePath("/route");
   revalidatePath("/dashboard");
@@ -269,6 +285,14 @@ export async function requestFailedDeliveryAction(
     return { success: false, error: logError.message };
   }
 
+  await notifyAdmins({
+    title: "Failed Delivery Request",
+    message: "A rider requested a failed delivery. Approval required.",
+    actionUrl: "/operations",
+    sendEmail: true,
+    emailStrategy: "individual",
+  });
+
   revalidateRiderOrderPaths(orderId);
   return { success: true };
 }
@@ -320,6 +344,13 @@ export async function markBatchPickedUpAction(
     .eq("assigned_rider_id", riderId)
     .eq("delivery_date", deliveryDate)
     .eq("status", "PENDING");
+
+  if (ordersToUpdate?.length) {
+    await notifyOutForDeliveryForBatch(
+      riderId,
+      ordersToUpdate.map((order) => order.id),
+    );
+  }
 
   revalidatePath("/route");
   revalidatePath("/dashboard");

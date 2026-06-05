@@ -4,6 +4,7 @@ import {
   isBatchCompleteByCounts,
   isTerminalOrderStatus,
 } from "@/lib/delivery/orderStatuses";
+import { notifyBatchCompleted } from "@/lib/delivery/deliveryStatusNotifications";
 
 const INCOMPLETE_BATCH_STATUSES = ["PENDING", "IN_TRANSIT"] as const;
 
@@ -75,6 +76,7 @@ export async function tryCompleteDeliveryBatch(
 
   if (updatedBatch) {
     revalidateBatchCompletionPaths();
+    await notifyBatchCompleted(batchId);
     return { completed: true, batchId };
   }
 

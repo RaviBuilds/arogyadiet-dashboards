@@ -1,4 +1,5 @@
 import { RiderBottomNav } from "@/shared/components/layout/rider-bottom-nav";
+import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -16,8 +17,15 @@ export default async function RiderLayout({
     redirect("/login");
   }
 
+  const { data: profile } = await supabase
+    .from("users")
+    .select("id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
   return (
     <div className="min-h-screen bg-zinc-50 flex flex-col relative">
+      <OneSignalProvider userId={profile?.id ?? null} />
       {/* 
         The top header can be very minimal for the rider, 
         just showing the brand or connection status.

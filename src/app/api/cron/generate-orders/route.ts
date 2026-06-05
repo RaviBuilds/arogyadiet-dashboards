@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateDailyOrders } from "@/actions/system-actions/orderGeneration";
 import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
+import { notifyAdmins } from "@/lib/notifications";
 
 /**
  * GET /api/cron/generate-orders?secret=<CRON_SECRET>&date=YYYY-MM-DD
@@ -40,6 +41,18 @@ export async function GET(request: Request) {
         { success: false, error: result.error },
         { status: 500 },
       );
+    }
+
+    try {
+      await notifyAdmins({
+        title: "Order Creation Automation Result!",
+        message: "Please check the 5:15 pm automation result.",
+        actionUrl: "/admin/operations",
+        sendEmail: true,
+        emailStrategy: "shared",
+      });
+    } catch (notifyError) {
+      console.error("Order creation notification error:", notifyError);
     }
 
     return NextResponse.json(

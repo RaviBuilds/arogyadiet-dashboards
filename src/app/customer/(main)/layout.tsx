@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { CustomerHeader } from "@/shared/components/layout/customer-header";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
+import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
 import { redirect } from "next/navigation";
 import { Metadata } from "next";
 
@@ -26,7 +27,7 @@ export default async function CustomerLayout({
 
   const { data: profile } = await supabase
     .from("users")
-    .select("full_name")
+    .select("id, full_name")
     .eq("auth_user_id", user.id)
     .maybeSingle();
 
@@ -35,6 +36,7 @@ export default async function CustomerLayout({
   return (
     // ADDED max-w-full and overflow-x-hidden to kill horizontal scroll
     <div className="flex min-h-screen w-full max-w-full bg-slate-50/50 print:block print:min-h-0 print:bg-white">
+      <OneSignalProvider userId={profile?.id ?? null} />
       <CustomerSidebar isMobile={false} />
 
       {/* Added min-w-0 to allow text truncation inside flex children */}

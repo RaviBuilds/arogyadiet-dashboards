@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { format, addDays } from "date-fns";
 
 /**
@@ -42,6 +43,33 @@ export async function GET(request: Request) {
         { success: false, error: activateError.message },
         { status: 500 },
       );
+    }
+
+    if (activated?.length) {
+      for (const sub of activated) {
+        const { data: profile } = await supabaseAdmin
+          .from("customer_profiles")
+          .select("user_id")
+          .eq("id", sub.customer_profile_id)
+          .maybeSingle();
+
+        if (profile?.user_id) {
+          await sendNotificationToUser(profile.user_id, {
+            title: "Subscription Activated!",
+            message:
+              "Your upcoming pending subscription has been activated. See more info.",
+            actionUrl: "/customer/dashboard",
+            sendEmail: false,
+          });
+        }
+
+        await notifyAdmins({
+          title: "Pending Subscription Activated!",
+          message: "A pending subscription has been activated for a customer.",
+          actionUrl: "/admin/customers",
+          sendEmail: false,
+        });
+      }
     }
 
     // 2. Stop active subscriptions that ended today

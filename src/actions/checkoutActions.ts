@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js"; // Use server client in production
 import { addDays, format, differenceInCalendarDays, parseISO } from "date-fns";
 import { cascadePendingSubscriptionDates } from "@/actions/manageMealActions";
+import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
   key_secret: process.env.RAZORPAY_KEY_SECRET!,
@@ -420,6 +421,30 @@ export async function verifyAndActivateSubscriptionAction(
       subscription_id: subscription.id,
       event_type: "ACTIVATED",
       note: "Activated via Razorpay Online Checkout",
+    });
+
+    const { data: customerProfile } = await supabaseAdmin
+      .from("customer_profiles")
+      .select("user_id")
+      .eq("id", customerProfileId)
+      .maybeSingle();
+
+    if (customerProfile?.user_id) {
+      await sendNotificationToUser(customerProfile.user_id, {
+        title: "Subscription Started!",
+        message:
+          "Thanks for purchasing a subscription. Click here to view how to manage your planner.",
+        actionUrl: "/customer/subscription/manage/planner",
+        sendEmail: true,
+      });
+    }
+
+    await notifyAdmins({
+      title: "New Subscription Started!",
+      message: "A customer has successfully purchased a new subscription.",
+      actionUrl: "/admin/subscriptions",
+      sendEmail: true,
+      emailStrategy: "shared",
     });
 
     return {

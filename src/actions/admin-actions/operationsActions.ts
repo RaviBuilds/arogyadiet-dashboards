@@ -11,6 +11,11 @@ import {
   reconcileDeliveryBatchStatuses,
   tryCompleteDeliveryBatch,
 } from "@/lib/delivery/batchCompletion";
+import {
+  notifyDelivered,
+  notifyOutForDeliveryForBatch,
+  notifyReachingToLocation,
+} from "@/lib/delivery/deliveryStatusNotifications";
 import { getFailureReasonFromLogs } from "@/lib/delivery/failureApproval";
 import { getISTDateString } from "@/lib/dates/ist";
 import { revalidatePath } from "next/cache";
@@ -223,6 +228,8 @@ export async function markAdminOrderOnTheWayAction(
     action: "mark_on_the_way",
   });
 
+  await notifyReachingToLocation(orderId);
+
   revalidateOrderStatusPaths(orderId);
   return { success: true };
 }
@@ -287,6 +294,8 @@ export async function markAdminOrderDeliveredAction(
     to: newStatus,
     action: "mark_delivered",
   });
+
+  await notifyDelivered(orderId);
 
   revalidateOrderStatusPaths(orderId);
   revalidateBatchPickupPaths();
@@ -461,7 +470,7 @@ export async function markAdminBatchPickedUpAction(
 
   const { data: batch, error: batchError } = await supabase
     .from("delivery_batches")
-    .select("id, status")
+    .select("id, status, assigned_rider_id")
     .eq("id", batchId)
     .maybeSingle();
 
@@ -535,6 +544,13 @@ export async function markAdminBatchPickedUpAction(
     delivery_date: deliveryDate,
     orders_updated: ordersToUpdate.length,
   });
+
+  if (batch.assigned_rider_id) {
+    await notifyOutForDeliveryForBatch(
+      batch.assigned_rider_id,
+      ordersToUpdate.map((order) => order.id),
+    );
+  }
 
   revalidateBatchPickupPaths();
 

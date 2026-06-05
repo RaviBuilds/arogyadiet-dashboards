@@ -10,6 +10,7 @@ import {
   subscriptionConfirmationEmailHtml,
   subscriptionConfirmationSubject,
 } from "@/emails/SubscriptionConfirmationEmail";
+import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -292,6 +293,7 @@ export async function addSubscription(
           customer_profile_id: customerProfileId,
           status: subscriptionStatus,
         });
+        await notifyManualSubscriptionAdded(customerProfileId);
         return { success: true, paymentId: fallbackPayment?.id };
       }
       throw new Error(payErr.message);
@@ -314,6 +316,8 @@ export async function addSubscription(
       paymentStatus: isPaid ? "PAID" : "PENDING",
     });
 
+    await notifyManualSubscriptionAdded(customerProfileId);
+
     return { success: true, paymentId: newPayment?.id };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
@@ -323,6 +327,32 @@ export async function addSubscription(
 }
 
 // ─── email helper ────────────────────────────────────────────────────────────
+
+async function notifyManualSubscriptionAdded(customerProfileId: string) {
+  const supabase = createAdminClient();
+  const { data: profile } = await supabase
+    .from("customer_profiles")
+    .select("user_id")
+    .eq("id", customerProfileId)
+    .maybeSingle();
+
+  if (profile?.user_id) {
+    await sendNotificationToUser(profile.user_id, {
+      title: "Subscription Started!",
+      message: "An administrator has added a subscription to your account.",
+      actionUrl: "/customer/subscription/manage/planner",
+      sendEmail: true,
+    });
+  }
+
+  await notifyAdmins({
+    title: "Subscription Manually Added",
+    message: "A subscription was manually added to a customer account.",
+    actionUrl: "/admin/subscriptions",
+    sendEmail: true,
+    emailStrategy: "shared",
+  });
+}
 
 async function sendSubscriptionEmail(
   supabase: ReturnType<typeof createAdminClient>,

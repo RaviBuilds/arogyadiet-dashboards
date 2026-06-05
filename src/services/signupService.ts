@@ -61,7 +61,7 @@ export async function registerCustomer(data: {
   if (profileError)
     throw new Error("Failed to create customer extension profile.");
 
-  return authData.user;
+  return userData.id;
 }
 
 //OAuth missing profile Handler
