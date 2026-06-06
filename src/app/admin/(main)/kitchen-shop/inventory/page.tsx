@@ -1,5 +1,5 @@
 import { adminGetProducts } from "@/actions/admin-actions/inventoryActions";
-import InventoryPageClient from "@/shared/components/admin/inventory/InventoryPageClient";
+import InventoryPageClient from "@/shared/components/admin/product-inventory/InventoryPageClient";
 
 export const revalidate = 0;
 

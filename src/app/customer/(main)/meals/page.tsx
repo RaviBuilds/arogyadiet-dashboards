@@ -21,7 +21,7 @@ import {
 } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ShopOrdersTracker } from "@/modules/meals/components/shop-orders-tracker";
+import { ShopOrdersTracker } from "@/shared/components/customer/shop-orders-tracker";
 
 export const revalidate = 0;
 

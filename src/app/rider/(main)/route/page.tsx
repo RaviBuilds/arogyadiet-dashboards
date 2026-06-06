@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { markBatchPickedUpAction } from "@/actions/rider-actions/routeActions";
 import Link from "next/link";
-import { RouteGpsIndicator } from "@/modules/rider/components/RouteGpsIndicator";
+import { RouteGpsIndicator } from "@/shared/components/rider/RouteGpsIndicator";
 
 export const revalidate = 0;
 

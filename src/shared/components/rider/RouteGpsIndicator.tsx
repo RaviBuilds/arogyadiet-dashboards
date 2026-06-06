@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   LiveLocationTracker,
   type GpsHardwareState,
-} from "@/modules/rider/components/LiveLocationTracker";
+} from "@/shared/components/rider/LiveLocationTracker";
 
 export function RouteGpsIndicator({
   riderId,

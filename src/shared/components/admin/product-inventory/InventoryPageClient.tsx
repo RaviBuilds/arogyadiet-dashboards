@@ -23,11 +23,11 @@ import {
   AdminInventoryProduct,
 } from "@/actions/admin-actions/inventoryActions";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
-import { ProductDescriptionEditor } from "@/shared/components/admin/inventory/ProductDescriptionEditor";
+import { ProductDescriptionEditor } from "@/shared/components/admin/product-inventory/ProductDescriptionEditor";
 import {
   ProductMediaGallery,
   type ProductMediaGalleryHandle,
-} from "@/shared/components/admin/inventory/ProductMediaGallery";
+} from "@/shared/components/admin/product-inventory/ProductMediaGallery";
 import { DataTable } from "@/shared/components/ui/data-table";
 import {
   AlertDialog,

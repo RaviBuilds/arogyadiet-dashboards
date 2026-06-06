@@ -1,0 +1,97 @@
+import { pgTable, uuid, varchar, decimal, integer, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
+
+// 1. ENUM DEFINITIONS
+export const productTypeEnum = pgEnum('inventory_product_type', ['RAW_MATERIAL', 'FINISHED_GOOD']);
+export const uomEnum = pgEnum('inventory_uom', ['KG', 'LITRE', 'UNIT']);
+export const lotStatusEnum = pgEnum('inventory_lot_status', ['ACTIVE', 'DEPLETED', 'EXPIRED']);
+export const mfgOrderStatusEnum = pgEnum('manufacturing_order_status', ['PENDING', 'COMPLETED']);
+export const transactionTypeEnum = pgEnum('inventory_transaction_type', [
+  'IN', 
+  'OUT', 
+  'SENT_TO_MFG', 
+  'RECEIVED_FROM_MFG', 
+  'EXPIRED'
+]);
+
+// 2. THE MASTER CATALOG TABLE
+export const inventoryProducts = pgTable('inventory_products', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  imageUrl: varchar('image_url', { length: 512 }), // For the Zepto-style grid cards
+  category: varchar('category', { length: 100 }).notNull(), // e.g., 'Grains', 'Oils', 'Ready-Made'
+  type: productTypeEnum('type').notNull(),
+  baseUom: uomEnum('base_uom').notNull(),
+  minStockThreshold: decimal('min_stock_threshold', { precision: 12, scale: 2 }).notNull().default('0.00'), // For Low Stock Alerts
+  defaultDurabilityDays: integer('default_durability_days').notNull().default(0), // Automatically sets expiry on arrival
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// 3. PHYSICAL STOCK & COSTING LOTS TABLE
+export const inventoryLots = pgTable('inventory_lots', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  productId: uuid('product_id').references(() => inventoryProducts.id, { onDelete: 'cascade' }).notNull(),
+  batchNumber: varchar('batch_number', { length: 100 }).notNull(), // Auto-generated string tracking batch
+  quantityRemaining: decimal('quantity_remaining', { precision: 12, scale: 2 }).notNull(),
+  unitCost: decimal('unit_cost', { precision: 12, scale: 2 }).notNull(), // Dynamic purchase price per unit
+  expiryDate: timestamp('expiry_date').notNull(), // Evaluated via durability or overridden manually
+  status: lotStatusEnum('status').notNull().default('ACTIVE'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 4. MANUFACTURING WORK-IN-PROGRESS (WIP) ORDERS TABLE
+export const manufacturingOrders = pgTable('manufacturing_orders', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  rawProductId: uuid('raw_product_id').references(() => inventoryProducts.id).notNull(),
+  sourceLotId: uuid('source_lot_id').references(() => inventoryLots.id).notNull(),
+  quantitySent: decimal('quantity_sent', { precision: 12, scale: 2 }).notNull(), // e.g., 100 Litres
+  totalCostValue: decimal('total_cost_value', { precision: 12, scale: 2 }).notNull(), // Total valuation moving to WIP
+  status: mfgOrderStatusEnum('status').notNull().default('PENDING'),
+  sentAt: timestamp('sent_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// 5. MANUFACTURING OUTPUTS (PACKAGING BREAKDOWN) TABLE
+export const manufacturingOutputs = pgTable('manufacturing_outputs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  mfgOrderId: uuid('mfg_order_id').references(() => manufacturingOrders.id, { onDelete: 'cascade' }).notNull(),
+  finishedProductId: uuid('finished_product_id').references(() => inventoryProducts.id).notNull(),
+  newLotId: uuid('new_lot_id').references(() => inventoryLots.id).notNull(), // Connects back to the generated lot
+  packageSize: decimal('package_size', { precision: 12, scale: 2 }).notNull(), // e.g., 10 (kg or L)
+  packageCount: integer('package_count').notNull(), // e.g., 5 packets
+});
+
+// 6. IMMUTABLE TRANSACTION AUDIT LEDGER TABLE
+export const inventoryTransactions = pgTable('inventory_transactions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  lotId: uuid('lot_id').references(() => inventoryLots.id, { onDelete: 'cascade' }).notNull(),
+  transactionType: transactionTypeEnum('transaction_type').notNull(),
+  quantityChanged: decimal('quantity_changed', { precision: 12, scale: 2 }).notNull(), // Negative for removals, positive for additions
+  financialValueChanged: decimal('financial_value_changed', { precision: 12, scale: 2 }).notNull(), // Financial balance mapping
+  timestamp: timestamp('timestamp').defaultNow().notNull(),
+});
+
+// ==========================================
+// DRIZZLE RELATIONS (For clean query joins)
+// ==========================================
+export const inventoryProductsRelations = relations(inventoryProducts, ({ many }) => ({
+  lots: many(inventoryLots),
+}));
+
+export const inventoryLotsRelations = relations(inventoryLots, ({ {one, many} }) => ({
+  product: one(inventoryProducts, { fields: [inventoryLots.productId], references: [inventoryProducts.id] }),
+  transactions: many(inventoryTransactions),
+}));
+
+export const manufacturingOrdersRelations = relations(manufacturingOrders, ({ {one, many} }) => ({
+  rawProduct: one(inventoryProducts, { fields: [manufacturingOrders.rawProductId], references: [inventoryProducts.id] }),
+  sourceLot: one(inventoryLots, { fields: [manufacturingOrders.sourceLotId], references: [inventoryLots.id] }),
+  outputs: many(manufacturingOutputs),
+}));
+
+export const manufacturingOutputsRelations = relations(manufacturingOutputs, ({ one }) => ({
+  order: one(manufacturingOrders, { fields: [manufacturingOutputs.mfgOrderId], references: [manufacturingOrders.id] }),
+  finishedProduct: one(inventoryProducts, { fields: [manufacturingOutputs.finishedProductId], references: [inventoryProducts.id] }),
+  newLot: one(inventoryLots, { fields: [manufacturingOutputs.newLotId], references: [inventoryLots.id] }),
+}));

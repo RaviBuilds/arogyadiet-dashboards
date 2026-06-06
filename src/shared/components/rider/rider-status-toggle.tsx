@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Switch } from "@/shared/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { Bike, PowerOff } from "lucide-react";
-import { setRiderOnlineAction } from "@/modules/rider/actions/shiftActions";
+import { setRiderOnlineAction } from "@/actions/rider-actions/shiftActions";
 
 type RiderStatusToggleProps = {
   initialStatus: boolean;
