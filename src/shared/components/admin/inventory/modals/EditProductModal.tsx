@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ImagePlus, Loader2, X } from "lucide-react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
-import { addProductAction } from "@/actions/inventory-actions";
+import { editProductAction } from "@/actions/inventory-actions";
 import {
   addProductFormSchema,
   ALLOWED_IMAGE_TYPES,
@@ -15,16 +16,15 @@ import {
   PRODUCT_TYPES,
   validateInventoryProductImage,
   type AddProductFormValues,
+  type InventoryCatalogProduct,
 } from "@/lib/inventory/product-schema";
-
 import { Button } from "@/shared/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/shared/components/ui/card";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/components/ui/dialog";
 import {
   Form,
   FormControl,
@@ -53,37 +53,62 @@ const BASE_UOM_LABELS: Record<(typeof BASE_UOMS)[number], string> = {
   UNIT: "Unit",
 };
 
-const defaultValues: AddProductFormValues = {
-  name: "",
-  category: "",
-  type: "RAW_MATERIAL",
-  baseUom: "KG",
-  minStockThreshold: 0,
-  defaultDurabilityDays: 0,
-};
-
-interface AddProductFormProps {
-  onSuccess?: () => void;
+function getDefaultValues(
+  product: InventoryCatalogProduct,
+): AddProductFormValues {
+  return {
+    name: product.name,
+    category: product.category,
+    type: product.type,
+    baseUom: product.baseUom,
+    minStockThreshold: product.minStockThreshold,
+    defaultDurabilityDays: product.defaultDurabilityDays,
+  };
 }
 
-export default function AddProductForm({ onSuccess }: AddProductFormProps) {
+interface EditProductModalProps {
+  product: InventoryCatalogProduct;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export default function EditProductModal({
+  product,
+  open,
+  onOpenChange,
+}: EditProductModalProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(
+    product.imageUrl,
+  );
   const [imageError, setImageError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const form = useForm<AddProductFormValues>({
     resolver: zodResolver(addProductFormSchema),
-    defaultValues,
+    defaultValues: getDefaultValues(product),
   });
 
+  useEffect(() => {
+    if (!open) return;
+
+    form.reset(getDefaultValues(product));
+    setImageFile(null);
+    setImageError(null);
+    setPreviewUrl(product.imageUrl);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, [open, product, form]);
+
   function clearImageSelection() {
-    if (previewUrl) {
+    if (previewUrl && previewUrl !== product.imageUrl) {
       URL.revokeObjectURL(previewUrl);
     }
     setImageFile(null);
-    setPreviewUrl(null);
+    setPreviewUrl(product.imageUrl);
     setImageError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -101,14 +126,11 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
     if (validationError) {
       setImageError(validationError);
       setImageFile(null);
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
-      setPreviewUrl(null);
+      setPreviewUrl(product.imageUrl);
       return;
     }
 
-    if (previewUrl) {
+    if (previewUrl && previewUrl !== product.imageUrl) {
       URL.revokeObjectURL(previewUrl);
     }
 
@@ -118,19 +140,9 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
   }
 
   function onSubmit(values: AddProductFormValues) {
-    if (!imageFile) {
-      setImageError("Product image is required.");
-      return;
-    }
-
-    const validationError = validateInventoryProductImage(imageFile);
-    if (validationError) {
-      setImageError(validationError);
-      return;
-    }
-
     startTransition(async () => {
       const formData = new FormData();
+      formData.append("productId", product.id);
       formData.append("name", values.name);
       formData.append("category", values.category);
       formData.append("type", values.type);
@@ -140,15 +152,17 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
         "defaultDurabilityDays",
         String(values.defaultDurabilityDays),
       );
-      formData.append("image", imageFile);
 
-      const result = await addProductAction(formData);
+      if (imageFile) {
+        formData.append("image", imageFile);
+      }
+
+      const result = await editProductAction(formData);
 
       if (result.success) {
-        toast.success("Product registered successfully.");
-        form.reset(defaultValues);
-        clearImageSelection();
-        onSuccess?.();
+        toast.success("Product updated successfully.");
+        onOpenChange(false);
+        router.refresh();
         return;
       }
 
@@ -157,8 +171,14 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
   }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Edit Product: {product.name}</DialogTitle>
+        </DialogHeader>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
             <FormField
               control={form.control}
               name="name"
@@ -180,7 +200,10 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
                 <FormItem>
                   <FormLabel>Category</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Grains, Oils, Ready-Made" {...field} />
+                    <Input
+                      placeholder="e.g. Grains, Oils, Ready-Made"
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -203,7 +226,7 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <ImagePlus />
-                  Browse Image
+                  Replace Image
                 </Button>
                 {imageFile && (
                   <>
@@ -230,8 +253,8 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
                 />
               )}
               <p className="text-xs text-muted-foreground">
-                Max file size: {MAX_IMAGE_SIZE_BYTES / 1_048_576} MB. JPEG, PNG,
-                WebP, or GIF.
+                Leave unchanged to keep the current image. Max file size:{" "}
+                {MAX_IMAGE_SIZE_BYTES / 1_048_576} MB.
               </p>
               {imageError && (
                 <p className="text-sm text-destructive">{imageError}</p>
@@ -247,7 +270,6 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
                     <FormLabel>Product Type</FormLabel>
                     <Select
                       onValueChange={field.onChange}
-                      defaultValue={field.value}
                       value={field.value}
                     >
                       <FormControl>
@@ -276,7 +298,6 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
                     <FormLabel>Base Unit of Measure</FormLabel>
                     <Select
                       onValueChange={field.onChange}
-                      defaultValue={field.value}
                       value={field.value}
                     >
                       <FormControl>
@@ -348,17 +369,19 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
               />
             </div>
 
-            <Button type="submit" disabled={isPending} className="w-full sm:w-auto">
+            <Button type="submit" disabled={isPending} className="w-full">
               {isPending ? (
                 <>
                   <Loader2 className="animate-spin" />
-                  Registering...
+                  Saving...
                 </>
               ) : (
-                "Register Product"
+                "Save Changes"
               )}
             </Button>
-      </form>
-    </Form>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }

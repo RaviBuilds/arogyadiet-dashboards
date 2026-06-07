@@ -1,3 +1,6 @@
+import InventoryHeader from "@/shared/components/admin/inventory/InventoryHeader";
+import OperationsCart from "@/shared/components/admin/inventory/OperationsCart";
+
 export default function InventoryLayout({
   children,
 }: {
@@ -5,12 +8,9 @@ export default function InventoryLayout({
 }) {
   return (
     <div className="flex min-h-screen flex-col bg-muted/20">
-      <header className="sticky top-0 z-40 border-b bg-background px-6 py-4 shadow-sm">
-        <h1 className="text-lg font-semibold text-primary">
-          ArogyaDiet Warehouse System
-        </h1>
-      </header>
+      <InventoryHeader />
       <main className="flex-1">{children}</main>
+      <OperationsCart />
     </div>
   );
 }
