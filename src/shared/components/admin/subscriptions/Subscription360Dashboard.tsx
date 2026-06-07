@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
-import { AdminSubmenu } from "@/shared/components/admin/core/AdminSubmenu";
+import { AdminSubmenuBar } from "@/shared/components/admin/core/AdminSubmenuBar";
 import {
   Card,
   CardContent,
@@ -205,7 +205,7 @@ export function Subscription360Dashboard({
 
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-500">
-      <AdminSubmenu
+      <AdminSubmenuBar
         tabs={tabs}
         activeTab={activeTab}
         onTabChange={setActiveTab}

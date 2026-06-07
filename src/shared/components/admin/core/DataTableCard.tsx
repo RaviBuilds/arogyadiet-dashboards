@@ -17,27 +17,29 @@ export function DataTableCard({
   footer,
 }: DataTableCardProps) {
   return (
-    <Card className="border-border shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <CardHeader className="pb-4 border-b">{header}</CardHeader>
+    <Card className="animate-in fade-in slide-in-from-bottom-4 rounded-xl border border-slate-200 bg-white shadow-sm duration-500">
+      <CardHeader className="border-b border-slate-200 bg-slate-50/50 p-6 pb-4">
+        {header}
+      </CardHeader>
 
-      <CardContent className="p-4 md:px-6">
+      <CardContent className="p-6">
         {(controls || actions) && (
-          <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-5">
-            <div className="w-full xl:w-auto flex items-center gap-2 flex-wrap">
+          <div className="mb-6 flex flex-col items-start justify-between gap-4 xl:flex-row xl:items-center">
+            <div className="flex w-full flex-wrap items-center gap-4 xl:w-auto">
               {controls}
             </div>
-            <div className="w-full xl:w-auto flex items-center gap-3 flex-wrap justify-end">
+            <div className="flex w-full flex-wrap items-center justify-end gap-3 xl:w-auto">
               {actions}
             </div>
           </div>
         )}
 
-        <div className="rounded-md border bg-card overflow-hidden">
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           {children}
         </div>
 
         {footer && (
-          <div className="flex items-center justify-between pt-5 pb-1">
+          <div className="flex items-center justify-between pb-1 pt-6">
             {footer}
           </div>
         )}

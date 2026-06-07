@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AdminSubmenu } from "@/shared/components/admin/core/AdminSubmenu";
+import { AdminSubmenuBar } from "@/shared/components/admin/core/AdminSubmenuBar";
 import { OverviewTab } from "./OverviewTab";
 import { SubscriptionRevenueTab } from "./SubscriptionRevenueTab";
 import { RiderPayoutsTab } from "./RiderPayoutsTab";
@@ -26,7 +26,7 @@ export default function FinanceDashboard({
 
   return (
     <div className="space-y-6">
-      <AdminSubmenu
+      <AdminSubmenuBar
         tabs={TABS}
         activeTab={activeTab}
         onTabChange={setActiveTab}

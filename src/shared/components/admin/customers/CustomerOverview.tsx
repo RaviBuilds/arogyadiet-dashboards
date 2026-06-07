@@ -157,83 +157,84 @@ export function CustomerOverview({
       value: metrics.totalCustomers,
       helper: "Complete subscriber base",
       icon: Users,
-      accent: "bg-primary/10 text-primary border-primary/20",
+      accent: "bg-slate-50 text-slate-700 border-slate-200",
     },
     {
       title: "Active Customers",
       value: metrics.activeCustomers,
       helper: `${getPercent(metrics.activeCustomers, metrics.totalCustomers)}% currently subscribed`,
       icon: UserCheck,
-      accent: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
+      accent: "bg-emerald-50 text-emerald-700 border-emerald-200",
     },
     {
       title: "No Active Plan",
       value: metrics.noPlanCustomers,
       helper: "Customers needing follow-up",
       icon: UserRoundX,
-      accent: "bg-zinc-500/10 text-zinc-700 border-zinc-200",
+      accent: "bg-slate-50 text-slate-600 border-slate-200",
     },
     {
       title: "Active Subscriptions",
       value: metrics.activeSubscriptionsCount,
       helper: "Running subscriptions",
       icon: Activity,
-      accent: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
+      accent: "bg-emerald-50 text-emerald-700 border-emerald-200",
     },
     {
       title: "Pending Subscriptions",
       value: metrics.pendingSubscriptionsCount,
       helper: "Scheduled (pending)",
       icon: CalendarClock,
-      accent: "bg-amber-500/10 text-amber-700 border-amber-200",
+      accent: "bg-amber-50 text-amber-700 border-amber-200",
     },
     {
       title: "Expired / Stopped",
       value: metrics.stoppedSubscriptionsCount,
       helper: "Inactive lifecycle records",
       icon: CirclePause,
-      accent: "bg-red-500/10 text-red-700 border-red-200",
+      accent: "bg-red-50 text-red-700 border-red-200",
     },
   ];
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <Card className="relative overflow-hidden border-primary/20 bg-linear-to-br from-primary/10 via-background to-emerald-500/10 shadow-sm">
-        <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
-        <CardContent className="relative p-6 md:p-7">
+      <Card className="relative overflow-hidden border border-slate-200 bg-white shadow-sm rounded-xl">
+        <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-emerald-50 blur-3xl" />
+        <div className="absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-slate-50 blur-2xl" />
+        <CardContent className="relative p-6 md:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-2xl space-y-3">
-              <Badge className="bg-primary/10 text-primary border-primary/20 hover:bg-primary/15">
+            <div className="max-w-2xl space-y-4">
+              <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 transition-all duration-200">
                 <Sparkles className="h-3 w-3" />
                 Customer command overview
               </Badge>
               <div>
-                <h2 className="text-2xl font-black tracking-tight text-foreground md:text-3xl">
+                <h2 className="text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl">
                   Customer & Subscription Overview
                 </h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                <p className="mt-2 text-sm leading-6 text-slate-500">
                   A quick operational snapshot of customer health, subscription
                   activity, and plan movement before the full admin dashboard is
                   introduced.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="bg-background/70">
+                <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200">
                   {metrics.totalCustomers} Customers
                 </Badge>
-                <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-200">
+                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">
                   {metrics.activeSubscriptionsCount} Active Subs
                 </Badge>
-                <Badge className="bg-amber-500/10 text-amber-700 border-amber-200">
+                <Badge className="bg-amber-50 text-amber-700 border-amber-200">
                   {metrics.pendingSubscriptionsCount} Pending
                 </Badge>
-                <Badge className="bg-red-500/10 text-red-700 border-red-200">
+                <Badge className="bg-red-50 text-red-700 border-red-200">
                   {metrics.stoppedSubscriptionsCount} Stopped / Expired
                 </Badge>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 rounded-2xl border bg-background/70 p-3 shadow-sm backdrop-blur-sm lg:min-w-[280px]">
+            <div className="grid grid-cols-2 gap-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4 shadow-sm lg:min-w-[280px]">
               <HeroMiniStat label="Active Sub" value={metrics.activeCustomers} />
               <HeroMiniStat label="No Plan" value={metrics.noPlanCustomers} />
             </div>
@@ -241,35 +242,36 @@ export function CustomerOverview({
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {kpis.map((item) => (
           <KpiCard key={item.title} {...item} />
         ))}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-        <Card className="border-border shadow-sm">
-          <CardHeader className="border-b bg-muted/20 pb-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <Card className="border border-slate-200 bg-white shadow-sm rounded-xl">
+          <CardHeader className="border-b border-slate-200 bg-slate-50/50 p-6 pb-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <CardTitle className="flex items-center gap-2 text-lg font-bold">
-                  <HeartPulse className="h-5 w-5 text-primary" />
+                <CardTitle className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
+                  <HeartPulse className="h-5 w-5 text-emerald-600" />
                   Customer Health
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-sm text-slate-500">
                   Profile readiness, dietary mix, and health flags.
                 </CardDescription>
               </div>
               <Button
                 variant="outline"
                 size="sm"
+                className="transition-all duration-200"
                 onClick={() => onNavigate("Customer Directory")}
               >
                 View Directory
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="space-y-6 p-5">
+          <CardContent className="space-y-6 p-6">
             <div className="grid gap-3 sm:grid-cols-3">
               <InsightPill
                 label="Medical history"
@@ -291,12 +293,12 @@ export function CustomerOverview({
               />
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-foreground">
+                <h3 className="text-sm font-semibold tracking-tight text-slate-900">
                   Customer Status Mix
                 </h3>
-                <Badge variant="outline" className="bg-muted/40">
+                <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200">
                   {metrics.totalCustomers} total
                 </Badge>
               </div>
@@ -314,8 +316,8 @@ export function CustomerOverview({
               />
             </div>
 
-            <div className="space-y-3">
-              <h3 className="text-sm font-bold text-foreground">
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold tracking-tight text-slate-900">
                 Dietary Distribution
               </h3>
               {metrics.dietDistribution.length === 0 ? (
@@ -335,45 +337,46 @@ export function CustomerOverview({
           </CardContent>
         </Card>
 
-        <Card className="border-border shadow-sm">
-          <CardHeader className="border-b bg-muted/20 pb-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <Card className="border border-slate-200 bg-white shadow-sm rounded-xl">
+          <CardHeader className="border-b border-slate-200 bg-slate-50/50 p-6 pb-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <CardTitle className="flex items-center gap-2 text-lg font-bold">
-                  <ClipboardList className="h-5 w-5 text-primary" />
+                <CardTitle className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
+                  <ClipboardList className="h-5 w-5 text-emerald-600" />
                   Subscription Snapshot
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-sm text-slate-500">
                   Active plan spread, pause usage, and upcoming endings.
                 </CardDescription>
               </div>
               <Button
                 variant="outline"
                 size="sm"
+                className="transition-all duration-200"
                 onClick={() => onNavigate("Active Subscriptions")}
               >
                 View Active
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="space-y-6 p-5">
-            <div className="rounded-xl border bg-primary/5 p-4">
+          <CardContent className="space-y-6 p-6">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-bold text-foreground">
+                  <p className="text-sm font-semibold tracking-tight text-slate-900">
                     Pause Credit Utilization
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-slate-500">
                     Across all active subscriptions
                   </p>
                 </div>
-                <Badge className="bg-primary/10 text-primary border-primary/20">
+                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">
                   {metrics.pauseCreditsUsed} / {metrics.pauseCreditsTotal}
                 </Badge>
               </div>
-              <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-background">
+              <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-200">
                 <div
-                  className="h-full rounded-full bg-primary transition-all"
+                  className="h-full rounded-full bg-emerald-500 transition-all duration-200"
                   style={{ width: `${metrics.pauseCreditsPercent}%` }}
                 />
               </div>
@@ -403,15 +406,15 @@ export function CustomerOverview({
               />
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-foreground">
+                <h3 className="text-sm font-semibold tracking-tight text-slate-900">
                   Ending Soon
                 </h3>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 px-2 text-xs"
+                  className="h-7 px-2 text-xs text-slate-500 hover:text-slate-900 transition-all duration-200"
                   onClick={() => onNavigate("Pending Subscriptions")}
                 >
                   View Pending
@@ -424,17 +427,17 @@ export function CustomerOverview({
                   {metrics.endingSoon.map((subscription) => (
                     <div
                       key={subscription.id}
-                      className="flex items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 transition-colors duration-200 hover:bg-slate-50"
                     >
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-foreground">
+                        <p className="truncate text-sm font-semibold tracking-tight text-slate-900">
                           {subscription.customer_name}
                         </p>
-                        <p className="truncate text-xs text-muted-foreground">
+                        <p className="truncate text-sm text-slate-500">
                           {subscription.plan_name}
                         </p>
                       </div>
-                      <Badge variant="outline" className="shrink-0 bg-muted/40">
+                      <Badge variant="outline" className="shrink-0 bg-slate-50 text-slate-600 border-slate-200">
                         {formatDate(subscription.ends_on)}
                       </Badge>
                     </div>
@@ -451,9 +454,9 @@ export function CustomerOverview({
 
 function HeroMiniStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border bg-card px-3 py-4 text-center shadow-sm">
-      <div className="text-2xl font-black text-foreground">{value}</div>
-      <div className="mt-1 text-xs font-medium text-muted-foreground">
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-5 text-center shadow-sm transition-all duration-200 hover:bg-slate-50">
+      <div className="text-2xl font-semibold tracking-tight text-slate-900">{value}</div>
+      <div className="mt-1 text-sm text-slate-500">
         {label}
       </div>
     </div>
@@ -474,17 +477,17 @@ function KpiCard({
   accent: string;
 }) {
   return (
-    <Card className="border-border shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
-      <CardContent className="p-5">
+    <Card className="border border-slate-200 bg-white shadow-sm rounded-xl transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-slate-300">
+      <CardContent className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <div className="mt-2 text-3xl font-black tracking-tight text-foreground">
+            <p className="text-sm text-slate-500">{title}</p>
+            <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
               {value}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
+            <p className="mt-1.5 text-sm text-slate-500">{helper}</p>
           </div>
-          <div className={`rounded-xl border p-2.5 ${accent}`}>
+          <div className={`rounded-xl border p-3 ${accent}`}>
             <Icon className="h-5 w-5" />
           </div>
         </div>
@@ -505,12 +508,12 @@ function InsightPill({
   className: string;
 }) {
   return (
-    <div className={`rounded-xl border p-3 ${className}`}>
+    <div className={`rounded-xl border p-4 transition-all duration-200 ${className}`}>
       <div className="flex items-center gap-2">
         <Icon className="h-4 w-4" />
-        <span className="text-xs font-semibold">{label}</span>
+        <span className="text-xs font-semibold uppercase tracking-wider">{label}</span>
       </div>
-      <div className="mt-2 text-2xl font-black">{value}</div>
+      <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
     </div>
   );
 }
@@ -529,10 +532,10 @@ function PlanDistributionSection({
   barClassName: string;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-bold text-foreground">{title}</h3>
-        <Badge variant="outline" className="bg-muted/40">
+        <h3 className="text-sm font-semibold tracking-tight text-slate-900">{title}</h3>
+        <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200">
           {total} total
         </Badge>
       </div>
@@ -569,12 +572,12 @@ function DistributionRow({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="truncate font-medium text-foreground">{label}</span>
-        <span className="shrink-0 text-xs font-semibold text-muted-foreground">
+        <span className="truncate font-medium text-slate-900">{label}</span>
+        <span className="shrink-0 text-xs font-medium text-slate-500">
           {value} ({percent}%)
         </span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
         <div
           className={`h-full rounded-full transition-all ${barClassName}`}
           style={{ width: `${percent}%` }}
@@ -586,7 +589,7 @@ function DistributionRow({
 
 function EmptyState({ label }: { label: string }) {
   return (
-    <div className="rounded-lg border border-dashed bg-muted/20 p-4 text-center text-sm text-muted-foreground">
+    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-sm text-slate-500">
       {label}
     </div>
   );

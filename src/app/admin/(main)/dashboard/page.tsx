@@ -1,39 +1,19 @@
-import Link from "next/link";
-import { Warehouse } from "lucide-react";
+import ExecutiveDashboard from "@/shared/components/admin/dashboard/ExecutiveDashboard";
+import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { getExecutiveSummary } from "@/services/dashboardMetrics";
 
-import { Button } from "@/shared/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/shared/components/ui/card";
+export const revalidate = 0;
 
-export default function AdminDashboardPage() {
+export default async function AdminDashboardPage() {
+  const summary = await getExecutiveSummary();
+
   return (
-    <div className="container space-y-8 py-8">
-      <h1 className="text-3xl font-bold">
-        Welcome to the Arogyadiet Admin Control Center
-      </h1>
-
-      <Link href="/admin/inventory" className="block max-w-md">
-        <Card className="border-primary/20 transition-colors hover:border-primary/50 hover:bg-primary/5">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-primary">
-              <Warehouse className="size-5" />
-              Manage Warehouse Inventory
-            </CardTitle>
-            <CardDescription>
-              Open the isolated warehouse system to register and manage master
-              catalog products.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button className="w-full">Enter Warehouse System</Button>
-          </CardContent>
-        </Card>
-      </Link>
+    <div className="flex animate-in fade-in flex-col gap-6 pb-2 duration-500">
+      <AdminPageHeader
+        title="Executive Overview"
+        description="Real-time pulse across customers, subscriptions, operations, and inventory."
+      />
+      <ExecutiveDashboard data={summary} />
     </div>
   );
 }

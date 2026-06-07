@@ -7,7 +7,7 @@ import DailyMealRoster from "@/shared/components/admin/operations/DailyMealRoste
 import LiveRoutingBoard from "@/shared/components/admin/operations/LiveRoutingBoard";
 import AdminLiveTracking from "@/shared/components/admin/operations/AdminLiveTracking";
 import AutomationLogs from "@/shared/components/admin/operations/AutomationLogs";
-import { AdminSubmenu } from "../core/AdminSubmenu";
+import { AdminSubmenuBar } from "../core/AdminSubmenuBar";
 
 export default function OperationsDashboard({
   deliveries,
@@ -19,7 +19,7 @@ export default function OperationsDashboard({
 
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-500">
-      <AdminSubmenu
+      <AdminSubmenuBar
         tabs={[
           "Today's Scheduled",
           "Planned (Tomorrow)",

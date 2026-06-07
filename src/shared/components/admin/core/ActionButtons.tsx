@@ -16,7 +16,7 @@ export function ExportButton({
       size="sm"
       onClick={onClick}
       disabled={disabled}
-      className="gap-2 text-primary hover:text-primary border-primary/20 hover:bg-primary/5"
+      className="gap-2 border-slate-200 text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
     >
       <Download className="h-4 w-4" /> {label}
     </Button>
@@ -35,9 +35,10 @@ export function RefreshButton({
   return (
     <Button
       variant="secondary"
+      size="sm"
       onClick={onClick}
       disabled={isLoading}
-      className="gap-2 shadow-sm font-medium bg-green-600/10 text-green-700 hover:bg-green-600/20"
+      className="gap-2 border border-emerald-200 bg-emerald-50 font-medium text-emerald-700 shadow-sm transition-all duration-200 hover:bg-emerald-100"
     >
       {isLoading ? (
         <Loader2 className="h-4 w-4 animate-spin" />

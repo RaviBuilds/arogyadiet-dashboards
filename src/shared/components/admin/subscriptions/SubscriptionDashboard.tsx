@@ -35,8 +35,13 @@ import {
   setRecommendedPlan,
   createSubscriptionPlan,
 } from "@/actions/admin-actions/subscriptionActions";
-import { AdminSubmenu } from "@/shared/components/admin/core/AdminSubmenu";
+import { AdminSubmenuBar } from "@/shared/components/admin/core/AdminSubmenuBar";
 import { HolidayCalendarClient } from "@/shared/components/admin/subscriptions/HolidayCalendarClient";
+import { GlobalDiscountClient } from "@/shared/components/admin/subscriptions/GlobalDiscountClient";
+import type {
+  CouponRow,
+  CouponSubscriptionPlan,
+} from "@/shared/components/admin/customers/AdminCouponsTab";
 import { ConfirmDeleteModal } from "@/shared/components/admin/core/ConfirmDeleteModal";
 import {
   Card,
@@ -48,13 +53,16 @@ import {
 } from "@/shared/components/ui/card";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
+import { buildPlanDistribution } from "@/lib/admin/subscriptionPlanDistribution";
 
 export function SubscriptionDashboard({
   plans,
   activeSubscriptions,
+  initialGlobalCoupons = [],
 }: {
   plans: any[];
   activeSubscriptions: any[];
+  initialGlobalCoupons?: CouponRow[];
 }) {
   const [activeTab, setActiveTab] = useState("Subscription Plans");
   const [isPending, startTransition] = useTransition();
@@ -177,17 +185,26 @@ export function SubscriptionDashboard({
   const totalPending = activeSubscriptions.filter(
     (s) => s.status === "PENDING",
   ).length;
-  const planDistribution = plans.map((plan) => ({
-    name: plan.name,
-    count: activeSubscriptions.filter(
-      (s) => s.plan_id === plan.id && s.status === "ACTIVE",
-    ).length,
-  }));
+  const planDistribution = buildPlanDistribution(
+    plans,
+    activeSubscriptions,
+    "ACTIVE",
+  );
+  const pendingPlanDistribution = buildPlanDistribution(
+    plans,
+    activeSubscriptions,
+    "PENDING",
+  );
 
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-500">
-      <AdminSubmenu
-        tabs={["Subscription Plans", "Subscription Modeling", "Holiday Calendar"]}
+      <AdminSubmenuBar
+        tabs={[
+          "Subscription Plans",
+          "Subscription Modeling",
+          "Holiday Calendar",
+          "Global Discount",
+        ]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -336,10 +353,40 @@ export function SubscriptionDashboard({
               </div>
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Pending Distribution by Plan</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {pendingPlanDistribution.map((pd) => (
+                  <div
+                    key={pd.name}
+                    className="flex items-center justify-between border-b pb-2"
+                  >
+                    <span className="font-medium">{pd.name}</span>
+                    <Badge variant="outline">{pd.count} Pending</Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
       {activeTab === "Holiday Calendar" && <HolidayCalendarClient />}
+
+      {activeTab === "Global Discount" && (
+        <GlobalDiscountClient
+          initialCoupons={initialGlobalCoupons}
+          subscriptionPlans={plans.map((plan) => ({
+            id: plan.id,
+            name: plan.name,
+            duration_days: plan.duration_days,
+            is_active: plan.is_active,
+          }))}
+        />
+      )}
 
       {/* CREATE/EDIT PLAN MODAL */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>

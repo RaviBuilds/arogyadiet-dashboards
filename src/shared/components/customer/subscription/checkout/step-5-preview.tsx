@@ -137,7 +137,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
     const res = await validateCouponAction(
       couponInput.trim(),
       customerProfileId,
-      baseDuration,
+      data.planId,
     );
 
     if (res.success && res.coupon) {

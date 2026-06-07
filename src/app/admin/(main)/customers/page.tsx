@@ -195,7 +195,7 @@ export default async function CustomersPage() {
   });
 
   return (
-    <div className="space-y-6 flex flex-col">
+    <div className="flex animate-in fade-in flex-col gap-6 pb-2 duration-500">
       <AdminPageHeader
         title="Customers"
         description="Manage your subscriber base and account statuses."
