@@ -16,13 +16,17 @@ export function SectionHeader({
 }: SectionHeaderProps) {
   return (
     <div
-      className={`flex items-center justify-between gap-4 mb-5 ${className}`}
+      className={`flex items-center justify-between gap-4 ${className}`}
     >
-      <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-        {Icon && <Icon className="h-5 w-5 text-muted-foreground" />}
+      <h2 className="flex items-center gap-2.5 text-lg font-semibold tracking-tight text-slate-900">
+        {Icon && <Icon className="h-5 w-5 text-emerald-600" />}
         {title}
       </h2>
-      {action && <div className="flex items-center gap-3">{action}</div>}
+      {action && (
+        <div className="flex items-center gap-3 transition-all duration-200">
+          {action}
+        </div>
+      )}
     </div>
   );
 }

@@ -80,14 +80,13 @@ export default async function Customer360Page({
   ] = await Promise.all([
     supabase
       .from("subscription_plans")
-      .select("id, name, price, duration_days, pause_credits")
-      .eq("is_active", true)
+      .select("id, name, price, duration_days, pause_credits, is_active")
       .order("price"),
     supabase.from("meal_categories").select("id, code, name").order("name"),
     supabase
       .from("coupons")
       .select(
-        "id, code, discount_type, discount_value_30_days, discount_value_60_days, discount_value_90_days, discount_value, max_uses, times_used, expires_at, created_at",
+        "id, code, discount_type, discount_value_30_days, discount_value_60_days, discount_value_90_days, flat_discounts_by_plan, discount_value, max_uses, times_used, expires_at, created_at",
       )
       .eq("customer_profile_id", id)
       .order("created_at", { ascending: false }),
@@ -177,6 +176,7 @@ export default async function Customer360Page({
       price: p.price as number,
       duration_days: p.duration_days as number,
       pause_credits: p.pause_credits as number,
+      is_active: p.is_active as boolean,
     })),
     mealCategories: (mealCategories ?? []).map((c: any) => ({
       id: c.id as string,

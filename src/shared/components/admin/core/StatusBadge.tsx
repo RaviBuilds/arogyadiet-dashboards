@@ -9,7 +9,8 @@ export function StatusBadge({ status, variant = "solid" }: StatusBadgeProps) {
   const normalized = status?.toUpperCase() || "UNKNOWN";
 
   // Define color mapping logic
-  let colorClass = "bg-muted text-muted-foreground hover:bg-muted";
+  let colorClass =
+    "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100";
 
   if (
     ["ACTIVE", "ONLINE", "DELIVERED", "ASSIGNED", "SUCCESS"].includes(
@@ -17,17 +18,20 @@ export function StatusBadge({ status, variant = "solid" }: StatusBadgeProps) {
     )
   ) {
     colorClass =
-      "bg-emerald-500/10 text-emerald-600 border-emerald-200 hover:bg-emerald-500/20";
+      "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100";
   } else if (
-    ["PAUSED", "OFFLINE", "CANCELLED", "FAILED"].includes(normalized)
+    ["STOPPED", "EXPIRED", "PAUSED", "OFFLINE", "CANCELLED", "FAILED"].includes(
+      normalized,
+    )
   ) {
-    colorClass =
-      "bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive/20";
+    colorClass = "bg-red-50 text-red-700 border-red-200 hover:bg-red-100";
   } else if (
     ["PENDING", "NOT YET PICKED UP", "MEAL_PREPARED"].includes(normalized)
   ) {
     colorClass =
-      "bg-orange-500/10 text-orange-600 border-orange-200 hover:bg-orange-500/20";
+      "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100";
+  } else if (["NO PLAN"].includes(normalized)) {
+    colorClass = "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100";
   } else if (
     [
       "OUT_FOR_DELIVERY",
@@ -39,8 +43,7 @@ export function StatusBadge({ status, variant = "solid" }: StatusBadgeProps) {
       "REACHING_TO_LOCATION",
     ].includes(normalized)
   ) {
-    colorClass =
-      "bg-blue-500/10 text-blue-600 border-blue-200 hover:bg-blue-500/20";
+    colorClass = "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100";
   } else if (["ORDER_CREATED"].includes(normalized)) {
     colorClass =
       "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20";
@@ -70,7 +73,7 @@ export function StatusBadge({ status, variant = "solid" }: StatusBadgeProps) {
   return (
     <Badge
       variant="outline"
-      className={`font-semibold tracking-wide ${colorClass}`}
+      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide transition-all duration-200 ${colorClass}`}
     >
       {status.replace(/_/g, " ")}
     </Badge>

@@ -72,10 +72,10 @@ const columns: ColumnDef<Customer>[] = [
             <Button
               variant="ghost"
               size="sm"
-              className="-ml-3 h-8 data-[state=open]:bg-accent"
+              className="-ml-3 h-8 text-xs font-medium uppercase tracking-wider text-slate-500 transition-all duration-200 hover:text-slate-900 data-[state=open]:bg-slate-100"
             >
               <span>Dietary Preference</span>
-              <Filter className="ml-2 h-3.5 w-3.5 text-muted-foreground" />
+              <Filter className="ml-2 h-3.5 w-3.5 text-slate-400" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[150px]">
@@ -116,10 +116,10 @@ const columns: ColumnDef<Customer>[] = [
             <Button
               variant="ghost"
               size="sm"
-              className="-ml-3 h-8 data-[state=open]:bg-accent"
+              className="-ml-3 h-8 text-xs font-medium uppercase tracking-wider text-slate-500 transition-all duration-200 hover:text-slate-900 data-[state=open]:bg-slate-100"
             >
               <span>Status</span>
-              <Filter className="ml-2 h-3.5 w-3.5 text-muted-foreground" />
+              <Filter className="ml-2 h-3.5 w-3.5 text-slate-400" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[150px]">
@@ -204,7 +204,7 @@ export function CustomerClientTable({ data }: { data: Customer[] }) {
     <DataTableCard
       header={<SectionHeader title="Customer Directory" icon={Users} />}
       controls={
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex flex-wrap items-center gap-4">
           <DataSearchFilter
             searchColumn={searchColumn}
             onColumnChange={(val) => {
@@ -226,9 +226,12 @@ export function CustomerClientTable({ data }: { data: Customer[] }) {
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="bg-background">
+              <Button
+                variant="outline"
+                className="border-slate-200 bg-white transition-all duration-200 hover:bg-slate-50"
+              >
                 Columns{" "}
-                <ChevronDown className="ml-2 h-4 w-4 text-muted-foreground" />
+                <ChevronDown className="ml-2 h-4 w-4 text-slate-500" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -264,17 +267,18 @@ export function CustomerClientTable({ data }: { data: Customer[] }) {
       }
       footer={
         <div className="flex w-full items-center justify-between">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-slate-500">
             Showing{" "}
-            <span className="font-medium text-foreground">
+            <span className="font-medium text-slate-900">
               {table.getFilteredRowModel().rows.length}
             </span>{" "}
             customers
           </p>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
+              className="border-slate-200 transition-all duration-200 hover:bg-slate-50"
               onClick={() => table.previousPage()}
               disabled={!table.getCanPreviousPage()}
             >
@@ -283,6 +287,7 @@ export function CustomerClientTable({ data }: { data: Customer[] }) {
             <Button
               variant="outline"
               size="sm"
+              className="border-slate-200 transition-all duration-200 hover:bg-slate-50"
               onClick={() => table.nextPage()}
               disabled={!table.getCanNextPage()}
             >
@@ -295,10 +300,13 @@ export function CustomerClientTable({ data }: { data: Customer[] }) {
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
-            <TableRow key={headerGroup.id} className="bg-muted/10">
+            <TableRow key={headerGroup.id} className="border-b border-slate-200 bg-slate-50/50">
               {headerGroup.headers.map((header) => {
                 return (
-                  <TableHead key={header.id}>
+                  <TableHead
+                    key={header.id}
+                    className="text-xs font-medium uppercase tracking-wider text-slate-500"
+                  >
                     {header.isPlaceholder
                       ? null
                       : flexRender(
@@ -317,7 +325,7 @@ export function CustomerClientTable({ data }: { data: Customer[] }) {
               <TableRow
                 key={row.id}
                 data-state={row.getIsSelected() && "selected"}
-                className="hover:bg-muted/30"
+                className="transition-colors duration-200 hover:bg-slate-50"
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>
@@ -330,7 +338,7 @@ export function CustomerClientTable({ data }: { data: Customer[] }) {
             <TableRow>
               <TableCell
                 colSpan={columns.length}
-                className="h-32 text-center text-muted-foreground"
+                className="py-12 text-center text-sm text-slate-500"
               >
                 No customers found matching your filters.
               </TableCell>

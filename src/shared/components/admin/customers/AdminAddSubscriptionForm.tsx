@@ -47,6 +47,7 @@ type SubscriptionPlan = {
   price: number;
   duration_days: number;
   pause_credits: number;
+  is_active?: boolean;
 };
 
 type MealCategory = {
@@ -133,8 +134,12 @@ export function AdminAddSubscriptionForm({
   const [isStartDateOpen, setIsStartDateOpen] = useState(false);
   const [isEndDateOpen, setIsEndDateOpen] = useState(false);
 
-  const { activeSubscription, subscriptionPlans, mealCategories, addresses } =
-    initialData;
+  const { activeSubscription, mealCategories, addresses } = initialData;
+  const subscriptionPlans = useMemo(
+    () =>
+      initialData.subscriptionPlans.filter((p) => p.is_active !== false),
+    [initialData.subscriptionPlans],
+  );
 
   const minStartDate = useMemo(
     () => getMinStartDate(activeSubscription?.effective_end_on ?? null),

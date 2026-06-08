@@ -20,7 +20,7 @@ import {
   ArrowRight,
   PowerOff,
 } from "lucide-react";
-import { RiderStatusToggle } from "@/modules/rider/components/rider-status-toggle";
+import { RiderStatusToggle } from "@/shared/components/rider/rider-status-toggle";
 import {
   Card,
   CardContent,

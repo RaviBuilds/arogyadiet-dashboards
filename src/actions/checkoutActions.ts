@@ -7,6 +7,10 @@ import { addDays, format, differenceInCalendarDays, parseISO } from "date-fns";
 import { cascadePendingSubscriptionDates } from "@/actions/manageMealActions";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { getCustomerNameByProfileId } from "@/lib/notifications/lookups";
+import {
+  applyCouponToBasePrice,
+  resolveSubscriptionCoupon,
+} from "@/lib/coupons/resolveSubscriptionCoupon";
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
   key_secret: process.env.RAZORPAY_KEY_SECRET!,
@@ -21,48 +25,28 @@ const supabaseAdmin = createClient(
 export async function validateCouponAction(
   code: string,
   customerProfileId: string,
-  planDuration: number,
+  planId: string,
 ) {
   try {
-    // 1. Fetch the coupon using the Admin client
-    const { data: coupon, error } = await supabaseAdmin
-      .from("coupons")
-      .select("*")
-      .eq("code", code.toUpperCase())
-      .eq("customer_profile_id", customerProfileId)
-      .single();
+    const { data: plan } = await supabaseAdmin
+      .from("subscription_plans")
+      .select("duration_days")
+      .eq("id", planId)
+      .maybeSingle();
 
-    // Log this to your terminal so you can see exactly what Supabase returns!
+    const resolved = await resolveSubscriptionCoupon(
+      supabaseAdmin,
+      code,
+      customerProfileId,
+      planId,
+      plan?.duration_days,
+    );
 
-    if (error || !coupon)
-      return { success: false, error: "Invalid coupon code." };
-
-    // 2. Validate Usage Limits and Expiry
-    if (coupon.times_used >= coupon.max_uses) {
-      return {
-        success: false,
-        error: "This coupon usage limit has been reached.",
-      };
-    }
-    if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
-      return { success: false, error: "This coupon has expired." };
+    if (!resolved.success) {
+      return { success: false, error: resolved.error };
     }
 
-    // 3. Resolve the correct discount amount based on plan duration
-    let resolvedDiscountValue = 0;
-    if (planDuration === 30)
-      resolvedDiscountValue = coupon.discount_value_30_days;
-    else if (planDuration === 60)
-      resolvedDiscountValue = coupon.discount_value_60_days;
-    else if (planDuration === 90)
-      resolvedDiscountValue = coupon.discount_value_90_days;
-
-    if (resolvedDiscountValue <= 0) {
-      return {
-        success: false,
-        error: "This coupon is not valid for the selected plan.",
-      };
-    }
+    const { coupon, resolvedDiscountValue } = resolved.result;
 
     return {
       success: true,
@@ -108,7 +92,7 @@ export async function createRazorpayOrderAction(
       const validation = await validateCouponAction(
         couponCode,
         customerProfileId,
-        planDuration,
+        planId,
       );
       if (validation.success && validation.coupon) {
         if (validation.coupon.discount_type === "FLAT") {
@@ -196,27 +180,21 @@ export async function verifyAndActivateSubscriptionAction(
     let hasValidCoupon = false;
 
     if (couponCode && customerProfileId) {
-      const { data: coupon } = await supabaseAdmin
-        .from("coupons")
-        .select("*")
-        .eq("code", couponCode)
-        .eq("customer_profile_id", customerProfileId)
-        .single();
+      const resolved = await resolveSubscriptionCoupon(
+        supabaseAdmin,
+        couponCode,
+        customerProfileId,
+        planId,
+        plan.duration_days,
+      );
 
-      if (coupon && coupon.times_used < coupon.max_uses) {
-        let discount = 0;
-        if (plan.duration_days === 30) discount = coupon.discount_value_30_days;
-        else if (plan.duration_days === 60)
-          discount = coupon.discount_value_60_days;
-        else if (plan.duration_days === 90)
-          discount = coupon.discount_value_90_days;
-
-        if (coupon.discount_type === "FLAT") {
-          finalBasePrice -= discount;
-        } else if (coupon.discount_type === "PERCENTAGE") {
-          finalBasePrice -= (finalBasePrice * discount) / 100;
-        }
-        finalBasePrice = Math.max(1, finalBasePrice); // Minimum 1 Rupee
+      if (resolved.success) {
+        const { coupon, resolvedDiscountValue } = resolved.result;
+        finalBasePrice = applyCouponToBasePrice(
+          finalBasePrice,
+          coupon,
+          resolvedDiscountValue,
+        );
         hasValidCoupon = true;
       }
     }
@@ -401,19 +379,20 @@ export async function verifyAndActivateSubscriptionAction(
 
     // 9. Burn the Coupon
     if (couponCode && customerProfileId) {
-      const { data: currentCoupon } = await supabaseAdmin
-        .from("coupons")
-        .select("times_used")
-        .eq("code", couponCode)
-        .eq("customer_profile_id", customerProfileId)
-        .single();
+      const resolved = await resolveSubscriptionCoupon(
+        supabaseAdmin,
+        couponCode,
+        customerProfileId,
+        planId,
+        plan.duration_days,
+      );
 
-      if (currentCoupon) {
+      if (resolved.success) {
+        const { coupon } = resolved.result;
         await supabaseAdmin
           .from("coupons")
-          .update({ times_used: currentCoupon.times_used + 1 })
-          .eq("code", couponCode)
-          .eq("customer_profile_id", customerProfileId);
+          .update({ times_used: coupon.times_used + 1 })
+          .eq("id", coupon.id);
       }
     }
 

@@ -22,13 +22,26 @@ export default async function SubscriptionsPage() {
     .select("id, status, starts_on, ends_on, plan_id, subscription_plans(name)")
     .in("status", ["ACTIVE", "PENDING"]);
 
+  // 3. Fetch global discount coupons (not tied to any customer)
+  const { data: globalCoupons } = await supabaseAdmin
+    .from("coupons")
+    .select(
+      "id, code, discount_type, discount_value_30_days, discount_value_60_days, discount_value_90_days, flat_discounts_by_plan, discount_value, max_uses, times_used, expires_at, created_at",
+    )
+    .is("customer_profile_id", null)
+    .order("created_at", { ascending: false });
+
   return (
     <div className="flex flex-col gap-6">
       <AdminPageHeader
         title="Subscription Management"
         description="Manage master plans and view subscription analytics."
       />
-      <SubscriptionDashboard plans={plans || []} activeSubscriptions={activeSubs || []} />
+      <SubscriptionDashboard
+        plans={plans || []}
+        activeSubscriptions={activeSubs || []}
+        initialGlobalCoupons={globalCoupons || []}
+      />
     </div>
   );
 }

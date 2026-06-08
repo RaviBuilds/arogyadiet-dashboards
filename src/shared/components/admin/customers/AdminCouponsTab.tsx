@@ -15,7 +15,12 @@ import {
   TicketPercent,
 } from "lucide-react";
 
-import { createCoupon, deleteCoupon } from "@/actions/admin-actions/adminCouponActions";
+import {
+  createCoupon,
+  createGlobalCoupon,
+  deleteCoupon,
+  deleteGlobalCoupon,
+} from "@/actions/admin-actions/adminCouponActions";
 import { cn } from "@/lib/utils";
 
 import { Button } from "@/shared/components/ui/button";
@@ -44,8 +49,19 @@ import {
 } from "@/shared/components/ui/popover";
 import { Calendar } from "@/shared/components/ui/calendar";
 import { ConfirmDeleteModal } from "../core/ConfirmDeleteModal";
+import {
+  getFlatDiscountForPlan,
+  normalizeFlatDiscountsByPlan,
+} from "@/lib/coupons/couponPlanDiscounts";
 
 // ─── types ───────────────────────────────────────────────────────────────────
+
+export type CouponSubscriptionPlan = {
+  id: string;
+  name: string;
+  duration_days: number;
+  is_active?: boolean;
+};
 
 export type CouponRow = {
   id: string;
@@ -54,6 +70,7 @@ export type CouponRow = {
   discount_value_30_days: number;
   discount_value_60_days: number;
   discount_value_90_days: number;
+  flat_discounts_by_plan?: Record<string, number> | null;
   discount_value: number;
   max_uses: number;
   times_used: number;
@@ -62,8 +79,45 @@ export type CouponRow = {
 };
 
 interface AdminCouponsTabProps {
-  customerProfileId: string;
   initialCoupons: CouponRow[];
+  subscriptionPlans: CouponSubscriptionPlan[];
+  variant?: "customer" | "global";
+  customerProfileId?: string;
+}
+
+function buildDefaultFlatDiscounts(
+  plans: CouponSubscriptionPlan[],
+): Record<string, number> {
+  return Object.fromEntries(plans.map((plan) => [plan.id, 0]));
+}
+
+function getCouponFlatDiscountLines(
+  coupon: CouponRow,
+  plans: CouponSubscriptionPlan[],
+) {
+  const byPlan = normalizeFlatDiscountsByPlan(coupon.flat_discounts_by_plan);
+  const planIds = new Set([
+    ...plans.map((plan) => plan.id),
+    ...Object.keys(byPlan),
+  ]);
+
+  return Array.from(planIds)
+    .map((planId) => {
+      const plan = plans.find((item) => item.id === planId);
+      const amount = getFlatDiscountForPlan(
+        coupon,
+        planId,
+        plan?.duration_days,
+      );
+      if (amount <= 0) return null;
+
+      const label = plan
+        ? `${plan.name} (${plan.duration_days}d)`
+        : `Plan ${planId.slice(0, 8)}`;
+
+      return { planId, label, amount };
+    })
+    .filter(Boolean) as Array<{ planId: string; label: string; amount: number }>;
 }
 
 // ─── form schema ─────────────────────────────────────────────────────────────
@@ -76,24 +130,21 @@ const formSchema = z
       .max(30, "Max 30 characters")
       .regex(/^[A-Z0-9_-]+$/, "Uppercase letters, numbers, - and _ only"),
     discountType: z.enum(["FLAT", "PERCENTAGE"]),
-    discountValue30Days: z.number().min(0).optional(),
-    discountValue60Days: z.number().min(0).optional(),
-    discountValue90Days: z.number().min(0).optional(),
+    flatDiscountsByPlan: z.record(z.string(), z.number().min(0)).optional(),
     discountValue: z.number().min(0).max(100).optional(),
     maxUses: z.number().int().min(1, "At least 1"),
     expiresAt: z.date().optional(),
   })
   .superRefine((d, ctx) => {
     if (d.discountType === "FLAT") {
-      const hasAny =
-        (d.discountValue30Days ?? 0) > 0 ||
-        (d.discountValue60Days ?? 0) > 0 ||
-        (d.discountValue90Days ?? 0) > 0;
+      const hasAny = Object.values(d.flatDiscountsByPlan ?? {}).some(
+        (value) => value > 0,
+      );
       if (!hasAny) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "At least one discount amount must be > 0",
-          path: ["discountValue30Days"],
+          path: ["flatDiscountsByPlan"],
         });
       }
     }
@@ -115,7 +166,11 @@ type FormValues = z.infer<typeof formSchema>;
 export function AdminCouponsTab({
   customerProfileId,
   initialCoupons,
+  subscriptionPlans,
+  variant = "customer",
 }: AdminCouponsTabProps) {
+  const isGlobal = variant === "global";
+  const activePlans = subscriptionPlans.filter((plan) => plan.is_active !== false);
   const [coupons, setCoupons] = useState<CouponRow[]>(initialCoupons);
   const [isPending, startTransition] = useTransition();
   const [isExpiryOpen, setIsExpiryOpen] = useState(false);
@@ -130,9 +185,7 @@ export function AdminCouponsTab({
     defaultValues: {
       code: "",
       discountType: "FLAT",
-      discountValue30Days: 0,
-      discountValue60Days: 0,
-      discountValue90Days: 0,
+      flatDiscountsByPlan: buildDefaultFlatDiscounts(activePlans),
       discountValue: 0,
       maxUses: 1,
     },
@@ -144,28 +197,34 @@ export function AdminCouponsTab({
 
   const onSubmit = (values: FormValues) => {
     startTransition(async () => {
-      const res = await createCoupon({
-        customerProfileId,
+      const payload = {
         code: values.code,
         discountType: values.discountType,
-        discountValue30Days: values.discountValue30Days ?? 0,
-        discountValue60Days: values.discountValue60Days ?? 0,
-        discountValue90Days: values.discountValue90Days ?? 0,
+        flatDiscountsByPlan: values.flatDiscountsByPlan ?? {},
         discountValue: values.discountValue ?? 0,
         maxUses: values.maxUses,
         expiresAt: values.expiresAt
           ? format(values.expiresAt, "yyyy-MM-dd")
           : undefined,
-      });
+      };
+
+      const res = isGlobal
+        ? await createGlobalCoupon(payload)
+        : await createCoupon({
+            ...payload,
+            customerProfileId: customerProfileId!,
+          });
 
       if (res.success) {
-        toast.success("Coupon created successfully!");
+        toast.success(
+          isGlobal
+            ? "Global discount coupon created successfully!"
+            : "Coupon created successfully!",
+        );
         reset({
           code: "",
           discountType: "FLAT",
-          discountValue30Days: 0,
-          discountValue60Days: 0,
-          discountValue90Days: 0,
+          flatDiscountsByPlan: buildDefaultFlatDiscounts(activePlans),
           discountValue: 0,
           maxUses: 1,
         });
@@ -180,7 +239,9 @@ export function AdminCouponsTab({
 
   const handleDelete = () => {
     startTransition(async () => {
-      const res = await deleteCoupon(deleteState.couponId, customerProfileId);
+      const res = isGlobal
+        ? await deleteGlobalCoupon(deleteState.couponId)
+        : await deleteCoupon(deleteState.couponId, customerProfileId!);
       if (res.success) {
         toast.success("Coupon deleted.");
         setCoupons((prev) =>
@@ -196,14 +257,18 @@ export function AdminCouponsTab({
   return (
     <div className="space-y-6">
       {/* ── Existing Coupons ── */}
-      <Card className="overflow-hidden border-border/70 shadow-sm">
-        <CardHeader className="space-y-0 border-b bg-muted/20">
+      <Card className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <CardHeader className="space-y-0 border-b border-slate-200 bg-slate-50/50 p-6 pb-4">
           <div className="flex items-center gap-2">
-            <TicketPercent className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">Active Coupons</CardTitle>
+            <TicketPercent className="h-5 w-5 text-emerald-600" />
+            <CardTitle className="text-lg font-semibold tracking-tight text-slate-900">
+              {isGlobal ? "Active Global Coupons" : "Active Coupons"}
+            </CardTitle>
           </div>
-          <CardDescription className="mt-1">
-            Discount codes assigned to this customer.
+          <CardDescription className="mt-1 text-sm text-slate-500">
+            {isGlobal
+              ? "Discount codes available to all customers during subscription checkout."
+              : "Discount codes assigned to this customer."}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -215,25 +280,17 @@ export function AdminCouponsTab({
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
-                <thead className="text-xs text-muted-foreground uppercase bg-muted/30 border-b">
+                <thead className="border-b border-slate-200 bg-slate-50/50 text-xs font-medium uppercase tracking-wider text-slate-500">
                   <tr>
-                    <th className="px-5 py-3 font-bold tracking-wider">Code</th>
-                    <th className="px-5 py-3 font-bold tracking-wider">Type</th>
-                    <th className="px-5 py-3 font-bold tracking-wider">
-                      Discount
-                    </th>
-                    <th className="px-5 py-3 font-bold tracking-wider">
-                      Uses
-                    </th>
-                    <th className="px-5 py-3 font-bold tracking-wider">
-                      Expires
-                    </th>
-                    <th className="px-5 py-3 font-bold tracking-wider text-right">
-                      Action
-                    </th>
+                    <th className="px-5 py-3">Code</th>
+                    <th className="px-5 py-3">Type</th>
+                    <th className="px-5 py-3">Discount</th>
+                    <th className="px-5 py-3">Uses</th>
+                    <th className="px-5 py-3">Expires</th>
+                    <th className="px-5 py-3 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/50">
+                <tbody className="divide-y divide-slate-200">
                   {coupons.map((coupon) => {
                     const isExpired =
                       coupon.expires_at &&
@@ -244,7 +301,7 @@ export function AdminCouponsTab({
                     return (
                       <tr
                         key={coupon.id}
-                        className="hover:bg-muted/20 transition-colors"
+                        className="transition-colors duration-200 hover:bg-slate-50"
                       >
                         <td className="px-5 py-3.5 whitespace-nowrap">
                           <div className="flex items-center gap-2">
@@ -278,21 +335,14 @@ export function AdminCouponsTab({
                             </span>
                           ) : (
                             <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-                              {coupon.discount_value_30_days > 0 && (
-                                <span>
-                                  30d: ₹{coupon.discount_value_30_days}
+                              {getCouponFlatDiscountLines(
+                                coupon,
+                                subscriptionPlans,
+                              ).map((line) => (
+                                <span key={line.planId}>
+                                  {line.label}: ₹{line.amount}
                                 </span>
-                              )}
-                              {coupon.discount_value_60_days > 0 && (
-                                <span>
-                                  60d: ₹{coupon.discount_value_60_days}
-                                </span>
-                              )}
-                              {coupon.discount_value_90_days > 0 && (
-                                <span>
-                                  90d: ₹{coupon.discount_value_90_days}
-                                </span>
-                              )}
+                              ))}
                             </div>
                           )}
                         </td>
@@ -353,18 +403,21 @@ export function AdminCouponsTab({
       </Card>
 
       {/* ── Create Coupon Form ── */}
-      <Card className="overflow-hidden border-border/70 shadow-sm">
-        <CardHeader className="space-y-0 border-b bg-muted/20">
+      <Card className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <CardHeader className="space-y-0 border-b border-slate-200 bg-slate-50/50 p-6 pb-4">
           <div className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">Create New Coupon</CardTitle>
+            <Plus className="h-5 w-5 text-emerald-600" />
+            <CardTitle className="text-lg font-semibold tracking-tight text-slate-900">
+              {isGlobal ? "Create Global Discount" : "Create New Coupon"}
+            </CardTitle>
           </div>
-          <CardDescription className="mt-1">
-            Coupons are linked to this customer and applied during their
-            checkout.
+          <CardDescription className="mt-1 text-sm text-slate-500">
+            {isGlobal
+              ? "Applies to all customers during subscription checkout."
+              : "Coupons are linked to this customer and applied during their checkout."}
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-5 sm:p-6">
+        <CardContent className="p-6">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             {/* Row 1: Code + Type + Max Uses */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -406,10 +459,10 @@ export function AdminCouponsTab({
                       value={field.value}
                       onValueChange={(val) => {
                         field.onChange(val);
-                        // Reset discount values on type change
-                        setValue("discountValue30Days", 0);
-                        setValue("discountValue60Days", 0);
-                        setValue("discountValue90Days", 0);
+                        setValue(
+                          "flatDiscountsByPlan",
+                          buildDefaultFlatDiscounts(activePlans),
+                        );
                         setValue("discountValue", 0);
                       }}
                     >
@@ -454,59 +507,49 @@ export function AdminCouponsTab({
             {discountType === "FLAT" ? (
               <div className="space-y-2">
                 <Label>
-                  Flat Discount by Plan Duration{" "}
+                  Flat Discount by Plan{" "}
                   <span className="text-muted-foreground font-normal text-xs">
-                    (enter 0 to skip a duration)
+                    (enter 0 to skip a plan)
                   </span>
                 </Label>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  {(
-                    [
-                      {
-                        name: "discountValue30Days" as const,
-                        label: "30-Day Plan (₹)",
-                      },
-                      {
-                        name: "discountValue60Days" as const,
-                        label: "60-Day Plan (₹)",
-                      },
-                      {
-                        name: "discountValue90Days" as const,
-                        label: "90-Day Plan (₹)",
-                      },
-                    ] as const
-                  ).map(({ name, label }) => (
-                    <div key={name} className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">
-                        {label}
-                      </Label>
-                      <Controller
-                        control={control}
-                        name={name}
-                        render={({ field }) => (
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            placeholder="0"
-                            className="h-10"
-                            value={field.value ?? ""}
-                            onChange={(e) =>
-                              field.onChange(
+                {activePlans.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    No active subscription plans available.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {activePlans.map((plan) => (
+                      <div key={plan.id} className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">
+                          {plan.name} ({plan.duration_days} days)
+                        </Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0"
+                          className="h-10"
+                          value={
+                            watch("flatDiscountsByPlan")?.[plan.id] ?? ""
+                          }
+                          onChange={(e) => {
+                            const current = watch("flatDiscountsByPlan") ?? {};
+                            setValue("flatDiscountsByPlan", {
+                              ...current,
+                              [plan.id]:
                                 e.target.value === ""
                                   ? 0
                                   : parseFloat(e.target.value),
-                              )
-                            }
-                          />
-                        )}
-                      />
-                    </div>
-                  ))}
-                </div>
-                {errors.discountValue30Days && (
+                            });
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {errors.flatDiscountsByPlan?.message && (
                   <p className="text-xs text-destructive">
-                    {errors.discountValue30Days.message}
+                    {String(errors.flatDiscountsByPlan.message)}
                   </p>
                 )}
               </div>
@@ -606,10 +649,16 @@ export function AdminCouponsTab({
             <Separator />
 
             <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                The coupon will only work for this customer during checkout.
+              <p className="text-xs text-slate-500">
+                {isGlobal
+                  ? "This code can be used by any customer when purchasing a subscription."
+                  : "The coupon will only work for this customer during checkout."}
               </p>
-              <Button type="submit" disabled={isPending}>
+              <Button
+                type="submit"
+                disabled={isPending}
+                className="transition-all duration-200"
+              >
                 {isPending && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}

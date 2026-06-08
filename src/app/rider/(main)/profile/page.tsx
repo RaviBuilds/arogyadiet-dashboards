@@ -9,11 +9,11 @@ import {
   CalendarHeart,
 } from "lucide-react";
 import { Card, CardContent } from "@/shared/components/ui/card";
-import { RiderLogoutButton } from "@/modules/rider/components/rider-logout-button";
+import { RiderLogoutButton } from "@/shared/components/rider/rider-logout-button";
 
 // Import your new Client Components!
-import { RiderAvatarUpload } from "@/modules/rider/components/rider-avatar-upload";
-import { EditProfileModal } from "@/modules/rider/components/edit-profile-modal";
+import { RiderAvatarUpload } from "@/shared/components/rider/rider-avatar-upload";
+import { EditProfileModal } from "@/shared/components/rider/edit-profile-modal";
 
 export const revalidate = 0;
 

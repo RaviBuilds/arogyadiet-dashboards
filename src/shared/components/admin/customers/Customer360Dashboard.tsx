@@ -20,7 +20,7 @@ import {
 } from "@/actions/admin-actions/customerActions";
 import { isArchivedCustomerEmail } from "@/lib/customers/customerArchive";
 
-import { AdminSubmenu } from "@/shared/components/admin/core/AdminSubmenu";
+import { AdminSubmenuBar } from "@/shared/components/admin/core/AdminSubmenuBar";
 import {
   Card,
   CardContent,
@@ -424,7 +424,7 @@ export function Customer360Dashboard({
 
   return (
     <div className="w-full">
-      <AdminSubmenu
+      <AdminSubmenuBar
         tabs={[
           "Profile & Medical",
           "Add Subscription",
@@ -921,6 +921,7 @@ export function Customer360Dashboard({
           <AdminCouponsTab
             customerProfileId={customer.id}
             initialCoupons={initialCoupons}
+            subscriptionPlans={initialSubscriptionData.subscriptionPlans}
           />
         )}
 

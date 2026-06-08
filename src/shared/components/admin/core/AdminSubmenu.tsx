@@ -60,17 +60,17 @@ export function AdminSubmenu({
   };
 
   return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0 border-b pb-0">
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0 border-b border-slate-200 pb-0">
       {normalizedTabs.map((tab) => (
         <Button
           key={tab.id}
           variant="ghost"
           onClick={() => handleTabClick(tab)}
           className={cn(
-            "justify-start px-5 py-3 text-sm font-medium transition-colors border-b-2 rounded-none hover:bg-transparent",
+            "justify-start rounded-none border-b-2 px-5 py-3 text-sm font-medium transition-all duration-200 hover:bg-transparent",
             activeTab === tab.id
-              ? "border-primary text-primary hover:text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground",
+              ? "border-emerald-600 text-slate-900 hover:text-slate-900"
+              : "border-transparent text-slate-500 hover:text-slate-900",
           )}
         >
           {tab.label}

@@ -56,7 +56,7 @@ import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
-import { AdminSubmenu } from "../core/AdminSubmenu";
+import { AdminSubmenuBar } from "../core/AdminSubmenuBar";
 import {
   revalidateCustomersPage,
   updateCustomerBasicInfo,
@@ -493,25 +493,25 @@ export default function CustomerDashboard({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-start justify-between gap-4">
-        <AdminSubmenu
-          tabs={["Overview", "Customer Directory", "Active Subscriptions", "Pending Subscriptions", "Expired / Stopped", "Shop Orders"]}
-          activeTab={activeTab}
-          onTabChange={handleTabChange}
-        />
-        <div className="flex shrink-0 flex-col items-stretch gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/customers/bulk-import">
-              <Upload className="h-4 w-4 mr-1.5" />
-              Bulk import
-            </Link>
-          </Button>
-          <Button onClick={() => setIsCreateModalOpen(true)} size="sm">
-            <Plus className="h-4 w-4 mr-1.5" />
-            Create Customer
-          </Button>
-        </div>
-      </div>
+      <AdminSubmenuBar
+        tabs={["Overview", "Customer Directory", "Active Subscriptions", "Pending Subscriptions", "Expired / Stopped", "Shop Orders"]}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        actions={
+          <>
+            <Button variant="outline" size="sm" className="transition-all duration-200" asChild>
+              <Link href="/customers/bulk-import">
+                <Upload className="h-4 w-4 mr-1.5" />
+                Bulk import
+              </Link>
+            </Button>
+            <Button onClick={() => setIsCreateModalOpen(true)} size="sm" className="transition-all duration-200">
+              <Plus className="h-4 w-4 mr-1.5" />
+              Create Customer
+            </Button>
+          </>
+        }
+      />
 
       <AdminCreateCustomerModal
         isOpen={isCreateModalOpen}
@@ -530,7 +530,7 @@ export default function CustomerDashboard({
         <DataTableCard
           header={<SectionHeader title="Customer Directory" icon={Users} />}
           controls={
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-4">
               <DataSearchFilter
                 searchColumn={searchColumn}
                 onColumnChange={setSearchColumn}
@@ -542,6 +542,7 @@ export default function CustomerDashboard({
                 type="button"
                 variant={showArchived ? "default" : "outline"}
                 size="sm"
+                className="transition-all duration-200"
                 onClick={() => setShowArchived((prev) => !prev)}
               >
                 {showArchived ? "Showing Archived" : "Show Archived"}
@@ -563,9 +564,9 @@ export default function CustomerDashboard({
         >
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/10">
-                <TableHead>Customer Info</TableHead>
-                <TableHead>Contact</TableHead>
+              <TableRow className="bg-slate-50/50 border-b border-slate-200">
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Customer Info</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Contact</TableHead>
 
                 {/* Filterable: Diet & Location */}
                 <TableHead>
@@ -574,7 +575,7 @@ export default function CustomerDashboard({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground"
+                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
                       >
                         <span>Diet & Allergy</span>
                         <Filter
@@ -638,7 +639,7 @@ export default function CustomerDashboard({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground"
+                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
                       >
                         <span>Status</span>
                         <Filter
@@ -723,7 +724,7 @@ export default function CustomerDashboard({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-accent font-semibold text-muted-foreground hover:text-foreground"
+                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
                       >
                         <span>Medical History</span>
                         <Filter
@@ -772,7 +773,7 @@ export default function CustomerDashboard({
                   </DropdownMenu>
                 </TableHead>
 
-                <TableHead className="w-[50px]">
+                <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -782,18 +783,18 @@ export default function CustomerDashboard({
                 <TableRow>
                   <TableCell
                     colSpan={6}
-                    className="text-center py-12 text-muted-foreground"
+                    className="text-center py-12 text-sm text-slate-500"
                   >
                     No customers match your criteria.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredCustomers.map((customer) => (
-                  <TableRow key={customer.id} className="hover:bg-muted/30">
+                  <TableRow key={customer.id} className="hover:bg-slate-50 transition-colors duration-200">
                     {/* Column 1: Customer Info */}
                     <TableCell>
-                      <div className="font-bold">{customer.fullName}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="font-semibold text-slate-900 tracking-tight">{customer.fullName}</div>
+                      <div className="text-sm text-slate-500 mt-0.5">
                         {customer.gender && customer.gender !== "N/A" ? (
                           <span>
                             ( {customer.gender.charAt(0).toUpperCase()} -{" "}
@@ -807,8 +808,8 @@ export default function CustomerDashboard({
 
                     {/* Column 2: Contact */}
                     <TableCell>
-                      <div className="font-medium">{customer.mobile}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="font-medium text-slate-900">{customer.mobile}</div>
+                      <div className="text-sm text-slate-500 mt-0.5">
                         {customer.email}
                       </div>
                     </TableCell>
@@ -816,7 +817,7 @@ export default function CustomerDashboard({
                     {/* Column 3: Diet & Location */}
                     <TableCell>
                       <div className="flex flex-col items-start gap-2">
-                        <Badge variant="outline" className="bg-primary/5">
+                        <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 px-2.5 text-slate-700">
                           {customer.dietary_preference}
                         </Badge>
                         {customer.allergies &&
@@ -853,7 +854,7 @@ export default function CustomerDashboard({
                           customer.status === "Active" ? "solid" : "outline"
                         }
                       />
-                      <div className="text-xs text-muted-foreground mt-1 font-medium">
+                      <div className="text-sm text-slate-500 mt-1.5">
                         {customer.activePlanName || "No Active Plan"}
                       </div>
                     </TableCell>
@@ -861,13 +862,13 @@ export default function CustomerDashboard({
                     {/* Column 5: Medical History */}
                     <TableCell>
                       {customer.hasMedicalHistory ? (
-                        <Badge className="bg-blue-50 text-blue-700 border-blue-200 shadow-none hover:bg-blue-100">
+                        <Badge className="rounded-full border-blue-200 bg-blue-50 px-2.5 text-blue-700 shadow-none transition-all duration-200 hover:bg-blue-100">
                           Provided
                         </Badge>
                       ) : (
                         <Badge
                           variant="outline"
-                          className="text-muted-foreground bg-zinc-50 shadow-none"
+                          className="rounded-full border-slate-200 bg-slate-50 px-2.5 text-slate-500 shadow-none"
                         >
                           Empty
                         </Badge>
@@ -879,8 +880,8 @@ export default function CustomerDashboard({
                       {/* ... Existing DropdownMenu code ... */}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          <Button variant="ghost" className="h-8 w-8 p-0 transition-all duration-200 hover:bg-slate-100">
+                            <MoreHorizontal className="h-4 w-4 text-slate-500" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-[180px]">
@@ -923,7 +924,7 @@ export default function CustomerDashboard({
         <DataTableCard
           header={<SectionHeader title="Active Subscriptions" icon={Users} />}
           controls={
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-4">
               <DataSearchFilter
                 searchColumn={searchColumn}
                 onColumnChange={setSearchColumn}
@@ -948,12 +949,12 @@ export default function CustomerDashboard({
         >
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/10">
-                <TableHead>Customer</TableHead>
-                <TableHead>Plan</TableHead>
-                <TableHead>Dates</TableHead>
-                <TableHead>Pause Credits</TableHead>
-                <TableHead className="w-[50px]">
+              <TableRow className="bg-slate-50/50 border-b border-slate-200">
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Customer</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Plan</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Dates</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Pause Credits</TableHead>
+                <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -963,23 +964,23 @@ export default function CustomerDashboard({
                 <TableRow>
                   <TableCell
                     colSpan={4}
-                    className="text-center py-12 text-muted-foreground"
+                    className="text-center py-12 text-sm text-slate-500"
                   >
                     No active subscriptions match your criteria.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredActiveSubscriptions.map((sub) => (
-                  <TableRow key={sub.id} className="hover:bg-muted/30">
+                  <TableRow key={sub.id} className="hover:bg-slate-50 transition-colors duration-200">
                     <TableCell>
-                      <div className="font-bold">{sub.customer_name}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="font-semibold text-slate-900 tracking-tight">{sub.customer_name}</div>
+                      <div className="text-sm text-slate-500 mt-0.5">
                         {sub.email}
                       </div>
                     </TableCell>
                     <TableCell>
                       {sub.plan_name}
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="text-sm text-slate-500 mt-0.5">
                         Total Days: {sub.total_days}
                       </div>
                     </TableCell>
@@ -1002,8 +1003,8 @@ export default function CustomerDashboard({
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          <Button variant="ghost" className="h-8 w-8 p-0 transition-all duration-200 hover:bg-slate-100">
+                            <MoreHorizontal className="h-4 w-4 text-slate-500" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-[180px]">
@@ -1029,7 +1030,7 @@ export default function CustomerDashboard({
         <DataTableCard
           header={<SectionHeader title="Pending Subscriptions" icon={Users} />}
           controls={
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-4">
               <DataSearchFilter
                 searchColumn={searchColumn}
                 onColumnChange={setSearchColumn}
@@ -1052,7 +1053,7 @@ export default function CustomerDashboard({
             </>
           }
         >
-          <div className="mx-4 mt-4 mb-2 flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+          <div className="mx-6 mt-6 mb-2 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 shadow-sm">
             <span className="mt-0.5 shrink-0">ℹ️</span>
             <span>
               Go to the{" "}
@@ -1064,12 +1065,12 @@ export default function CustomerDashboard({
           </div>
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/10">
-                <TableHead>Customer</TableHead>
-                <TableHead>Plan</TableHead>
-                <TableHead>Scheduled Start Date</TableHead>
-                <TableHead>Pause Credits</TableHead>
-                <TableHead className="w-[50px]">
+              <TableRow className="bg-slate-50/50 border-b border-slate-200">
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Customer</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Plan</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Scheduled Start Date</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Pause Credits</TableHead>
+                <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -1079,23 +1080,23 @@ export default function CustomerDashboard({
                 <TableRow>
                   <TableCell
                     colSpan={5}
-                    className="text-center py-12 text-muted-foreground"
+                    className="text-center py-12 text-sm text-slate-500"
                   >
                     No pending subscriptions found.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredPendingSubscriptions.map((sub) => (
-                  <TableRow key={sub.id} className="hover:bg-muted/30">
+                  <TableRow key={sub.id} className="hover:bg-slate-50 transition-colors duration-200">
                     <TableCell>
-                      <div className="font-bold">{sub.customer_name}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="font-semibold text-slate-900 tracking-tight">{sub.customer_name}</div>
+                      <div className="text-sm text-slate-500 mt-0.5">
                         {sub.email}
                       </div>
                     </TableCell>
                     <TableCell>
                       {sub.plan_name}
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="text-sm text-slate-500 mt-0.5">
                         Total Days: {sub.total_days}
                       </div>
                     </TableCell>
@@ -1115,8 +1116,8 @@ export default function CustomerDashboard({
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          <Button variant="ghost" className="h-8 w-8 p-0 transition-all duration-200 hover:bg-slate-100">
+                            <MoreHorizontal className="h-4 w-4 text-slate-500" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-[200px]">
@@ -1142,7 +1143,7 @@ export default function CustomerDashboard({
         <DataTableCard
           header={<SectionHeader title="Expired / Stopped Subscriptions" icon={Users} />}
           controls={
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-4">
               <DataSearchFilter
                 searchColumn={searchColumn}
                 onColumnChange={setSearchColumn}
@@ -1167,13 +1168,13 @@ export default function CustomerDashboard({
         >
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/10">
-                <TableHead>Customer</TableHead>
-                <TableHead>Plan</TableHead>
-                <TableHead>Start Date</TableHead>
-                <TableHead>End Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[50px]">
+              <TableRow className="bg-slate-50/50 border-b border-slate-200">
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Customer</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Plan</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Start Date</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">End Date</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Status</TableHead>
+                <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -1183,23 +1184,23 @@ export default function CustomerDashboard({
                 <TableRow>
                   <TableCell
                     colSpan={6}
-                    className="text-center py-12 text-muted-foreground"
+                    className="text-center py-12 text-sm text-slate-500"
                   >
                     No expired or stopped subscriptions found.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredStoppedSubscriptions.map((sub) => (
-                  <TableRow key={sub.id} className="hover:bg-muted/30">
+                  <TableRow key={sub.id} className="hover:bg-slate-50 transition-colors duration-200">
                     <TableCell>
-                      <div className="font-bold">{sub.customer_name}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="font-semibold text-slate-900 tracking-tight">{sub.customer_name}</div>
+                      <div className="text-sm text-slate-500 mt-0.5">
                         {sub.email}
                       </div>
                     </TableCell>
                     <TableCell>
                       {sub.plan_name}
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="text-sm text-slate-500 mt-0.5">
                         Total Days: {sub.total_days}
                       </div>
                     </TableCell>
@@ -1223,8 +1224,8 @@ export default function CustomerDashboard({
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                          <Button variant="ghost" className="h-8 w-8 p-0 transition-all duration-200 hover:bg-slate-100">
+                            <MoreHorizontal className="h-4 w-4 text-slate-500" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-[200px]">
@@ -1250,7 +1251,7 @@ export default function CustomerDashboard({
         <DataTableCard
           header={<SectionHeader title="Shop Orders" icon={ShoppingBag} />}
           controls={
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-4">
               <DataSearchFilter
                 searchColumn={searchColumn}
                 onColumnChange={setSearchColumn}
@@ -1275,14 +1276,14 @@ export default function CustomerDashboard({
         >
           <Table>
             <TableHeader>
-              <TableRow className="bg-muted/10">
-                <TableHead>Order</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Purchased</TableHead>
-                <TableHead>Target Delivery</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[50px]">
+              <TableRow className="bg-slate-50/50 border-b border-slate-200">
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Order</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Customer</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Items</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Purchased</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Target Delivery</TableHead>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Status</TableHead>
+                <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -1292,7 +1293,7 @@ export default function CustomerDashboard({
                 <TableRow>
                   <TableCell
                     colSpan={7}
-                    className="text-center py-12 text-muted-foreground"
+                    className="text-center py-12 text-sm text-slate-500"
                   >
                     No shop orders found.
                   </TableCell>
@@ -1336,29 +1337,29 @@ export default function CustomerDashboard({
                   const cfg = statusConfig[orderStatus] ?? statusConfig.unknown;
 
                   return (
-                    <TableRow key={order.id} className="hover:bg-muted/30">
+                    <TableRow key={order.id} className="hover:bg-slate-50 transition-colors duration-200">
                       <TableCell>
-                        <div className="font-bold text-sm">
+                        <div className="font-semibold text-slate-900 tracking-tight text-sm">
                           #{String(order.id).slice(-6).toUpperCase()}
                         </div>
                         {typeof order.total_amount === "number" && (
-                          <div className="text-xs text-muted-foreground mt-0.5">
+                          <div className="text-sm text-slate-500 mt-0.5">
                             ₹{Number(order.total_amount).toFixed(2)}
                           </div>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="font-medium">{order.customer_name}</div>
+                        <div className="font-semibold text-slate-900 tracking-tight">{order.customer_name}</div>
                       </TableCell>
                       <TableCell>
                         <div className="space-y-0.5">
                           {order.items.length === 0 ? (
-                            <span className="text-muted-foreground text-sm">—</span>
+                            <span className="text-slate-500 text-sm">—</span>
                           ) : (
                             order.items.map((item, idx) => (
                               <div key={idx} className="flex items-center gap-1.5 text-sm">
-                                <span className="font-medium">{item.product_name}</span>
-                                <span className="text-muted-foreground text-xs">×{item.quantity}</span>
+                                <span className="font-medium text-slate-900">{item.product_name}</span>
+                                <span className="text-slate-500 text-xs">×{item.quantity}</span>
                               </div>
                             ))
                           )}
@@ -1399,8 +1400,8 @@ export default function CustomerDashboard({
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0">
-                              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                            <Button variant="ghost" className="h-8 w-8 p-0 transition-all duration-200 hover:bg-slate-100">
+                              <MoreHorizontal className="h-4 w-4 text-slate-500" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-[200px]">

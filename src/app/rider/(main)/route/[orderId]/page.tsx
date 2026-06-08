@@ -8,7 +8,7 @@ import {
   Phone,
   Utensils,
 } from "lucide-react";
-import { LiveLocationTracker } from "@/modules/rider/components/LiveLocationTracker";
+import { LiveLocationTracker } from "@/shared/components/rider/LiveLocationTracker";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -17,7 +17,7 @@ import {
   buildAddonLinesFromOrder,
   buildDeliveryChecklistItems,
 } from "@/lib/delivery/riderChecklist";
-import { RiderDeliveryActions } from "@/modules/rider/components/RiderDeliveryActions";
+import { RiderDeliveryActions } from "@/shared/components/rider/RiderDeliveryActions";
 
 export const revalidate = 0;
 

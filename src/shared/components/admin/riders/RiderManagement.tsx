@@ -53,7 +53,7 @@ import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
-import { AdminSubmenu } from "../core/AdminSubmenu";
+import { AdminSubmenuBar } from "../core/AdminSubmenuBar";
 import ServiceAreaManager from "./ServiceAreaManager";
 
 export interface RiderData {
@@ -280,7 +280,7 @@ export default function RiderManagement({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <AdminSubmenu
+      <AdminSubmenuBar
         tabs={["Today's Activity", "Rider List", "Service Areas"]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
