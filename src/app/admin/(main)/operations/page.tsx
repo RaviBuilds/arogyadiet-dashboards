@@ -8,6 +8,7 @@ import {
 } from "@/actions/admin-actions/operationsActions";
 import { getISTDateString } from "@/lib/dates/ist";
 import FailedDeliveryApprovals from "@/shared/components/admin/operations/FailedDeliveryApprovals";
+import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 
 // Live ops data: fetch fresh on every request (matches riders page)
 export const revalidate = 0;
@@ -62,15 +63,11 @@ export default async function OperationsPage() {
   const pendingFailures = await fetchPendingFailureApprovals();
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">
-          Operations Control
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Manage daily dispatch, route sequences, and planned deliveries.
-        </p>
-      </div>
+    <div className="flex animate-in fade-in flex-col gap-6 pb-2 duration-500">
+      <AdminPageHeader
+        title="Operations Control"
+        description="Manage daily dispatch, route sequences, and planned deliveries."
+      />
 
       <OperationsDashboard
         deliveries={rawDeliveries || []}

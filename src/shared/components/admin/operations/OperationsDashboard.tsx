@@ -7,6 +7,7 @@ import DailyMealRoster from "@/shared/components/admin/operations/DailyMealRoste
 import LiveRoutingBoard from "@/shared/components/admin/operations/LiveRoutingBoard";
 import AdminLiveTracking from "@/shared/components/admin/operations/AdminLiveTracking";
 import AutomationLogs from "@/shared/components/admin/operations/AutomationLogs";
+import RoutingSandbox from "@/shared/components/admin/operations/RoutingSandbox";
 import { AdminSubmenuBar } from "../core/AdminSubmenuBar";
 
 export default function OperationsDashboard({
@@ -27,6 +28,7 @@ export default function OperationsDashboard({
           "Daily Meal Roster",
           "Live Tracking",
           "Automation Logs",
+          "Sandbox",
         ]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -54,6 +56,8 @@ export default function OperationsDashboard({
       {activeTab === "Automation Logs" && (
         <AutomationLogs initialLogs={automationLogs} />
       )}
+
+      {activeTab === "Sandbox" && <RoutingSandbox />}
     </div>
   );
 }

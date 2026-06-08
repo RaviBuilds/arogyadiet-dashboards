@@ -155,11 +155,13 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator className="bg-slate-200/60" />
-              <DropdownMenuItem className="cursor-pointer rounded-lg px-3 py-2 transition-all duration-200">
-                Profile
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer rounded-lg px-3 py-2 transition-all duration-200">
-                Settings
+              <DropdownMenuItem asChild>
+                <Link
+                  href="/profile"
+                  className="cursor-pointer rounded-lg px-3 py-2 transition-all duration-200"
+                >
+                  Profile
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-slate-200/60" />
               <DropdownMenuItem
