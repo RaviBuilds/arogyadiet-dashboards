@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { ShoppingBag } from "lucide-react";
+import { Info, ShoppingBag } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/shared/components/ui/button";
 import { ShopOrdersClient } from "./shop-orders-client";
@@ -51,24 +51,30 @@ export default async function ShopOrdersPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4">
+    <div className="mx-auto max-w-5xl space-y-8 animate-in fade-in slide-in-from-bottom-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900">My Shop Orders</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
+            My Shop Orders
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
             Track your purchased products and their delivery status.
           </p>
         </div>
-        <Button asChild variant="outline" className="rounded-xl shrink-0">
+        <Button
+          asChild
+          variant="outline"
+          className="shrink-0 rounded-xl transition-all duration-200"
+        >
           <Link href="/shop">
-            <ShoppingBag className="h-4 w-4 mr-2" />
+            <ShoppingBag className="mr-2 h-4 w-4" />
             Browse Shop
           </Link>
         </Button>
       </div>
 
-      <div className="rounded-2xl bg-amber-50 border border-amber-200 px-5 py-3.5 text-sm text-amber-800 flex items-start gap-3">
-        <span className="text-base mt-0.5">ℹ️</span>
+      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+        <Info className="mt-0.5 h-4 w-4 shrink-0" />
         <p>
           Products with <strong>Purchased</strong> status will be merged into
           your next delivery batch. Once scheduled, the delivery date is locked.

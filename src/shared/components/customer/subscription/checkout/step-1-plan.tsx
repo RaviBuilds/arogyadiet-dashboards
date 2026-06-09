@@ -34,9 +34,9 @@ export function PlanSelection({
 
   return (
     <div className="space-y-10">
-      <section>
-        <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
+      <section className="space-y-6">
+        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
             1
           </span>
           Selected subscription plan
@@ -46,10 +46,10 @@ export function PlanSelection({
             <Card
               key={plan.id}
               className={cn(
-                "cursor-pointer border-2 transition-all relative",
+                "cursor-pointer rounded-xl border bg-white shadow-sm transition-all duration-200 relative",
                 data.planId === plan.id
-                  ? "border-primary shadow-md"
-                  : "hover:border-zinc-300",
+                  ? "border-primary ring-2 ring-primary/20 shadow-md"
+                  : "border-slate-200 hover:border-slate-300 hover:shadow-md",
               )}
               onClick={() => setData({ ...data, planId: plan.id })}
             >
@@ -59,13 +59,13 @@ export function PlanSelection({
                 </div>
               )}
               <CardContent className="p-6 text-center">
-                <p className="font-bold text-zinc-500 uppercase text-xs tracking-widest">
+                <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
                   {plan.duration_days} Days
                 </p>
-                <p className="text-3xl font-black my-2">
+                <p className="text-3xl font-semibold text-slate-900 my-2">
                   ₹{plan.price.toLocaleString("en-IN")}
                 </p>
-                <div className="text-[10px] text-muted-foreground border-t pt-2 mt-2">
+                <div className="text-xs text-slate-500 border-t border-slate-100 pt-3 mt-3">
                   ₹{plan.base_price} Base + ₹{plan.tax_amount} GST
                 </div>
               </CardContent>
@@ -73,9 +73,9 @@ export function PlanSelection({
           ))}
         </div>
       </section>
-      <section>
-        <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
+      <section className="space-y-6">
+        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
             2
           </span>
           Initial Food Preference
@@ -98,9 +98,10 @@ export function PlanSelection({
                   data.foodType === category.code ? "default" : "outline"
                 }
                 className={cn(
-                  "px-10 h-12 font-semibold transition-all",
+                  "px-10 h-12 rounded-lg font-semibold transition-all duration-200",
                   data.foodType === category.code &&
                     "ring-2 ring-primary ring-offset-2",
+                  data.foodType !== category.code && "hover:bg-slate-50",
                 )}
                 onClick={() => handleFoodTypeChange(category.code)}
               >
@@ -113,17 +114,18 @@ export function PlanSelection({
         {warning && (
           <Alert className="mt-6 border-amber-200 bg-amber-50 text-amber-900">
             <AlertCircle className="h-4 w-4 stroke-amber-600" />
-            <AlertTitle className="font-bold">Dietary Note</AlertTitle>
+            <AlertTitle className="font-semibold">Dietary Note</AlertTitle>
             <AlertDescription>{warning}</AlertDescription>
           </Alert>
         )}
       </section>
-      <div className="pt-8 border-t flex justify-end">
+      <div className="pt-8 border-t border-slate-100 flex justify-end">
         <Button
           size="lg"
+          variant="secondary"
           disabled={!data.planId}
           onClick={onNext}
-          className="bg-secondary hover:bg-secondary/90 px-10 text-white font-bold"
+          className="px-10 font-semibold transition-all duration-200"
         >
           Next: Delivery Details
         </Button>

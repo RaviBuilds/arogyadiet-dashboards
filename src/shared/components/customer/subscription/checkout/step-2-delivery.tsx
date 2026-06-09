@@ -19,6 +19,7 @@ import {
   PopoverTrigger,
 } from "@/shared/components/ui/popover";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { Badge } from "@/shared/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 // 1. IMPORT YOUR MODAL (Adjust path if necessary based on your structure)
@@ -120,8 +121,8 @@ export function DeliveryDetails({
     <div className="space-y-10 animate-in fade-in slide-in-from-right-4">
       {/* 1. Subscription Start Date */}
       <section className="space-y-4">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
+        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
             3
           </span>
           When should we start?
@@ -132,8 +133,8 @@ export function DeliveryDetails({
               <Button
                 variant="outline"
                 className={cn(
-                  "w-full justify-start text-left font-normal h-12 border-2",
-                  !data.startDate && "text-muted-foreground",
+                  "w-full justify-start text-left font-normal h-12 rounded-lg border border-slate-200 hover:bg-slate-50 transition-all duration-200",
+                  !data.startDate && "text-slate-500",
                 )}
               >
                 <CalendarIcon className="mr-2 h-4 w-4" />
@@ -158,11 +159,11 @@ export function DeliveryDetails({
               />
             </PopoverContent>
           </Popover>
-          <p className="text-[11px] text-muted-foreground mt-2 px-1">
+          <p className="text-xs text-slate-500 mt-2 px-1">
             * Note: Tomorrow's meal must be finalized before 5:00 PM today.
           </p>
           {latestSubscription && (
-            <p className="text-sm text-blue-600 bg-blue-50 p-2 rounded-md border border-blue-100">
+            <p className="text-sm text-blue-800 bg-blue-50 p-3 rounded-lg border border-blue-200">
               Your new plan will automatically begin after your current
               subscription expires.
             </p>
@@ -173,8 +174,8 @@ export function DeliveryDetails({
       {/* 2. Address Selection */}
       <section className="space-y-4">
         <div className="flex flex-col md:flex-row gap-2 items-start justify-between md:items-center">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
+          <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
               4
             </span>
             Delivery Address
@@ -185,7 +186,7 @@ export function DeliveryDetails({
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+              className="gap-2 transition-all duration-200"
               onClick={() => setIsAddressModalOpen(true)}
             >
               <Settings className="h-4 w-4" /> Manage Addresses
@@ -194,7 +195,7 @@ export function DeliveryDetails({
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 border-primary text-primary hover:bg-primary/5"
+              className="gap-2 transition-all duration-200"
               onClick={() => setIsAddressModalOpen(true)}
             >
               <Plus className="h-4 w-4" /> Add New Address
@@ -203,8 +204,8 @@ export function DeliveryDetails({
         </div>
 
         {isLoading ? (
-          <div className="h-32 flex items-center justify-center border-2 border-dashed rounded-xl">
-            <p className="text-muted-foreground animate-pulse">
+          <div className="h-32 flex items-center justify-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+            <p className="text-sm text-slate-500 animate-pulse">
               Loading saved addresses...
             </p>
           </div>
@@ -214,10 +215,10 @@ export function DeliveryDetails({
               <Card
                 key={addr.id}
                 className={cn(
-                  "cursor-pointer border-2 transition-all relative group",
+                  "cursor-pointer rounded-xl border shadow-sm transition-all duration-200 relative group",
                   data.addressId === addr.id
-                    ? "border-secondary bg-secondary/5"
-                    : "hover:border-zinc-300",
+                    ? "border-secondary bg-secondary/5 ring-2 ring-secondary/20"
+                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50",
                 )}
                 onClick={() => setData({ ...data, addressId: addr.id })}
               >
@@ -227,17 +228,22 @@ export function DeliveryDetails({
                   </div>
                 )}
                 <CardContent className="p-4 flex gap-3">
-                  <MapPin className="h-5 w-5 text-muted-foreground shrink-0 mt-1" />
+                  <MapPin className="h-5 w-5 text-slate-400 shrink-0 mt-1" />
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="font-bold text-sm">{addr.tag}</p>
+                      <p className="font-semibold text-sm text-slate-900">
+                        {addr.tag}
+                      </p>
                       {addr.is_primary && (
-                        <span className="bg-secondary/20 text-secondary-foreground text-[10px] px-2 py-0.5 rounded font-bold">
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] font-semibold uppercase tracking-wider text-emerald-700"
+                        >
                           PRIMARY
-                        </span>
+                        </Badge>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                    <p className="text-sm text-slate-500 mt-1 line-clamp-2">
                       {addr.street_1}, {addr.street_2 && `${addr.street_2},`}{" "}
                       {addr.city}, {addr.pincode}
                     </p>
@@ -247,14 +253,14 @@ export function DeliveryDetails({
             ))}
 
             {addresses.length === 0 && (
-              <div className="col-span-full py-10 text-center border-2 border-dashed rounded-xl space-y-3">
-                <p className="text-muted-foreground">
+              <div className="col-span-full py-10 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-3">
+                <p className="text-sm text-slate-500">
                   No saved addresses found.
                 </p>
                 <Button
                   size="sm"
-                  className="bg-primary"
                   onClick={() => setIsAddressModalOpen(true)}
+                  className="transition-all duration-200"
                 >
                   Enter Delivery Address
                 </Button>
@@ -265,15 +271,20 @@ export function DeliveryDetails({
       </section>
 
       {/* Navigation */}
-      <div className="pt-8 border-t flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8">
-        <Button variant="ghost" onClick={onBack} className="gap-2">
+      <div className="pt-8 border-t border-slate-100 flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8">
+        <Button
+          variant="ghost"
+          onClick={onBack}
+          className="gap-2 transition-all duration-200"
+        >
           <ChevronLeft className="h-4 w-4" /> Back to Plans
         </Button>
         <Button
           size="lg"
+          variant="secondary"
           disabled={!data.startDate || !data.addressId}
           onClick={onNext}
-          className="bg-secondary hover:bg-secondary/90 px-10 text-white font-bold"
+          className="px-10 font-semibold transition-all duration-200"
         >
           Customize My Meals
         </Button>

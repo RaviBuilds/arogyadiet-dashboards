@@ -281,34 +281,36 @@ export default function ShopCheckoutPage() {
   };
 
   return (
-    <main className="p-6 lg:p-8">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">
+    <div className="space-y-8">
+      <header>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
           Checkout Review
         </h1>
-        <p className="mt-2 text-sm text-zinc-500">
+        <p className="mt-2 text-sm text-slate-500">
           Review your delivery details and billing summary before payment.
         </p>
       </header>
 
-      <div className="grid gap-8 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-3 lg:gap-8">
         <div className="space-y-6 lg:col-span-2">
-          <Card>
+          <Card className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <CardHeader>
-              <CardTitle>Delivery Information</CardTitle>
+              <CardTitle className="font-semibold tracking-tight text-slate-900">
+                Delivery Information
+              </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-6 pt-0">
               {isLoadingAddress ? (
-                <div className="flex items-center text-sm text-muted-foreground">
+                <div className="flex items-center text-sm text-slate-500">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...
                 </div>
               ) : (
                 <div className="space-y-2 text-sm">
-                  <p className="font-semibold text-zinc-900">
+                  <p className="font-semibold text-slate-900">
                     {name || "Customer"}
                   </p>
                   {address ? (
-                    <div className="flex gap-2 text-zinc-700">
+                    <div className="flex gap-3 text-slate-600">
                       <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
                       <div>
                         {address.tag ? (
@@ -322,7 +324,7 @@ export default function ShopCheckoutPage() {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-muted-foreground">
+                    <p className="text-slate-500">
                       No primary address found. Please add one in profile.
                     </p>
                   )}
@@ -331,25 +333,27 @@ export default function ShopCheckoutPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <CardHeader>
-              <CardTitle>Order Review</CardTitle>
+              <CardTitle className="font-semibold tracking-tight text-slate-900">
+                Order Review
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 p-6 pt-0">
               {items.map((item) => {
                 const unitPrice = item.sale_price ?? item.original_price;
                 return (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between rounded-md border p-3"
+                    className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/30 p-4 transition-colors hover:bg-slate-50"
                   >
                     <div>
-                      <p className="font-medium text-zinc-900">{item.name}</p>
-                      <p className="text-sm text-zinc-500">
+                      <p className="font-medium text-slate-900">{item.name}</p>
+                      <p className="text-sm text-slate-500">
                         Qty: {item.quantity}
                       </p>
                     </div>
-                    <p className="font-semibold">
+                    <p className="font-semibold text-slate-900">
                       {formatCurrency(unitPrice * item.quantity)}
                     </p>
                   </div>
@@ -360,11 +364,13 @@ export default function ShopCheckoutPage() {
         </div>
 
         <div className="space-y-6 lg:col-span-1">
-          <Card>
+          <Card className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <CardHeader>
-              <CardTitle>Coupon</CardTitle>
+              <CardTitle className="font-semibold tracking-tight text-slate-900">
+                Coupon
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-3 p-6 pt-0">
               <Input
                 placeholder="Enter coupon code"
                 value={couponInput}
@@ -374,7 +380,7 @@ export default function ShopCheckoutPage() {
                 type="button"
                 onClick={handleApplyCoupon}
                 disabled={isApplying}
-                className="w-full"
+                className="w-full transition-all duration-200"
               >
                 {isApplying ? (
                   <>
@@ -386,7 +392,7 @@ export default function ShopCheckoutPage() {
                 )}
               </Button>
               {discount.type ? (
-                <p className="text-xs text-green-700">
+                <p className="text-xs text-emerald-700">
                   Applied:{" "}
                   <span className="font-semibold">
                     {couponInput.trim().toUpperCase()}
@@ -396,31 +402,33 @@ export default function ShopCheckoutPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <CardHeader>
-              <CardTitle>Billing Summary</CardTitle>
+              <CardTitle className="font-semibold tracking-tight text-slate-900">
+                Billing Summary
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
+            <CardContent className="space-y-3 p-6 pt-0 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Item Subtotal</span>
+                <span className="text-slate-500">Item Subtotal</span>
                 <span>{formatCurrency(billing.baseSubtotal)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Discount</span>
+                <span className="text-slate-500">Discount</span>
                 <span>-{formatCurrency(billing.discount)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">{gstLabel}</span>
+                <span className="text-slate-500">{gstLabel}</span>
                 <span>{formatCurrency(billing.tax)}</span>
               </div>
               <Separator />
-              <div className="flex justify-between text-base font-bold">
+              <div className="flex justify-between text-base font-semibold text-slate-900">
                 <span>Grand Total</span>
                 <span>{formatCurrency(billing.total)}</span>
               </div>
               <Button
                 type="button"
-                className="mt-2 w-full"
+                className="mt-2 w-full transition-all duration-200"
                 onClick={handlePayment}
                 disabled={isPaying || items.length === 0}
               >
@@ -437,6 +445,6 @@ export default function ShopCheckoutPage() {
           </Card>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

@@ -65,7 +65,7 @@ function NavGroup({
   onNavigate?: () => void;
 }) {
   return (
-    <nav className="grid items-start px-4 text-sm font-medium gap-2">
+    <nav className="grid items-start gap-1.5 px-3 text-sm font-medium">
       {items.map((item) => {
         const Icon = item.icon;
         let isActive = false;
@@ -86,10 +86,10 @@ function NavGroup({
             href={item.href}
             onClick={() => onNavigate && onNavigate()}
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all",
+              "flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200",
               isActive
-                ? "bg-primary text-white shadow-sm"
-                : "text-zinc-400 hover:text-white hover:bg-white/5",
+                ? "bg-primary font-semibold text-primary-foreground shadow-sm ring-1 ring-primary/30"
+                : "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100",
             )}
           >
             <Icon className="h-4 w-4" />
@@ -111,24 +111,24 @@ function SidebarContent({
   onLogout: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col gap-4 pb-4 md:pb-0">
-      <div className="flex h-14 items-center border-b border-white/10 px-6 lg:h-[60px]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center border-b border-white/[0.08] px-6 py-5 lg:h-[60px]">
         <Link
           href="/dashboard"
           className="flex items-center gap-2 font-bold text-xl text-white"
           onClick={() => onNavigate && onNavigate()}
         >
-          <div className="flex items-center justify-center w-full h-full">
+          <div className="flex h-full w-full items-center justify-center">
             <img
               src="/logo.png"
               alt="ArogyaDiet"
-              className="h-17 w-auto object-contain px-2 py-1 rounded-md"
+              className="h-12 w-auto rounded-md object-contain px-2 py-1"
             />
           </div>
         </Link>
       </div>
 
-      <div className="flex-1 overflow-auto py-2 space-y-6">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain py-4">
         <NavGroup
           items={mainNavItems}
           pathname={pathname}
@@ -136,7 +136,7 @@ function SidebarContent({
         />
 
         <div>
-          <div className="px-7 mb-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
+          <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
             <ShoppingBag className="h-3 w-3" /> Shop
           </div>
           <NavGroup
@@ -147,7 +147,7 @@ function SidebarContent({
         </div>
 
         <div>
-          <div className="px-7 mb-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
+          <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
             <Settings2 className="h-3 w-3" /> Manage Meals
           </div>
           <NavGroup
@@ -164,13 +164,13 @@ function SidebarContent({
         />
       </div>
 
-      <div className="mt-auto p-4 border-t border-white/10">
+      <div className="z-10 mt-auto shrink-0 border-t border-white/[0.08] bg-zinc-950 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <Button
           variant="ghost"
-          className="w-full justify-start text-zinc-400 hover:text-red-400 hover:bg-red-400/10"
+          className="w-full justify-start gap-2 rounded-xl text-zinc-400 transition-all duration-200 hover:bg-red-500/10 hover:text-red-400"
           onClick={onLogout}
         >
-          <LogOut className="mr-2 h-4 w-4" /> Logout
+          <LogOut className="h-4 w-4" /> Logout
         </Button>
       </div>
     </div>
@@ -197,10 +197,10 @@ export function CustomerSidebar({
   return (
     <div
       className={cn(
-        "border-r border-white/10 bg-zinc-950 sticky top-0 shrink-0 rounded-tr-3xl print:hidden",
+        "sticky top-0 shrink-0 rounded-tr-3xl border-r border-white/[0.08] bg-zinc-950 shadow-xl shadow-black/20 print:hidden",
         isMobile
-          ? "w-full h-[80vh]"
-          : "hidden md:block md:w-64 lg:w-72 h-[100dvh]",
+          ? "flex h-full min-h-0 w-full flex-col overflow-hidden"
+          : "hidden h-[100dvh] md:block md:w-64 lg:w-72",
       )}
     >
       <SidebarContent

@@ -35,7 +35,13 @@ export default async function ManageAddressPage() {
     .single();
 
   if (!activeSub)
-    return <div className="p-8 text-center">No active subscription found.</div>;
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+        <p className="text-sm font-medium text-slate-500">
+          No active subscription found.
+        </p>
+      </div>
+    );
 
   // Fetch Addresses
   const { data: addresses } = await supabase

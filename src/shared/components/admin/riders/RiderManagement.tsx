@@ -247,7 +247,8 @@ export default function RiderManagement({
     startTransition(async () => {
       const res = await deleteRider(activeRider.id);
       if (res.success) {
-        toast.success("Rider completely deleted");
+        toast.success("Rider deactivated");
+        revalidateRidersPage();
         setIsDeleteModalOpen(false);
       } else toast.error(res.error);
     });
@@ -537,7 +538,7 @@ export default function RiderManagement({
                                 onClick={() => openDeleteModal(rider)}
                               >
                                 <Trash2 className="mr-2 h-4 w-4" />
-                                Delete Rider
+                                Deactivate Rider
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -726,23 +727,26 @@ export default function RiderManagement({
         </DialogContent>
       </Dialog>
 
-      {/* --- DELETE RIDER SECURE MODAL --- */}
+      {/* --- DEACTIVATE RIDER SECURE MODAL --- */}
       <Dialog open={isDeleteModalOpen} onOpenChange={setIsDeleteModalOpen}>
         <DialogContent className="sm:max-w-[450px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" /> Delete Rider Account
+              <AlertTriangle className="h-5 w-5" /> Deactivate Rider Account
             </DialogTitle>
             <DialogDescription asChild>
-              <div className="pt-2 text-red-600/90 font-medium text-sm">
-                This action cannot be undone. All data associated with this
-                rider will be fully deleted, so please backup data before
-                performing delete.
+              <div className="pt-2 text-muted-foreground text-sm space-y-2">
+                <p>
+                  This will deactivate the rider and block portal login. Service
+                  areas will be unassigned.
+                </p>
+                <p className="font-medium text-foreground">
+                  Delivery history and earnings records are preserved.
+                </p>
               </div>
             </DialogDescription>
             <div className="text-sm text-muted-foreground mt-2">
-              This will permanently delete the rider profile and system access
-              for{" "}
+              Deactivating rider{" "}
               <span className="font-bold text-foreground">
                 {activeRider?.fullName}
               </span>
@@ -751,7 +755,7 @@ export default function RiderManagement({
           </DialogHeader>
           <div className="py-4 space-y-4">
             <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md border border-destructive/20 font-medium">
-              To confirm deletion, please type the Employee Code:
+              To confirm, please type the Employee Code:
               <br />
               <span className="font-bold text-base tracking-widest">
                 {activeRider?.employee_code}
@@ -783,7 +787,7 @@ export default function RiderManagement({
               ) : (
                 <Trash2 className="mr-2 h-4 w-4" />
               )}{" "}
-              Delete Rider
+              Deactivate Rider
             </Button>
           </DialogFooter>
         </DialogContent>

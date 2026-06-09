@@ -104,12 +104,12 @@ const STATUS_CONFIG = {
   pending: {
     label: "Payment Pending",
     icon: Clock,
-    className: "bg-zinc-100 text-zinc-600 border-zinc-200",
+    className: "bg-slate-100 text-slate-600 border-slate-200",
   },
   unknown: {
     label: "Unknown",
     icon: Clock,
-    className: "bg-zinc-100 text-zinc-500 border-zinc-200",
+    className: "bg-slate-100 text-slate-500 border-slate-200",
   },
 };
 
@@ -118,15 +118,16 @@ function StatusBadge({ order }: { order: ShopOrderRow }) {
   const cfg = STATUS_CONFIG[key];
   const Icon = cfg.icon;
   return (
-    <span
+    <Badge
+      variant="outline"
       className={cn(
-        "inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
         cfg.className,
       )}
     >
       <Icon className="h-3 w-3" />
       {cfg.label}
-    </span>
+    </Badge>
   );
 }
 
@@ -174,7 +175,7 @@ function EditDeliveryDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 font-semibold tracking-tight text-slate-900">
             <CalendarDays className="h-5 w-5 text-primary" />
             Edit Delivery Date
           </DialogTitle>
@@ -203,12 +204,18 @@ function EditDeliveryDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={pending}>
+          <Button
+            variant="outline"
+            onClick={onClose}
+            disabled={pending}
+            className="transition-all duration-200"
+          >
             Cancel
           </Button>
           <Button
             onClick={handleSave}
             disabled={pending || !date || date < minDate}
+            className="transition-all duration-200"
           >
             {pending ? "Saving..." : "Save Changes"}
           </Button>
@@ -234,12 +241,12 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
 
   if (orders.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/50 p-12 text-center">
-        <Package className="h-10 w-10 text-zinc-300 mx-auto mb-3" />
-        <p className="text-zinc-500 font-medium">
+      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-12 text-center">
+        <Package className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+        <p className="font-medium text-slate-500">
           You haven&apos;t purchased any shop products yet.
         </p>
-        <p className="text-sm text-zinc-400 mt-1">
+        <p className="mt-1 text-sm text-slate-400">
           Browse the shop and add products to your next delivery.
         </p>
       </div>
@@ -248,9 +255,9 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
 
   return (
     <>
-      <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         {/* Desktop header */}
-        <div className="hidden md:grid grid-cols-[1fr_1.2fr_1.4fr_1fr_1.2fr_48px] bg-zinc-50 border-b px-5 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider">
+        <div className="hidden grid-cols-[1fr_1.2fr_1.4fr_1fr_1.2fr_48px] border-b bg-slate-50/50 px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 md:grid">
           <div>Order</div>
           <div>Purchased</div>
           <div>Items</div>
@@ -259,7 +266,7 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
           <div />
         </div>
 
-        <div className="divide-y divide-zinc-100">
+        <div className="divide-y divide-slate-100">
           {orders.map((order) => {
             const orderStatus = getOrderStatus(order);
             const canEdit = orderStatus === "purchased";
@@ -273,39 +280,39 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
             return (
               <div
                 key={order.id}
-                className="px-5 py-4 grid grid-cols-1 md:grid-cols-[1fr_1.2fr_1.4fr_1fr_1.2fr_48px] items-center gap-3 md:gap-0 hover:bg-zinc-50/70 transition-colors"
+                className="grid grid-cols-1 items-center gap-3 px-6 py-4 transition-colors duration-200 hover:bg-slate-50 md:grid-cols-[1fr_1.2fr_1.4fr_1fr_1.2fr_48px] md:gap-0"
               >
                 {/* Order ID */}
                 <div>
-                  <p className="font-bold text-zinc-900 text-sm">
+                  <p className="text-sm font-semibold text-slate-900">
                     #{String(order.id).slice(-6).toUpperCase()}
                   </p>
                   {typeof order.total_amount === "number" && (
-                    <p className="text-xs text-zinc-400 mt-0.5">
+                    <p className="mt-0.5 text-xs text-slate-500">
                       ₹{Number(order.total_amount).toFixed(2)}
                     </p>
                   )}
                 </div>
 
                 {/* Purchased date */}
-                <div className="text-sm text-zinc-600">
+                <div className="text-sm text-slate-600">
                   {format(parseISO(order.created_at), "MMM do, yyyy")}
                 </div>
 
                 {/* Items */}
                 <div className="space-y-0.5">
                   {items.length === 0 ? (
-                    <span className="text-sm text-zinc-400">—</span>
+                    <span className="text-sm text-slate-400">—</span>
                   ) : (
                     items.map((item, idx) => (
                       <div
                         key={idx}
                         className="flex items-center gap-1.5 text-sm"
                       >
-                        <span className="font-medium text-zinc-800">
+                        <span className="font-medium text-slate-800">
                           {getProductName(item?.products ?? null) ?? "Product"}
                         </span>
-                        <span className="text-zinc-400 text-xs">
+                        <span className="text-xs text-slate-400">
                           ×{item?.quantity}
                         </span>
                       </div>
@@ -314,13 +321,13 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
                 </div>
 
                 {/* Target Delivery */}
-                <div className="text-sm text-zinc-600">
+                <div className="text-sm text-slate-600">
                   {displayDate ? (
                     <span>
                       {format(parseISO(displayDate), "MMM do, yyyy")}
                     </span>
                   ) : (
-                    <span className="text-zinc-400">—</span>
+                    <span className="text-slate-400">—</span>
                   )}
                 </div>
 
@@ -336,7 +343,7 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-zinc-400 hover:text-zinc-700"
+                        className="h-8 w-8 text-slate-400 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700"
                       >
                         <MoreHorizontal className="h-4 w-4" />
                         <span className="sr-only">Order actions</span>
@@ -347,14 +354,14 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
                         onClick={() => canEdit && openEdit(order)}
                         disabled={!canEdit}
                         className={cn(
-                          "flex items-center gap-2 cursor-pointer",
-                          !canEdit && "opacity-40 cursor-not-allowed",
+                          "flex cursor-pointer items-center gap-2",
+                          !canEdit && "cursor-not-allowed opacity-40",
                         )}
                       >
                         <CalendarDays className="h-4 w-4" />
                         Edit Delivery Date
                         {!canEdit && orderStatus === "scheduled" && (
-                          <span className="ml-auto text-[10px] text-zinc-400 font-normal">
+                          <span className="ml-auto text-[10px] font-normal text-slate-400">
                             Locked
                           </span>
                         )}

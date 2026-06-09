@@ -94,16 +94,19 @@ export default function ProductCard({ product }: ProductCardProps) {
 
   return (
     <article
-      className={`overflow-hidden rounded-xl border border-zinc-200 bg-white transition-shadow duration-200 ${
-        isOutOfStock ? "opacity-75" : "hover:shadow-md"
-      }`}
+      className={cn(
+        "overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-200",
+        isOutOfStock
+          ? "opacity-75"
+          : "hover:-translate-y-0.5 hover:shadow-md",
+      )}
     >
-      <div className="relative aspect-[4/3] w-full bg-zinc-100">
+      <div className="relative aspect-[4/3] w-full bg-slate-100">
         {primaryImage ? (
           <button
             type="button"
             onClick={() => setLightboxOpen(true)}
-            className="block h-full w-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
+            className="block h-full w-full cursor-zoom-in transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2"
             aria-label={`View ${product.name} images`}
           >
             <img
@@ -115,7 +118,7 @@ export default function ProductCard({ product }: ProductCardProps) {
             />
           </button>
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-sm text-zinc-500">
+          <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">
             No image
           </div>
         )}
@@ -137,7 +140,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                 <DialogClose asChild>
                   <button
                     type="button"
-                    className="absolute right-4 top-4 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white transition-colors hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                    className="absolute right-4 top-4 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white transition-all duration-200 hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                     aria-label="Close image gallery"
                   >
                     <X className="h-5 w-5" />
@@ -149,7 +152,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                     <button
                       type="button"
                       onClick={showPreviousImage}
-                      className="absolute left-4 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition-colors hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      className="absolute left-4 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition-all duration-200 hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                       aria-label="Previous image"
                     >
                       <ChevronLeft className="h-6 w-6" />
@@ -157,7 +160,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                     <button
                       type="button"
                       onClick={showNextImage}
-                      className="absolute right-4 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition-colors hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      className="absolute right-4 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition-all duration-200 hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                       aria-label="Next image"
                     >
                       <ChevronRight className="h-6 w-6" />
@@ -176,23 +179,26 @@ export default function ProductCard({ product }: ProductCardProps) {
         ) : null}
 
         {isOutOfStock ? (
-          <span className="absolute right-3 top-3 rounded-md bg-zinc-900 px-2 py-1 text-xs font-semibold text-white">
+          <Badge className="absolute right-3 top-3 border-0 bg-slate-900 text-white hover:bg-slate-900">
             Out of stock
-          </span>
+          </Badge>
         ) : isOnSale ? (
-          <span className="absolute right-3 top-3 rounded-md bg-red-500 px-2 py-1 text-xs font-semibold text-white">
+          <Badge
+            variant="outline"
+            className="absolute right-3 top-3 border-red-200 bg-red-50 text-red-700 hover:bg-red-50"
+          >
             Sale!
-          </span>
+          </Badge>
         ) : null}
       </div>
 
-      <div className="space-y-3 p-4">
+      <div className="space-y-4 p-6">
         <div className="space-y-1">
-          <p className="text-xs uppercase tracking-wide text-zinc-500">
+          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
             {product.category ?? "Uncategorized"}
           </p>
           <h3
-            className="text-lg font-semibold text-zinc-900"
+            className="text-lg font-semibold tracking-tight text-slate-900"
             style={{
               display: "-webkit-box",
               WebkitLineClamp: 2,
@@ -207,15 +213,15 @@ export default function ProductCard({ product }: ProductCardProps) {
         <div className="flex items-center gap-2">
           {isOnSale ? (
             <>
-              <span className="text-sm line-through text-zinc-400">
+              <span className="text-sm line-through text-slate-400">
                 ₹{product.original_price.toFixed(2)}
               </span>
-              <span className="text-base font-bold text-green-600">
+              <span className="text-base font-semibold text-emerald-700">
                 ₹{(product.sale_price as number).toFixed(2)}
               </span>
             </>
           ) : (
-            <span className="text-base font-semibold text-zinc-900">
+            <span className="text-base font-semibold text-slate-900">
               ₹{product.original_price.toFixed(2)}
             </span>
           )}
@@ -223,27 +229,28 @@ export default function ProductCard({ product }: ProductCardProps) {
 
         <div className="flex items-center gap-2">
           {isOutOfStock ? (
-            <button
+            <Button
               type="button"
               disabled
-              className="flex-1 cursor-not-allowed rounded-md bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-500"
+              variant="secondary"
+              className="flex-1"
             >
               Out of stock
-            </button>
+            </Button>
           ) : !cartItem ? (
-            <button
+            <Button
               type="button"
               onClick={() => addItem(product)}
-              className="flex-1 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
+              className="flex-1 transition-all duration-200"
             >
               Add to cart
-            </button>
+            </Button>
           ) : (
-            <div className="flex flex-1 items-center justify-between rounded-md bg-green-600 px-3 py-2 text-white">
+            <div className="flex flex-1 items-center justify-between rounded-lg bg-emerald-600 px-3 py-2 text-white transition-all duration-200">
               <button
                 type="button"
                 onClick={() => removeItem(product.id)}
-                className="inline-flex items-center justify-center"
+                className="inline-flex items-center justify-center transition-all duration-200"
                 aria-label="Decrease quantity"
               >
                 <Minus className="h-4 w-4" />
@@ -254,7 +261,7 @@ export default function ProductCard({ product }: ProductCardProps) {
               <button
                 type="button"
                 onClick={() => addItem(product)}
-                className="inline-flex items-center justify-center"
+                className="inline-flex items-center justify-center transition-all duration-200"
                 aria-label="Increase quantity"
               >
                 <Plus className="h-4 w-4" />
@@ -268,6 +275,7 @@ export default function ProductCard({ product }: ProductCardProps) {
             size="icon"
             onClick={() => setQuickViewOpen(true)}
             aria-label={`Quick view ${product.name}`}
+            className="transition-all duration-200"
           >
             <Eye className="h-4 w-4" />
           </Button>
@@ -280,7 +288,7 @@ export default function ProductCard({ product }: ProductCardProps) {
 
           <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
             <div>
-              <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl border bg-secondary/10 p-4">
+              <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-secondary/10 p-4">
                 {activeImage ? (
                   <img
                     src={activeImage}
@@ -302,7 +310,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                       type="button"
                       onClick={() => setActiveImage(url)}
                       className={cn(
-                        "h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-background p-1",
+                        "h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-background p-1 transition-all duration-200",
                         activeImage === url &&
                           "ring-2 ring-primary ring-offset-2",
                       )}
@@ -321,7 +329,7 @@ export default function ProductCard({ product }: ProductCardProps) {
 
             <div className="flex flex-col">
               <div className="space-y-2">
-                <h2 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">
+                <h2 className="text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl">
                   {product.name}
                 </h2>
                 <div className="flex flex-wrap gap-2">
@@ -339,12 +347,15 @@ export default function ProductCard({ product }: ProductCardProps) {
                   ₹{displayPrice.toFixed(2)}
                 </span>
                 {isOnSale ? (
-                  <span className="ml-3 text-lg text-muted-foreground line-through">
+                  <span className="ml-3 text-lg text-slate-400 line-through">
                     ₹{product.original_price.toFixed(2)}
                   </span>
                 ) : null}
                 {discountPercent ? (
-                  <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50"
+                  >
                     -{discountPercent}%
                   </Badge>
                 ) : null}
@@ -354,7 +365,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                 className={cn(
                   "mt-2 text-sm font-medium",
                   product.in_stock
-                    ? "text-emerald-600"
+                    ? "text-emerald-700"
                     : "text-muted-foreground",
                 )}
               >
@@ -362,7 +373,7 @@ export default function ProductCard({ product }: ProductCardProps) {
               </p>
 
               {typeof taxPercent === "number" && taxPercent > 0 ? (
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 text-sm text-slate-500">
                   Inclusive of all taxes ({taxPercent}%)
                 </p>
               ) : null}
@@ -378,7 +389,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                   dangerouslySetInnerHTML={{ __html: product.description }}
                 />
               ) : (
-                <p className="mt-6 text-sm text-muted-foreground">
+                <p className="mt-6 text-sm text-slate-500">
                   No description available.
                 </p>
               )}
@@ -391,17 +402,17 @@ export default function ProductCard({ product }: ProductCardProps) {
                 ) : !cartItem ? (
                   <Button
                     type="button"
-                    className="w-full"
+                    className="w-full transition-all duration-200"
                     onClick={() => addItem(product)}
                   >
                     Add to cart
                   </Button>
                 ) : (
-                  <div className="flex w-full items-center justify-between rounded-lg bg-green-600 px-3 py-2 text-white">
+                  <div className="flex w-full items-center justify-between rounded-lg bg-emerald-600 px-3 py-2 text-white transition-all duration-200">
                     <button
                       type="button"
                       onClick={() => removeItem(product.id)}
-                      className="inline-flex items-center justify-center rounded-md p-1 hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      className="inline-flex items-center justify-center rounded-md p-1 transition-all duration-200 hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                       aria-label="Decrease quantity"
                     >
                       <Minus className="h-4 w-4" />
@@ -414,7 +425,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                     <button
                       type="button"
                       onClick={() => addItem(product)}
-                      className="inline-flex items-center justify-center rounded-md p-1 hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      className="inline-flex items-center justify-center rounded-md p-1 transition-all duration-200 hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                       aria-label="Increase quantity"
                     >
                       <Plus className="h-4 w-4" />

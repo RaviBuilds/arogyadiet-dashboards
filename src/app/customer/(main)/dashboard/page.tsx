@@ -30,7 +30,7 @@ import {
 } from "@/shared/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { repairOverLimitPauseCredits } from "@/actions/manageMealActions";
-import { DashboardFixedBackgroundLogo } from "@/shared/components/customer/DashboardFixedBackgroundLogo";
+import { DashboardFixedBackgroundLogoLazy } from "@/shared/components/customer/DashboardFixedBackgroundLogoLazy";
 
 export const revalidate = 0;
 
@@ -133,7 +133,7 @@ export default async function CustomerDashboard() {
   if (subError) {
     return (
       <>
-        <DashboardFixedBackgroundLogo />
+        <DashboardFixedBackgroundLogoLazy />
         <div className="relative z-10 max-w-4xl mx-auto mt-1 p-4">
           <Alert variant="destructive" className="bg-red-50 border-red-200">
             <AlertCircle className="h-4 w-4 stroke-red-600" />
@@ -154,7 +154,7 @@ export default async function CustomerDashboard() {
   if (!activeSub) {
     return (
       <>
-        <DashboardFixedBackgroundLogo />
+        <DashboardFixedBackgroundLogoLazy />
         <div className="relative z-10 max-w-4xl mx-auto mt-1 animate-in fade-in slide-in-from-bottom-4">
           <Card className="border border-dashed border-slate-200 bg-white shadow-sm text-center py-16">
             <CardContent className="flex flex-col items-center space-y-4">
@@ -185,11 +185,34 @@ export default async function CustomerDashboard() {
     : activeSub.subscription_plans;
   const planName = planDetails?.name || "Custom Plan";
   const safeTotal = activeSub.pause_credits_total || 1;
-  let { count: actualPauseCreditsUsed } = await supabase
-    .from("subscription_daily_preferences")
-    .select("*", { count: "exact", head: true })
-    .eq("subscription_id", activeSub.id)
-    .eq("is_paused", true);
+
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const nextWeekStr = format(addDays(new Date(), 7), "yyyy-MM-dd");
+
+  const [{ count: initialPauseCount }, { data: upcomingMeals }] =
+    await Promise.all([
+      supabase
+        .from("subscription_daily_preferences")
+        .select("*", { count: "exact", head: true })
+        .eq("subscription_id", activeSub.id)
+        .eq("is_paused", true),
+      supabase
+        .from("subscription_daily_preferences")
+        .select(
+          `
+      preference_date,
+      is_paused,
+      meal_categories ( code ),
+      addresses ( tag, street_1, city )
+    `,
+        )
+        .eq("subscription_id", activeSub.id)
+        .gte("preference_date", todayStr)
+        .lte("preference_date", nextWeekStr)
+        .order("preference_date", { ascending: true }),
+    ]);
+
+  let actualPauseCreditsUsed = initialPauseCount;
 
   if ((actualPauseCreditsUsed ?? 0) > safeTotal) {
     await repairOverLimitPauseCredits(activeSub.id);
@@ -210,29 +233,10 @@ export default async function CustomerDashboard() {
     activeSub.pause_credits_total - pauseCreditsUsed,
   );
 
-  // --- Fetch Next 7 Days Deliveries ---
-  const todayStr = format(new Date(), "yyyy-MM-dd");
-  const nextWeekStr = format(addDays(new Date(), 7), "yyyy-MM-dd");
-
-  const { data: upcomingMeals } = await supabase
-    .from("subscription_daily_preferences")
-    .select(
-      `
-      preference_date,
-      is_paused,
-      meal_categories ( code ),
-      addresses ( tag, street_1, city )
-    `,
-    )
-    .eq("subscription_id", activeSub.id)
-    .gte("preference_date", todayStr)
-    .lte("preference_date", nextWeekStr)
-    .order("preference_date", { ascending: true });
-
   return (
     <>
-      <DashboardFixedBackgroundLogo />
-      <div className="relative z-10 max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4">
+      <DashboardFixedBackgroundLogoLazy />
+      <div className="relative z-10 max-w-5xl mx-auto space-y-10">
       <div className="relative w-full h-40 sm:h-48 md:h-56 rounded-xl overflow-hidden border border-slate-200 shadow-sm">
         <Image
           src="/banner.jpg"
