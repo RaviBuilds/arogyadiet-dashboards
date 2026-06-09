@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getCustomerSession } from "@/lib/customer/get-session";
 import { CustomerHeader } from "@/shared/components/layout/customer-header";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
 import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
@@ -16,20 +16,9 @@ export default async function CustomerLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
+  const { user, profile, error } = await getCustomerSession();
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError || !user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("users")
-    .select("id, full_name")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  if (error || !user) redirect("/login");
 
   const userName = profile?.full_name || user.user_metadata?.full_name || null;
 
