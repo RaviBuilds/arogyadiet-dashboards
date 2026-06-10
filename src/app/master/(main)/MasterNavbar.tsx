@@ -67,28 +67,40 @@ export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) 
         </Link>
 
         {/* Center: Desktop Navigation */}
-        <nav className="hidden items-center gap-6 text-sm md:flex lg:gap-8">
+        <nav className="hidden items-center gap-5 text-sm md:flex lg:gap-7">
           <Link
             href="/dashboard"
-            className={`transition-colors hover:text-foreground ${isActive("/dashboard") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+            className={`transition-colors hover:text-foreground ${isActive("/dashboard") ? "text-emerald-600 font-semibold" : "text-muted-foreground font-medium"}`}
           >
             Dashboard
           </Link>
           <Link
+            href="/customers"
+            className={`transition-colors hover:text-foreground ${isActive("/customers") ? "text-emerald-600 font-semibold" : "text-muted-foreground font-medium"}`}
+          >
+            Customers
+          </Link>
+          <Link
+            href="/subscriptions"
+            className={`transition-colors hover:text-foreground ${isActive("/subscriptions") ? "text-emerald-600 font-semibold" : "text-muted-foreground font-medium"}`}
+          >
+            Subscriptions
+          </Link>
+          <Link
             href="/user-management"
-            className={`transition-colors hover:text-foreground ${isActive("/user-management") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+            className={`transition-colors hover:text-foreground ${isActive("/user-management") ? "text-emerald-600 font-semibold" : "text-muted-foreground font-medium"}`}
           >
             User Management
           </Link>
           <Link
             href="/finance"
-            className={`transition-colors hover:text-foreground ${isActive("/finance") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+            className={`transition-colors hover:text-foreground ${isActive("/finance") ? "text-emerald-600 font-semibold" : "text-muted-foreground font-medium"}`}
           >
             Finance
           </Link>
           <Link
             href="/logs"
-            className={`transition-colors hover:text-foreground ${isActive("/logs") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
+            className={`transition-colors hover:text-foreground ${isActive("/logs") ? "text-emerald-600 font-semibold" : "text-muted-foreground font-medium"}`}
           >
             Logs
           </Link>
@@ -150,25 +162,37 @@ export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) 
               <nav className="grid gap-2 text-base mt-4">
                 <Link
                   href="/dashboard"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/dashboard") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/dashboard") ? "text-emerald-600 font-semibold bg-emerald-50" : "text-muted-foreground font-medium"}`}
                 >
                   Dashboard
                 </Link>
                 <Link
+                  href="/customers"
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/customers") ? "text-emerald-600 font-semibold bg-emerald-50" : "text-muted-foreground font-medium"}`}
+                >
+                  Customers
+                </Link>
+                <Link
+                  href="/subscriptions"
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/subscriptions") ? "text-emerald-600 font-semibold bg-emerald-50" : "text-muted-foreground font-medium"}`}
+                >
+                  Subscriptions
+                </Link>
+                <Link
                   href="/user-management"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/user-management") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/user-management") ? "text-emerald-600 font-semibold bg-emerald-50" : "text-muted-foreground font-medium"}`}
                 >
                   User Management
                 </Link>
                 <Link
                   href="/finance"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/finance") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/finance") ? "text-emerald-600 font-semibold bg-emerald-50" : "text-muted-foreground font-medium"}`}
                 >
                   Finance
                 </Link>
                 <Link
                   href="/logs"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/logs") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
+                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/logs") ? "text-emerald-600 font-semibold bg-emerald-50" : "text-muted-foreground font-medium"}`}
                 >
                   Logs
                 </Link>
