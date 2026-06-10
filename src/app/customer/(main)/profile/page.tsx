@@ -1,6 +1,7 @@
 import { getUserAddresses } from "@/services/addressService";
 import { AddressList } from "@/shared/components/customer/address-list";
 import { CustomerLogoutButton } from "@/shared/components/customer/customer-logout-button";
+import { PasswordChangeForm } from "@/shared/components/customer/password-change-form";
 import { createClient } from "@/lib/supabase/server";
 import { ProfileForm } from "@/shared/components/customer/profile-form";
 import {
@@ -105,6 +106,19 @@ export default async function CustomerProfilePage() {
           />
         </CardContent>
       </Card>
+
+      {/* Password Change Section */}
+      <div className="border-t border-slate-200 pt-10">
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+            Security Settings
+          </h2>
+          <p className="text-sm text-slate-500">
+            Manage your account security and password.
+          </p>
+        </div>
+        <PasswordChangeForm />
+      </div>
 
       <div className="border-t border-slate-200 pt-10">
         <AddressList addresses={addresses} />

@@ -300,6 +300,7 @@ export function MealPlannerClient({
   totalPausesUsed = 0,
   holidaysByDate = {},
   planDuration = 30,
+  subscriptionStartDate,
 }: any) {
   const router = useRouter();
   const [overrides, setOverrides] =
@@ -693,6 +694,8 @@ export function MealPlannerClient({
                 {daysInMonth.map((date, index) => {
                   const dateStr = format(date, "yyyy-MM-dd");
                   const isPaused = pausedDates.includes(dateStr);
+                  const today = startOfDay(new Date());
+                  const isInPast = isBefore(startOfDay(date), today);
                   const isLockedOut = isBefore(
                     startOfDay(date),
                     minEditableDate,
@@ -700,17 +703,52 @@ export function MealPlannerClient({
                   const isDisabled = isLockedOut;
 
                   const dayPrefCode = overrides[dateStr] || baseFoodType;
-                  const style = isPaused
-                    ? PAUSE_STYLE
-                    : PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
-                  const Icon = style.icon;
-                  const dayLabel = isPaused
-                    ? PAUSE_STYLE.label
-                    : getCategoryLabel(
+                  
+                  // For past dates, show actual status with special styling
+                  let displayLabel = "";
+                  let style = PREF_STYLES.VEG;
+                  let Icon = VegSvg;
+
+                  if (isInPast) {
+                    // Past date - show what actually happened with grayed styling
+                    if (isPaused) {
+                      displayLabel = "Paused";
+                      style = {
+                        icon: PAUSE_STYLE.icon,
+                        bg: "bg-slate-50",
+                        color: "text-slate-400",
+                        border: "border-slate-200"
+                      };
+                      Icon = style.icon;
+                    } else {
+                      // Show meal type but with grayed styling like the 10th date
+                      const originalStyle = PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
+                      displayLabel = getCategoryLabel(
                         dayPrefCode,
-                        mealCategories.find((c: any) => c.code === dayPrefCode)
-                          ?.name,
+                        mealCategories.find((c: any) => c.code === dayPrefCode)?.name,
                       );
+                      style = {
+                        icon: originalStyle.icon,
+                        bg: "bg-slate-50",
+                        color: "text-slate-400", 
+                        border: "border-slate-200"
+                      };
+                      Icon = style.icon;
+                    }
+                  } else {
+                    // Future date - normal behavior
+                    style = isPaused
+                      ? PAUSE_STYLE
+                      : PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
+                    Icon = style.icon;
+                    displayLabel = isPaused
+                      ? PAUSE_STYLE.label
+                      : getCategoryLabel(
+                          dayPrefCode,
+                          mealCategories.find((c: any) => c.code === dayPrefCode)
+                            ?.name,
+                        );
+                  }
 
                   return (
                     <button
@@ -719,7 +757,9 @@ export function MealPlannerClient({
                       onClick={() => handleToggleMeal(dateStr)}
                       className={cn(
                         "flex flex-col items-center justify-center aspect-square p-1 rounded-xl border transition-all duration-200 relative select-none",
-                        isLockedOut
+                        isInPast
+                          ? cn(style.bg, style.border, "cursor-default")
+                          : isLockedOut
                           ? "bg-slate-100 border-slate-200 opacity-60 cursor-not-allowed grayscale"
                           : cn(
                               style.bg,
@@ -736,7 +776,7 @@ export function MealPlannerClient({
                       <span
                         className={cn(
                           "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",
-                          isLockedOut ? "text-slate-400" : style.color,
+                          isInPast ? style.color : isLockedOut ? "text-slate-400" : style.color,
                         )}
                       >
                         {format(date, "d")}
@@ -745,22 +785,27 @@ export function MealPlannerClient({
                       <div
                         className={cn(
                           "flex flex-col items-center justify-center gap-1",
-                          isLockedOut ? "text-slate-400" : style.color,
+                          isInPast ? style.color : isLockedOut ? "text-slate-400" : style.color,
                         )}
                       >
-                        <Icon className="h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95" />
-                        <span className="text-[9px] md:text-[11px] font-bold leading-none hidden sm:block">
-                          {dayLabel}
+                        <Icon 
+                          className={cn(
+                            "h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95",
+                            isInPast ? "opacity-60" : ""
+                          )} 
+                        />
+                        <span className="text-[9px] md:text-[11px] font-bold leading-none text-center">
+                          {displayLabel}
                         </span>
                       </div>
 
-                      {!isLockedOut && (
+                      {!isLockedOut && !isInPast && (
                         <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
                           <RefreshCw className="h-5 w-5 text-zinc-600 opacity-20" />
                         </div>
                       )}
 
-                      {isLockedOut && (
+                      {isLockedOut && !isInPast && (
                         <div className="absolute top-1 right-1">
                           <AlertCircle className="h-3 w-3 text-slate-400" />
                         </div>
