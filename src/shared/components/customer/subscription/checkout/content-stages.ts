@@ -1,0 +1,8 @@
+export const CONTENT_STAGES = {
+  PLAN_SELECT: 1,
+  FOOD_PREFERENCE: 2,
+  START_DATE: 3,
+  DELIVERY_ADDRESS: 4,
+  MEAL_PLANNER: 5,
+  REVIEW: 6,
+} as const;

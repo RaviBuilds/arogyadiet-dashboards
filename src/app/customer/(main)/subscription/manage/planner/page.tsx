@@ -36,7 +36,9 @@ export default async function ManageMealPlannerPage() {
   // 2. Fetch Active Subscription
   const { data: activeSub } = await supabase
     .from("subscriptions")
-    .select("id, effective_end_on, pause_credits_total, pause_credits_used")
+    .select(
+      "id, effective_end_on, pause_credits_total, pause_credits_used, subscription_plans(duration_days)",
+    )
     .eq("customer_profile_id", profile.id)
     .eq("status", "ACTIVE")
     .single();
@@ -121,6 +123,11 @@ export default async function ManageMealPlannerPage() {
     activeSub.effective_end_on,
   );
 
+  const planData = Array.isArray(activeSub.subscription_plans)
+    ? activeSub.subscription_plans[0]
+    : activeSub.subscription_plans;
+  const planDuration = planData?.duration_days ?? scheduleDays.length;
+
   return (
     <MealPlannerClient
       subscriptionId={activeSub.id}
@@ -132,6 +139,7 @@ export default async function ManageMealPlannerPage() {
       maxPauses={activeSub.pause_credits_total}
       totalPausesUsed={totalPausesUsed ?? 0}
       holidaysByDate={holidaysByDate}
+      planDuration={planDuration}
     />
   );
 }

@@ -21,6 +21,7 @@ import {
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Badge } from "@/shared/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { CONTENT_STAGES } from "./content-stages";
 
 // 1. IMPORT YOUR MODAL (Adjust path if necessary based on your structure)
 import { AddressManagerModal } from "@/shared/components/customer/address-manager-modal";
@@ -123,7 +124,7 @@ export function DeliveryDetails({
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            3
+            {CONTENT_STAGES.START_DATE}
           </span>
           When should we start?
         </h2>
@@ -176,7 +177,7 @@ export function DeliveryDetails({
         <div className="flex flex-col md:flex-row gap-2 items-start justify-between md:items-center">
           <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-              4
+              {CONTENT_STAGES.DELIVERY_ADDRESS}
             </span>
             Delivery Address
           </h2>

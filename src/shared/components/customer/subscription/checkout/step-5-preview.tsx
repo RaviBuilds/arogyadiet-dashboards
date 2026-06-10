@@ -25,6 +25,7 @@ import {
   AlertTitle,
 } from "@/shared/components/ui/alert";
 import { createClient } from "@/lib/supabase/client";
+import { CONTENT_STAGES } from "./content-stages";
 
 import {
   createRazorpayOrderAction,
@@ -256,7 +257,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
       <section>
         <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            5
+            {CONTENT_STAGES.REVIEW}
           </span>
           Review Your Order
         </h2>

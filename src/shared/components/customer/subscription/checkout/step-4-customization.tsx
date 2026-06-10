@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CONTENT_STAGES } from "./content-stages";
 
 // --- CUSTOM REALISTIC SVG ILLUSTRATIONS ---
 
@@ -420,7 +421,7 @@ export function MealCustomization({
       <div className="space-y-2">
         <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            3
+            {CONTENT_STAGES.MEAL_PLANNER}
           </span>
           Meal Planner
         </h2>

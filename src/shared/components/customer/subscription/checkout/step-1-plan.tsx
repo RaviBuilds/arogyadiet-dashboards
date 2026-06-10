@@ -10,6 +10,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/shared/components/ui/alert";
+import { CONTENT_STAGES } from "./content-stages";
 
 export function PlanSelection({
   plans,
@@ -37,7 +38,7 @@ export function PlanSelection({
       <section className="space-y-6">
         <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            1
+            {CONTENT_STAGES.PLAN_SELECT}
           </span>
           Selected subscription plan
         </h2>
@@ -76,7 +77,7 @@ export function PlanSelection({
       <section className="space-y-6">
         <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            2
+            {CONTENT_STAGES.FOOD_PREFERENCE}
           </span>
           Initial Food Preference
         </h2>

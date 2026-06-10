@@ -1,4 +1,5 @@
 import { getCustomerSession } from "@/lib/customer/get-session";
+import { FloatingSupportMenu } from "@/shared/components/customer/FloatingSupportMenu";
 import { CustomerHeader } from "@/shared/components/layout/customer-header";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
 import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
@@ -38,9 +39,9 @@ export default async function CustomerLayout({
         <main className="flex-1 p-4 md:p-6 lg:p-8 w-full min-w-0 print:p-0">
           {children}
         </main>
-
-       
       </div>
+
+      <FloatingSupportMenu />
     </div>
   );
 }
