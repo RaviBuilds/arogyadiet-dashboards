@@ -74,17 +74,17 @@ export function AddressList({ addresses, onRefresh }: AddressListProps) {
   return (
     <div className="space-y-6">
       {/* --- The Header and Top-Level Button --- */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
             Delivery Addresses
           </h2>
-          <p className="text-muted-foreground">
+          <p className="text-sm text-slate-500">
             Manage where you want your daily diet meals delivered.
           </p>
 
           {addresses && addresses.length >= 2 && (
-            <p className="text-sm font-medium text-amber-600 mt-2 bg-amber-50 inline-block px-2 py-1 rounded">
+            <p className="mt-2 inline-block rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
               Note: A maximum of 2 addresses can be maintained.
             </p>
           )}
@@ -95,6 +95,7 @@ export function AddressList({ addresses, onRefresh }: AddressListProps) {
             variant="default"
             onClick={handleAdd}
             disabled={addresses.length >= 2}
+            className="shrink-0 transition-all duration-200"
           >
             Add Address
           </Button>
@@ -103,16 +104,16 @@ export function AddressList({ addresses, onRefresh }: AddressListProps) {
 
       {/* --- EMPTY STATE --- */}
       {!addresses || addresses.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed rounded-lg bg-muted/30 text-center">
-          <MapPin className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
-          <h3 className="text-lg font-semibold tracking-tight">
+        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-12 text-center">
+          <MapPin className="mb-4 h-12 w-12 text-slate-400 opacity-50" />
+          <h3 className="text-lg font-semibold tracking-tight text-slate-900">
             No addresses saved
           </h3>
-          <p className="text-sm text-muted-foreground mt-2 mb-6 max-w-sm">
+          <p className="mt-2 mb-6 max-w-sm text-sm text-slate-500">
             You haven't added any delivery addresses yet. Add one now to start
             receiving your diet plans.
           </p>
-          <Button onClick={handleAdd}>
+          <Button onClick={handleAdd} className="transition-all duration-200">
             <Plus className="mr-2 h-4 w-4" /> Add New Address
           </Button>
         </div>
@@ -122,7 +123,7 @@ export function AddressList({ addresses, onRefresh }: AddressListProps) {
           {addresses.map((address) => (
             <Card
               key={address.id}
-              className="flex flex-col relative overflow-hidden transition-all hover:shadow-md"
+              className="relative flex flex-col overflow-hidden rounded-xl border border-slate-200 shadow-sm transition-all duration-200 hover:shadow-md"
             >
               {address.is_primary && (
                 <div className="absolute top-0 left-0 w-full h-1 bg-primary" />
@@ -135,39 +136,39 @@ export function AddressList({ addresses, onRefresh }: AddressListProps) {
                 </CardTitle>
                 <div className="flex gap-2">
                   {address.is_primary && (
-                    <Badge className="bg-secondary text-secondary-foreground hover:bg-secondary/90 border-none">
+                    <Badge className="border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
                       Primary Default
                     </Badge>
                   )}
                 </div>
               </CardHeader>
 
-              <CardContent className="flex-1 pb-4 text-sm text-muted-foreground space-y-1">
-                <p className="text-foreground font-medium">
+              <CardContent className="flex-1 space-y-1 pb-4 text-sm text-slate-500">
+                <p className="font-medium text-slate-900">
                   {address.street_1}
                 </p>
                 {address.street_2 && <p>{address.street_2}</p>}
                 {address.landmark && <p>Landmark: {address.landmark}</p>}
                 <p className="pt-2 font-medium">
                   {address.city}, {address.state}{" "}
-                  <span className="text-foreground">{address.pincode}</span>
+                  <span className="text-slate-900">{address.pincode}</span>
                 </p>
               </CardContent>
 
-              <CardFooter className=" flex flex-row items-center justify-center gap-3">
+              <CardFooter className="flex flex-row items-center justify-center gap-3">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-fit"
+                  className="w-fit transition-all duration-200"
                   onClick={() => handleEdit(address)}
                 >
-                  <Edit className="h-4 w-4 mr-2" /> Edit
+                  <Edit className="mr-2 h-4 w-4" /> Edit
                 </Button>
 
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="w-fit text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  className="w-fit text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive"
                   onClick={() => setAddressToDelete(address.id)}
                 >
                   <Trash2 className="h-4 w-4 mr-2" /> Delete

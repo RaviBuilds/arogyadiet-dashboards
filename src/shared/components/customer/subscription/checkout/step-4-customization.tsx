@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CONTENT_STAGES } from "./content-stages";
 
 // --- CUSTOM REALISTIC SVG ILLUSTRATIONS ---
 
@@ -418,15 +419,15 @@ export function MealCustomization({
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 max-w-4xl mx-auto">
       <div className="space-y-2">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">
-            3
+        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
+            {CONTENT_STAGES.MEAL_PLANNER}
           </span>
           Meal Planner
         </h2>
-        <p className="text-muted-foreground ml-10">
+        <p className="text-sm text-slate-500 ml-10">
           Your base plan is set to{" "}
-          <strong className="text-foreground">
+          <strong className="font-semibold text-slate-900">
             {getCategoryLabel(
               data.foodType,
               mealCategories.find((c: any) => c.code === data.foodType)?.name,
@@ -439,7 +440,7 @@ export function MealCustomization({
       <div className="ml-0 md:ml-10 space-y-8">
         <div
           className={cn(
-            "border rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors",
+            "rounded-xl border p-5 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors duration-200",
             isLimitReached
               ? "bg-amber-50 border-amber-200"
               : "bg-blue-50 border-blue-200",
@@ -492,8 +493,8 @@ export function MealCustomization({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 md:gap-4 p-3 bg-zinc-50 rounded-lg border text-sm w-fit mx-auto md:mx-0">
-          <span className="text-muted-foreground font-medium mr-2 flex items-center gap-1 hidden sm:flex">
+        <div className="flex flex-wrap items-center gap-3 p-4 bg-slate-50/50 rounded-xl border border-slate-200 text-sm w-fit mx-auto md:mx-0">
+          <span className="text-slate-500 font-medium mr-2 flex items-center gap-1 hidden sm:flex">
             <RefreshCw className="h-4 w-4" /> Cycle:
           </span>
           {cycleOptions.map((option) => {
@@ -503,13 +504,14 @@ export function MealCustomization({
                 <div
                   key="PAUSE"
                   className={cn(
-                    "flex items-center gap-1.5 px-2 py-1 rounded-md",
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-full border",
                     PAUSE_STYLE.bg,
                     PAUSE_STYLE.color,
+                    "border-zinc-200",
                   )}
                 >
                   <Icon className="h-5 w-5 drop-shadow-sm" />
-                  <span className="font-bold text-xs md:text-sm">
+                  <span className="font-semibold text-xs md:text-sm">
                     {PAUSE_STYLE.label}
                   </span>
                 </div>
@@ -527,13 +529,14 @@ export function MealCustomization({
               <div
                 key={option}
                 className={cn(
-                  "flex items-center gap-1.5 px-2 py-1 rounded-md",
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full border",
                   style.bg,
                   style.color,
+                  style.border.split(" ")[0],
                 )}
               >
                 <Icon className="h-5 w-5 drop-shadow-sm" />
-                <span className="font-bold text-xs md:text-sm">{label}</span>
+                <span className="font-semibold text-xs md:text-sm">{label}</span>
               </div>
             );
           })}
@@ -546,9 +549,9 @@ export function MealCustomization({
             return (
               <div
                 key={monthName}
-                className="bg-white rounded-2xl border p-4 md:p-8 shadow-sm"
+                className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 md:p-8"
               >
-                <h3 className="text-xl font-bold text-center mb-6 text-zinc-800">
+                <h3 className="text-lg font-semibold text-slate-900 tracking-tight text-center mb-6">
                   {monthName}
                 </h3>
                 <div
@@ -558,7 +561,7 @@ export function MealCustomization({
                   {WEEKDAYS.map((day) => (
                     <div
                       key={day}
-                      className="text-xs md:text-sm font-bold text-zinc-400 uppercase tracking-wider"
+                      className="text-xs font-medium text-slate-500 uppercase tracking-wider"
                     >
                       {day}
                     </div>
@@ -596,7 +599,7 @@ export function MealCustomization({
                         key={index}
                         onClick={() => handleToggleMeal(dateStr)}
                         className={cn(
-                          "flex flex-col items-center justify-center aspect-square p-1 rounded-2xl border-2 transition-all relative select-none group hover:shadow-md hover:-translate-y-0.5",
+                          "flex flex-col items-center justify-center aspect-square p-1 rounded-xl border transition-all duration-200 relative select-none group hover:shadow-md hover:-translate-y-0.5",
                           style.bg,
                           style.border,
                         )}
@@ -640,19 +643,20 @@ export function MealCustomization({
         </div>
       </div>
 
-      <div className="pt-8 border-t flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8">
+      <div className="pt-8 border-t border-slate-100 flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8">
         <Button
           variant="ghost"
           onClick={onBack}
-          className="w-full sm:w-auto gap-2"
+          className="w-full sm:w-auto gap-2 transition-all duration-200"
         >
           <ChevronLeft className="h-4 w-4 shrink-0" /> Back to Plans
         </Button>
         <Button
           size="lg"
+          variant="secondary"
           disabled={!data.startDate || !data.addressId}
           onClick={onNext}
-          className="w-full sm:w-auto bg-secondary hover:bg-secondary/90 px-10 text-white font-bold"
+          className="w-full sm:w-auto px-10 font-semibold transition-all duration-200"
         >
           Review and Pay
         </Button>

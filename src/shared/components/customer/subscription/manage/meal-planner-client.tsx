@@ -61,6 +61,10 @@ const MeatSvg = ({ className }: { className?: string }) => (
         <stop offset="0%" stopColor="#FFF3E0" />
         <stop offset="100%" stopColor="#E8C38E" />
       </linearGradient>
+      <linearGradient id="ringGradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#DCECF7" />
+        <stop offset="100%" stopColor="#8DA9C4" />
+      </linearGradient>
     </defs>
     <g stroke="#9A3B2D" strokeWidth="1.8" strokeLinejoin="round">
       <path
@@ -74,18 +78,62 @@ const MeatSvg = ({ className }: { className?: string }) => (
         strokeLinecap="round"
       />
     </g>
-    <path
-      d="M55 50 C67 15 98 12 108 38 C118 65 101 92 72 88 C48 84 37 67 45 55 C48 51 51 50 55 50 Z"
-      fill="url(#meatGradient)"
-      stroke="#34143E"
-      strokeWidth="2.2"
-      strokeLinejoin="round"
+    <ellipse
+      cx="60"
+      cy="52"
+      rx="5"
+      ry="6"
+      fill="url(#ringGradient)"
+      stroke="#4F5D73"
+      strokeWidth="1.5"
     />
-    <path
-      d="M61 27 C74 18 90 19 98 29 C88 40 70 40 58 34 C57 31 58 29 61 27 Z"
-      fill="white"
-      opacity="0.72"
-    />
+    <g>
+      <path
+        d="M55 50 C67 15 98 12 108 38 C118 65 101 92 72 88 C48 84 37 67 45 55 C48 51 51 50 55 50 Z"
+        fill="url(#meatGradient)"
+        stroke="#34143E"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M50 64 C66 58 88 61 103 72 C93 87 70 91 53 80 C48 76 47 70 50 64 Z"
+        fill="#C84C00"
+        opacity="0.45"
+      />
+      <path
+        d="M61 27 C74 18 90 19 98 29 C88 40 70 40 58 34 C57 31 58 29 61 27 Z"
+        fill="white"
+        opacity="0.72"
+      />
+      <path
+        d="M67 24 C77 20 88 21 94 27 C88 33 77 33 69 29 C67 28 66 26 67 24 Z"
+        fill="#FFE08A"
+        opacity="0.65"
+      />
+      <path
+        d="M48 46 C57 35 69 31 80 31"
+        stroke="white"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        opacity="0.85"
+      />
+    </g>
+    <g fill="none" stroke="#E36A15" strokeWidth="1.2" opacity="0.85">
+      <circle cx="63" cy="36" r="1.8" />
+      <circle cx="75" cy="33" r="1.6" />
+      <circle cx="86" cy="38" r="1.6" />
+      <circle cx="58" cy="48" r="1.6" />
+      <circle cx="70" cy="47" r="1.6" />
+      <circle cx="83" cy="48" r="1.6" />
+      <circle cx="94" cy="44" r="1.6" />
+      <circle cx="55" cy="60" r="1.6" />
+      <circle cx="66" cy="60" r="1.6" />
+      <circle cx="79" cy="61" r="1.6" />
+      <circle cx="91" cy="60" r="1.6" />
+      <circle cx="61" cy="72" r="1.6" />
+      <circle cx="74" cy="74" r="1.6" />
+      <circle cx="88" cy="72" r="1.6" />
+    </g>
   </svg>
 );
 const EggSvg = ({ className }: { className?: string }) => (
@@ -105,6 +153,14 @@ const EggSvg = ({ className }: { className?: string }) => (
       fill="#FFCC80"
       opacity="0.6"
     />
+    <path
+      d="M32 28 C 22 40 20 55 22 65"
+      stroke="#FFFFFF"
+      strokeWidth="5"
+      strokeLinecap="round"
+      fill="none"
+      opacity="0.8"
+    />
   </svg>
 );
 const MixedSvg = ({ className }: { className?: string }) => (
@@ -114,6 +170,15 @@ const MixedSvg = ({ className }: { className?: string }) => (
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
   >
+    <rect
+      x="12"
+      y="22"
+      width="76"
+      height="60"
+      rx="12"
+      fill="#D1C4E9"
+      opacity="0.5"
+    />
     <rect
       x="10"
       y="20"
@@ -234,6 +299,8 @@ export function MealPlannerClient({
   maxPauses,
   totalPausesUsed = 0,
   holidaysByDate = {},
+  planDuration = 30,
+  subscriptionStartDate,
 }: any) {
   const router = useRouter();
   const [overrides, setOverrides] =
@@ -309,6 +376,11 @@ export function MealPlannerClient({
     });
     return months;
   }, [scheduleDays]);
+
+  const endDate =
+    scheduleDays.length > 0
+      ? parseISO(scheduleDays[scheduleDays.length - 1])
+      : null;
 
   const handleToggleMeal = (dateString: string) => {
     const date = parseISO(dateString);
@@ -438,14 +510,14 @@ export function MealPlannerClient({
   });
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 max-w-4xl">
       {/* Top Banner & Save Button */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 border rounded-xl shadow-sm sticky top-[60px] z-10">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 border border-slate-200 rounded-xl shadow-sm sticky top-[60px] z-10">
         <div>
-          <h2 className="text-xl font-bold text-zinc-900">
+          <h2 className="text-lg font-semibold text-slate-900 tracking-tight">
             Manage Meal Planner
           </h2>
-          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+          <p className="text-sm text-slate-500 flex items-center gap-1 mt-1">
             <AlertCircle className="h-3 w-3" /> Changes for tomorrow must be
             made before 5:00 PM today.
           </p>
@@ -484,7 +556,7 @@ export function MealPlannerClient({
       {/* Pause Credit Banner */}
       <div
         className={cn(
-          "border rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors",
+          "rounded-xl border p-5 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors duration-200",
           isLimitReached
             ? "bg-amber-50 border-amber-200"
             : "bg-blue-50 border-blue-200",
@@ -503,7 +575,7 @@ export function MealPlannerClient({
                 isLimitReached ? "text-amber-900" : "text-blue-900",
               )}
             >
-              Pause Credit Usage
+              Your {planDuration}-Meal Plan
             </p>
             <p
               className={cn(
@@ -512,17 +584,35 @@ export function MealPlannerClient({
               )}
             >
               You have used <strong>{pausesUsed}</strong> of{" "}
-              <strong>{maxPauses}</strong> available credits.
+              <strong>{maxPauses}</strong> pause credits.
               {isLimitReached && " (Limit Reached)"}
             </p>
           </div>
         </div>
+        <div className="text-center sm:text-right">
+          <p
+            className={cn(
+              "text-xs font-medium",
+              isLimitReached ? "text-amber-700" : "text-blue-700",
+            )}
+          >
+            New End Date
+          </p>
+          <p
+            className={cn(
+              "text-lg font-extrabold",
+              isLimitReached ? "text-amber-900" : "text-blue-900",
+            )}
+          >
+            {endDate ? format(endDate, "MMMM do, yyyy") : "..."}
+          </p>
+        </div>
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-2 md:gap-4 p-3 bg-zinc-50 rounded-lg border text-sm w-fit">
-        <span className="text-muted-foreground font-medium mr-2 flex items-center gap-1 hidden sm:flex">
-          <RefreshCw className="h-4 w-4" /> Click date to cycle:
+      <div className="flex flex-wrap items-center gap-3 p-4 bg-slate-50/50 rounded-xl border border-slate-200 text-sm w-fit mx-auto md:mx-0">
+        <span className="text-slate-500 font-medium mr-2 flex items-center gap-1 hidden sm:flex">
+          <RefreshCw className="h-4 w-4" /> Cycle:
         </span>
         {cycleOptionsForLegend.map((option) => {
           if (option === "PAUSE") {
@@ -531,13 +621,14 @@ export function MealPlannerClient({
               <div
                 key="PAUSE"
                 className={cn(
-                  "flex items-center gap-1.5 px-2 py-1 rounded-md",
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full border",
                   PAUSE_STYLE.bg,
                   PAUSE_STYLE.color,
+                  "border-zinc-200",
                 )}
               >
-                <Icon className="h-4 w-4 drop-shadow-sm" />
-                <span className="font-bold text-xs md:text-sm">
+                <Icon className="h-5 w-5 drop-shadow-sm" />
+                <span className="font-semibold text-xs md:text-sm">
                   {PAUSE_STYLE.label}
                 </span>
               </div>
@@ -553,13 +644,14 @@ export function MealPlannerClient({
             <div
               key={option}
               className={cn(
-                "flex items-center gap-1.5 px-2 py-1 rounded-md",
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-full border",
                 style.bg,
                 style.color,
+                style.border.split(" ")[0],
               )}
             >
-              <Icon className="h-4 w-4 drop-shadow-sm" />
-              <span className="font-bold text-xs md:text-sm">{label}</span>
+              <Icon className="h-5 w-5 drop-shadow-sm" />
+              <span className="font-semibold text-xs md:text-sm">{label}</span>
             </div>
           );
         })}
@@ -573,9 +665,9 @@ export function MealPlannerClient({
           return (
             <div
               key={monthName}
-              className="bg-white rounded-2xl border p-4 md:p-8 shadow-sm"
+              className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 md:p-8"
             >
-              <h3 className="text-xl font-bold text-center mb-6 text-zinc-800">
+              <h3 className="text-lg font-semibold text-slate-900 tracking-tight text-center mb-6">
                 {monthName}
               </h3>
               <div
@@ -585,7 +677,7 @@ export function MealPlannerClient({
                 {WEEKDAYS.map((day) => (
                   <div
                     key={day}
-                    className="text-xs md:text-sm font-bold text-zinc-400 uppercase tracking-wider"
+                    className="text-xs font-medium text-slate-500 uppercase tracking-wider"
                   >
                     {day}
                   </div>
@@ -602,6 +694,8 @@ export function MealPlannerClient({
                 {daysInMonth.map((date, index) => {
                   const dateStr = format(date, "yyyy-MM-dd");
                   const isPaused = pausedDates.includes(dateStr);
+                  const today = startOfDay(new Date());
+                  const isInPast = isBefore(startOfDay(date), today);
                   const isLockedOut = isBefore(
                     startOfDay(date),
                     minEditableDate,
@@ -609,17 +703,52 @@ export function MealPlannerClient({
                   const isDisabled = isLockedOut;
 
                   const dayPrefCode = overrides[dateStr] || baseFoodType;
-                  const style = isPaused
-                    ? PAUSE_STYLE
-                    : PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
-                  const Icon = style.icon;
-                  const dayLabel = isPaused
-                    ? PAUSE_STYLE.label
-                    : getCategoryLabel(
+                  
+                  // For past dates, show actual status with special styling
+                  let displayLabel = "";
+                  let style = PREF_STYLES.VEG;
+                  let Icon = VegSvg;
+
+                  if (isInPast) {
+                    // Past date - show what actually happened with grayed styling
+                    if (isPaused) {
+                      displayLabel = "Paused";
+                      style = {
+                        icon: PAUSE_STYLE.icon,
+                        bg: "bg-slate-50",
+                        color: "text-slate-400",
+                        border: "border-slate-200"
+                      };
+                      Icon = style.icon;
+                    } else {
+                      // Show meal type but with grayed styling like the 10th date
+                      const originalStyle = PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
+                      displayLabel = getCategoryLabel(
                         dayPrefCode,
-                        mealCategories.find((c: any) => c.code === dayPrefCode)
-                          ?.name,
+                        mealCategories.find((c: any) => c.code === dayPrefCode)?.name,
                       );
+                      style = {
+                        icon: originalStyle.icon,
+                        bg: "bg-slate-50",
+                        color: "text-slate-400", 
+                        border: "border-slate-200"
+                      };
+                      Icon = style.icon;
+                    }
+                  } else {
+                    // Future date - normal behavior
+                    style = isPaused
+                      ? PAUSE_STYLE
+                      : PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
+                    Icon = style.icon;
+                    displayLabel = isPaused
+                      ? PAUSE_STYLE.label
+                      : getCategoryLabel(
+                          dayPrefCode,
+                          mealCategories.find((c: any) => c.code === dayPrefCode)
+                            ?.name,
+                        );
+                  }
 
                   return (
                     <button
@@ -627,9 +756,11 @@ export function MealPlannerClient({
                       disabled={isDisabled}
                       onClick={() => handleToggleMeal(dateStr)}
                       className={cn(
-                        "flex flex-col items-center justify-center aspect-square p-1 rounded-2xl border-2 transition-all relative select-none",
-                        isLockedOut
-                          ? "bg-zinc-100 border-zinc-200 opacity-60 cursor-not-allowed grayscale"
+                        "flex flex-col items-center justify-center aspect-square p-1 rounded-xl border transition-all duration-200 relative select-none",
+                        isInPast
+                          ? cn(style.bg, style.border, "cursor-default")
+                          : isLockedOut
+                          ? "bg-slate-100 border-slate-200 opacity-60 cursor-not-allowed grayscale"
                           : cn(
                               style.bg,
                               style.border,
@@ -645,7 +776,7 @@ export function MealPlannerClient({
                       <span
                         className={cn(
                           "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",
-                          isLockedOut ? "text-zinc-400" : style.color,
+                          isInPast ? style.color : isLockedOut ? "text-slate-400" : style.color,
                         )}
                       >
                         {format(date, "d")}
@@ -654,24 +785,29 @@ export function MealPlannerClient({
                       <div
                         className={cn(
                           "flex flex-col items-center justify-center gap-1",
-                          isLockedOut ? "text-zinc-400" : style.color,
+                          isInPast ? style.color : isLockedOut ? "text-slate-400" : style.color,
                         )}
                       >
-                        <Icon className="h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95" />
-                        <span className="text-[9px] md:text-[11px] font-bold leading-none hidden sm:block">
-                          {dayLabel}
+                        <Icon 
+                          className={cn(
+                            "h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95",
+                            isInPast ? "opacity-60" : ""
+                          )} 
+                        />
+                        <span className="text-[9px] md:text-[11px] font-bold leading-none text-center">
+                          {displayLabel}
                         </span>
                       </div>
 
-                      {!isLockedOut && (
+                      {!isLockedOut && !isInPast && (
                         <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                          <RefreshCw className="h-5 w-5 text-zinc-600 opacity-50" />
+                          <RefreshCw className="h-5 w-5 text-zinc-600 opacity-20" />
                         </div>
                       )}
 
-                      {isLockedOut && (
+                      {isLockedOut && !isInPast && (
                         <div className="absolute top-1 right-1">
-                          <AlertCircle className="h-3 w-3 text-zinc-400" />
+                          <AlertCircle className="h-3 w-3 text-slate-400" />
                         </div>
                       )}
                     </button>

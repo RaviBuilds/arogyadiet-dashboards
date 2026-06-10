@@ -9,6 +9,7 @@ import {
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { getCustomerSession } from "@/lib/customer/get-session";
 
 export async function LoginAction(prevState: any, formData: FormData) {
   const email = formData.get("email") as string;
@@ -103,4 +104,59 @@ export async function updatePasswordAction(prevState: any, formData: FormData) {
   }
 
   redirect("/dashboard");
+}
+
+// Password Change Action for authenticated users
+export async function changePasswordAction(prevState: any, formData: FormData) {
+  const currentPassword = formData.get("currentPassword") as string;
+  const newPassword = formData.get("newPassword") as string;
+  const confirmPassword = formData.get("confirmPassword") as string;
+
+  // Validate inputs
+  if (!currentPassword) {
+    return { error: "Current password is required" };
+  }
+  if (!newPassword) {
+    return { error: "New password is required" };
+  }
+  if (newPassword !== confirmPassword) {
+    return { error: "Passwords do not match" };
+  }
+  if (newPassword.length < 8) {
+    return { error: "Password must be at least 8 characters long" };
+  }
+  if (currentPassword === newPassword) {
+    return { error: "New password must be different from current password" };
+  }
+
+  try {
+    // Get current user session
+    const { user, error: sessionError } = await getCustomerSession();
+    
+    if (sessionError || !user) {
+      return { error: "Authentication required" };
+    }
+
+    // Verify current password by attempting to sign in
+    const supabase = await createClient();
+    const { error: verificationError } = await supabase.auth.signInWithPassword({
+      email: user.email!,
+      password: currentPassword,
+    });
+
+    if (verificationError) {
+      return { error: "Current password is incorrect" };
+    }
+
+    // Update password
+    await updateUserPassword(newPassword);
+
+    // Force logout to ensure security
+    await supabase.auth.signOut();
+
+    return { success: "Password updated successfully. Please login with your new password." };
+  } catch (error: any) {
+    console.error("Password change error:", error.message);
+    return { error: error.message || "Failed to update password. Please try again." };
+  }
 }

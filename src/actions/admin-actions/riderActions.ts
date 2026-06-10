@@ -51,51 +51,66 @@ export async function updateRiderDetails(
 }
 
 export async function deleteRider(riderId: string) {
-  
-const supabaseAdmin = createAdminClient();
+  const supabaseAdmin = createAdminClient();
   const { data: riderData, error: fetchError } = await supabaseAdmin
     .from("rider_profiles")
-    .select("user_id")
+    .select("user_id, is_active")
     .eq("id", riderId)
     .single();
   if (fetchError || !riderData)
     return { success: false, error: "Rider profile not found." };
+  if (riderData.is_active === false) {
+    return { success: false, error: "Rider account is already deactivated." };
+  }
+
   const userId = riderData.user_id;
 
+  const { data: userData, error: userFetchError } = await supabaseAdmin
+    .from("users")
+    .select("auth_user_id")
+    .eq("id", userId)
+    .single();
+  if (userFetchError || !userData) {
+    return { success: false, error: "Rider user account not found." };
+  }
+
   try {
-    await supabaseAdmin
+    const { error: areaError } = await supabaseAdmin
       .from("rider_service_areas")
       .update({ rider_id: null })
       .eq("rider_id", riderId);
+    if (areaError) throw areaError;
+
     const { error: profileError } = await supabaseAdmin
       .from("rider_profiles")
-      .delete()
+      .update({ is_active: false, is_online: false })
       .eq("id", riderId);
     if (profileError) throw profileError;
+
     const { error: userError } = await supabaseAdmin
       .from("users")
-      .delete()
+      .update({ is_active: false })
       .eq("id", userId);
     if (userError) throw userError;
-    const { error: authError } =
-      await supabaseAdmin.auth.admin.deleteUser(userId);
-    if (authError) throw authError;
+
+    if (userData.auth_user_id) {
+      const { error: authError } =
+        await supabaseAdmin.auth.admin.updateUserById(userData.auth_user_id, {
+          ban_duration: "876600h",
+        });
+      if (authError) throw authError;
+    }
 
     await logAdminAction("DELETE", "rider", riderId, {
       user_id: userId,
+      soft_deleted: true,
     });
     revalidatePath("/admin/riders");
     return { success: true };
   } catch (error: any) {
-    if (error.code === "23503")
-      return {
-        success: false,
-        error:
-          "Cannot delete this rider because they have historical delivery records.",
-      };
     return {
       success: false,
-      error: error.message || "Failed to fully delete the rider account.",
+      error: error.message || "Failed to deactivate the rider account.",
     };
   }
 }

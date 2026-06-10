@@ -36,7 +36,9 @@ export default async function ManageMealPlannerPage() {
   // 2. Fetch Active Subscription
   const { data: activeSub } = await supabase
     .from("subscriptions")
-    .select("id, effective_end_on, pause_credits_total, pause_credits_used")
+    .select(
+      "id, effective_end_on, starts_on, pause_credits_total, pause_credits_used, subscription_plans(duration_days)",
+    )
     .eq("customer_profile_id", profile.id)
     .eq("status", "ACTIVE")
     .single();
@@ -76,14 +78,15 @@ export default async function ManageMealPlannerPage() {
     .select("id, code, name")
     .order("code", { ascending: true });
 
-  // 4. Fetch the Daily Roster (From today until end date)
+  // 4. Fetch the Daily Roster (From subscription start until end date)
+  const startDate = activeSub.starts_on || format(new Date(), "yyyy-MM-dd");
   const todayStr = format(new Date(), "yyyy-MM-dd");
 
   const { data: dailyPrefs } = await supabase
     .from("subscription_daily_preferences")
     .select("preference_date, is_paused, meal_categories(code)")
     .eq("subscription_id", activeSub.id)
-    .gte("preference_date", todayStr)
+    .gte("preference_date", startDate)
     .lte("preference_date", activeSub.effective_end_on)
     .order("preference_date", { ascending: true });
 
@@ -117,9 +120,14 @@ export default async function ManageMealPlannerPage() {
   });
 
   const holidaysByDate = await fetchHolidaysInRange(
-    todayStr,
+    startDate,
     activeSub.effective_end_on,
   );
+
+  const planData = Array.isArray(activeSub.subscription_plans)
+    ? activeSub.subscription_plans[0]
+    : activeSub.subscription_plans;
+  const planDuration = planData?.duration_days ?? scheduleDays.length;
 
   return (
     <MealPlannerClient
@@ -132,6 +140,8 @@ export default async function ManageMealPlannerPage() {
       maxPauses={activeSub.pause_credits_total}
       totalPausesUsed={totalPausesUsed ?? 0}
       holidaysByDate={holidaysByDate}
+      planDuration={planDuration}
+      subscriptionStartDate={startDate}
     />
   );
 }

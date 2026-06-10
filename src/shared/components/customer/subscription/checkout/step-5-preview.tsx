@@ -16,6 +16,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
+import { Badge } from "@/shared/components/ui/badge";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Input } from "@/shared/components/ui/input";
 import {
@@ -24,6 +25,7 @@ import {
   AlertTitle,
 } from "@/shared/components/ui/alert";
 import { createClient } from "@/lib/supabase/client";
+import { CONTENT_STAGES } from "./content-stages";
 
 import {
   createRazorpayOrderAction,
@@ -253,40 +255,40 @@ export function OrderPreview({ data, plans, onBack }: any) {
       )}
 
       <section>
-        <h2 className="text-lg sm:text-xl font-bold mb-1 sm:mb-2 flex items-center gap-2">
-          <span className="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0">
-            5
+        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
+            {CONTENT_STAGES.REVIEW}
           </span>
           Review Your Order
         </h2>
-        <p className="text-sm sm:text-base text-muted-foreground ml-8">
+        <p className="text-sm text-slate-500 ml-10 mt-1">
           Please review your subscription details before secure payment.
         </p>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
         <div className="lg:col-span-7 space-y-6">
-          <Card className="border sm:border-2 overflow-hidden shadow-sm">
-            <div className="bg-zinc-50 border-b px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 sm:h-5 sm:w-5 text-zinc-700" />
-              <h3 className="font-bold text-base sm:text-lg text-zinc-800">
+          <Card className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="border-b border-slate-100 bg-slate-50/50 px-6 py-4 flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-slate-700" />
+              <h3 className="font-semibold text-slate-900">
                 Subscription Summary
               </h3>
             </div>
 
             <CardContent className="p-0">
-              <div className="p-4 sm:p-6 flex items-start gap-3 sm:gap-4">
-                <div className="bg-primary/10 p-2 sm:p-3 rounded-full text-primary shrink-0 mt-0.5">
-                  <Calendar className="h-4 w-4 sm:h-5 sm:w-5" />
+              <div className="p-6 flex items-start gap-4">
+                <div className="rounded-full bg-primary/10 p-3 text-primary shrink-0 mt-0.5">
+                  <Calendar className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h4 className="font-bold text-base sm:text-lg text-zinc-900 truncate">
+                  <h4 className="font-semibold text-slate-900 truncate">
                     {planName}
                   </h4>
-                  <div className="flex flex-col mt-1 sm:mt-2 text-xs sm:text-sm text-zinc-600 space-y-1">
+                  <div className="flex flex-col mt-2 text-sm text-slate-500 space-y-1">
                     <p>
                       Starts:{" "}
-                      <strong className="text-zinc-900">
+                      <strong className="font-medium text-slate-900">
                         {data.startDate
                           ? format(new Date(data.startDate), "MMM do, yyyy")
                           : "TBD"}
@@ -294,7 +296,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
                     </p>
                     <p>
                       Ends:{" "}
-                      <strong className="text-zinc-900">
+                      <strong className="font-medium text-slate-900">
                         {endDate ? format(endDate, "MMM do, yyyy") : "TBD"}
                       </strong>
                     </p>
@@ -302,40 +304,47 @@ export function OrderPreview({ data, plans, onBack }: any) {
                 </div>
               </div>
 
-              <hr className="border-zinc-100" />
+              <hr className="border-slate-100" />
 
-              <div className="p-4 sm:p-6 flex items-start gap-3 sm:gap-4">
-                <div className="bg-amber-100 p-2 sm:p-3 rounded-full text-amber-600 shrink-0 mt-0.5">
-                  <Utensils className="h-4 w-4 sm:h-5 sm:w-5" />
+              <div className="p-6 flex items-start gap-4">
+                <div className="rounded-full bg-amber-100 p-3 text-amber-600 shrink-0 mt-0.5">
+                  <Utensils className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h4 className="font-bold text-base sm:text-lg text-zinc-900">
+                  <h4 className="font-semibold text-slate-900">
                     Meal Schedule
                   </h4>
-                  <p className="text-xs sm:text-sm text-zinc-600 mt-1">
+                  <p className="text-sm text-slate-500 mt-1">
                     Base Plan:{" "}
-                    <strong className="text-zinc-900">{data.foodType}</strong>
+                    <strong className="font-medium text-slate-900">
+                      {data.foodType}
+                    </strong>
                   </p>
 
-                  <div className="mt-3 bg-zinc-50 border rounded-lg p-3 w-full">
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 w-full">
                     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-2">
-                      <span className="text-xs sm:text-sm font-semibold text-zinc-700">
+                      <span className="text-sm font-semibold text-slate-700">
                         Pause Credits Used
                       </span>
-                      <span className="text-xs font-bold bg-white border px-2 py-1 rounded w-fit">
+                      <Badge
+                        variant="outline"
+                        className="w-fit border-slate-200 bg-white text-xs font-semibold"
+                      >
                         {pausesUsed} of {maxPauses}
-                      </span>
+                      </Badge>
                     </div>
                     {pausesUsed > 0 ? (
-                      <div className="text-[11px] sm:text-xs text-zinc-600 leading-relaxed break-words">
-                        <span className="font-medium">Paused Dates:</span>{" "}
+                      <div className="text-xs text-slate-500 leading-relaxed break-words">
+                        <span className="font-medium text-slate-700">
+                          Paused Dates:
+                        </span>{" "}
                         {pausedDatesArray
                           .sort()
                           .map((d: string) => format(new Date(d), "MMM do"))
                           .join(", ")}
                       </div>
                     ) : (
-                      <p className="text-[11px] sm:text-xs text-zinc-500">
+                      <p className="text-xs text-slate-500">
                         No dates paused.
                       </p>
                     )}
@@ -343,22 +352,22 @@ export function OrderPreview({ data, plans, onBack }: any) {
                 </div>
               </div>
 
-              <hr className="border-zinc-100" />
+              <hr className="border-slate-100" />
 
-              <div className="p-4 sm:p-6 flex items-start gap-3 sm:gap-4">
-                <div className="bg-green-100 p-2 sm:p-3 rounded-full text-green-600 shrink-0 mt-0.5">
-                  <MapPin className="h-4 w-4 sm:h-5 sm:w-5" />
+              <div className="p-6 flex items-start gap-4">
+                <div className="rounded-full bg-green-100 p-3 text-green-600 shrink-0 mt-0.5">
+                  <MapPin className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h4 className="font-bold text-base sm:text-lg text-zinc-900">
+                  <h4 className="font-semibold text-slate-900">
                     Delivery Address
                   </h4>
                   {isLoadingAddress ? (
-                    <div className="mt-2 h-10 bg-zinc-100 animate-pulse rounded-md w-3/4"></div>
+                    <div className="mt-2 h-10 bg-slate-100 animate-pulse rounded-md w-3/4"></div>
                   ) : deliveryAddress ? (
-                    <div className="mt-2 text-xs sm:text-sm text-zinc-600 leading-relaxed break-words">
+                    <div className="mt-2 text-sm text-slate-500 leading-relaxed break-words">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-bold text-zinc-900 truncate">
+                        <span className="font-semibold text-slate-900 truncate">
                           {deliveryAddress.tag}
                         </span>
                       </div>
@@ -367,7 +376,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
                       </p>
                     </div>
                   ) : (
-                    <p className="text-xs sm:text-sm text-red-500 mt-2">
+                    <p className="text-sm text-red-500 mt-2">
                       Error loading address details.
                     </p>
                   )}
@@ -378,17 +387,15 @@ export function OrderPreview({ data, plans, onBack }: any) {
         </div>
 
         <div className="lg:col-span-5 space-y-6">
-          <Card className="border sm:border-2 overflow-hidden shadow-sm">
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex items-center gap-2 mb-3 sm:mb-4">
-                <Tag className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
-                <h3 className="font-bold text-base sm:text-lg text-zinc-800">
-                  Apply Coupon
-                </h3>
+          <Card className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Tag className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold text-slate-900">Apply Coupon</h3>
               </div>
 
               {!appliedCoupon ? (
-                <div className="space-y-2 sm:space-y-3">
+                <div className="space-y-3">
                   <div className="flex gap-2">
                     <Input
                       placeholder="Code (e.g. DEVTEST1)"
@@ -396,7 +403,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
                       onChange={(e) =>
                         setCouponInput(e.target.value.toUpperCase())
                       }
-                      className="uppercase bg-zinc-50 text-sm"
+                      className="uppercase bg-slate-50 border-slate-200 text-sm"
                       disabled={isLoadingProfile}
                     />
                     <Button
@@ -405,6 +412,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
                       disabled={
                         isApplyingCoupon || !couponInput || isLoadingProfile
                       }
+                      className="transition-all duration-200"
                     >
                       {isApplyingCoupon ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -414,19 +422,21 @@ export function OrderPreview({ data, plans, onBack }: any) {
                     </Button>
                   </div>
                   {couponError && (
-                    <p className="text-[11px] sm:text-xs text-red-500 font-medium">
+                    <p className="text-xs text-red-500 font-medium">
                       {couponError}
                     </p>
                   )}
                 </div>
               ) : (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex justify-between items-center">
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 flex justify-between items-center">
                   <div className="min-w-0">
-                    <p className="text-xs sm:text-sm font-bold text-green-800 flex items-center gap-1.5 truncate">
-                      <ShieldCheck className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />{" "}
-                      Applied!
-                    </p>
-                    <p className="text-[10px] sm:text-xs text-green-700 mt-0.5 truncate">
+                    <Badge
+                      variant="outline"
+                      className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold"
+                    >
+                      <ShieldCheck className="h-3 w-3" /> Applied!
+                    </Badge>
+                    <p className="text-xs text-emerald-700 mt-2 truncate">
                       Code: <strong>{appliedCoupon.code}</strong>
                     </p>
                   </div>
@@ -434,41 +444,39 @@ export function OrderPreview({ data, plans, onBack }: any) {
                     variant="ghost"
                     size="icon"
                     onClick={handleRemoveCoupon}
-                    className="text-green-800 hover:bg-green-100 shrink-0 h-8 w-8"
+                    className="text-emerald-800 hover:bg-emerald-100 shrink-0 h-8 w-8 transition-all duration-200"
                   >
-                    <X className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <X className="h-4 w-4" />
                   </Button>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <Card className="border sm:border-2 overflow-hidden shadow-sm relative">
-            <div className="bg-zinc-50 border-b px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-2">
-              <Receipt className="h-4 w-4 sm:h-5 sm:w-5 text-zinc-700" />
-              <h3 className="font-bold text-base sm:text-lg text-zinc-800">
-                Price Details
-              </h3>
+          <Card className="border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
+            <div className="border-b border-slate-100 bg-slate-50/50 px-6 py-4 flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-slate-700" />
+              <h3 className="font-semibold text-slate-900">Price Details</h3>
             </div>
 
-            <CardContent className="p-4 sm:p-6 space-y-3 sm:space-y-4">
-              <div className="flex justify-between text-xs sm:text-sm text-zinc-600">
+            <CardContent className="p-6 space-y-4">
+              <div className="flex justify-between text-sm text-slate-500">
                 <span>Base Price</span>
-                <span className="font-medium text-zinc-900">
+                <span className="font-medium text-slate-900">
                   ₹{originalBasePrice.toLocaleString("en-IN")}
                 </span>
               </div>
 
               {appliedCoupon && (
-                <div className="flex justify-between text-xs sm:text-sm font-bold text-green-600">
+                <div className="flex justify-between text-sm font-semibold text-emerald-600">
                   <span>Discount</span>
                   <span>- ₹{discountAmount.toLocaleString("en-IN")}</span>
                 </div>
               )}
 
-              <div className="flex justify-between text-xs sm:text-sm text-zinc-600">
+              <div className="flex justify-between text-sm text-slate-500">
                 <span>GST ({gstRate * 100}%)</span>
-                <span className="font-medium text-zinc-900">
+                <span className="font-medium text-slate-900">
                   ₹
                   {gst.toLocaleString("en-IN", {
                     minimumFractionDigits: 2,
@@ -477,18 +485,18 @@ export function OrderPreview({ data, plans, onBack }: any) {
                 </span>
               </div>
 
-              <div className="flex justify-between text-xs sm:text-sm text-green-600 font-medium">
+              <div className="flex justify-between text-sm text-emerald-600 font-medium">
                 <span>Delivery</span>
                 <span>Free</span>
               </div>
 
-              <hr className="border-zinc-200 border-dashed" />
+              <hr className="border-slate-200 border-dashed" />
 
               <div className="flex justify-between items-center">
-                <span className="font-bold text-base sm:text-lg text-zinc-900">
+                <span className="text-lg font-semibold text-slate-900">
                   Total
                 </span>
-                <span className="font-black text-xl sm:text-2xl text-primary">
+                <span className="text-2xl font-semibold text-primary">
                   ₹
                   {totalAmount.toLocaleString("en-IN", {
                     minimumFractionDigits: 2,
@@ -497,7 +505,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
                 </span>
               </div>
 
-              <div className="pt-2 sm:pt-4 space-y-4">
+              <div className="pt-4 space-y-4">
                 {/* MODERN ERROR OVERLAY */}
                 {paymentError && (
                   <Alert
@@ -505,7 +513,9 @@ export function OrderPreview({ data, plans, onBack }: any) {
                     className="bg-red-50 text-red-900 border-red-200 animate-in fade-in slide-in-from-bottom-2"
                   >
                     <AlertCircle className="h-4 w-4 stroke-red-600" />
-                    <AlertTitle className="font-bold">Payment Issue</AlertTitle>
+                    <AlertTitle className="font-semibold">
+                      Payment Issue
+                    </AlertTitle>
                     <AlertDescription className="text-xs mt-1">
                       {paymentError}
                     </AlertDescription>
@@ -518,19 +528,19 @@ export function OrderPreview({ data, plans, onBack }: any) {
                     isProcessing || isLoadingAddress || isLoadingProfile
                   }
                   onClick={handlePayment}
-                  className="w-full relative text-base sm:text-lg font-bold h-12 sm:h-14 bg-primary hover:bg-primary/90 text-white transition-all active:scale-95 disabled:opacity-80"
+                  className="w-full h-12 sm:h-14 text-base font-semibold transition-all duration-200 active:scale-95 disabled:opacity-80"
                 >
                   {isProcessing ? (
                     <span className="flex items-center">
-                      <Loader2 className="mr-2 h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                       Verifying Payment...
                     </span>
                   ) : (
                     "Proceed to Pay"
                   )}
                 </Button>
-                <p className="text-center text-[10px] sm:text-[11px] text-muted-foreground mt-3 sm:mt-4 flex justify-center items-center gap-1 sm:gap-1.5 break-words">
-                  <ShieldCheck className="h-3 w-3 sm:h-4 sm:w-4 text-green-600 shrink-0" />
+                <p className="text-center text-xs text-slate-500 flex justify-center items-center gap-1.5 break-words">
+                  <ShieldCheck className="h-4 w-4 text-green-600 shrink-0" />
                   100% Secure Checkout via Razorpay
                 </p>
               </div>
@@ -539,12 +549,12 @@ export function OrderPreview({ data, plans, onBack }: any) {
         </div>
       </div>
 
-      <div className="pt-4 sm:pt-8 border-t flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8 pb-6">
+      <div className="pt-8 border-t border-slate-100 flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8 pb-6">
         <Button
           variant="ghost"
           onClick={onBack}
           disabled={isProcessing}
-          className="w-full sm:w-auto gap-2 hover:bg-zinc-100 text-sm"
+          className="w-full sm:w-auto gap-2 hover:bg-slate-50 text-sm transition-all duration-200"
         >
           <ChevronLeft className="h-4 w-4 shrink-0" /> Back to Meal Planner
         </Button>

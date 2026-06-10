@@ -39,7 +39,6 @@ type ActiveSubscription = {
   subscription_code: string;
   effective_end_on: string | null;
   total_days: number | null;
-  consumed_days: number | null;
 } | null;
 
 type BillingClientProps = {
@@ -94,13 +93,10 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
             </div>
             <div className="bg-white/10 p-4 rounded-xl border border-white/10 backdrop-blur-sm">
               <p className="text-zinc-400 text-xs uppercase tracking-wider mb-1">
-                Remaining Days
+                Total Days
               </p>
               <p className="text-3xl font-black text-white">
-                {(activeSub.total_days || 0) - (activeSub.consumed_days || 0)}{" "}
-                <span className="text-sm font-normal text-zinc-400">
-                  / {activeSub.total_days || 0}
-                </span>
+                {activeSub.total_days ?? 0}
               </p>
             </div>
           </CardContent>

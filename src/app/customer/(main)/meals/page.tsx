@@ -13,14 +13,9 @@ import {
   PauseCircle,
   Clock,
 } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/shared/components/ui/card";
+import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Badge } from "@/shared/components/ui/badge";
 import { ShopOrdersTracker } from "@/shared/components/customer/shop-orders-tracker";
 
 export const revalidate = 0;
@@ -223,20 +218,24 @@ export default async function MyMealsPage({
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 sm:gap-6">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900">My Meals</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 tracking-tight">
+            My Meals
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
             Track today's delivery and view your entire subscription history.
           </p>
         </div>
 
-        <ShopOrdersTracker shopOrders={shopOrders || []} />
+        <div className="shrink-0 self-start sm:self-auto">
+          <ShopOrdersTracker shopOrders={shopOrders || []} />
+        </div>
       </div>
 
       {!activeSub ? (
-        <Card className="border-dashed border-2 bg-zinc-50/50 py-10 text-center">
-          <p className="text-zinc-500 font-medium">
+        <Card className="border border-dashed border-slate-200 bg-white shadow-sm py-12 text-center">
+          <p className="text-sm text-slate-500 font-medium">
             You don't have an active subscription right now.
           </p>
         </Card>
@@ -245,42 +244,42 @@ export default async function MyMealsPage({
           {/* ========================================== */}
           {/* SECTION 1: TODAY'S MEAL                  */}
           {/* ========================================== */}
-          <section className="space-y-4">
-            <h2 className="text-xl font-bold text-zinc-900 flex items-center gap-2">
+          <section className="space-y-6">
+            <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-2">
               <Package className="h-5 w-5 text-primary" /> Today's Meal
             </h2>
 
             {todaysPreference?.is_paused ? (
-              <Card className="border-none shadow-sm bg-zinc-50">
-                <CardContent className="p-6 flex items-center gap-4 text-zinc-500">
-                  <PauseCircle className="h-8 w-8" />
+              <Card className="border border-dashed border-slate-200 bg-slate-50/80 shadow-sm">
+                <CardContent className="p-6 flex items-center gap-4">
+                  <PauseCircle className="h-8 w-8 text-slate-400 shrink-0" />
                   <div>
-                    <p className="font-bold text-lg text-zinc-700">
+                    <p className="font-semibold text-lg text-slate-700">
                       Meal Paused
                     </p>
-                    <p className="text-sm">
+                    <p className="text-sm text-slate-500">
                       You have paused your delivery for today.
                     </p>
                   </div>
                 </CardContent>
               </Card>
             ) : todaysOrder?.status === "DELIVERED" ? (
-              <Card className="border-none shadow-md bg-green-50 border border-green-200">
-                <CardContent className="p-8 text-center flex flex-col items-center">
-                  <div className="bg-green-100 p-4 rounded-full mb-4">
-                    <CheckCircle2 className="h-10 w-10 text-green-600" />
+              <Card className="border border-emerald-200 bg-emerald-50/50 shadow-sm">
+                <CardContent className="p-6 text-center flex flex-col items-center">
+                  <div className="bg-emerald-100 p-4 rounded-full mb-4">
+                    <CheckCircle2 className="h-10 w-10 text-emerald-600" />
                   </div>
-                  <h3 className="text-2xl font-black text-green-900">
+                  <h3 className="text-2xl font-semibold text-emerald-900 tracking-tight">
                     Today's meal delivered!
                   </h3>
-                  <p className="text-green-700 mt-2 font-medium">
+                  <p className="text-sm text-emerald-700 mt-2">
                     Eat nutrition-rich food and be healthy. Enjoy your meal!
                   </p>
                   {(() => {
                     const lines = buildAddonLinesFromDeliveryOrder(todaysOrder);
                     if (!lines.length) return null;
                     return (
-                      <p className="text-muted-foreground text-sm mt-3">
+                      <p className="text-sm text-slate-500 mt-3">
                         📦 Includes: {formatAddonLines(lines)}
                       </p>
                     );
@@ -289,22 +288,22 @@ export default async function MyMealsPage({
               </Card>
             ) : todaysOrder?.status === "REACHING_TO_LOCATION" ||
               todaysOrder?.status === "OUT_FOR_DELIVERY" ? (
-              <Card className="border-none shadow-md bg-white border-2 border-blue-500 overflow-hidden relative">
+              <Card className="border border-blue-200 bg-white shadow-sm overflow-hidden relative">
                 <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 animate-pulse" />
-                <CardContent className="p-6 md:p-8 flex flex-col md:flex-row justify-between items-center gap-6">
+                <CardContent className="p-6 flex flex-col md:flex-row justify-between items-center gap-6">
                   <div className="flex items-center gap-4">
-                    <div className="bg-blue-100 p-4 rounded-full">
+                    <div className="bg-blue-100 p-4 rounded-full shrink-0">
                       <MapPin className="h-8 w-8 text-blue-600" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black text-zinc-900">
+                      <h3 className="text-xl font-semibold text-slate-900 tracking-tight">
                         {todaysOrder?.status === "REACHING_TO_LOCATION"
                           ? "Rider is arriving"
                           : "Delivery in progress"}
                       </h3>
 
                       {todaysOrder?.status === "REACHING_TO_LOCATION" ? (
-                        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
                           <p className="text-sm font-semibold text-amber-900">
                             Get ready to collect your package. Rider is arriving
                             at your location.
@@ -313,7 +312,7 @@ export default async function MyMealsPage({
                       ) : null}
 
                       {todaysOrder?.status === "OUT_FOR_DELIVERY" ? (
-                        <p className="text-muted-foreground mt-1">
+                        <p className="text-sm text-slate-500 mt-1">
                           Rider is currently out for delivery.
                         </p>
                       ) : null}
@@ -323,7 +322,7 @@ export default async function MyMealsPage({
                           buildAddonLinesFromDeliveryOrder(todaysOrder);
                         if (!lines.length) return null;
                         return (
-                          <p className="text-muted-foreground text-xs mt-2">
+                          <p className="text-xs text-slate-500 mt-2">
                             📦 Includes: {formatAddonLines(lines)}
                           </p>
                         );
@@ -333,7 +332,7 @@ export default async function MyMealsPage({
                   <Button
                     asChild
                     size="lg"
-                    className="bg-blue-600 hover:bg-blue-700 text-white w-full md:w-auto h-14 rounded-xl text-lg shadow-lg shadow-blue-200"
+                    className="w-full md:w-auto transition-all duration-200"
                   >
                     {/* Links to the Tracking Component we will build next! */}
                     <Link href={`/tracking/${todaysOrder.id}`}>
@@ -344,17 +343,17 @@ export default async function MyMealsPage({
                 </CardContent>
               </Card>
             ) : todaysOrder ? (
-              <Card className="border-none shadow-sm bg-white">
-                <CardContent className="p-6 flex items-center justify-between">
+              <Card className="border border-slate-200 bg-white shadow-sm">
+                <CardContent className="p-6 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
-                    <div className="bg-orange-50 p-3 rounded-full">
+                    <div className="bg-orange-50 p-3 rounded-full shrink-0">
                       <Utensils className="h-6 w-6 text-orange-600" />
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-zinc-400 uppercase tracking-wider">
+                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
                         Current Status
                       </p>
-                      <p className="text-lg font-black text-zinc-900 capitalize">
+                      <p className="text-lg font-semibold text-slate-900 capitalize">
                         {formatStatus(todaysOrder.status)}
                       </p>
                       {(() => {
@@ -362,21 +361,21 @@ export default async function MyMealsPage({
                           buildAddonLinesFromDeliveryOrder(todaysOrder);
                         if (!lines.length) return null;
                         return (
-                          <p className="text-muted-foreground text-xs mt-1">
+                          <p className="text-xs text-slate-500 mt-1">
                             📦 Includes: {formatAddonLines(lines)}
                           </p>
                         );
                       })()}
                     </div>
                   </div>
-                  <div className="text-sm text-zinc-500 flex items-center gap-2">
+                  <div className="text-sm text-slate-500 flex items-center gap-2 shrink-0">
                     <Clock className="h-4 w-4" /> Awaiting Dispatch
                   </div>
                 </CardContent>
               </Card>
             ) : (
-              <Card className="border-dashed border-2 bg-zinc-50/50 py-6 text-center">
-                <p className="text-zinc-500 font-medium">
+              <Card className="border border-dashed border-slate-200 bg-white shadow-sm py-12 text-center">
+                <p className="text-sm text-slate-500 font-medium">
                   No delivery scheduled for today.
                 </p>
               </Card>
@@ -386,20 +385,20 @@ export default async function MyMealsPage({
           {/* ========================================== */}
           {/* SECTION 2: DAY-WISE HISTORY (PAGINATED)  */}
           {/* ========================================== */}
-          <section className="space-y-4 pt-4">
-            <h2 className="text-xl font-bold text-zinc-900 flex items-center gap-2">
+          <section className="space-y-6 pt-2">
+            <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-2">
               <Utensils className="h-5 w-5 text-primary" /> Subscription History
             </h2>
 
-            <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-              <div className="hidden md:grid grid-cols-4 bg-zinc-50 border-b p-4 text-xs font-bold text-zinc-500 uppercase tracking-wider">
+            <Card className="border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div className="hidden md:grid grid-cols-4 bg-slate-50/50 border-b border-slate-100 px-6 py-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
                 <div>Date</div>
                 <div>Meal/Action</div>
                 <div>Status</div>
                 <div className="text-right">Day #</div>
               </div>
 
-              <div className="divide-y divide-zinc-100">
+              <div className="divide-y divide-slate-100">
                 {historyData.map((row, idx) => {
                   const absoluteDayNumber =
                     (currentPage - 1) * pageSize + idx + 1;
@@ -408,12 +407,12 @@ export default async function MyMealsPage({
                   return (
                     <div
                       key={idx}
-                      className="p-4 grid grid-cols-1 md:grid-cols-4 items-center gap-2 md:gap-0 hover:bg-zinc-50 transition-colors"
+                      className="px-4 md:px-6 py-4 md:py-5 grid grid-cols-1 md:grid-cols-4 items-center gap-2 md:gap-0 hover:bg-slate-50 transition-colors duration-200"
                     >
                       {/* Date */}
-                      <div className="font-medium text-zinc-900">
+                      <div className="font-medium text-slate-900">
                         {format(dateObj, "MMM do, yyyy")}
-                        <span className="md:hidden text-zinc-400 text-xs ml-2">
+                        <span className="md:hidden text-slate-400 text-xs ml-2">
                           (Day {absoluteDayNumber})
                         </span>
                       </div>
@@ -421,17 +420,23 @@ export default async function MyMealsPage({
                       {/* Meal Type / Paused */}
                       <div>
                         {row.is_paused ? (
-                          <span className="inline-flex items-center gap-1.5 bg-zinc-100 text-zinc-600 px-2.5 py-1 rounded-md text-xs font-bold uppercase">
+                          <Badge
+                            variant="outline"
+                            className="rounded-full bg-slate-100 text-slate-600 border-slate-200 uppercase"
+                          >
                             <PauseCircle className="h-3 w-3" /> Paused
-                          </span>
+                          </Badge>
                         ) : (
                           <div>
-                            <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2.5 py-1 rounded-md text-xs font-bold uppercase">
+                            <Badge
+                              variant="outline"
+                              className="rounded-full bg-orange-50 text-orange-700 border-orange-200 uppercase"
+                            >
                               {row.meal_name || "Meal"}
-                            </span>
+                            </Badge>
                             {Array.isArray(row.addons) &&
                               row.addons.length > 0 && (
-                                <div className="text-muted-foreground text-xs mt-1 space-y-0.5">
+                                <div className="text-xs text-slate-500 mt-1 space-y-0.5">
                                   {row.addons.map(
                                     (a: AddonProductLine, i: number) => (
                                       <div key={`${a.name}-${i}`}>
@@ -448,27 +453,36 @@ export default async function MyMealsPage({
                       {/* Execution Status */}
                       <div>
                         {row.is_paused ? (
-                          <span className="text-zinc-400 text-sm italic">
+                          <span className="text-slate-400 text-sm italic">
                             -
                           </span>
                         ) : row.status === "DELIVERED" ? (
-                          <span className="text-green-600 font-bold text-sm flex items-center gap-1">
-                            <CheckCircle2 className="h-4 w-4" /> Delivered
-                          </span>
+                          <Badge
+                            variant="outline"
+                            className="rounded-full bg-emerald-50 text-emerald-700 border-emerald-200"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Delivered
+                          </Badge>
                         ) : row.status === "PENDING" &&
                           new Date(row.date) > new Date() ? (
-                          <span className="text-zinc-400 font-medium text-sm">
+                          <Badge
+                            variant="outline"
+                            className="rounded-full bg-slate-50 text-slate-500 border-slate-200"
+                          >
                             Upcoming
-                          </span>
+                          </Badge>
                         ) : (
-                          <span className="text-blue-600 font-medium text-sm capitalize">
+                          <Badge
+                            variant="outline"
+                            className="rounded-full bg-blue-50 text-blue-700 border-blue-200 capitalize"
+                          >
                             {formatStatus(row.status)}
-                          </span>
+                          </Badge>
                         )}
                       </div>
 
                       {/* Day Number (Desktop) */}
-                      <div className="hidden md:block text-right font-mono text-sm text-zinc-400">
+                      <div className="hidden md:block text-right font-mono text-sm text-slate-400">
                         {absoluteDayNumber}
                       </div>
                     </div>
@@ -476,7 +490,7 @@ export default async function MyMealsPage({
                 })}
 
                 {historyData.length === 0 && (
-                  <div className="p-8 text-center text-zinc-500">
+                  <div className="p-10 text-center text-sm text-slate-500">
                     No history found.
                   </div>
                 )}
@@ -484,11 +498,12 @@ export default async function MyMealsPage({
 
               {/* PAGINATION CONTROLS */}
               {totalPages > 1 && (
-                <div className="p-4 border-t bg-zinc-50 flex items-center justify-between">
+                <div className="border-t border-slate-100 bg-slate-50/50 px-6 py-4 flex items-center justify-between">
                   <Button
                     variant="outline"
                     disabled={currentPage <= 1}
                     asChild={currentPage > 1}
+                    className="transition-all duration-200"
                   >
                     {currentPage > 1 ? (
                       <Link href={`/meals?page=${currentPage - 1}`}>
@@ -501,7 +516,7 @@ export default async function MyMealsPage({
                     )}
                   </Button>
 
-                  <span className="text-sm font-medium text-zinc-500">
+                  <span className="text-sm font-medium text-slate-500 transition-all duration-200">
                     Page {currentPage} of {totalPages}
                   </span>
 
@@ -509,6 +524,7 @@ export default async function MyMealsPage({
                     variant="outline"
                     disabled={currentPage >= totalPages}
                     asChild={currentPage < totalPages}
+                    className="transition-all duration-200"
                   >
                     {currentPage < totalPages ? (
                       <Link href={`/meals?page=${currentPage + 1}`}>
@@ -522,7 +538,7 @@ export default async function MyMealsPage({
                   </Button>
                 </div>
               )}
-            </div>
+            </Card>
           </section>
         </>
       )}
