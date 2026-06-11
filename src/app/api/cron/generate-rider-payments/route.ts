@@ -30,9 +30,11 @@ export async function GET(request: Request) {
         ? now.getFullYear() - 1
         : now.getFullYear();
 
-    const periodStart = `${targetYear}-${String(targetMonth).padStart(2, "0")}-01`;
-    const lastDay = new Date(targetYear, targetMonth, 0).getDate();
-    const periodEnd = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    // 27th payment cycle: period runs from 27th of previous month to 26th of target month
+    const prevMonth = targetMonth === 1 ? 12 : targetMonth - 1;
+    const prevYear = targetMonth === 1 ? targetYear - 1 : targetYear;
+    const periodStart = `${prevYear}-${String(prevMonth).padStart(2, "0")}-27`;
+    const periodEnd = `${targetYear}-${String(targetMonth).padStart(2, "0")}-26`;
 
     // Get all active riders
     const { data: riders, error: ridersErr } = await supabase

@@ -10,7 +10,16 @@ import {
   SheetTitle,
 } from "@/shared/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Menu } from "lucide-react";
+import {
+  Menu,
+  LayoutDashboard,
+  TrendingUp,
+  Truck,
+  ChefHat,
+  ShoppingBag,
+  FileBarChart,
+  Settings,
+} from "lucide-react";
 import Image from "next/image";
 import {
   DropdownMenu,
@@ -37,6 +46,16 @@ interface MasterNavbarProps {
   email: string;
 }
 
+const NAV_ITEMS = [
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/growth", label: "Growth & Subs", icon: TrendingUp },
+  { href: "/logistics", label: "Logistics", icon: Truck },
+  { href: "/kitchen-ops", label: "Kitchen Ops", icon: ChefHat },
+  { href: "/commerce", label: "Commerce & Inventory", icon: ShoppingBag },
+  { href: "/reports", label: "Report Engine", icon: FileBarChart },
+  { href: "/system", label: "System", icon: Settings },
+];
+
 export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) {
   const supabase = createClient();
   const pathname = usePathname();
@@ -49,49 +68,45 @@ export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) 
   const isActive = (path: string) => pathname.startsWith(path);
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b bg-background shadow-sm">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-40 w-full border-b border-slate-200 bg-white/95 backdrop-blur-sm shadow-sm">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Left: Brand Logo */}
         <Link
           href="/dashboard"
-          className="flex items-center gap-2 text-lg font-semibold md:text-base"
+          className="flex items-center gap-2.5"
         >
           <Image
             src="/logo.png"
             alt="ArogyaDiet"
-            width={100}
-            height={28}
+            width={90}
+            height={24}
             className="h-auto w-auto"
           />
-          <span className="hidden sm:inline-block">Master</span>
+          <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-widest text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
+            BI Command Center
+          </span>
         </Link>
 
         {/* Center: Desktop Navigation */}
-        <nav className="hidden items-center gap-6 text-sm md:flex lg:gap-8">
-          <Link
-            href="/dashboard"
-            className={`transition-colors hover:text-foreground ${isActive("/dashboard") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
-          >
-            Dashboard
-          </Link>
-          <Link
-            href="/user-management"
-            className={`transition-colors hover:text-foreground ${isActive("/user-management") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
-          >
-            User Management
-          </Link>
-          <Link
-            href="/finance"
-            className={`transition-colors hover:text-foreground ${isActive("/finance") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
-          >
-            Finance
-          </Link>
-          <Link
-            href="/logs"
-            className={`transition-colors hover:text-foreground ${isActive("/logs") ? "text-primary font-semibold" : "text-muted-foreground font-medium"}`}
-          >
-            Logs
-          </Link>
+        <nav className="hidden items-center gap-1 text-sm lg:flex">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all duration-200 ${
+                  active
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="font-medium text-xs">{item.label}</span>
+              </Link>
+            );
+          })}
         </nav>
 
         {/* Right: Mobile Menu & Avatar */}
@@ -101,11 +116,11 @@ export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) 
               <Button
                 variant="ghost"
                 size="icon"
-                className="relative h-9 w-9 rounded-full ring-1 ring-border"
+                className="relative h-9 w-9 rounded-full ring-1 ring-slate-200"
               >
                 <Avatar className="h-9 w-9">
                   <AvatarImage src={userProfile.avatarUrl || ""} />
-                  <AvatarFallback className="bg-primary/10 text-primary font-medium">
+                  <AvatarFallback className="bg-red-50 text-red-600 font-semibold text-sm">
                     {userProfile.fullName?.charAt(0) || "M"}
                   </AvatarFallback>
                 </Avatar>
@@ -137,7 +152,7 @@ export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) 
               <Button
                 variant="outline"
                 size="icon"
-                className="shrink-0 md:hidden"
+                className="shrink-0 lg:hidden"
               >
                 <Menu className="h-5 w-5" />
                 <span className="sr-only">Toggle navigation menu</span>
@@ -145,33 +160,29 @@ export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) 
             </SheetTrigger>
             <SheetContent side="right" className="flex flex-col w-[280px]">
               <SheetHeader className="text-left pb-4 border-b">
-                <SheetTitle>Menu</SheetTitle>
+                <SheetTitle className="flex items-center gap-2">
+                  <span>BI Command Center</span>
+                </SheetTitle>
               </SheetHeader>
-              <nav className="grid gap-2 text-base mt-4">
-                <Link
-                  href="/dashboard"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/dashboard") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
-                >
-                  Dashboard
-                </Link>
-                <Link
-                  href="/user-management"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/user-management") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
-                >
-                  User Management
-                </Link>
-                <Link
-                  href="/finance"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/finance") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
-                >
-                  Finance
-                </Link>
-                <Link
-                  href="/logs"
-                  className={`flex items-center gap-4 rounded-md px-3 py-2 hover:bg-muted hover:text-foreground ${isActive("/logs") ? "text-primary font-semibold bg-primary/5" : "text-muted-foreground font-medium"}`}
-                >
-                  Logs
-                </Link>
+              <nav className="grid gap-1 text-sm mt-4">
+                {NAV_ITEMS.map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+                        active
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
               </nav>
             </SheetContent>
           </Sheet>

@@ -29,7 +29,7 @@ export async function getRoutingData() {
   const { data: ordersData, error: ordersError } = await supabase
     .from("delivery_orders")
     .select(`
-      id, status, assigned_rider_id, delivery_date,
+      id, status, assigned_rider_id, delivery_date, customer_profile_id,
       customer_profiles ( users ( full_name ) ),
       addresses!delivery_address_id ( pincode, lat, lng ),
       meal_categories ( name )
@@ -39,8 +39,19 @@ export async function getRoutingData() {
 
   if (ordersError) console.error("Error fetching routing orders:", ordersError);
 
+  // Map of customer_profile_id -> pinned rider_id (permanent overrides).
+  const { data: fixedAssignments } = await supabase
+    .from("fixed_rider_assignments")
+    .select("customer_profile_id, rider_id");
+  const overrideMap = new Map(
+    (fixedAssignments || []).map((fa: any) => [fa.customer_profile_id, fa.rider_id]),
+  );
+
   const orders = (ordersData || []).map((o: any) => {
     const addr = Array.isArray(o.addresses) ? o.addresses[0] : o.addresses;
+    const pinnedRiderId = o.customer_profile_id
+      ? overrideMap.get(o.customer_profile_id) ?? null
+      : null;
     return {
       id: o.id,
       customerName: o.customer_profiles?.users?.full_name || "Unknown",
@@ -49,6 +60,8 @@ export async function getRoutingData() {
       status: o.status,
       deliveryDate: o.delivery_date,
       assigned_rider_id: o.assigned_rider_id || "",
+      isPinned: Boolean(pinnedRiderId),
+      pinnedRiderId,
     };
   });
 

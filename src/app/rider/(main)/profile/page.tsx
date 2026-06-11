@@ -14,6 +14,7 @@ import { RiderLogoutButton } from "@/shared/components/rider/rider-logout-button
 // Import your new Client Components!
 import { RiderAvatarUpload } from "@/shared/components/rider/rider-avatar-upload";
 import { EditProfileModal } from "@/shared/components/rider/edit-profile-modal";
+import { ChangePasswordModal } from "@/shared/components/rider/change-password-modal";
 
 export const revalidate = 0;
 
@@ -143,27 +144,31 @@ export default async function RiderProfilePage() {
               </div>
             </div>
 
-            <div className="p-6 space-y-6 bg-zinc-50/50">
-              <h3 className="font-bold text-zinc-900 uppercase tracking-wider text-xs">
-                Emergency Information
-              </h3>
-              <div className="flex items-start gap-3">
-                {/* ADDED shrink-0 TO PREVENT SQUISHING */}
-                <ShieldAlert className="h-5 w-5 text-red-400 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-zinc-500">
-                    Emergency Contact
-                  </p>
-                  <p className="font-bold text-zinc-900 mt-0.5">
-                    {riderProfile?.emergency_contact || "Not setup yet"}
-                  </p>
-                  {!riderProfile?.emergency_contact && (
-                    <p className="text-xs text-red-500 font-medium mt-1">
-                      Please update your emergency contact for your safety.
+            <div className="p-6 flex flex-col justify-between bg-zinc-50/50">
+              <div className="space-y-6">
+                <h3 className="font-bold text-zinc-900 uppercase tracking-wider text-xs">
+                  Emergency Info
+                </h3>
+                <div className="flex items-start justify-start gap-3">
+                  {/* ADDED shrink-0 TO PREVENT SQUISHING */}
+                  <ShieldAlert className="h-5 w-5 text-red-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-zinc-500">
+                      Emergency Contact
                     </p>
-                  )}
+                    <p className="font-bold text-zinc-900 mt-0.5">
+                      {riderProfile?.emergency_contact || "Not setup yet"}
+                    </p>
+                    {!riderProfile?.emergency_contact && (
+                      <p className="text-xs text-red-500 font-medium mt-1">
+                        Please update your emergency contact for your safety.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
+
+              <ChangePasswordModal />
             </div>
           </div>
         </CardContent>

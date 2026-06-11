@@ -5,9 +5,23 @@ import { Resend } from "resend";
 const resend = new Resend(process.env.RESEND_API_KEY);
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL || "ArogyaDiet <noreply@arogyadiet.com>";
-const SHARED_ADMIN_INBOX = "arogya664@gmail.com";
+const SHARED_ADMIN_INBOX_FALLBACK = "arogya664@gmail.com";
 const APP_BASE_URL =
   process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+async function getSharedAdminInbox(): Promise<string> {
+  try {
+    const supabaseAdmin = createAdminClient();
+    const { data } = await supabaseAdmin
+      .from("system_settings")
+      .select("shared_admin_email")
+      .eq("id", "global")
+      .single();
+    return data?.shared_admin_email || SHARED_ADMIN_INBOX_FALLBACK;
+  } catch {
+    return SHARED_ADMIN_INBOX_FALLBACK;
+  }
+}
 
 export interface NotificationPayload {
   title: string;
@@ -99,7 +113,8 @@ async function sendAdminEmails(
     const strategy = payload.emailStrategy ?? "shared";
 
     if (strategy === "shared") {
-      await sendNotificationEmail(SHARED_ADMIN_INBOX, payload);
+      const sharedInbox = await getSharedAdminInbox();
+      await sendNotificationEmail(sharedInbox, payload);
       return;
     }
 

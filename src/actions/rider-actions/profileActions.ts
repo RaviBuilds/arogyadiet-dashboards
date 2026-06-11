@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { updateUserPassword } from "@/services/AuthService";
 
 export async function updateRiderAvatar(userId: string, avatarUrl: string) {
   const supabase = await createClient();
@@ -32,4 +33,63 @@ export async function updateEmergencyContact(
 
   revalidatePath("/profile");
   return { success: true };
+}
+
+
+export async function changeRiderPassword(
+  currentPassword: string,
+  newPassword: string,
+  confirmPassword: string,
+): Promise<{ success?: string; error?: string }> {
+  if (!currentPassword) {
+    return { error: "Current password is required" };
+  }
+  if (!newPassword) {
+    return { error: "New password is required" };
+  }
+  if (newPassword !== confirmPassword) {
+    return { error: "Passwords do not match" };
+  }
+  if (newPassword.length < 8) {
+    return { error: "Password must be at least 8 characters long" };
+  }
+  if (currentPassword === newPassword) {
+    return { error: "New password must be different from current password" };
+  }
+
+  try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return { error: "Authentication required" };
+    }
+
+    // Verify current password
+    const { error: verificationError } =
+      await supabase.auth.signInWithPassword({
+        email: user.email!,
+        password: currentPassword,
+      });
+
+    if (verificationError) {
+      return { error: "Current password is incorrect" };
+    }
+
+    // Update password
+    await updateUserPassword(newPassword);
+
+    return {
+      success: "Password updated successfully.",
+    };
+  } catch (error: any) {
+    console.error("Rider password change error:", error.message);
+    return {
+      error: error.message || "Failed to update password. Please try again.",
+    };
+  }
 }

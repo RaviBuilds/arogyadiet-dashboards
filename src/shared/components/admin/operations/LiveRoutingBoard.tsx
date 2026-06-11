@@ -26,6 +26,7 @@ import {
   Save,
   Undo2,
   Route,
+  Pin,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -33,6 +34,7 @@ import {
   getRoutingData,
 } from "@/actions/admin-actions/routingActions";
 import { SectionHeader } from "../core/SectionHeader";
+import FixedRiderAssignments from "./FixedRiderAssignments";
 
 const getISTDateString = (offsetDays = 0) => {
   const date = new Date();
@@ -82,6 +84,8 @@ export interface RoutingOrder {
   status: string;
   deliveryDate: string;
   assigned_rider_id: string;
+  isPinned?: boolean;
+  pinnedRiderId?: string | null;
 }
 
 export interface RoutingRider {
@@ -399,6 +403,11 @@ export default function LiveRoutingBoard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Permanent customer -> rider overrides, managed inline below the board */}
+      <div className="pt-2 border-t border-dashed border-border/60">
+        <FixedRiderAssignments onChanged={fetchBoardData} />
+      </div>
     </div>
   );
 }
@@ -433,10 +442,16 @@ function OrderCard({
         <div className="flex-1 overflow-hidden">
           <div className="flex justify-between items-start mb-1.5 gap-2">
             <h4
-              className="font-semibold text-sm truncate pr-2"
+              className="font-semibold text-sm truncate pr-2 flex items-center gap-1.5"
               title={order.customerName}
             >
-              {order.customerName}
+              {order.isPinned && (
+                <Pin
+                  className="h-3 w-3 shrink-0 text-primary fill-primary/20"
+                  aria-label="Permanently pinned to this rider"
+                />
+              )}
+              <span className="truncate">{order.customerName}</span>
             </h4>
             <div className="flex flex-col items-end gap-1 shrink-0">
               <Badge
