@@ -150,7 +150,7 @@ export async function RiderDashboardContent() {
         </p>
       </div>
 
-      <RiderStatusToggle initialStatus={isOnDuty} />
+      <RiderStatusToggle initialStatus={isOnDuty} riderId={riderProfile.id} />
 
       {!isOnDuty && (
         <Card className="border-dashed border-2 border-zinc-200 shadow-none bg-white rounded-2xl">
