@@ -24,3 +24,28 @@
 ## 5. Stable Modules
 - **Customer & Rider Portals are stable and in production.**
 - Avoid massive refactors to `customer` and `rider` components without explicit user authorization, as regressions here impact live users immediately.
+
+
+## 6. Inventory & Manufacturing Hub
+
+### Raw Material → Finished Product Conversion
+- The Manufacturing Hub converts raw materials into finished products through defined mappings.
+- **Product Mapping (pre-configured by admin):** Inventory admin proactively defines conversion mappings in the "Product Mapping" page (`/admin/inventory/mappings`).
+- **Tight Coupling Rule:** When a mapping exists for a raw material, ONLY the mapped finished products should appear in the "Process Output" dropdown — not all finished products.
+- **Fallback:** If no mapping is configured for a given raw material, all finished products are shown (backward compatibility).
+
+### Supported Conversion Scenarios
+1. **1:1 (One raw → One finished):** Coconut Oil Tin → Coconut Oil 1Lt only.
+2. **1:Many (One raw → Multiple finished):** Coconut Oil Tin → Coconut Oil 1Lt OR Coconut Oil 2Lt.
+3. **Many:1 (Multiple raw → One finished):** Sunflower Seeds + Pumpkin Seeds + Turmeric → Mixed Powder. Uses the Multi-Material Dispatch feature with `manufacturing_batches`.
+
+### Multi-Material Dispatch (Scenario 3)
+- Admin selects a multi-raw-material mapping, dispatches multiple raw material lots together.
+- System creates a `manufacturing_batch` grouping all individual `manufacturing_orders`.
+- When processing output, the total input weight equals the sum of all dispatched raw materials.
+- Cost is distributed proportionally across the combined input weight.
+
+### Inventory Transaction Integrity
+- Every stock movement (in/out/to-manufacturing/from-manufacturing) records an `inventory_transaction` for audit purposes.
+- FIFO lot depletion is enforced — oldest lots are consumed first during outbound dispatch.
+- Manufacturing conversions must never exceed the remaining raw material weight.

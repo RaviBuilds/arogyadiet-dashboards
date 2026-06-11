@@ -340,7 +340,7 @@ export async function executeAutomatedDispatch(targetDate: string) {
   const { data: orders, error: ordersError } = await supabaseAdmin
     .from("delivery_orders")
     .select(
-      `id, delivery_address_id, addresses!delivery_address_id ( id, pincode, lat, lng, city, state )`,
+      `id, customer_profile_id, delivery_address_id, addresses!delivery_address_id ( id, pincode, lat, lng, city, state )`,
     )
     .eq("delivery_date", targetDate)
     .eq("status", "ORDER_CREATED")
@@ -371,6 +371,25 @@ export async function executeAutomatedDispatch(targetDate: string) {
   const pincodeToRiderMap = new Map(
     serviceAreas?.map((sa) => [sa.pincode, sa.rider_id]),
   );
+
+  // Permanent customer -> rider overrides. These take precedence over pincode
+  // matching and apply even when the customer's pincode is outside the rider's
+  // service area. Only active riders are honoured; if the pinned rider is
+  // inactive the order falls back to normal pincode-based routing.
+  const { data: fixedAssignments } = await supabaseAdmin
+    .from("fixed_rider_assignments")
+    .select("customer_profile_id, rider_id, rider_profiles!inner ( is_active )");
+  const customerOverrideMap = new Map<string, string>();
+  for (const fa of fixedAssignments ?? []) {
+    const rider = Array.isArray((fa as any).rider_profiles)
+      ? (fa as any).rider_profiles[0]
+      : (fa as any).rider_profiles;
+    if (rider?.is_active && fa.customer_profile_id && fa.rider_id) {
+      customerOverrideMap.set(fa.customer_profile_id, fa.rider_id);
+    }
+  }
+
+  let overrideAssigned = 0;
 
   const riderGroups = new Map<string, RoutableOrder[]>();
   const pincodeCache = new Map<string, { lat: number; lng: number }>();
@@ -414,11 +433,15 @@ export async function executeAutomatedDispatch(targetDate: string) {
       }
     }
 
-    const riderId = pincodeToRiderMap.get(address?.pincode || "");
+    const overrideRiderId = order.customer_profile_id
+      ? customerOverrideMap.get(order.customer_profile_id)
+      : undefined;
+    const riderId = overrideRiderId || pincodeToRiderMap.get(address?.pincode || "");
     if (!riderId) {
       skippedNoRider++;
       continue;
     }
+    if (overrideRiderId) overrideAssigned++;
 
     const auditEntry: CoordinateAuditEntry = {
       orderId: order.id,
@@ -528,6 +551,7 @@ export async function executeAutomatedDispatch(targetDate: string) {
     batchesRemoved: resetResult.batchesRemoved,
     ordersReset: resetResult.ordersReset,
     geocodedFromPincode,
+    overrideAssigned,
     skippedBadCoords,
     skippedNoRider,
     skippedOrderIds,

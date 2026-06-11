@@ -121,28 +121,49 @@ export async function getAutomationHealthLog(
 
   let query = supabase
     .from("automation_logs")
-    .select("id, automation_type, status, executed_at, details")
-    .order("executed_at", { ascending: false })
+    .select("id, automation_type, target_date, run_count, last_run_at, latest_stats")
+    .order("last_run_at", { ascending: false })
     .limit(50);
 
   if (startDate && endDate) {
     query = query
-      .gte("executed_at", `${startDate}T00:00:00`)
-      .lte("executed_at", `${endDate}T23:59:59`);
+      .gte("target_date", startDate)
+      .lte("target_date", endDate);
   }
 
   const { data: logs } = await query;
 
-  return (logs || []).map((log) => ({
-    id: log.id,
-    automationType: log.automation_type,
-    status: log.status as "SUCCESS" | "FAILURE" | "RUNNING",
-    executedAt: log.executed_at,
-    details:
-      typeof log.details === "string"
-        ? log.details
-        : log.details
-          ? JSON.stringify(log.details)
-          : null,
-  }));
+  return (logs || []).map((log) => {
+    // Derive status from latest_stats - if stats contain error info, mark as FAILURE
+    const stats = log.latest_stats as Record<string, unknown> | null;
+    let status: "SUCCESS" | "FAILURE" | "RUNNING" = "SUCCESS";
+    if (stats && (stats.error || stats.status === "FAILURE")) {
+      status = "FAILURE";
+    }
+
+    // Build a readable details string from latest_stats
+    let details: string | null = null;
+    if (stats) {
+      const parts: string[] = [];
+      if (stats.ordersInserted !== undefined) parts.push(`Orders: ${stats.ordersInserted}`);
+      if (stats.totalPreferencesFound !== undefined) parts.push(`Prefs: ${stats.totalPreferencesFound}`);
+      if (stats.skippedExisting !== undefined) parts.push(`Skipped: ${stats.skippedExisting}`);
+      if (stats.batchesCreated !== undefined) parts.push(`Batches: ${stats.batchesCreated}`);
+      if (stats.ordersAssigned !== undefined) parts.push(`Assigned: ${stats.ordersAssigned}`);
+      if (stats.error) parts.push(`Error: ${stats.error}`);
+      if (parts.length > 0) {
+        details = parts.join(" | ");
+      } else {
+        details = JSON.stringify(stats);
+      }
+    }
+
+    return {
+      id: log.id,
+      automationType: log.automation_type,
+      status,
+      executedAt: log.last_run_at,
+      details,
+    };
+  });
 }

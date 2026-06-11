@@ -263,6 +263,101 @@ export const revertPendingMfgSchema = z.object({
 
 export type RevertPendingMfgFormValues = z.infer<typeof revertPendingMfgSchema>;
 
+// --- Manufacturing Product Mappings ---
+
+export const createMappingFormSchema = z.object({
+  name: z
+    .string()
+    .min(1, "Mapping name is required")
+    .max(255, "Name must be 255 characters or less"),
+  rawProductIds: z
+    .array(z.string().uuid("Invalid product ID"))
+    .min(1, "At least one raw material is required"),
+  finishedProductIds: z
+    .array(z.string().uuid("Invalid product ID"))
+    .min(1, "At least one finished product is required"),
+});
+
+export type CreateMappingFormValues = z.infer<typeof createMappingFormSchema>;
+
+export const updateMappingFormSchema = createMappingFormSchema.extend({
+  mappingId: z.string().uuid("Invalid mapping ID"),
+});
+
+export type UpdateMappingFormValues = z.infer<typeof updateMappingFormSchema>;
+
+export const deleteMappingSchema = z.object({
+  mappingId: z.string().uuid("Invalid mapping ID"),
+});
+
+export type ManufacturingProductMapping = {
+  id: string;
+  name: string;
+  rawProductIds: string[];
+  finishedProductIds: string[];
+  rawProducts: Pick<InventoryProduct, "id" | "name" | "baseUom">[];
+  finishedProducts: Pick<InventoryProduct, "id" | "name" | "baseUom">[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ManufacturingProductMappingRow = {
+  id: string;
+  name: string;
+  raw_product_ids: string[];
+  finished_product_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export function mapManufacturingProductMappingRow(
+  row: ManufacturingProductMappingRow,
+  rawProducts: Pick<InventoryProduct, "id" | "name" | "baseUom">[],
+  finishedProducts: Pick<InventoryProduct, "id" | "name" | "baseUom">[],
+): ManufacturingProductMapping {
+  return {
+    id: row.id,
+    name: row.name,
+    rawProductIds: row.raw_product_ids,
+    finishedProductIds: row.finished_product_ids,
+    rawProducts,
+    finishedProducts,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// --- Multi-dispatch (many raw materials → 1 finished product) ---
+
+export const multiDispatchFormSchema = z.object({
+  mappingId: z.string().uuid("Select a mapping"),
+  items: z
+    .array(
+      z.object({
+        lotId: z.string().uuid("Invalid lot ID"),
+        quantityToSend: z.coerce
+          .number()
+          .positive("Quantity must be greater than 0"),
+      }),
+    )
+    .min(1, "At least one raw material lot is required"),
+});
+
+export type MultiDispatchFormValues = z.infer<typeof multiDispatchFormSchema>;
+
+export type ManufacturingBatch = {
+  id: string;
+  name: string;
+  mappingId: string | null;
+  status: MfgOrderStatus;
+  totalInputWeight: number;
+  totalCostValue: number;
+  createdAt: string;
+  completedAt: string | null;
+  orders: ManufacturingOrder[];
+  allowedFinishedProducts: FinishedGoodOption[];
+};
+
 type InventoryProductRow = {
   id: string;
   name: string;

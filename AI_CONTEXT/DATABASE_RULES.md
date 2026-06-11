@@ -22,3 +22,20 @@
 ## RLS Sensitive Tables
 - `users`, `customer_profiles`, `addresses` are heavily protected by Row Level Security.
 - The Admin Server Actions bypass RLS using the Service Role Key (`createAdminClient`). This is intentional for complex cross-user state mutations but must be used carefully to prevent unauthorized privilege escalation.
+
+## Inventory & Manufacturing Tables
+7. **`inventory_products`**: Master catalog of all products with type (`RAW_MATERIAL` | `FINISHED_GOOD`), UoM, stock thresholds.
+8. **`inventory_lots`**: FIFO stock lots with batch tracking (batch number, quantity, unit cost, expiry, status).
+9. **`manufacturing_orders`**: Individual work-in-progress entries linking a raw material lot to processing. Can belong to a `manufacturing_batch`.
+10. **`manufacturing_outputs`**: Records of each packaging output from a manufacturing order.
+11. **`manufacturing_product_mappings`**: Defines allowed conversion paths between raw materials and finished products (supports 1:1, 1:many, many:1).
+12. **`manufacturing_batches`**: Groups multiple manufacturing orders for multi-raw-material processing (many-to-one conversion).
+13. **`inventory_transactions`**: Audit ledger (IN, OUT, SENT_TO_MFG, RECEIVED_FROM_MFG, EXPIRED).
+
+## Manufacturing Conversion Rules
+- **Scenario 1 (1:1):** One raw material → one finished product. E.g., Coconut Oil Tin → Coconut Oil 1Lt.
+- **Scenario 2 (1:many):** One raw material → multiple finished products. E.g., Coconut Oil Tin → Coconut Oil 1Lt OR Coconut Oil 2Lt.
+- **Scenario 3 (many:1):** Multiple raw materials → one finished product. E.g., Sunflower Seeds + Pumpkin Seeds + Turmeric Raw → Mixed Powder 3kg.
+- Mappings are defined proactively in `manufacturing_product_mappings` by inventory admin.
+- When processing a manufacturing output, only the finished products mapped to that raw material should appear in the dropdown.
+- If no mapping exists for a raw product, the system falls back to showing all finished products (backward compatibility).

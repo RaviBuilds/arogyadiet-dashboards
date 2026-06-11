@@ -41,11 +41,13 @@ const BASE_UOM_LABELS: Record<BaseUom, string> = {
 interface PendingOrdersPanelProps {
   pendingOrders: ManufacturingOrder[];
   finishedGoods: FinishedGoodOption[];
+  mappedFinishedGoodsMap: Record<string, FinishedGoodOption[]>;
 }
 
 export default function PendingOrdersPanel({
   pendingOrders,
   finishedGoods,
+  mappedFinishedGoodsMap,
 }: PendingOrdersPanelProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -121,7 +123,11 @@ export default function PendingOrdersPanel({
                         mfgOrderId={order.id}
                         remainingToPackage={order.remainingToPackage}
                         rawBaseUom={order.baseUom}
-                        finishedGoods={finishedGoods}
+                        finishedGoods={
+                          mappedFinishedGoodsMap[order.rawProductId]?.length > 0
+                            ? mappedFinishedGoodsMap[order.rawProductId]
+                            : finishedGoods
+                        }
                       />
                       {order.remainingToPackage > 0 && (
                         <AlertDialog>

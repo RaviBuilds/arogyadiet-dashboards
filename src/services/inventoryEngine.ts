@@ -8,6 +8,7 @@ import {
   type AddProductInput,
   type BulkInboundItem,
   type BulkOutboundItem,
+  type CreateMappingFormValues,
   type DispatchInventoryStockResult,
   type DispatchStockReason,
   type FinishedGoodOption,
@@ -15,7 +16,11 @@ import {
   type InventoryLot,
   type InventoryMetrics,
   type InventoryProduct,
+  type ManufacturingBatch,
   type ManufacturingOrder,
+  type ManufacturingProductMapping,
+  type ManufacturingProductMappingRow,
+  type MultiDispatchFormValues,
   type ProcessManufacturingOutputResult,
   type RevertPendingManufacturingResult,
   type TransactionLedgerEntry,
@@ -25,6 +30,7 @@ import {
   mapInventoryLotRow,
   mapInventoryProductRow,
   mapManufacturingOrderRow,
+  mapManufacturingProductMappingRow,
   mapTransactionLedgerRow,
 } from "@/lib/inventory/product-schema";
 
@@ -1025,5 +1031,572 @@ export async function revertPendingManufacturing(
   return {
     refundedQuantity: remainingQuantity,
     sourceLotId,
+  };
+}
+
+
+// --- Manufacturing Product Mappings ---
+
+export async function getManufacturingMappings(): Promise<
+  ManufacturingProductMapping[]
+> {
+  const supabase = createAdminClient();
+
+  const { data: mappings, error } = await supabase
+    .from("manufacturing_product_mappings")
+    .select("id, name, raw_product_ids, finished_product_ids, created_at, updated_at")
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!mappings || mappings.length === 0) {
+    return [];
+  }
+
+  // Collect all unique product IDs to fetch their names
+  const allProductIds = new Set<string>();
+  for (const mapping of mappings) {
+    for (const id of mapping.raw_product_ids) allProductIds.add(id);
+    for (const id of mapping.finished_product_ids) allProductIds.add(id);
+  }
+
+  const { data: products, error: productsError } = await supabase
+    .from("inventory_products")
+    .select("id, name, base_uom")
+    .in("id", Array.from(allProductIds));
+
+  if (productsError) {
+    throw new Error(productsError.message);
+  }
+
+  const productMap = new Map(
+    (products ?? []).map((p) => [p.id, { id: p.id, name: p.name, baseUom: p.base_uom }]),
+  );
+
+  return mappings.map((row) => {
+    const rawProducts = row.raw_product_ids
+      .map((id: string) => productMap.get(id))
+      .filter(Boolean) as Pick<InventoryProduct, "id" | "name" | "baseUom">[];
+
+    const finishedProducts = row.finished_product_ids
+      .map((id: string) => productMap.get(id))
+      .filter(Boolean) as Pick<InventoryProduct, "id" | "name" | "baseUom">[];
+
+    return mapManufacturingProductMappingRow(
+      row as ManufacturingProductMappingRow,
+      rawProducts,
+      finishedProducts,
+    );
+  });
+}
+
+export async function createManufacturingMapping(
+  input: CreateMappingFormValues,
+): Promise<ManufacturingProductMapping> {
+  const supabase = createAdminClient();
+
+  const { data: row, error } = await supabase
+    .from("manufacturing_product_mappings")
+    .insert({
+      name: input.name,
+      raw_product_ids: input.rawProductIds,
+      finished_product_ids: input.finishedProductIds,
+    })
+    .select("id, name, raw_product_ids, finished_product_ids, created_at, updated_at")
+    .single();
+
+  if (error || !row) {
+    throw new Error(error?.message ?? "Failed to create mapping.");
+  }
+
+  // Fetch product details for the response
+  const allIds = [...input.rawProductIds, ...input.finishedProductIds];
+  const { data: products } = await supabase
+    .from("inventory_products")
+    .select("id, name, base_uom")
+    .in("id", allIds);
+
+  const productMap = new Map(
+    (products ?? []).map((p) => [p.id, { id: p.id, name: p.name, baseUom: p.base_uom }]),
+  );
+
+  const rawProducts = input.rawProductIds
+    .map((id) => productMap.get(id))
+    .filter(Boolean) as Pick<InventoryProduct, "id" | "name" | "baseUom">[];
+
+  const finishedProducts = input.finishedProductIds
+    .map((id) => productMap.get(id))
+    .filter(Boolean) as Pick<InventoryProduct, "id" | "name" | "baseUom">[];
+
+  return mapManufacturingProductMappingRow(
+    row as ManufacturingProductMappingRow,
+    rawProducts,
+    finishedProducts,
+  );
+}
+
+export async function updateManufacturingMapping(
+  mappingId: string,
+  input: CreateMappingFormValues,
+): Promise<ManufacturingProductMapping> {
+  const supabase = createAdminClient();
+
+  const { data: row, error } = await supabase
+    .from("manufacturing_product_mappings")
+    .update({
+      name: input.name,
+      raw_product_ids: input.rawProductIds,
+      finished_product_ids: input.finishedProductIds,
+    })
+    .eq("id", mappingId)
+    .select("id, name, raw_product_ids, finished_product_ids, created_at, updated_at")
+    .single();
+
+  if (error || !row) {
+    throw new Error(error?.message ?? "Failed to update mapping.");
+  }
+
+  const allIds = [...input.rawProductIds, ...input.finishedProductIds];
+  const { data: products } = await supabase
+    .from("inventory_products")
+    .select("id, name, base_uom")
+    .in("id", allIds);
+
+  const productMap = new Map(
+    (products ?? []).map((p) => [p.id, { id: p.id, name: p.name, baseUom: p.base_uom }]),
+  );
+
+  const rawProducts = input.rawProductIds
+    .map((id) => productMap.get(id))
+    .filter(Boolean) as Pick<InventoryProduct, "id" | "name" | "baseUom">[];
+
+  const finishedProducts = input.finishedProductIds
+    .map((id) => productMap.get(id))
+    .filter(Boolean) as Pick<InventoryProduct, "id" | "name" | "baseUom">[];
+
+  return mapManufacturingProductMappingRow(
+    row as ManufacturingProductMappingRow,
+    rawProducts,
+    finishedProducts,
+  );
+}
+
+export async function deleteManufacturingMapping(mappingId: string): Promise<void> {
+  const supabase = createAdminClient();
+
+  const { error } = await supabase
+    .from("manufacturing_product_mappings")
+    .delete()
+    .eq("id", mappingId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Get finished goods that are mapped to a specific raw material product.
+ * If no mapping exists for this raw product, returns an empty array.
+ */
+export async function getFinishedGoodsForRawProduct(
+  rawProductId: string,
+): Promise<FinishedGoodOption[]> {
+  const supabase = createAdminClient();
+
+  // Find all mappings where this raw product is included
+  const { data: mappings, error: mappingsError } = await supabase
+    .from("manufacturing_product_mappings")
+    .select("finished_product_ids")
+    .contains("raw_product_ids", [rawProductId]);
+
+  if (mappingsError) {
+    throw new Error(mappingsError.message);
+  }
+
+  if (!mappings || mappings.length === 0) {
+    return [];
+  }
+
+  // Collect all unique finished product IDs from all matching mappings
+  const finishedProductIds = new Set<string>();
+  for (const mapping of mappings) {
+    for (const id of mapping.finished_product_ids) {
+      finishedProductIds.add(id);
+    }
+  }
+
+  if (finishedProductIds.size === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("inventory_products")
+    .select("id, name, base_uom")
+    .eq("type", "FINISHED_GOOD")
+    .in("id", Array.from(finishedProductIds))
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((row) => mapFinishedGoodOptionRow(row));
+}
+
+/**
+ * Get all raw material products (for mapping UI).
+ */
+export async function getRawMaterialProducts(): Promise<
+  Pick<InventoryProduct, "id" | "name" | "baseUom">[]
+> {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("inventory_products")
+    .select("id, name, base_uom")
+    .eq("type", "RAW_MATERIAL")
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    baseUom: row.base_uom,
+  }));
+}
+
+
+// --- Multi-Dispatch to Manufacturing (many raw materials → 1 batch) ---
+
+export async function sendMultiToManufacturing(
+  input: MultiDispatchFormValues,
+): Promise<{ batchId: string }> {
+  const supabase = createAdminClient();
+
+  // Fetch the mapping to get its name
+  const { data: mappingRow, error: mappingError } = await supabase
+    .from("manufacturing_product_mappings")
+    .select("id, name")
+    .eq("id", input.mappingId)
+    .single();
+
+  if (mappingError || !mappingRow) {
+    throw new Error(mappingError?.message ?? "Mapping not found.");
+  }
+
+  // Validate all lots exist and are active
+  const lotIds = input.items.map((item) => item.lotId);
+  const { data: lotRows, error: lotsFetchError } = await supabase
+    .from("inventory_lots")
+    .select("id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status, created_at")
+    .in("id", lotIds)
+    .eq("status", "ACTIVE");
+
+  if (lotsFetchError) {
+    throw new Error(lotsFetchError.message);
+  }
+
+  if (!lotRows || lotRows.length !== input.items.length) {
+    throw new Error("One or more lots are not found or not active.");
+  }
+
+  const lotMap = new Map(lotRows.map((row) => [row.id, row]));
+
+  // Calculate totals
+  let totalInputWeight = 0;
+  let totalCostValue = 0;
+
+  for (const item of input.items) {
+    const lotRow = lotMap.get(item.lotId);
+    if (!lotRow) throw new Error(`Lot ${item.lotId} not found.`);
+
+    const quantityRemaining = Number(lotRow.quantity_remaining);
+    if (item.quantityToSend > quantityRemaining) {
+      throw new Error(
+        `Cannot send ${item.quantityToSend} from lot ${lotRow.batch_number}. Only ${quantityRemaining} remaining.`,
+      );
+    }
+
+    totalInputWeight += item.quantityToSend;
+    totalCostValue += item.quantityToSend * Number(lotRow.unit_cost);
+  }
+
+  // Create the batch
+  const { data: batchRow, error: batchError } = await supabase
+    .from("manufacturing_batches")
+    .insert({
+      name: mappingRow.name,
+      mapping_id: input.mappingId,
+      status: "PENDING",
+      total_input_weight: totalInputWeight,
+      total_cost_value: totalCostValue,
+    })
+    .select("id")
+    .single();
+
+  if (batchError || !batchRow) {
+    throw new Error(batchError?.message ?? "Failed to create manufacturing batch.");
+  }
+
+  // Create individual manufacturing orders for each lot, linked to the batch
+  for (const item of input.items) {
+    const lotRow = lotMap.get(item.lotId)!;
+    const unitCost = Number(lotRow.unit_cost);
+    const itemCost = item.quantityToSend * unitCost;
+
+    const { data: orderRow, error: orderError } = await supabase
+      .from("manufacturing_orders")
+      .insert({
+        raw_product_id: lotRow.product_id,
+        source_lot_id: item.lotId,
+        quantity_sent: item.quantityToSend,
+        total_cost_value: itemCost,
+        status: "PENDING",
+        batch_id: batchRow.id,
+      })
+      .select("id")
+      .single();
+
+    if (orderError || !orderRow) {
+      // Cleanup batch on failure
+      await supabase.from("manufacturing_orders").delete().eq("batch_id", batchRow.id);
+      await supabase.from("manufacturing_batches").delete().eq("id", batchRow.id);
+      throw new Error(orderError?.message ?? "Failed to create manufacturing order.");
+    }
+
+    // Deduct from lot
+    const quantityRemaining = Number(lotRow.quantity_remaining);
+    const newRemaining = quantityRemaining - item.quantityToSend;
+    const newStatus = newRemaining === 0 ? "DEPLETED" : "ACTIVE";
+
+    const { error: lotUpdateError } = await supabase
+      .from("inventory_lots")
+      .update({
+        quantity_remaining: newRemaining,
+        status: newStatus,
+      })
+      .eq("id", item.lotId);
+
+    if (lotUpdateError) {
+      await supabase.from("manufacturing_orders").delete().eq("batch_id", batchRow.id);
+      await supabase.from("manufacturing_batches").delete().eq("id", batchRow.id);
+      throw new Error(lotUpdateError.message);
+    }
+
+    // Record transaction
+    const { error: transactionError } = await supabase
+      .from("inventory_transactions")
+      .insert({
+        lot_id: item.lotId,
+        transaction_type: "SENT_TO_MFG",
+        quantity_changed: -item.quantityToSend,
+        financial_value_changed: -itemCost,
+      });
+
+    if (transactionError) {
+      // Revert lot
+      await supabase
+        .from("inventory_lots")
+        .update({ quantity_remaining: quantityRemaining, status: lotRow.status })
+        .eq("id", item.lotId);
+      await supabase.from("manufacturing_orders").delete().eq("batch_id", batchRow.id);
+      await supabase.from("manufacturing_batches").delete().eq("id", batchRow.id);
+      throw new Error(transactionError.message);
+    }
+  }
+
+  return { batchId: batchRow.id };
+}
+
+export async function getPendingManufacturingBatches(): Promise<ManufacturingBatch[]> {
+  const supabase = createAdminClient();
+
+  const { data: batches, error } = await supabase
+    .from("manufacturing_batches")
+    .select("id, name, mapping_id, status, total_input_weight, total_cost_value, created_at, completed_at")
+    .eq("status", "PENDING")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!batches || batches.length === 0) {
+    return [];
+  }
+
+  // For each batch, get its orders and mapping's finished products
+  const results: ManufacturingBatch[] = [];
+
+  for (const batch of batches) {
+    // Get orders in this batch
+    const { data: orderRows } = await supabase
+      .from("manufacturing_orders")
+      .select(
+        "id, raw_product_id, source_lot_id, quantity_sent, total_cost_value, status, sent_at, completed_at, inventory_products!raw_product_id(name, base_uom), inventory_lots!source_lot_id(batch_number), manufacturing_outputs(package_size, package_count)",
+      )
+      .eq("batch_id", batch.id);
+
+    const orders = (orderRows ?? []).map((row) => mapManufacturingOrderRow(row));
+
+    // Get allowed finished products from the mapping
+    let allowedFinishedProducts: FinishedGoodOption[] = [];
+    if (batch.mapping_id) {
+      const { data: mappingRow } = await supabase
+        .from("manufacturing_product_mappings")
+        .select("finished_product_ids")
+        .eq("id", batch.mapping_id)
+        .single();
+
+      if (mappingRow && mappingRow.finished_product_ids?.length > 0) {
+        const { data: products } = await supabase
+          .from("inventory_products")
+          .select("id, name, base_uom")
+          .in("id", mappingRow.finished_product_ids);
+
+        allowedFinishedProducts = (products ?? []).map((row) => mapFinishedGoodOptionRow(row));
+      }
+    }
+
+    results.push({
+      id: batch.id,
+      name: batch.name,
+      mappingId: batch.mapping_id,
+      status: batch.status as "PENDING" | "COMPLETED",
+      totalInputWeight: Number(batch.total_input_weight),
+      totalCostValue: Number(batch.total_cost_value),
+      createdAt: batch.created_at,
+      completedAt: batch.completed_at,
+      orders,
+      allowedFinishedProducts,
+    });
+  }
+
+  return results;
+}
+
+export async function processBatchOutput(
+  batchId: string,
+  finishedProductId: string,
+  packageSize: number,
+  packageCount: number,
+  expiryDate: Date,
+): Promise<ProcessManufacturingOutputResult> {
+  const supabase = createAdminClient();
+
+  // Get the batch
+  const { data: batch, error: batchError } = await supabase
+    .from("manufacturing_batches")
+    .select("id, status, total_input_weight, total_cost_value")
+    .eq("id", batchId)
+    .single();
+
+  if (batchError || !batch) {
+    throw new Error(batchError?.message ?? "Batch not found.");
+  }
+
+  if (batch.status !== "PENDING") {
+    throw new Error("Only pending batches can be processed.");
+  }
+
+  const totalInputWeight = Number(batch.total_input_weight);
+  const totalCostValue = Number(batch.total_cost_value);
+  const currentOutputWeight = packageSize * packageCount;
+
+  if (currentOutputWeight > totalInputWeight) {
+    throw new Error(
+      `Output weight (${currentOutputWeight}) exceeds total input weight (${totalInputWeight}).`,
+    );
+  }
+
+  // Verify finished product exists and is correct type
+  const { data: productRow, error: productError } = await supabase
+    .from("inventory_products")
+    .select("id, type")
+    .eq("id", finishedProductId)
+    .single();
+
+  if (productError || !productRow) {
+    throw new Error(productError?.message ?? "Finished product not found.");
+  }
+
+  if (productRow.type !== "FINISHED_GOOD") {
+    throw new Error("Selected product must be a finished good.");
+  }
+
+  // Calculate cost proportionally
+  const costPerUnit = totalCostValue / totalInputWeight;
+  const costTransferred = costPerUnit * currentOutputWeight;
+  const newUnitCost = costTransferred / packageCount;
+  const batchNumber = `LOT-${Date.now()}`;
+
+  // Create finished good lot
+  const { data: lotRow, error: lotError } = await supabase
+    .from("inventory_lots")
+    .insert({
+      product_id: finishedProductId,
+      batch_number: batchNumber,
+      quantity_remaining: packageCount,
+      unit_cost: newUnitCost,
+      expiry_date: expiryDate.toISOString(),
+      status: "ACTIVE",
+    })
+    .select("id")
+    .single();
+
+  if (lotError || !lotRow) {
+    throw new Error(lotError?.message ?? "Failed to create finished goods lot.");
+  }
+
+  // Mark batch as completed
+  const { error: batchUpdateError } = await supabase
+    .from("manufacturing_batches")
+    .update({ status: "COMPLETED", completed_at: new Date().toISOString() })
+    .eq("id", batchId);
+
+  if (batchUpdateError) {
+    await supabase.from("inventory_lots").delete().eq("id", lotRow.id);
+    throw new Error(batchUpdateError.message);
+  }
+
+  // Mark all orders in the batch as completed
+  const { error: ordersUpdateError } = await supabase
+    .from("manufacturing_orders")
+    .update({ status: "COMPLETED", completed_at: new Date().toISOString() })
+    .eq("batch_id", batchId);
+
+  if (ordersUpdateError) {
+    await supabase
+      .from("manufacturing_batches")
+      .update({ status: "PENDING", completed_at: null })
+      .eq("id", batchId);
+    await supabase.from("inventory_lots").delete().eq("id", lotRow.id);
+    throw new Error(ordersUpdateError.message);
+  }
+
+  // Record transaction
+  const { error: transactionError } = await supabase
+    .from("inventory_transactions")
+    .insert({
+      lot_id: lotRow.id,
+      transaction_type: "RECEIVED_FROM_MFG",
+      quantity_changed: packageCount,
+      financial_value_changed: costTransferred,
+    });
+
+  if (transactionError) {
+    // Don't revert — transaction is just a log entry
+    console.error("Failed to log batch output transaction:", transactionError.message);
+  }
+
+  return {
+    lotId: lotRow.id,
+    batchNumber,
+    outputId: batchId,
   };
 }

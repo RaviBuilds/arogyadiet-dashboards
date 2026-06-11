@@ -10,6 +10,7 @@ import { Button } from "@/shared/components/ui/button";
 const NAV_ITEMS = [
   { label: "Master Catalog", href: "/admin/inventory" },
   { label: "Manufacturing Hub", href: "/admin/inventory/manufacturing" },
+  { label: "Product Mapping", href: "/admin/inventory/mappings" },
   { label: "Audit Ledger", href: "/admin/inventory/ledger" },
 ] as const;
 
@@ -19,7 +20,8 @@ export default function InventoryHeader() {
   function isActive(href: string) {
     if (
       href === "/admin/inventory/manufacturing" ||
-      href === "/admin/inventory/ledger"
+      href === "/admin/inventory/ledger" ||
+      href === "/admin/inventory/mappings"
     ) {
       return pathname.startsWith(href);
     }

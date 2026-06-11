@@ -9,7 +9,10 @@ import {
   bulkOutboundSchema,
   type BulkInboundItem,
   type BulkOutboundItem,
+  createMappingFormSchema,
   deleteProductSchema,
+  deleteMappingSchema,
+  multiDispatchFormSchema,
   parseAddProductFormData,
   parseEditProductFormData,
   parseDispatchStockFormData,
@@ -17,25 +20,32 @@ import {
   parseProcessOutputFormData,
   parseReceiveStockFormData,
   revertPendingMfgSchema,
+  updateMappingFormSchema,
   validateInventoryProductImage,
 } from "@/lib/inventory/product-schema";
 import {
   BulkInventoryError,
   createInventoryProduct,
+  createManufacturingMapping,
   deleteInventoryProduct,
+  deleteManufacturingMapping,
   dispatchInventoryStock,
+  processBatchOutput,
   processBulkInbound,
   processBulkOutbound,
   processManufacturingOutput,
   receiveInventoryStock,
   revertPendingManufacturing,
+  sendMultiToManufacturing,
   sendToManufacturing,
   updateInventoryProduct,
+  updateManufacturingMapping,
   uploadInventoryProductImage,
 } from "@/services/inventoryEngine";
 
 const INVENTORY_PATH = "/admin/inventory";
 const MANUFACTURING_PATH = "/admin/inventory/manufacturing";
+const MAPPINGS_PATH = "/admin/inventory/mappings";
 
 type AddProductResult =
   | { success: true; productId: string }
@@ -391,6 +401,163 @@ export async function dispatchStockAction(
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : "Failed to dispatch stock.";
+    return { success: false, error: message };
+  }
+}
+
+// --- Manufacturing Product Mapping Actions ---
+
+type CreateMappingResult =
+  | { success: true; mappingId: string }
+  | { success: false; error: string };
+
+type UpdateMappingResult =
+  | { success: true; mappingId: string }
+  | { success: false; error: string };
+
+type DeleteMappingResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function createMappingAction(
+  input: { name: string; rawProductIds: string[]; finishedProductIds: string[] },
+): Promise<CreateMappingResult> {
+  const parsed = createMappingFormSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid mapping data.",
+    };
+  }
+
+  try {
+    const mapping = await createManufacturingMapping(parsed.data);
+    revalidatePath(MAPPINGS_PATH);
+    revalidatePath(MANUFACTURING_PATH);
+    return { success: true, mappingId: mapping.id };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to create mapping.";
+    return { success: false, error: message };
+  }
+}
+
+export async function updateMappingAction(
+  input: { mappingId: string; name: string; rawProductIds: string[]; finishedProductIds: string[] },
+): Promise<UpdateMappingResult> {
+  const parsed = updateMappingFormSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid mapping data.",
+    };
+  }
+
+  try {
+    const mapping = await updateManufacturingMapping(
+      parsed.data.mappingId,
+      {
+        name: parsed.data.name,
+        rawProductIds: parsed.data.rawProductIds,
+        finishedProductIds: parsed.data.finishedProductIds,
+      },
+    );
+    revalidatePath(MAPPINGS_PATH);
+    revalidatePath(MANUFACTURING_PATH);
+    return { success: true, mappingId: mapping.id };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to update mapping.";
+    return { success: false, error: message };
+  }
+}
+
+export async function deleteMappingAction(
+  mappingId: string,
+): Promise<DeleteMappingResult> {
+  const parsed = deleteMappingSchema.safeParse({ mappingId });
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid mapping ID.",
+    };
+  }
+
+  try {
+    await deleteManufacturingMapping(parsed.data.mappingId);
+    revalidatePath(MAPPINGS_PATH);
+    revalidatePath(MANUFACTURING_PATH);
+    return { success: true };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to delete mapping.";
+    return { success: false, error: message };
+  }
+}
+
+
+// --- Multi-Dispatch Actions ---
+
+type MultiDispatchResult =
+  | { success: true; batchId: string }
+  | { success: false; error: string };
+
+type ProcessBatchOutputResult =
+  | { success: true; lotId: string; batchNumber: string }
+  | { success: false; error: string };
+
+export async function multiDispatchToManufacturingAction(
+  input: { mappingId: string; items: { lotId: string; quantityToSend: number }[] },
+): Promise<MultiDispatchResult> {
+  const parsed = multiDispatchFormSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid multi-dispatch data.",
+    };
+  }
+
+  try {
+    const result = await sendMultiToManufacturing(parsed.data);
+    revalidatePath(MANUFACTURING_PATH);
+    revalidatePath(INVENTORY_PATH);
+    return { success: true, batchId: result.batchId };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to dispatch to manufacturing.";
+    return { success: false, error: message };
+  }
+}
+
+export async function processBatchOutputAction(
+  input: {
+    batchId: string;
+    finishedProductId: string;
+    packageSize: number;
+    packageCount: number;
+    expiryDate: string;
+  },
+): Promise<ProcessBatchOutputResult> {
+  if (!input.batchId || !input.finishedProductId || !input.packageSize || !input.packageCount || !input.expiryDate) {
+    return { success: false, error: "All fields are required." };
+  }
+
+  const expiryDate = startOfDay(parseISO(input.expiryDate));
+
+  try {
+    const result = await processBatchOutput(
+      input.batchId,
+      input.finishedProductId,
+      input.packageSize,
+      input.packageCount,
+      expiryDate,
+    );
+    revalidatePath(INVENTORY_PATH);
+    revalidatePath(MANUFACTURING_PATH);
+    return { success: true, lotId: result.lotId, batchNumber: result.batchNumber };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to process batch output.";
     return { success: false, error: message };
   }
 }

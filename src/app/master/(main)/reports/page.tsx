@@ -1,4 +1,5 @@
 import ReportEngineShell from "./ReportEngineShell";
+import SharedAdminEmailConfig from "./SharedAdminEmailConfig";
 
 export const revalidate = 0;
 
@@ -14,6 +15,7 @@ export default function ReportsPage() {
         </p>
       </div>
       <ReportEngineShell />
+      <SharedAdminEmailConfig />
     </div>
   );
 }
