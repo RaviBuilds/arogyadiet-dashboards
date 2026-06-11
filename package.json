@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.26",
     "@capacitor-community/keep-awake": "^8.0.1",
     "@capacitor/core": "^8.3.4",
     "@capacitor/geolocation": "^8.2.0",

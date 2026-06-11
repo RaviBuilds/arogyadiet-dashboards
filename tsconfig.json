@@ -22,7 +22,8 @@
       "@/*": ["./src/*"],
       "@/components/*": ["./src/shared/components/*"],
       "@/hooks/*": ["./src/shared/hooks/*"],
-      "@/utils/*": ["./src/shared/utils/*"]
+      "@/utils/*": ["./src/shared/utils/*"],
+      "@capacitor-community/background-geolocation": ["./src/lib/capacitor/background-geolocation-stub.ts"]
     }
   },
   "include": [
