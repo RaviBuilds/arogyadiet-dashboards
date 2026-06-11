@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AlertTriangle } from "lucide-react";
-import { Geolocation } from "@capacitor/geolocation";
-import { KeepAwake } from "@capacitor-community/keep-awake";
+import { BackgroundGeolocation } from "@capacitor-community/background-geolocation";
 import { Capacitor } from "@capacitor/core";
 
 export type GpsHardwareState = "idle" | "acquiring" | "active" | "error";
@@ -28,98 +27,70 @@ export function LiveLocationTracker({
   // Generates a unique ID for this specific tab/phone session
   const [sessionId] = useState(() => crypto.randomUUID());
 
-  // Keeps track of whether this phone has officially claimed the database yet
+  // Keeps track of whether this phone has officially claimed the database session
   const hasClaimedSession = useRef(false);
   const lastUpdateTime = useRef<number>(0);
 
-  const updateGpsState = (next: GpsHardwareState) => {
-    setGpsState(next);
-    onGpsStateChange?.(next);
-  };
-  console.log("sessionId", sessionId);
+  // Store the background watcher ID for cleanup
+  const watcherIdRef = useRef<string | null>(null);
 
-  // Manage screen wake lock based on delivery activity
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-
-    async function manageScreenWakeLock() {
-      try {
-        if (isDelivering && !isHijacked) {
-          await KeepAwake.keepAwake();
-          console.log("Screen wake lock activated: Screen will stay awake.");
-        } else {
-          await KeepAwake.allowSleep();
-          console.log("Screen wake lock released: Screen can now sleep.");
-        }
-      } catch (err) {
-        console.error("Failed to adjust screen wake lock state:", err);
-      }
-    }
-
-    manageScreenWakeLock();
-
-    return () => {
-      if (Capacitor.isNativePlatform()) {
-        KeepAwake.allowSleep().catch((err) =>
-          console.error("Failed to release wake lock on unmount:", err),
-        );
-      }
-    };
-  }, [isDelivering, isHijacked]);
+  const updateGpsState = useCallback(
+    (next: GpsHardwareState) => {
+      setGpsState(next);
+      onGpsStateChange?.(next);
+    },
+    [onGpsStateChange],
+  );
 
   useEffect(() => {
     if (!isDelivering || isHijacked) return;
 
-    // We are delivering and attempting to start GPS tracking.
+    // Only use background geolocation on native platforms
+    if (!Capacitor.isNativePlatform()) return;
+
     updateGpsState("acquiring");
     setError(null);
 
-    let activeWatchId: string | null = null;
+    let cancelled = false;
 
-    async function startNativeTracking() {
+    async function startBackgroundTracking() {
       try {
-        // 1. Request hardware permission dynamically if on a native platform
-        if (Capacitor.isNativePlatform()) {
-          const permissions = await Geolocation.requestPermissions();
-          if (permissions.location !== "granted") {
-            setError(
-              "Location access was denied. Please enable GPS in device settings.",
-            );
-            updateGpsState("error");
-            return;
-          }
-        }
-
-        // 2. Start the native hardware geolocation engine loop
-        activeWatchId = await Geolocation.watchPosition(
+        const watcherId = await BackgroundGeolocation.addWatcher(
           {
-            enableHighAccuracy: true,
-            maximumAge: 10000,
-            timeout: 5000,
+            backgroundMessage:
+              "ArogyaDiet is tracking your route for delivery updates.",
+            backgroundTitle: "Active Delivery Route",
+            requestPermissions: true,
+            stale: false,
+            distanceFilter: 10, // Update every 10 meters of movement
           },
-          async (position, geoError) => {
-            if (geoError) {
-              console.error("GPS Native Error:", geoError.message);
+          async (location, bgError) => {
+            if (cancelled) return;
+
+            if (bgError) {
+              console.error("Background Location Error:", bgError);
               updateGpsState("error");
-              setError("Failed to get GPS signal. Please check permissions.");
+              setError(
+                "Location tracking failed. Please check GPS permissions.",
+              );
               return;
             }
 
-            if (!position || isHijacked) return;
+            if (!location) return;
 
             const now = Date.now();
-            // Throttling: If 3000ms haven't passed, ignore this tick
+            // Throttle DB writes: skip if less than 3s since last update
             if (now - lastUpdateTime.current < 3000) {
               return;
             }
             lastUpdateTime.current = now;
 
-            // Hardware is actively providing coordinates.
+            // Hardware is actively providing coordinates
             updateGpsState("active");
 
-            const { latitude, longitude } = position.coords;
+            const { latitude, longitude } = location;
 
-            // 1. THE FIRST PING: The device MUST formally claim the database session
+            // 1. FIRST PING: Claim the database session for this device
             if (!hasClaimedSession.current) {
               const { error: claimError } = await supabase
                 .from("rider_live_locations")
@@ -128,39 +99,43 @@ export function LiveLocationTracker({
                     rider_id: riderId,
                     lat: latitude,
                     lng: longitude,
-                    tracker_session_id: sessionId, // Claim ownership!
+                    tracker_session_id: sessionId,
                     updated_at: new Date().toISOString(),
                   },
                   { onConflict: "rider_id" },
                 );
 
               if (!claimError) {
-                hasClaimedSession.current = true; // Mark as successfully claimed
+                hasClaimedSession.current = true;
               }
-              return; // Done for this ping!
+              return;
             }
 
-            // 2. ALL FUTURE PINGS: Verify we still own it before pushing updates
+            // 2. SUBSEQUENT PINGS: Verify ownership before updating
             const { data: dbCheck } = await supabase
               .from("rider_live_locations")
               .select("tracker_session_id")
               .eq("rider_id", riderId)
               .maybeSingle();
 
-            // If the DB has an ID, and it's NOT ours, someone else logged in and stole it!
+            // If another device has claimed this rider's session, stop tracking
             if (
               dbCheck?.tracker_session_id &&
               dbCheck.tracker_session_id !== sessionId
             ) {
               console.warn("Tracking hijacked by another device!");
-              setIsHijacked(true); // Trigger the red UI
-              if (activeWatchId) {
-                await Geolocation.clearWatch({ id: activeWatchId });
+              setIsHijacked(true);
+              // Remove watcher immediately to stop draining battery
+              if (watcherIdRef.current) {
+                await BackgroundGeolocation.removeWatcher({
+                  id: watcherIdRef.current,
+                });
+                watcherIdRef.current = null;
               }
               return;
             }
 
-            // 3. SAFE TO PROCEED: We still own the session, save the new coordinates
+            // 3. SAFE: We still own the session, push coordinates
             const { error: dbError } = await supabase
               .from("rider_live_locations")
               .upsert(
@@ -179,8 +154,17 @@ export function LiveLocationTracker({
             }
           },
         );
+
+        // Persist the watcher ID so cleanup can kill the foreground service
+        if (!cancelled) {
+          watcherIdRef.current = watcherId;
+        } else {
+          // If cancelled before we could store it, remove immediately
+          await BackgroundGeolocation.removeWatcher({ id: watcherId });
+        }
       } catch (err: unknown) {
-        console.error("Failed to launch tracker engine:", err);
+        if (cancelled) return;
+        console.error("Failed to start background location tracker:", err);
         updateGpsState("error");
         setError(
           err instanceof Error
@@ -190,23 +174,29 @@ export function LiveLocationTracker({
       }
     }
 
-    startNativeTracking();
+    startBackgroundTracking();
 
-    // Cleanup when leaving the page or changing dependencies
+    // Cleanup: remove watcher to kill the foreground service and stop battery drain
     return () => {
-      if (activeWatchId) {
-        Geolocation.clearWatch({ id: activeWatchId });
+      cancelled = true;
+      if (watcherIdRef.current) {
+        BackgroundGeolocation.removeWatcher({ id: watcherIdRef.current }).catch(
+          (err) =>
+            console.error("Failed to remove background watcher on cleanup:", err),
+        );
+        watcherIdRef.current = null;
       }
+      hasClaimedSession.current = false;
       updateGpsState("idle");
     };
-  }, [riderId, isDelivering, isHijacked, sessionId]);
+  }, [riderId, isDelivering, isHijacked, sessionId, supabase, updateGpsState]);
 
   useEffect(() => {
     if (!isDelivering) {
       updateGpsState("idle");
       setError(null);
     }
-  }, [isDelivering]);
+  }, [isDelivering, updateGpsState]);
 
   if (!isDelivering) return null;
   if (!showIndicator) return null;

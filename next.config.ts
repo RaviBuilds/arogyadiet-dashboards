@@ -11,6 +11,14 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  serverExternalPackages: ["@capacitor-community/background-geolocation"],
+  turbopack: {
+    resolveAlias: {
+      // This package is native-only (no JS bundle). Stub it for the web build.
+      // Actual usage is guarded by Capacitor.isNativePlatform() checks.
+      "@capacitor-community/background-geolocation": "./src/lib/capacitor/background-geolocation-stub.ts",
+    },
+  },
 };
 
 export default nextConfig;

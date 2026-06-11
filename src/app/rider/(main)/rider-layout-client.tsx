@@ -23,5 +23,5 @@ export function RiderOneSignal({ userId }: { userId: string | null }) {
 }
 
 export function RiderNotificationBell({ userId }: { userId: string | null }) {
-  return <NotificationBell userId={userId} />;
+  return <NotificationBell userId={userId ?? undefined} />;
 }
