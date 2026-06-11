@@ -227,9 +227,11 @@ export async function generateMonthlyPayment(
     return { error: "Payment summary already exists for this month." };
   }
 
-  const periodStart = `${year}-${String(month).padStart(2, "0")}-01`;
-  const lastDay = new Date(year, month, 0).getDate();
-  const periodEnd = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  // 27th payment cycle: period runs from 27th of previous month to 26th of current month
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  const periodStart = `${prevYear}-${String(prevMonth).padStart(2, "0")}-27`;
+  const periodEnd = `${year}-${String(month).padStart(2, "0")}-26`;
 
   // Get dates already covered by existing custom summaries
   const coveredDates = await getCoveredDates(supabase, riderId, periodStart, periodEnd);
