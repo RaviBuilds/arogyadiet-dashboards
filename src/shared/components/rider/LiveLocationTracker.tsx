@@ -22,7 +22,12 @@ export function LiveLocationTracker({
   const [error, setError] = useState<string | null>(null);
   const [isHijacked, setIsHijacked] = useState(false);
   const [gpsState, setGpsState] = useState<GpsHardwareState>("idle");
-  const supabase = createClient();
+
+  // Stable singleton client for this component instance. createClient() returns a
+  // NEW client object on every call, so creating it in the render body would change
+  // the reference each render and force the tracking effect (which depends on it) to
+  // tear down and re-create the native BackgroundGeolocation watcher on every render.
+  const [supabase] = useState(() => createClient());
 
   // Generates a unique ID for this specific tab/phone session
   const [sessionId] = useState(() => crypto.randomUUID());
@@ -31,16 +36,31 @@ export function LiveLocationTracker({
   const hasClaimedSession = useRef(false);
   const lastUpdateTime = useRef<number>(0);
 
+  // Mirror of gpsState so we can skip redundant state writes from rapid GPS pings.
+  const gpsStateRef = useRef<GpsHardwareState>("idle");
+  // Mirror of error for the same reason — avoids setState-in-effect churn.
+  const errorRef = useRef<string | null>(null);
+
   // Store the background watcher ID for cleanup
   const watcherIdRef = useRef<string | null>(null);
 
   const updateGpsState = useCallback(
     (next: GpsHardwareState) => {
+      // Skip no-op transitions to avoid cascading re-renders (and parent
+      // re-renders via onGpsStateChange) when the GPS keeps reporting "active".
+      if (gpsStateRef.current === next) return;
+      gpsStateRef.current = next;
       setGpsState(next);
       onGpsStateChange?.(next);
     },
     [onGpsStateChange],
   );
+
+  const updateError = useCallback((next: string | null) => {
+    if (errorRef.current === next) return;
+    errorRef.current = next;
+    setError(next);
+  }, []);
 
   useEffect(() => {
     if (!isDelivering || isHijacked) return;
@@ -49,7 +69,7 @@ export function LiveLocationTracker({
     if (!Capacitor.isNativePlatform()) return;
 
     updateGpsState("acquiring");
-    setError(null);
+    updateError(null);
 
     let cancelled = false;
 
@@ -62,7 +82,10 @@ export function LiveLocationTracker({
             backgroundTitle: "Active Delivery Route",
             requestPermissions: true,
             stale: false,
-            distanceFilter: 10, // Update every 10 meters of movement
+            // Only fire after ~25m of real movement. A low filter (e.g. 10m)
+            // floods the Capacitor bridge with micro-movement events that choke
+            // the WebView. 25m keeps live tracking accurate without the churn.
+            distanceFilter: 25,
           },
           async (location, bgError) => {
             if (cancelled) return;
@@ -70,7 +93,7 @@ export function LiveLocationTracker({
             if (bgError) {
               console.error("Background Location Error:", bgError);
               updateGpsState("error");
-              setError(
+              updateError(
                 "Location tracking failed. Please check GPS permissions.",
               );
               return;
@@ -166,7 +189,7 @@ export function LiveLocationTracker({
         if (cancelled) return;
         console.error("Failed to start background location tracker:", err);
         updateGpsState("error");
-        setError(
+        updateError(
           err instanceof Error
             ? err.message
             : "Unknown tracking setup exception",
@@ -189,14 +212,14 @@ export function LiveLocationTracker({
       hasClaimedSession.current = false;
       updateGpsState("idle");
     };
-  }, [riderId, isDelivering, isHijacked, sessionId, supabase, updateGpsState]);
+  }, [riderId, isDelivering, isHijacked, sessionId, supabase, updateGpsState, updateError]);
 
   useEffect(() => {
     if (!isDelivering) {
       updateGpsState("idle");
-      setError(null);
+      updateError(null);
     }
-  }, [isDelivering, updateGpsState]);
+  }, [isDelivering, updateGpsState, updateError]);
 
   if (!isDelivering) return null;
   if (!showIndicator) return null;

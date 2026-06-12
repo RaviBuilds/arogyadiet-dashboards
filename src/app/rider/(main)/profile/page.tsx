@@ -43,7 +43,7 @@ export default async function RiderProfilePage() {
   const riderProfile = Array.isArray(appUser.rider_profiles)
     ? appUser.rider_profiles[0]
     : appUser.rider_profiles;
-console.log("test");
+
   const joinDate = riderProfile?.joining_date
     ? format(parseISO(riderProfile.joining_date), "MMMM do, yyyy")
     : "Unknown";

@@ -28,13 +28,13 @@ export function RiderBottomNav() {
               key={item.name}
               href={item.href}
               className={cn(
-                "flex flex-col items-center justify-center w-16 h-12 transition-all rounded-xl",
+                "flex flex-col items-center justify-center w-16 h-12 transition-colors rounded-xl",
                 isActive ? "text-primary" : "text-zinc-400 hover:text-zinc-600",
               )}
             >
               <div
                 className={cn(
-                  "flex items-center justify-center p-1.5 rounded-full mb-1 transition-all",
+                  "flex items-center justify-center p-1.5 rounded-full mb-1 transition-colors",
                   isActive ? "bg-primary/10" : "bg-transparent",
                 )}
               >
