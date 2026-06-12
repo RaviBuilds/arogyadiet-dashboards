@@ -12,9 +12,29 @@ export const ALLOWED_IMAGE_TYPES = [
   "image/gif",
 ] as const;
 
+export const PURCHASE_ORDER_BUCKET = "purchase-orders";
+export const MAX_PURCHASE_ORDER_SIZE_BYTES = 5_242_880;
+export const ALLOWED_PURCHASE_ORDER_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+] as const;
+
+export const INVENTORY_SOURCE_TYPES = ["FARMER", "VENDOR", "OTHER"] as const;
+
 export type ProductType = (typeof PRODUCT_TYPES)[number];
 export type BaseUom = (typeof BASE_UOMS)[number];
 export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
+export type AllowedPurchaseOrderType =
+  (typeof ALLOWED_PURCHASE_ORDER_TYPES)[number];
+export type InventorySourceType = (typeof INVENTORY_SOURCE_TYPES)[number];
+
+export const INVENTORY_SOURCE_LABELS: Record<InventorySourceType, string> = {
+  FARMER: "Farmer",
+  VENDOR: "Vendor",
+  OTHER: "Other",
+};
 
 export const addProductFormSchema = z.object({
   name: z
@@ -113,12 +133,31 @@ export type InventoryMetrics = {
   expiringLots: ExpiringLotAlert[];
 };
 
-export const receiveStockFormSchema = z.object({
+export const receiveStockBaseSchema = z.object({
   productId: z.string().uuid("Invalid product ID"),
   quantity: z.coerce.number().positive("Quantity must be greater than 0"),
   totalCost: z.coerce.number().min(0, "Total cost must be 0 or greater"),
   expiryDate: z.string().optional(),
+  sourceType: z.enum(INVENTORY_SOURCE_TYPES, {
+    message: "Select a source",
+  }),
+  sourceName: z
+    .string()
+    .max(255, "Source name must be 255 characters or less")
+    .optional(),
 });
+
+export const receiveStockFormSchema = receiveStockBaseSchema.superRefine(
+  (data, ctx) => {
+    if (data.sourceType === "OTHER" && !data.sourceName?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceName"],
+        message: "Enter the source name when 'Other' is selected",
+      });
+    }
+  },
+);
 
 export type ReceiveStockFormValues = z.infer<typeof receiveStockFormSchema>;
 
@@ -126,6 +165,10 @@ export const DISPATCH_STOCK_REASONS = [
   "Kitchen Consumption",
   "Customer Sale",
   "Spoilage / Damage",
+  "Sent to Gachibowli Branch",
+  "Sent to Madhapur Branch",
+  // TODO(franchise): once the franchise model ships, replace the fixed branch
+  // destinations above with dynamic "Sent to <franchise name>" options.
 ] as const;
 
 export type DispatchStockReason = (typeof DISPATCH_STOCK_REASONS)[number];
@@ -140,9 +183,23 @@ export const dispatchStockFormSchema = z.object({
 
 export type DispatchStockFormValues = z.infer<typeof dispatchStockFormSchema>;
 
-export const bulkInboundItemSchema = receiveStockFormSchema.extend({
-  name: z.string().min(1, "Product name is required"),
-});
+export const bulkInboundItemSchema = receiveStockBaseSchema
+  .extend({
+    name: z.string().min(1, "Product name is required"),
+    purchaseOrderPath: z
+      .string()
+      .max(512, "Purchase order path must be 512 characters or less")
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.sourceType === "OTHER" && !data.sourceName?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceName"],
+        message: "Enter the source name when 'Other' is selected",
+      });
+    }
+  });
 
 export const bulkOutboundItemSchema = dispatchStockFormSchema.extend({
   name: z.string().min(1, "Product name is required"),
@@ -162,6 +219,25 @@ export type BulkOutboundItem = z.infer<typeof bulkOutboundItemSchema>;
 export type DispatchInventoryStockResult = {
   totalDispatched: number;
   lotsAffected: number;
+};
+
+export const purchaseOrderExportFiltersSchema = z.object({
+  from: z.string().min(1, "Start date is required"),
+  to: z.string().min(1, "End date is required"),
+  type: z.enum(PRODUCT_TYPES).optional(),
+  productIds: z.array(z.string().uuid("Invalid product ID")).optional(),
+});
+
+export type PurchaseOrderExportFilters = z.infer<
+  typeof purchaseOrderExportFiltersSchema
+>;
+
+export type PurchaseOrderExportFile = {
+  lotId: string;
+  batchNumber: string;
+  productName: string;
+  path: string;
+  receivedAt: string;
 };
 
 export const TRANSACTION_TYPES = [
@@ -392,6 +468,26 @@ export function validateInventoryProductImage(file: File): string | null {
   return null;
 }
 
+export function validatePurchaseOrderFile(file: File): string | null {
+  if (!(file instanceof File) || file.size === 0) {
+    return "Purchase order file is empty.";
+  }
+
+  if (file.size > MAX_PURCHASE_ORDER_SIZE_BYTES) {
+    return "Purchase order file must be 5 MB or smaller.";
+  }
+
+  if (
+    !ALLOWED_PURCHASE_ORDER_TYPES.includes(
+      file.type as AllowedPurchaseOrderType,
+    )
+  ) {
+    return "Purchase order must be JPEG, PNG, WebP, or PDF.";
+  }
+
+  return null;
+}
+
 const addProductFormDataSchema = addProductFormSchema.extend({
   minStockThreshold: z.coerce
     .number()
@@ -458,12 +554,15 @@ type InventoryLotRow = {
 
 export function parseReceiveStockFormData(formData: FormData) {
   const expiryDate = getFormString(formData, "expiryDate");
+  const sourceName = getFormString(formData, "sourceName");
 
   return receiveStockFormSchema.safeParse({
     productId: getFormString(formData, "productId"),
     quantity: getFormString(formData, "quantity"),
     totalCost: getFormString(formData, "totalCost"),
     expiryDate: expiryDate || undefined,
+    sourceType: getFormString(formData, "sourceType"),
+    sourceName: sourceName || undefined,
   });
 }
 

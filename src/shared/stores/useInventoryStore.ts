@@ -1,6 +1,9 @@
 import { create } from "zustand";
 
-import { type DispatchStockReason } from "@/lib/inventory/product-schema";
+import {
+  type DispatchStockReason,
+  type InventorySourceType,
+} from "@/lib/inventory/product-schema";
 
 export type InboundCartItem = {
   id: string;
@@ -9,6 +12,9 @@ export type InboundCartItem = {
   qty: number;
   cost: number;
   expiry?: string;
+  sourceType: InventorySourceType;
+  sourceName?: string;
+  purchaseOrderFile?: File;
 };
 
 export type OutboundCartItem = {

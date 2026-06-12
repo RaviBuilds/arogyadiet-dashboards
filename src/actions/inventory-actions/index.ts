@@ -22,6 +22,7 @@ import {
   revertPendingMfgSchema,
   updateMappingFormSchema,
   validateInventoryProductImage,
+  validatePurchaseOrderFile,
 } from "@/lib/inventory/product-schema";
 import {
   BulkInventoryError,
@@ -41,6 +42,7 @@ import {
   updateInventoryProduct,
   updateManufacturingMapping,
   uploadInventoryProductImage,
+  uploadPurchaseOrderFile,
 } from "@/services/inventoryEngine";
 
 const INVENTORY_PATH = "/admin/inventory";
@@ -211,12 +213,36 @@ export async function receiveStockAction(
     ? startOfDay(parseISO(parsed.data.expiryDate))
     : undefined;
 
+  let purchaseOrderPath: string | undefined;
+  const purchaseOrderFile = formData.get("purchaseOrder");
+  if (purchaseOrderFile instanceof File && purchaseOrderFile.size > 0) {
+    const fileValidationError = validatePurchaseOrderFile(purchaseOrderFile);
+    if (fileValidationError) {
+      return { success: false, error: fileValidationError };
+    }
+
+    try {
+      purchaseOrderPath = await uploadPurchaseOrderFile(purchaseOrderFile);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to upload purchase order.";
+      return { success: false, error: message };
+    }
+  }
+
   try {
     const lot = await receiveInventoryStock(
       parsed.data.productId,
       parsed.data.quantity,
       parsed.data.totalCost,
       customExpiry,
+      {
+        sourceType: parsed.data.sourceType,
+        sourceName: parsed.data.sourceName,
+        purchaseOrderPath,
+      },
     );
     revalidatePath(INVENTORY_PATH);
     return { success: true, lotId: lot.id, batchNumber: lot.batchNumber };
@@ -314,9 +340,21 @@ export async function revertPendingMfgAction(
 }
 
 export async function bulkReceiveAction(
-  items: BulkInboundItem[],
+  formData: FormData,
 ): Promise<BulkReceiveResult> {
-  const parsed = bulkInboundSchema.safeParse(items);
+  const rawItems = formData.get("items");
+  if (typeof rawItems !== "string") {
+    return { success: false, error: "Invalid inbound batch data." };
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(rawItems);
+  } catch {
+    return { success: false, error: "Invalid inbound batch data." };
+  }
+
+  const parsed = bulkInboundSchema.safeParse(parsedJson);
   if (!parsed.success) {
     return {
       success: false,
@@ -324,8 +362,35 @@ export async function bulkReceiveAction(
     };
   }
 
+  const items: BulkInboundItem[] = parsed.data;
+
+  for (let index = 0; index < items.length; index++) {
+    const file = formData.get(`purchaseOrder-${index}`);
+    if (!(file instanceof File) || file.size === 0) {
+      continue;
+    }
+
+    const fileValidationError = validatePurchaseOrderFile(file);
+    if (fileValidationError) {
+      return {
+        success: false,
+        error: `${items[index].name}: ${fileValidationError}`,
+      };
+    }
+
+    try {
+      items[index].purchaseOrderPath = await uploadPurchaseOrderFile(file);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to upload purchase order.";
+      return { success: false, error: `${items[index].name}: ${message}` };
+    }
+  }
+
   try {
-    const result = await processBulkInbound(parsed.data);
+    const result = await processBulkInbound(items);
     revalidatePath(INVENTORY_PATH);
     return {
       success: true,
