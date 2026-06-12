@@ -18,10 +18,22 @@ const NotificationBell = dynamic(
   { ssr: false, loading: () => <div className="w-8 h-8" /> },
 );
 
+const NativeShellProvider = dynamic(
+  () =>
+    import("@/shared/components/rider/NativeShellProvider").then((m) => ({
+      default: m.NativeShellProvider,
+    })),
+  { ssr: false },
+);
+
 export function RiderOneSignal({ userId }: { userId: string | null }) {
   return <OneSignalProvider userId={userId} />;
 }
 
 export function RiderNotificationBell({ userId }: { userId: string | null }) {
   return <NotificationBell userId={userId ?? undefined} />;
+}
+
+export function RiderNativeShell({ children }: { children: React.ReactNode }) {
+  return <NativeShellProvider>{children}</NativeShellProvider>;
 }
