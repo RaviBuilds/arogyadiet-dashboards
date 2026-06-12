@@ -2,7 +2,6 @@
 
 import Script from "next/script";
 import { useEffect, useRef } from "react";
-import { Capacitor } from "@capacitor/core";
 import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -39,8 +38,9 @@ type OneSignalClient = {
 };
 
 /**
- * Type definition for the native OneSignal Cordova/Capacitor plugin.
- * This is injected globally by `onesignal-cordova-plugin` at runtime.
+ * Type for the native OneSignal Cordova/Capacitor plugin.
+ * Injected globally at `window.plugins.OneSignal` by onesignal-cordova-plugin
+ * at runtime inside the native Android shell. Never imported as a module.
  */
 type NativeOneSignalPlugin = {
   initialize: (appId: string) => void;
@@ -85,6 +85,24 @@ const ONESIGNAL_APP_ID = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 const ONESIGNAL_SCRIPT_SRC =
   "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
 
+// ─── Platform Detection (lazy, client-only) ─────────────────────────────────────
+
+/**
+ * Safely checks if we're running inside a Capacitor native shell.
+ * This must ONLY be called client-side (inside useEffect or event handlers).
+ * Returns false during SSR and on Vercel builds.
+ */
+function checkIsNativePlatform(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    // @capacitor/core sets window.Capacitor when loaded in a native shell
+    const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+    return cap?.isNativePlatform?.() ?? false;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Web SDK Helpers ────────────────────────────────────────────────────────────
 
 function registerForegroundRefreshListener(OneSignal: OneSignalClient) {
@@ -103,11 +121,11 @@ function registerForegroundRefreshListener(OneSignal: OneSignalClient) {
 // ─── Native Plugin Initialization ───────────────────────────────────────────────
 
 /**
- * Initializes the native OneSignal Cordova plugin (onesignal-cordova-plugin).
+ * Initializes the native OneSignal plugin via `window.plugins.OneSignal`.
  *
- * This plugin is registered globally at `window.plugins.OneSignal` when the
- * Capacitor app boots. It communicates directly with the native Android SDK
- * and FCM — no service workers or web SDK needed.
+ * This is the Cordova plugin registered globally by onesignal-cordova-plugin
+ * when the Capacitor app boots. It communicates directly with the native
+ * Android SDK and FCM — no service workers or web imports needed.
  */
 function initializeNativeOneSignal(
   appId: string,
@@ -117,18 +135,19 @@ function initializeNativeOneSignal(
 
   if (!nativeOneSignal) {
     console.warn(
-      "Native OneSignal plugin not found. Ensure onesignal-cordova-plugin is installed in rider-mobile-app.",
+      "[OneSignal] Native plugin not available on window.plugins.OneSignal. " +
+        "Ensure onesignal-cordova-plugin is installed in rider-mobile-app.",
     );
     return;
   }
 
-  // Initialize with your OneSignal App ID
+  // Initialize with the OneSignal App ID
   nativeOneSignal.initialize(appId);
 
-  // Request push notification permission (Android 13+ will show system dialog)
+  // Prompt for push notification permission (Android 13+ system dialog)
   nativeOneSignal.Notifications.requestPermission(true);
 
-  // Listen for incoming notifications while app is in foreground
+  // Listen for foreground notifications to refresh the in-app bell
   nativeOneSignal.Notifications.addEventListener(
     "foregroundWillDisplay",
     () => {
@@ -143,9 +162,12 @@ function initializeNativeOneSignal(
 }
 
 /**
- * Syncs user identity with the native OneSignal plugin.
+ * Syncs user identity with the native OneSignal plugin on re-renders.
  */
-function syncNativeUser(userId: string | null, prevUserId: string | null): void {
+function syncNativeUser(
+  userId: string | null,
+  prevUserId: string | null,
+): void {
   const nativeOneSignal = window.plugins?.OneSignal;
   if (!nativeOneSignal) return;
 
@@ -161,29 +183,33 @@ function syncNativeUser(userId: string | null, prevUserId: string | null): void 
 export function OneSignalProvider({ userId }: { userId: string | null }) {
   const initStartedRef = useRef(false);
   const lastUserIdRef = useRef<string | null>(null);
-  const isNative = Capacitor.isNativePlatform();
+  const isNativeRef = useRef<boolean | null>(null);
 
-  // ─── Native Platform Path ───────────────────────────────────────────────────
+  // ─── Unified initialization (runs client-side only) ─────────────────────────
   useEffect(() => {
-    if (!isNative) return;
     if (!ONESIGNAL_APP_ID || typeof window === "undefined") return;
 
-    if (!initStartedRef.current) {
-      initStartedRef.current = true;
-      initializeNativeOneSignal(ONESIGNAL_APP_ID, userId);
-      lastUserIdRef.current = userId;
-    } else {
-      // Subsequent renders — just sync the user identity
-      syncNativeUser(userId, lastUserIdRef.current);
-      lastUserIdRef.current = userId;
+    // Lazily detect platform once on first mount
+    if (isNativeRef.current === null) {
+      isNativeRef.current = checkIsNativePlatform();
     }
-  }, [isNative, userId]);
 
-  // ─── Web Platform Path ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (isNative) return; // Skip web SDK on native
-    if (!ONESIGNAL_APP_ID || typeof window === "undefined") return;
+    const isNative = isNativeRef.current;
 
+    // ── Native Path ─────────────────────────────────────────────────────────
+    if (isNative) {
+      if (!initStartedRef.current) {
+        initStartedRef.current = true;
+        initializeNativeOneSignal(ONESIGNAL_APP_ID, userId);
+        lastUserIdRef.current = userId;
+      } else {
+        syncNativeUser(userId, lastUserIdRef.current);
+        lastUserIdRef.current = userId;
+      }
+      return;
+    }
+
+    // ── Web Path ────────────────────────────────────────────────────────────
     const syncUser = async (OneSignal: OneSignalClient) => {
       try {
         if (userId) {
@@ -255,12 +281,14 @@ export function OneSignalProvider({ userId }: { userId: string | null }) {
     } catch (error) {
       console.warn("OneSignal initialization failed:", error);
     }
-  }, [isNative, userId]);
+  }, [userId]);
 
   // ─── Cleanup on Unmount ─────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       if (!lastUserIdRef.current) return;
+
+      const isNative = isNativeRef.current;
 
       if (isNative) {
         window.plugins?.OneSignal?.logout();
@@ -272,14 +300,18 @@ export function OneSignalProvider({ userId }: { userId: string | null }) {
 
       lastUserIdRef.current = null;
     };
-  }, [isNative]);
+  }, []);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
-  // On native, no web SDK script needed — the Cordova plugin is the SDK
-  if (!ONESIGNAL_APP_ID || isNative) {
+  if (!ONESIGNAL_APP_ID) {
     return null;
   }
 
+  // On native, the Cordova plugin IS the SDK — no script tag needed.
+  // We still render the script tag unconditionally on the server/initial render
+  // since we can't know the platform at SSR time. On native, the script will
+  // simply fail to load (no network needed) and we use window.plugins instead.
+  // This is harmless and avoids hydration mismatches.
   return <Script src={ONESIGNAL_SCRIPT_SRC} strategy="afterInteractive" defer />;
 }
