@@ -1,0 +1,26 @@
+{
+  "appId": "com.arogyadiet.rider",
+  "appName": "ArogyaDiet Rider",
+  "webDir": "out",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "BackgroundGeolocation": {
+      "backgroundMessage": "ArogyaDiet is tracking your route for delivery updates.",
+      "backgroundTitle": "Active Delivery Route"
+    },
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#18181b",
+      "showSpinner": false
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#fafafa"
+  }
+}

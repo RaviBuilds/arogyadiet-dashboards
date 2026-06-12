@@ -9,6 +9,7 @@ import { setRiderOnlineAction } from "@/actions/rider-actions/shiftActions";
 import { BackgroundGeolocation } from "@capacitor-community/background-geolocation";
 import { Capacitor } from "@capacitor/core";
 import { createClient } from "@/lib/supabase/client";
+import { enableKeepAwake, disableKeepAwake } from "@/lib/capacitor/keep-awake";
 
 type RiderStatusToggleProps = {
   initialStatus: boolean;
@@ -96,8 +97,10 @@ export function RiderStatusToggle({
         // Toggle succeeded — manage background geolocation
         if (checked) {
           await startBackgroundTracking();
+          await enableKeepAwake();
         } else {
           await stopBackgroundTracking();
+          await disableKeepAwake();
         }
         router.refresh();
       }
