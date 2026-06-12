@@ -13,9 +13,12 @@ export function RouteGpsIndicator({
   riderId: string;
   isActive: boolean;
 }) {
-  if (!isActive) return null;
-
+  // Hooks must run unconditionally and in the same order on every render.
+  // Previously useState was declared AFTER an early `return null`, which is a
+  // Rules-of-Hooks violation that throws/desyncs hook state whenever isActive flips.
   const [gpsState, setGpsState] = useState<GpsHardwareState>("acquiring");
+
+  if (!isActive) return null;
 
   return (
     <div className="flex items-center gap-2">

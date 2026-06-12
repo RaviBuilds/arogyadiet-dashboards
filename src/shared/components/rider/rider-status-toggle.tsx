@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useRef, useCallback } from "react";
+import { useState, useTransition, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Switch } from "@/shared/components/ui/switch";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,8 @@ export function RiderStatusToggle({
 
   // Background geolocation watcher reference
   const watcherIdRef = useRef<string | null>(null);
+  // Throttle DB writes so a fast GPS stream can't hammer Supabase / the WebView.
+  const lastWriteRef = useRef<number>(0);
 
   const startBackgroundTracking = useCallback(async () => {
     if (!Capacitor.isNativePlatform()) return;
@@ -40,7 +42,9 @@ export function RiderStatusToggle({
           backgroundTitle: "Active Delivery Route",
           requestPermissions: true,
           stale: false,
-          distanceFilter: 10, // Update every 10 meters
+          // ~25m movement threshold (was 10m). A tighter filter spams the
+          // bridge with micro-movements and degrades WebView frame rates.
+          distanceFilter: 25,
         },
         async (location, error) => {
           if (error) {
@@ -49,6 +53,12 @@ export function RiderStatusToggle({
           }
 
           if (location) {
+            // Throttle DB writes: at most one every 3s regardless of how
+            // frequently the plugin reports new coordinates.
+            const now = Date.now();
+            if (now - lastWriteRef.current < 3000) return;
+            lastWriteRef.current = now;
+
             const { latitude, longitude } = location;
             await supabase.from("rider_live_locations").upsert(
               {
@@ -80,6 +90,22 @@ export function RiderStatusToggle({
       }
       watcherIdRef.current = null;
     }
+  }, []);
+
+  // Safety net: if this component unmounts while still on duty (e.g. the rider
+  // navigates away), remove the native watcher so the foreground service and
+  // its location stream don't leak and keep draining battery / firing events.
+  useEffect(() => {
+    return () => {
+      if (watcherIdRef.current) {
+        BackgroundGeolocation.removeWatcher({
+          id: watcherIdRef.current,
+        }).catch((err) =>
+          console.error("Failed to remove watcher on unmount:", err),
+        );
+        watcherIdRef.current = null;
+      }
+    };
   }, []);
 
   const handleToggle = (checked: boolean) => {
