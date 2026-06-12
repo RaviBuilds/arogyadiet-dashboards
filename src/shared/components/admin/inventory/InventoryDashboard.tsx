@@ -20,6 +20,7 @@ import type {
   ProductType,
 } from "@/lib/inventory/product-schema";
 import { cn } from "@/lib/utils";
+import DownloadPurchaseOrdersModal from "@/shared/components/admin/inventory/modals/DownloadPurchaseOrdersModal";
 import ProductCard from "@/shared/components/admin/inventory/ProductCard";
 import RegisterProductSheet from "@/shared/components/admin/inventory/RegisterProductSheet";
 import { Input } from "@/shared/components/ui/input";
@@ -131,8 +132,9 @@ export default function InventoryDashboard({
             Browse the master catalog and register new raw materials or finished
             goods.
           </p>
-          <div className="mt-2 sm:mt-3 [&_button]:h-8 [&_button]:px-2.5 [&_button]:text-xs sm:[&_button]:h-9 sm:[&_button]:px-3 sm:[&_button]:text-sm">
+          <div className="mt-2 flex flex-wrap items-center gap-2 sm:mt-3 [&_button]:h-8 [&_button]:px-2.5 [&_button]:text-xs sm:[&_button]:h-9 sm:[&_button]:px-3 sm:[&_button]:text-sm">
             <RegisterProductSheet />
+            <DownloadPurchaseOrdersModal products={initialProducts} />
           </div>
         </div>
         <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-2/5 sm:block md:w-1/2">

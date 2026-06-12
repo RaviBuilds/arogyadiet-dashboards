@@ -1,9 +1,11 @@
-import { addDays, parseISO, startOfDay } from "date-fns";
+import { addDays, format, parseISO, startOfDay } from "date-fns";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   INVENTORY_PRODUCT_BUCKET,
+  PURCHASE_ORDER_BUCKET,
   validateInventoryProductImage,
+  validatePurchaseOrderFile,
   type ActiveRawMaterialLot,
   type AddProductInput,
   type BulkInboundItem,
@@ -16,12 +18,15 @@ import {
   type InventoryLot,
   type InventoryMetrics,
   type InventoryProduct,
+  type InventorySourceType,
   type ManufacturingBatch,
   type ManufacturingOrder,
   type ManufacturingProductMapping,
   type ManufacturingProductMappingRow,
   type MultiDispatchFormValues,
   type ProcessManufacturingOutputResult,
+  type PurchaseOrderExportFile,
+  type PurchaseOrderExportFilters,
   type RevertPendingManufacturingResult,
   type TransactionLedgerEntry,
   type UpdateInventoryProductInput,
@@ -53,6 +58,44 @@ export async function uploadInventoryProductImage(file: File): Promise<string> {
   }
 
   return data.path;
+}
+
+export async function uploadPurchaseOrderFile(file: File): Promise<string> {
+  const validationError = validatePurchaseOrderFile(file);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const supabase = createAdminClient();
+  const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const datePrefix = format(new Date(), "yyyy/MM/dd");
+  const path = `${datePrefix}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+
+  const { data, error } = await supabase.storage
+    .from(PURCHASE_ORDER_BUCKET)
+    .upload(path, file, { cacheControl: "3600", upsert: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.path;
+}
+
+export async function downloadPurchaseOrderFile(
+  path: string,
+): Promise<Uint8Array> {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase.storage
+    .from(PURCHASE_ORDER_BUCKET)
+    .download(path);
+
+  if (error || !data) {
+    throw new Error(error?.message ?? `Failed to download ${path}.`);
+  }
+
+  return new Uint8Array(await data.arrayBuffer());
 }
 
 export async function createInventoryProduct(
@@ -370,11 +413,18 @@ async function resolveExpiryDate(
   return addDays(new Date(), product.default_durability_days);
 }
 
+export type ReceiveStockSourceInfo = {
+  sourceType: InventorySourceType;
+  sourceName?: string;
+  purchaseOrderPath?: string;
+};
+
 export async function receiveInventoryStock(
   productId: string,
   quantity: number,
   totalCost: number,
   customExpiry?: Date,
+  source?: ReceiveStockSourceInfo,
 ): Promise<InventoryLot> {
   const supabase = createAdminClient();
   const unitCost = totalCost / quantity;
@@ -390,6 +440,12 @@ export async function receiveInventoryStock(
       unit_cost: unitCost,
       expiry_date: expiryDate.toISOString(),
       status: "ACTIVE",
+      source_type: source?.sourceType ?? null,
+      source_name:
+        source?.sourceType === "OTHER"
+          ? source.sourceName?.trim() || null
+          : null,
+      purchase_order_path: source?.purchaseOrderPath ?? null,
     })
     .select(
       "id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status, created_at",
@@ -568,6 +624,11 @@ export async function processBulkInbound(
         item.quantity,
         item.totalCost,
         customExpiry,
+        {
+          sourceType: item.sourceType,
+          sourceName: item.sourceName,
+          purchaseOrderPath: item.purchaseOrderPath,
+        },
       );
       batchNumbers.push(lot.batchNumber);
     } catch (err: unknown) {
@@ -608,6 +669,61 @@ export async function processBulkOutbound(
   }
 
   return { processed: items.length, totalDispatched };
+}
+
+type PurchaseOrderExportRow = {
+  id: string;
+  batch_number: string;
+  purchase_order_path: string;
+  created_at: string;
+  product_id: string;
+  inventory_products: { name: string } | { name: string }[];
+};
+
+export async function getPurchaseOrderFilesForExport(
+  filters: PurchaseOrderExportFilters,
+): Promise<PurchaseOrderExportFile[]> {
+  const supabase = createAdminClient();
+  const fromDate = startOfDay(parseISO(filters.from));
+  const toDateExclusive = addDays(startOfDay(parseISO(filters.to)), 1);
+
+  let query = supabase
+    .from("inventory_lots")
+    .select(
+      "id, batch_number, purchase_order_path, created_at, product_id, inventory_products!inner(name, type)",
+    )
+    .not("purchase_order_path", "is", null)
+    .gte("created_at", fromDate.toISOString())
+    .lt("created_at", toDateExclusive.toISOString())
+    .order("created_at", { ascending: true });
+
+  if (filters.type) {
+    query = query.eq("inventory_products.type", filters.type);
+  }
+
+  if (filters.productIds && filters.productIds.length > 0) {
+    query = query.in("product_id", filters.productIds);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data ?? []) as PurchaseOrderExportRow[]).map((row) => {
+    const product = Array.isArray(row.inventory_products)
+      ? row.inventory_products[0]
+      : row.inventory_products;
+
+    return {
+      lotId: row.id,
+      batchNumber: row.batch_number,
+      productName: product?.name ?? "Unknown product",
+      path: row.purchase_order_path,
+      receivedAt: row.created_at,
+    };
+  });
 }
 
 export async function getActiveRawMaterialLots(): Promise<ActiveRawMaterialLot[]> {
