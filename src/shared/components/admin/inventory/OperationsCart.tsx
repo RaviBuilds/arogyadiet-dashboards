@@ -9,6 +9,7 @@ import {
   bulkDispatchAction,
   bulkReceiveAction,
 } from "@/actions/inventory-actions";
+import { INVENTORY_SOURCE_LABELS } from "@/lib/inventory/product-schema";
 import { Button } from "@/shared/components/ui/button";
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
 import {
@@ -106,17 +107,26 @@ export default function OperationsCart() {
     }
 
     startInboundTransition(async () => {
+      const formData = new FormData();
       const payload = inboundCart.map(
-        ({ productId, name, qty, cost, expiry }) => ({
+        ({ productId, name, qty, cost, expiry, sourceType, sourceName }) => ({
           productId,
           name,
           quantity: qty,
           totalCost: cost,
           expiryDate: expiry,
+          sourceType,
+          sourceName,
         }),
       );
+      formData.append("items", JSON.stringify(payload));
+      inboundCart.forEach((item, index) => {
+        if (item.purchaseOrderFile) {
+          formData.append(`purchaseOrder-${index}`, item.purchaseOrderFile);
+        }
+      });
 
-      const result = await bulkReceiveAction(payload);
+      const result = await bulkReceiveAction(formData);
 
       if (result.success) {
         toast.success(
@@ -220,7 +230,7 @@ export default function OperationsCart() {
                         <StagingCartItem
                           key={item.id}
                           name={item.name}
-                          details={`Qty: ${item.qty} · Cost: ₹${item.cost.toLocaleString("en-IN")}${item.expiry ? ` · Exp: ${item.expiry}` : ""}`}
+                          details={`Qty: ${item.qty} · Cost: ₹${item.cost.toLocaleString("en-IN")}${item.expiry ? ` · Exp: ${item.expiry}` : ""} · Src: ${item.sourceType === "OTHER" && item.sourceName ? item.sourceName : INVENTORY_SOURCE_LABELS[item.sourceType]}${item.purchaseOrderFile ? " · PO attached" : ""}`}
                           onRemove={() => removeInboundItem(item.id)}
                         />
                       ))}
