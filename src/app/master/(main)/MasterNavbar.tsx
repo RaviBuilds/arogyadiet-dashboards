@@ -16,7 +16,7 @@ import {
   TrendingUp,
   Truck,
   ChefHat,
-  ShoppingBag,
+  Boxes,
   FileBarChart,
   Settings,
 } from "lucide-react";
@@ -51,7 +51,7 @@ const NAV_ITEMS = [
   { href: "/growth", label: "Growth & Subs", icon: TrendingUp },
   { href: "/logistics", label: "Logistics", icon: Truck },
   { href: "/kitchen-ops", label: "Kitchen Ops", icon: ChefHat },
-  { href: "/commerce", label: "Commerce & Inventory", icon: ShoppingBag },
+  { href: "/inventory", label: "Inventory BI", icon: Boxes },
   { href: "/reports", label: "Report Engine", icon: FileBarChart },
   { href: "/system", label: "System", icon: Settings },
 ];
