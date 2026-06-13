@@ -155,3 +155,182 @@ export interface ReportResult {
   totalRecords: number;
   generatedAt: string;
 }
+
+// ─── Inventory Intelligence (Master BI) ────────
+
+export type InventoryProductType = "RAW_MATERIAL" | "FINISHED_GOOD";
+
+export type InventoryStockStatus =
+  | "HEALTHY"
+  | "LOW_STOCK"
+  | "OUT_OF_STOCK"
+  | "EXPIRING"
+  | "EXPIRED";
+
+export interface InventoryKPISummary {
+  totalWarehouseValue: number;
+  rawMaterialValue: number;
+  finishedGoodValue: number;
+  totalUniqueItems: number;
+  activeLots: number;
+  totalQuantity: number;
+  lowStockCount: number;
+  expiringSoonCount: number;
+  expiredValue: number;
+  manufacturingYieldPercent: number;
+}
+
+export interface InventoryCategoryValue {
+  category: string;
+  value: number;
+  quantity: number;
+  itemCount: number;
+}
+
+export interface InventoryTypeValue {
+  type: InventoryProductType;
+  label: string;
+  value: number;
+  quantity: number;
+}
+
+export interface ExpiryRiskBucket {
+  bucket: string;
+  order: number;
+  lots: number;
+  value: number;
+  quantity: number;
+}
+
+export interface InventorySourceValue {
+  source: string;
+  label: string;
+  value: number;
+  lots: number;
+}
+
+export interface TopInventoryProduct {
+  productId: string;
+  name: string;
+  category: string;
+  type: InventoryProductType;
+  value: number;
+  quantity: number;
+  baseUom: string;
+}
+
+export interface InventoryProductRow {
+  productId: string;
+  name: string;
+  category: string;
+  type: InventoryProductType;
+  baseUom: string;
+  totalQuantity: number;
+  totalValue: number;
+  avgUnitCost: number;
+  activeLots: number;
+  minStockThreshold: number;
+  nearestExpiry: string | null;
+  status: InventoryStockStatus;
+}
+
+export interface InventoryLowStockDetail {
+  productId: string;
+  productName: string;
+  category: string;
+  totalQuantity: number;
+  minStockThreshold: number;
+  baseUom: string;
+  shortfall: number;
+}
+
+export interface InventoryExpiringDetail {
+  lotId: string;
+  productName: string;
+  category: string;
+  batchNumber: string;
+  quantityRemaining: number;
+  value: number;
+  expiryDate: string;
+  daysToExpiry: number;
+}
+
+export interface InventoryAnalyticsSnapshot {
+  kpis: InventoryKPISummary;
+  categoryValues: InventoryCategoryValue[];
+  typeValues: InventoryTypeValue[];
+  expiryBuckets: ExpiryRiskBucket[];
+  sourceValues: InventorySourceValue[];
+  topProducts: TopInventoryProduct[];
+  products: InventoryProductRow[];
+  lowStock: InventoryLowStockDetail[];
+  expiring: InventoryExpiringDetail[];
+  categories: string[];
+  generatedAt: string;
+}
+
+export interface InventoryMovementPoint {
+  period: string;
+  inboundValue: number;
+  outboundValue: number;
+  manufacturingValue: number;
+  netValue: number;
+  cumulativeNetValue: number;
+}
+
+// ─── Shop Products (Browse Shop catalog) ───────
+
+export type ShopProductStatus = "ACTIVE" | "OUT_OF_STOCK" | "INACTIVE";
+
+export interface ShopProductRow {
+  id: string;
+  sku: string | null;
+  name: string;
+  category: string;
+  imageUrl: string | null;
+  stockQuantity: number;
+  originalPrice: number;
+  salePrice: number | null;
+  effectivePrice: number;
+  discountPercent: number;
+  inventoryValue: number;
+  potentialRevenue: number;
+  isActive: boolean;
+  inStock: boolean;
+  isFeatured: boolean;
+  status: ShopProductStatus;
+}
+
+export interface ShopCategoryValue {
+  category: string;
+  productCount: number;
+  inventoryValue: number;
+  stockUnits: number;
+}
+
+export interface ShopStockStatusSlice {
+  status: string;
+  label: string;
+  count: number;
+}
+
+export interface ShopProductsKPIs {
+  totalProducts: number;
+  activeProducts: number;
+  outOfStockCount: number;
+  inactiveCount: number;
+  inventoryValue: number;
+  inventoryValueAtMrp: number;
+  onSaleCount: number;
+  featuredCount: number;
+  totalStockUnits: number;
+}
+
+export interface ShopProductsAnalytics {
+  kpis: ShopProductsKPIs;
+  products: ShopProductRow[];
+  categoryValues: ShopCategoryValue[];
+  stockStatus: ShopStockStatusSlice[];
+  categories: string[];
+  generatedAt: string;
+}
