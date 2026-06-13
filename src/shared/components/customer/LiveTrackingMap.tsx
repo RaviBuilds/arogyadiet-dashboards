@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GoogleMap,
   useJsApiLoader,
@@ -17,28 +17,19 @@ const containerStyle = {
   borderRadius: "1rem",
 };
 
+const MAP_OPTIONS: google.maps.MapOptions = {
+  disableDefaultUI: true,
+  zoomControl: true,
+  styles: [
+    {
+      featureType: "poi",
+      elementType: "labels",
+      stylers: [{ visibility: "off" }],
+    },
+  ],
+};
+
 type RiderCoords = { lat: number; lng: number };
-
-function extractCoordsFromRealtimePayload(
-  payload: unknown,
-): RiderCoords | null {
-  // Supabase `postgres_changes` payload puts the updated row in `payload.new`.
-  const newData = (payload as { new?: unknown } | null | undefined)?.new as
-    | Record<string, unknown>
-    | null
-    | undefined;
-
-  const rawLat = newData?.lat;
-  const rawLng = newData?.lng;
-
-  if (rawLat == null || rawLng == null) return null;
-
-  const lat = Number(rawLat);
-  const lng = Number(rawLng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-  return { lat, lng };
-}
 
 export function LiveTrackingMap({
   riderId,
@@ -53,54 +44,55 @@ export function LiveTrackingMap({
   customerLng?: number;
   onEtaChange?: (etaText: string | null) => void;
 }) {
-  const supabase = createClient();
-  const [riderLocation, setRiderLocation] = useState<{
-    lat: number;
-    lng: number;
-  } | null>(null);
+  // Stable Supabase client — created once and reused across renders.
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
-  const [initialCenter] = useState(
-    customerLat && customerLng
-      ? { lat: customerLat, lng: customerLng }
-      : { lat: 17.385, lng: 78.4867 },
-  );
-
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const [riderLocation, setRiderLocation] = useState<RiderCoords | null>(null);
   const [directionsResponse, setDirectionsResponse] =
     useState<google.maps.DirectionsResult | null>(null);
+
+  // Track whether we've already fetched directions so we never re-fetch.
+  const directionsFetchedRef = useRef(false);
+
+  const initialCenter = useMemo(
+    () =>
+      customerLat && customerLng
+        ? { lat: customerLat, lng: customerLng }
+        : { lat: 17.385, lng: 78.4867 },
+    [customerLat, customerLng],
+  );
 
   const { isLoaded } = useJsApiLoader({
     id: "google-map-script",
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY as string,
   });
 
-  // Fetch and refresh driving route whenever rider location updates.
+  const canTrack =
+    orderStatus === "OUT_FOR_DELIVERY" ||
+    orderStatus === "REACHING_TO_LOCATION";
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // DIRECTIONS: Fetch the route polyline ONCE (rider → customer).
+  // This effect only fires when we first have both:
+  //   1. A valid riderLocation (initial fetch from DB)
+  //   2. The Maps JS SDK loaded
+  // It will NOT re-fire on subsequent riderLocation updates because of the
+  // directionsFetchedRef guard.
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const notifyEta = (eta: string | null) => onEtaChange?.(eta);
-
-    const canTrack =
-      orderStatus === "OUT_FOR_DELIVERY" ||
-      orderStatus === "REACHING_TO_LOCATION";
-
-    if (!canTrack) {
-      notifyEta(null);
-      return;
-    }
-
-    if (!isLoaded) return;
-
-    if (customerLat == null || customerLng == null) {
-      notifyEta(null);
-      return;
-    }
-
-    // DirectionsService must not run until rider origin is present.
+    // Already fetched — never re-fetch.
+    if (directionsFetchedRef.current) return;
+    if (!isLoaded || !canTrack) return;
+    if (customerLat == null || customerLng == null) return;
     if (!riderLocation) return;
 
     let cancelled = false;
+    directionsFetchedRef.current = true;
 
     const fetchDirections = async () => {
       try {
-        // CRITICAL: Coerce all coordinates to strict numbers (stringified decimals can silently fail).
         const originCoords = {
           lat: Number(riderLocation.lat),
           lng: Number(riderLocation.lng),
@@ -110,7 +102,6 @@ export function LiveTrackingMap({
           lng: Number(customerLng),
         };
 
-        // If coercion produced NaN, abort this attempt.
         if (
           Number.isNaN(originCoords.lat) ||
           Number.isNaN(originCoords.lng) ||
@@ -119,15 +110,9 @@ export function LiveTrackingMap({
         ) {
           console.warn(
             "[LiveTrackingMap] Directions aborted: NaN coordinates",
-            {
-              originCoords,
-              destCoords,
-              riderLocation,
-              customerLat,
-              customerLng,
-            },
+            { originCoords, destCoords },
           );
-          if (!cancelled) notifyEta(null);
+          onEtaChange?.(null);
           return;
         }
 
@@ -141,13 +126,14 @@ export function LiveTrackingMap({
         if (cancelled) return;
         setDirectionsResponse(response);
 
-        const etaText = response.routes?.[0]?.legs?.[0]?.duration?.text ?? null;
-        notifyEta(etaText);
+        const etaText =
+          response.routes?.[0]?.legs?.[0]?.duration?.text ?? null;
+        onEtaChange?.(etaText);
       } catch (err) {
-        console.error("Directions request failed", err);
+        console.error("[LiveTrackingMap] Directions request failed", err);
         if (cancelled) return;
         setDirectionsResponse(null);
-        notifyEta(null);
+        onEtaChange?.(null);
       }
     };
 
@@ -156,18 +142,24 @@ export function LiveTrackingMap({
     return () => {
       cancelled = true;
     };
-  }, [isLoaded, customerLat, customerLng, orderStatus, riderLocation, onEtaChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
+    // gated by directionsFetchedRef; we only want the first valid riderLocation.
+  }, [isLoaded, canTrack, customerLat, customerLng, riderLocation]);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // REALTIME: Subscribe to rider GPS updates.
+  // Updates ONLY the marker position — never triggers Directions.
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!riderId || !supabase) return;
+    if (!riderId) return;
 
-    // 1. Robust Initial Fetch
+    // 1. Initial fetch
     const fetchInitialLocation = async () => {
       try {
         const { data, error } = await supabase
-          .from('rider_live_locations')
-          .select('lat, lng')
-          .eq('rider_id', riderId)
+          .from("rider_live_locations")
+          .select("lat, lng")
+          .eq("rider_id", riderId)
           .single();
 
         if (error) throw error;
@@ -182,23 +174,26 @@ export function LiveTrackingMap({
 
     fetchInitialLocation();
 
-    // 2. Global Realtime Subscription
+    // 2. Realtime subscription
     const channel = supabase
       .channel(`public:rider_live_locations:rider_id=eq.${riderId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'rider_live_locations',
-          filter: `rider_id=eq.${riderId}`
+          event: "*",
+          schema: "public",
+          table: "rider_live_locations",
+          filter: `rider_id=eq.${riderId}`,
         },
         (payload) => {
-          const newData = payload.new as any;
+          const newData = payload.new as Record<string, unknown> | undefined;
           if (newData && newData.lat && newData.lng) {
-            setRiderLocation({ lat: Number(newData.lat), lng: Number(newData.lng) });
+            setRiderLocation({
+              lat: Number(newData.lat),
+              lng: Number(newData.lng),
+            });
           }
-        }
+        },
       )
       .subscribe();
 
@@ -206,6 +201,25 @@ export function LiveTrackingMap({
       supabase.removeChannel(channel);
     };
   }, [riderId, supabase]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PAN: Smoothly follow rider on the map without re-rendering <GoogleMap>.
+  // ─────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!riderLocation || !mapRef.current) return;
+    mapRef.current.panTo(riderLocation);
+  }, [riderLocation]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // MAP LOAD CALLBACK
+  // ─────────────────────────────────────────────────────────────────────────
+  const handleMapLoad = useCallback((map: google.maps.Map) => {
+    mapRef.current = map;
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
 
   if (!isLoaded) {
     return (
@@ -215,11 +229,7 @@ export function LiveTrackingMap({
     );
   }
 
-  const canShowMap =
-    orderStatus === "OUT_FOR_DELIVERY" ||
-    orderStatus === "REACHING_TO_LOCATION";
-
-  if (!canShowMap) {
+  if (!canTrack) {
     return (
       <div className="p-6 bg-orange-50 border border-orange-100 text-orange-800 rounded-2xl text-center shadow-sm">
         <MapPin className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -246,20 +256,10 @@ export function LiveTrackingMap({
         mapContainerStyle={containerStyle}
         center={initialCenter}
         zoom={15}
-        options={{
-          disableDefaultUI: true,
-          zoomControl: true,
-          styles: [
-            // Optional: Cleans up map clutter for a premium look
-            {
-              featureType: "poi",
-              elementType: "labels",
-              stylers: [{ visibility: "off" }],
-            },
-          ],
-        }}
+        options={MAP_OPTIONS}
+        onLoad={handleMapLoad}
       >
-        {/* Route polyline snapped to the road */}
+        {/* Route polyline — rendered once, never re-fetched */}
         {directionsResponse && (
           <DirectionsRenderer
             directions={directionsResponse}
@@ -275,13 +275,12 @@ export function LiveTrackingMap({
           />
         )}
 
-        {/* Origin marker (Rider) */}
+        {/* Rider marker — updates position in real-time without re-fetching anything */}
         {riderLocation && (
           <Marker
             position={riderLocation}
             title="Rider"
             label={{ text: "🛵", fontSize: "22px" }}
-            // Transparent icon so only the label (emoji) is visible.
             icon={{
               url: "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E",
               scaledSize: new window.google.maps.Size(1, 1),
@@ -289,7 +288,7 @@ export function LiveTrackingMap({
           />
         )}
 
-        {/* Destination marker (Customer) */}
+        {/* Destination marker */}
         {customerLat && customerLng && (
           <Marker
             position={{ lat: customerLat, lng: customerLng }}
