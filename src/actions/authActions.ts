@@ -151,10 +151,19 @@ export async function changePasswordAction(prevState: any, formData: FormData) {
     // Update password
     await updateUserPassword(newPassword);
 
-    // Force logout to ensure security
-    await supabase.auth.signOut();
+    // Security: terminate all OTHER active sessions (other devices) immediately
+    // after the password change. The current device stays signed in. A failure
+    // here is logged but must not break the success response.
+    try {
+      await supabase.auth.signOut({ scope: "others" });
+    } catch (signOutError) {
+      console.error(
+        "Customer password change: failed to revoke other sessions",
+        signOutError,
+      );
+    }
 
-    return { success: "Password updated successfully. Please login with your new password." };
+    return { success: "Password updated successfully. You have been signed out on all other devices." };
   } catch (error: any) {
     console.error("Password change error:", error.message);
     return { error: error.message || "Failed to update password. Please try again." };

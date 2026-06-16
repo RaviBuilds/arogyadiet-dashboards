@@ -118,6 +118,18 @@ export async function changeAdminPasswordAction(
     return { success: false, error: updateError.message };
   }
 
+  // Security: invalidate all OTHER active sessions (other devices) after a
+  // successful password change. The current device remains signed in.
+  // Failures here must not block the success response shown to the user.
+  try {
+    await auth.supabase.auth.signOut({ scope: "others" });
+  } catch (signOutError) {
+    console.error(
+      "Admin password change: failed to revoke other sessions",
+      signOutError,
+    );
+  }
+
   const supabaseAdmin = createAdminClient();
   await supabaseAdmin
     .from("users")
