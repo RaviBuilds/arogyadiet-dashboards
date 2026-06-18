@@ -13,6 +13,7 @@ function escapeCsvValue(value: string): string {
 
 export function exportLedgerToCsv(
   table: Table<TransactionLedgerEntry>,
+  fileName = "audit_ledger.csv",
 ): void {
   const rows = table.getFilteredRowModel().rows;
   if (rows.length === 0) return;
@@ -37,7 +38,7 @@ export function exportLedgerToCsv(
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "audit_ledger.csv";
+  link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
 }

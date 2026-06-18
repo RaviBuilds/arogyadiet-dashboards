@@ -83,6 +83,18 @@ export async function changeRiderPassword(
     // Update password
     await updateUserPassword(newPassword);
 
+    // Security: terminate all OTHER active sessions (other devices) while
+    // keeping the current device signed in. A failure here must not prevent
+    // the user from seeing the success message.
+    try {
+      await supabase.auth.signOut({ scope: "others" });
+    } catch (signOutError) {
+      console.error(
+        "Rider password change: failed to revoke other sessions",
+        signOutError,
+      );
+    }
+
     return {
       success: "Password updated successfully.",
     };

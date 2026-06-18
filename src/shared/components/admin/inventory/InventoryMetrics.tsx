@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import {
   AlertTriangle,
   Clock,
@@ -6,8 +9,15 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type { InventoryMetrics as InventoryMetricsData } from "@/lib/inventory/product-schema";
+import type {
+  InventoryCatalogProduct,
+  InventoryMetrics as InventoryMetricsData,
+} from "@/lib/inventory/product-schema";
+import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import InventoryInsights, {
+  type InsightTab,
+} from "@/shared/components/admin/inventory/InventoryInsights";
 
 function formatINR(amount: number): string {
   return new Intl.NumberFormat("en-IN", {
@@ -23,6 +33,7 @@ function MetricCard({
   iconBg,
   iconColor,
   valueClassName,
+  onClick,
 }: {
   icon: LucideIcon;
   label: string;
@@ -31,9 +42,31 @@ function MetricCard({
   iconBg: string;
   iconColor: string;
   valueClassName?: string;
+  onClick?: () => void;
 }) {
+  const isInteractive = Boolean(onClick);
+
   return (
-    <Card className="border shadow-sm">
+    <Card
+      className={cn(
+        "border shadow-sm transition-all",
+        isInteractive &&
+          "cursor-pointer hover:border-slate-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      )}
+      role={isInteractive ? "button" : undefined}
+      tabIndex={isInteractive ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        isInteractive
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
+    >
       <CardContent className="p-5">
         <div className="flex items-start gap-4">
           <div
@@ -55,6 +88,11 @@ function MetricCard({
                 {subtext}
               </p>
             ) : null}
+            {isInteractive ? (
+              <p className="mt-1.5 text-xs font-medium text-slate-400">
+                Click to view details
+              </p>
+            ) : null}
           </div>
         </div>
       </CardContent>
@@ -64,11 +102,23 @@ function MetricCard({
 
 interface InventoryMetricsProps {
   data: InventoryMetricsData;
+  products: InventoryCatalogProduct[];
 }
 
-export default function InventoryMetrics({ data }: InventoryMetricsProps) {
+export default function InventoryMetrics({
+  data,
+  products,
+}: InventoryMetricsProps) {
+  const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<InsightTab>("ALL");
+
   const lowStockCount = data.lowStockAlerts.length;
   const expiringCount = data.expiringLots.length;
+
+  const openTab = (tab: InsightTab) => {
+    setActiveTab(tab);
+    setOpen(true);
+  };
 
   const lowStockSubtext =
     lowStockCount === 0
@@ -86,39 +136,53 @@ export default function InventoryMetrics({ data }: InventoryMetricsProps) {
     expiringCount === 0 ? "All clear" : "Within 14 days";
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-      <MetricCard
-        icon={IndianRupee}
-        label="Total Warehouse Value"
-        value={`₹${formatINR(data.totalWarehouseValue)}`}
-        iconBg="bg-emerald-50"
-        iconColor="text-emerald-600"
+    <>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <MetricCard
+          icon={IndianRupee}
+          label="Total Warehouse Value"
+          value={`₹${formatINR(data.totalWarehouseValue)}`}
+          iconBg="bg-emerald-50"
+          iconColor="text-emerald-600"
+        />
+        <MetricCard
+          icon={Package}
+          label="Total Unique Items"
+          value={String(data.totalUniqueItems)}
+          iconBg="bg-blue-50"
+          iconColor="text-blue-600"
+          onClick={() => openTab("ALL")}
+        />
+        <MetricCard
+          icon={AlertTriangle}
+          label="Low Stock Alerts"
+          value={String(lowStockCount)}
+          subtext={lowStockSubtext}
+          iconBg="bg-red-50"
+          iconColor="text-destructive"
+          valueClassName={lowStockCount > 0 ? "text-destructive" : undefined}
+          onClick={() => openTab("LOW_STOCK")}
+        />
+        <MetricCard
+          icon={Clock}
+          label="Expiring Soon"
+          value={String(expiringCount)}
+          subtext={expiringSubtext}
+          iconBg="bg-amber-50"
+          iconColor="text-amber-600"
+          valueClassName={expiringCount > 0 ? "text-amber-600" : undefined}
+          onClick={() => openTab("EXPIRING")}
+        />
+      </div>
+
+      <InventoryInsights
+        products={products}
+        metrics={data}
+        open={open}
+        onOpenChange={setOpen}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
-      <MetricCard
-        icon={Package}
-        label="Total Unique Items"
-        value={String(data.totalUniqueItems)}
-        iconBg="bg-blue-50"
-        iconColor="text-blue-600"
-      />
-      <MetricCard
-        icon={AlertTriangle}
-        label="Low Stock Alerts"
-        value={String(lowStockCount)}
-        subtext={lowStockSubtext}
-        iconBg="bg-red-50"
-        iconColor="text-destructive"
-        valueClassName={lowStockCount > 0 ? "text-destructive" : undefined}
-      />
-      <MetricCard
-        icon={Clock}
-        label="Expiring Soon"
-        value={String(expiringCount)}
-        subtext={expiringSubtext}
-        iconBg="bg-amber-50"
-        iconColor="text-amber-600"
-        valueClassName={expiringCount > 0 ? "text-amber-600" : undefined}
-      />
-    </div>
+    </>
   );
 }

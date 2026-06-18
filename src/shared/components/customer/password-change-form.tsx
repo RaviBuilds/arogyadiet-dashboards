@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useActionState } from "react";
 import { Eye, EyeOff, Lock, KeyRound, ShieldAlert } from "lucide-react";
@@ -16,7 +15,6 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export function PasswordChangeForm() {
-  const router = useRouter();
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -50,10 +48,6 @@ export function PasswordChangeForm() {
       } else if (result?.success) {
         toast.success(result.success, { id: "password-change" });
         reset();
-        // Redirect to login after a short delay
-        setTimeout(() => {
-          router.push("/login");
-        }, 2000);
       }
     } catch (error) {
       toast.error("Failed to update password. Please try again.", { id: "password-change" });
@@ -72,7 +66,7 @@ export function PasswordChangeForm() {
           Change Password
         </CardTitle>
         <p className="text-sm text-slate-600">
-          Update your password to keep your account secure. You'll need to login again after changing.
+          Update your password to keep your account secure. You'll stay signed in on this device.
         </p>
       </CardHeader>
       
@@ -209,7 +203,7 @@ export function PasswordChangeForm() {
           <div>
             <p className="font-medium text-amber-800">Security Notice</p>
             <p className="text-amber-700 mt-1">
-              After changing your password, you'll be automatically logged out and redirected to the login page for security purposes.
+              For your security, changing your password will sign you out of all other devices. You'll remain signed in here.
             </p>
           </div>
         </div>
