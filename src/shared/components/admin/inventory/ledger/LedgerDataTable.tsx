@@ -24,6 +24,7 @@ import { type DateRange } from "react-day-picker";
 import {
   TRANSACTION_TYPES,
   type TransactionLedgerEntry,
+  type TransactionType,
 } from "@/lib/inventory/product-schema";
 import { Button } from "@/shared/components/ui/button";
 import {
@@ -55,9 +56,29 @@ import { exportLedgerToCsv } from "./export-ledger-csv";
 
 interface LedgerDataTableProps {
   data: TransactionLedgerEntry[];
+  /** Restrict the transaction-type filter to a specific subset (e.g. a section). */
+  availableTypes?: readonly TransactionType[];
+  /** Title shown in the table card header. */
+  title?: string;
+  /** Description shown in the table card header. */
+  description?: string;
+  /** Message shown when no rows match the current filters. */
+  emptyLabel?: string;
+  /** File name used for the CSV export. */
+  exportFileName?: string;
+  /** Render the in-table date range picker. Disable when filtering upstream. */
+  showDatePicker?: boolean;
 }
 
-export default function LedgerDataTable({ data }: LedgerDataTableProps) {
+export default function LedgerDataTable({
+  data,
+  availableTypes = TRANSACTION_TYPES,
+  title = "Transaction History",
+  description,
+  emptyLabel = "No transactions match your filters.",
+  exportFileName = "audit_ledger.csv",
+  showDatePicker = true,
+}: LedgerDataTableProps) {
   const [sorting, setSorting] = useState<SortingState>([
     { id: "timestamp", desc: true },
   ]);
@@ -108,8 +129,9 @@ export default function LedgerDataTable({ data }: LedgerDataTableProps) {
   return (
     <Card className="border shadow-sm">
       <CardHeader>
-        <CardTitle>Transaction History</CardTitle>
+        <CardTitle>{title}</CardTitle>
         <CardDescription>
+          {description ? `${description} · ` : ""}
           {filteredCount} transaction{filteredCount === 1 ? "" : "s"} shown
           {dateFilteredData.length !== data.length
             ? ` (filtered from ${data.length} loaded)`
@@ -125,45 +147,49 @@ export default function LedgerDataTable({ data }: LedgerDataTableProps) {
             className="max-w-xs"
           />
 
-          <DatePickerWithRange date={dateRange} onDateChange={setDateRange} />
+          {showDatePicker && (
+            <DatePickerWithRange date={dateRange} onDateChange={setDateRange} />
+          )}
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Filter className="h-4 w-4" />
-                Transaction Type
-                {typeFilterValue.length > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    ({typeFilterValue.length})
-                  </span>
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-52">
-              {TRANSACTION_TYPES.map((type) => (
-                <DropdownMenuCheckboxItem
-                  key={type}
-                  checked={typeFilterValue.includes(type)}
-                  onCheckedChange={(checked) => {
-                    const next = checked
-                      ? [...typeFilterValue, type]
-                      : typeFilterValue.filter((value) => value !== type);
-                    table
-                      .getColumn("transactionType")
-                      ?.setFilterValue(next.length ? next : undefined);
-                  }}
-                >
-                  {TRANSACTION_LABELS[type]}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {availableTypes.length > 1 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2">
+                  <Filter className="h-4 w-4" />
+                  Transaction Type
+                  {typeFilterValue.length > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      ({typeFilterValue.length})
+                    </span>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                {availableTypes.map((type) => (
+                  <DropdownMenuCheckboxItem
+                    key={type}
+                    checked={typeFilterValue.includes(type)}
+                    onCheckedChange={(checked) => {
+                      const next = checked
+                        ? [...typeFilterValue, type]
+                        : typeFilterValue.filter((value) => value !== type);
+                      table
+                        .getColumn("transactionType")
+                        ?.setFilterValue(next.length ? next : undefined);
+                    }}
+                  >
+                    {TRANSACTION_LABELS[type]}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           <Button
             variant="outline"
             className="ml-auto gap-2"
             disabled={filteredCount === 0}
-            onClick={() => exportLedgerToCsv(table)}
+            onClick={() => exportLedgerToCsv(table, exportFileName)}
           >
             <Download className="h-4 w-4" />
             Export CSV
@@ -208,7 +234,7 @@ export default function LedgerDataTable({ data }: LedgerDataTableProps) {
                     colSpan={ledgerColumns.length}
                     className="h-24 text-center text-muted-foreground"
                   >
-                    No transactions match your filters.
+                    {emptyLabel}
                   </TableCell>
                 </TableRow>
               )}
