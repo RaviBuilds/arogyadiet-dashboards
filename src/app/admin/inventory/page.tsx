@@ -15,7 +15,7 @@ export default async function WarehouseInventoryPage() {
 
   return (
     <div className="space-y-6 bg-zinc-100 p-6">
-      <InventoryMetrics data={metricsData} />
+      <InventoryMetrics data={metricsData} products={initialProducts} />
       <InventoryDashboard initialProducts={initialProducts} />
     </div>
   );
