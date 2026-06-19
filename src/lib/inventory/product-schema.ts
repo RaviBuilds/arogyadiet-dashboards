@@ -259,6 +259,12 @@ export type TransactionLedgerEntry = {
   baseUom: BaseUom;
   quantityChanged: number;
   financialValueChanged: number;
+  /** Incoming entries only — where the stock came from. */
+  sourceType: InventorySourceType | null;
+  /** Free-text supplier name, captured when sourceType is OTHER. */
+  sourceName: string | null;
+  /** Outgoing entries only — why the stock left (DISPATCH_STOCK_REASONS). */
+  reason: DispatchStockReason | null;
 };
 
 export const MFG_ORDER_STATUSES = ["PENDING", "COMPLETED"] as const;
@@ -706,21 +712,21 @@ export function mapInventoryLotRow(row: InventoryLotRow): InventoryLot {
   };
 }
 
+type TransactionLedgerLotSummary = {
+  batch_number: string;
+  source_type: InventorySourceType | null;
+  source_name: string | null;
+  inventory_products: JoinedProductSummary | JoinedProductSummary[];
+};
+
 type TransactionLedgerRow = {
   id: string;
   transaction_type: TransactionType;
   quantity_changed: string | number;
   financial_value_changed: string | number;
   timestamp: string;
-  inventory_lots:
-    | {
-        batch_number: string;
-        inventory_products: JoinedProductSummary | JoinedProductSummary[];
-      }
-    | {
-        batch_number: string;
-        inventory_products: JoinedProductSummary | JoinedProductSummary[];
-      }[];
+  reason: DispatchStockReason | null;
+  inventory_lots: TransactionLedgerLotSummary | TransactionLedgerLotSummary[];
 };
 
 export function mapTransactionLedgerRow(
@@ -738,6 +744,9 @@ export function mapTransactionLedgerRow(
     baseUom: product.base_uom,
     quantityChanged: Number(row.quantity_changed),
     financialValueChanged: Number(row.financial_value_changed),
+    sourceType: lot.source_type ?? null,
+    sourceName: lot.source_name ?? null,
+    reason: row.reason ?? null,
   };
 }
 

@@ -375,8 +375,11 @@ export async function getTransactionLedger(
       quantity_changed,
       financial_value_changed,
       timestamp,
+      reason,
       inventory_lots!inner (
         batch_number,
+        source_type,
+        source_name,
         inventory_products!inner ( name, base_uom )
       )
     `,
@@ -482,7 +485,7 @@ type LotRollbackState = {
 export async function dispatchInventoryStock(
   productId: string,
   quantityToDispatch: number,
-  _reason: DispatchStockReason,
+  reason: DispatchStockReason,
 ): Promise<DispatchInventoryStockResult> {
   const supabase = createAdminClient();
 
@@ -571,6 +574,7 @@ export async function dispatchInventoryStock(
         transaction_type: "OUT",
         quantity_changed: -deduct,
         financial_value_changed: -(deduct * unitCost),
+        reason,
       })
       .select("id")
       .single();

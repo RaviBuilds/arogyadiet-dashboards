@@ -5,6 +5,7 @@ import { format, parseISO } from "date-fns";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import {
+  INVENTORY_SOURCE_LABELS,
   type BaseUom,
   type TransactionLedgerEntry,
   type TransactionType,
@@ -43,6 +44,65 @@ export const multiSelectFilterFn: FilterFn<TransactionLedgerEntry> = (
   if (!values || values.length === 0) return true;
   return values.includes(row.getValue(columnId) as string);
 };
+
+/**
+ * Canonical filterable value for the Source / Destination column.
+ * - Incoming (IN): the supplier source label (Farmer / Vendor / Other)
+ * - Outgoing (OUT): the dispatch reason / destination
+ * - Manufacturing / other: empty (no source-or-destination concept)
+ *
+ * Kept canonical (not the custom "Other" name) so a single "Other" filter
+ * matches every "Other" supplier regardless of the free-text name entered.
+ */
+export function getLedgerCategoryValue(entry: TransactionLedgerEntry): string {
+  if (entry.transactionType === "IN") {
+    return entry.sourceType ? INVENTORY_SOURCE_LABELS[entry.sourceType] : "";
+  }
+  if (entry.transactionType === "OUT") {
+    return entry.reason ?? "";
+  }
+  return "";
+}
+
+const SOURCE_BADGE_STYLES = "border-emerald-200 bg-emerald-50 text-emerald-700";
+const DESTINATION_BADGE_STYLES = "border-rose-200 bg-rose-50 text-rose-700";
+
+function SourceOrDestinationCell({
+  entry,
+}: {
+  entry: TransactionLedgerEntry;
+}) {
+  if (entry.transactionType === "IN") {
+    if (!entry.sourceType) {
+      return <span className="text-sm text-muted-foreground">—</span>;
+    }
+    const isOther = entry.sourceType === "OTHER";
+    const customName = entry.sourceName?.trim();
+    return (
+      <div className="flex flex-col gap-0.5">
+        <Badge variant="outline" className={SOURCE_BADGE_STYLES}>
+          {INVENTORY_SOURCE_LABELS[entry.sourceType]}
+        </Badge>
+        {isOther && customName ? (
+          <span className="text-xs text-muted-foreground">{customName}</span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (entry.transactionType === "OUT") {
+    if (!entry.reason) {
+      return <span className="text-sm text-muted-foreground">—</span>;
+    }
+    return (
+      <Badge variant="outline" className={DESTINATION_BADGE_STYLES}>
+        {entry.reason}
+      </Badge>
+    );
+  }
+
+  return <span className="text-sm text-muted-foreground">—</span>;
+}
 
 function formatQuantity(value: number, baseUom: BaseUom): string {
   const sign = value > 0 ? "+" : value < 0 ? "-" : "";
@@ -95,11 +155,20 @@ function TransactionTypeBadge({ type }: { type: TransactionType }) {
 }
 
 export function formatLedgerRowForExport(entry: TransactionLedgerEntry) {
+  const category = getLedgerCategoryValue(entry);
+  const sourceOrDestination =
+    entry.transactionType === "IN" &&
+    entry.sourceType === "OTHER" &&
+    entry.sourceName?.trim()
+      ? `${category} (${entry.sourceName.trim()})`
+      : category;
+
   return {
     Date: format(parseISO(entry.timestamp), "dd MMM yyyy, hh:mm a"),
     Type: TRANSACTION_LABELS[entry.transactionType],
     Product: entry.productName,
     Batch: entry.batchNumber,
+    "Source / Destination": sourceOrDestination || "—",
     Quantity: formatQuantity(entry.quantityChanged, entry.baseUom),
     "Financial Impact": formatFinancialImpact(entry.financialValueChanged),
   };
@@ -142,6 +211,19 @@ export const ledgerColumns: ColumnDef<TransactionLedgerEntry>[] = [
         </p>
       </div>
     ),
+    enableSorting: false,
+  },
+  {
+    id: "sourceOrDestination",
+    accessorFn: (row) => getLedgerCategoryValue(row),
+    filterFn: multiSelectFilterFn,
+    header: ({ table }) => {
+      const meta = table.options.meta as
+        | { categoryHeader?: string }
+        | undefined;
+      return meta?.categoryHeader ?? "Source / Destination";
+    },
+    cell: ({ row }) => <SourceOrDestinationCell entry={row.original} />,
     enableSorting: false,
   },
   {
