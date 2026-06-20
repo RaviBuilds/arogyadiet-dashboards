@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { getCustomerNameByProfileId } from "@/lib/notifications/lookups";
-import { notifySubscriptionStopped } from "@/lib/subscription/subscriptionNotifications";
+import { notifySubscriptionExpired } from "@/lib/subscription/subscriptionNotifications";
 import { format, addDays } from "date-fns";
 
 /**
@@ -13,8 +13,8 @@ import { format, addDays } from "date-fns";
  * What it does:
  *  1. Activates PENDING subscriptions whose starts_on = tomorrow.
  *     This lets the 5:15 PM automation pick them up and create delivery orders for the first day.
- *  2. Marks ACTIVE subscriptions whose effective_end_on = today as STOPPED.
- *     This cleans up plans that have fully concluded.
+ *  2. Marks ACTIVE subscriptions whose effective_end_on <= today as EXPIRED.
+ *     This cleans up plans that have fully concluded (also catches missed days).
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -78,12 +78,12 @@ export async function GET(request: Request) {
       }
     }
 
-    // 2. Stop active subscriptions that ended today
+    // 2. Expire active subscriptions that ended today or earlier (catches missed days)
     const { data: stopped, error: stopError } = await supabaseAdmin
       .from("subscriptions")
-      .update({ status: "STOPPED" })
+      .update({ status: "EXPIRED" })
       .eq("status", "ACTIVE")
-      .eq("effective_end_on", today)
+      .lte("effective_end_on", today)
       .select("id, customer_profile_id, effective_end_on");
 
     if (stopError) {
@@ -96,7 +96,7 @@ export async function GET(request: Request) {
 
     if (stopped?.length) {
       for (const sub of stopped) {
-        await notifySubscriptionStopped(sub.customer_profile_id, sub.id);
+        await notifySubscriptionExpired(sub.customer_profile_id, sub.id);
       }
     }
 
