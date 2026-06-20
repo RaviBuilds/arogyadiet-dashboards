@@ -14,6 +14,8 @@
 
 Today, ArogyaDiet runs as a single business serving Hyderabad through four portals — Customer, Rider, Admin, and Master. The goal is to evolve the platform so that **new franchise locations (Gachibowli, Bangalore, and beyond) can be launched as independent operating businesses on the same platform**, each with their own customers, riders, inventory, and orders — without ArogyaDiet having to build or maintain a separate system for every location.
 
+**Critical architectural principle:** The existing Hyderabad core operation remains the **parent/base** and is NOT converted into a franchise. It continues operating through `admin.arogyadiet.com` exactly as it does today — no migration, no `franchise_id` stamping on existing data, no separate franchise dashboard. Only NEW locations receive franchise identity and isolation. The Core Admin retains oversight of both Hyderabad operations and all franchise operations.
+
 The chosen model is industry-standard for SaaS platforms and can be summarized in three words:
 
 > ### **Single Codebase · Shared Database · Isolated Data**
@@ -114,12 +116,12 @@ These tables hold the **living operational data of running a meal-delivery busin
 
 To make all of this work, the design introduces **one new central table: `franchises`.** Conceptually it holds:
 
-- A franchise identity (name, e.g., "Hyderabad (Core)", "Gachibowli", "Bangalore").
+- A franchise identity (name, e.g., "Gachibowli", "Bangalore"). Note: the Core_Operation (Hyderabad) is NOT in this table.
 - Its operational status (active, onboarding, suspended).
 - Its anchor location, linked to the existing **`kitchens`** table (which already carries latitude/longitude) — the franchise's physical base of operations.
 - The set of **pincodes** it serves, expressed through the existing pincode-based `rider_service_areas` model.
 
-Every tenant-isolated table then gains a `franchise_id` reference pointing back to this table — the single stamp that says _"this record belongs to Gachibowli."_
+Every tenant-isolated table then gains a `franchise_id` reference pointing back to this table — the single stamp that says _"this record belongs to Gachibowli."_ **Existing Core_Operation records (Hyderabad) retain NULL `franchise_id`** — they are not migrated, not stamped, and continue to be accessed exactly as they are today.
 
 ### How a Customer Is Assigned to a Franchise
 
@@ -179,8 +181,9 @@ flowchart TB
 
 Conceptually, the policies read like plain business rules:
 
-- **Franchise staff (`FRANCHISE_ADMIN`, and the franchise's riders/customers):** _"You may only see and change rows where `franchise_id` matches the franchise you belong to."_
-- **Master and Core Admin (`MASTER_ADMIN`, `ADMIN`):** _"You operate above the boundary and may see across all franchises."_ This is the deliberate **Master bypass** that powers the global head-office view.
+- **Franchise staff (`FRANCHISE_ADMIN`, and the franchise's riders/customers):** _"You may only see and change rows where `franchise_id` matches the franchise you belong to. Core records (NULL `franchise_id`) are invisible to you."_
+- **Master and Core Admin (`MASTER_ADMIN`, `ADMIN`):** _"You operate above the boundary and may see across all franchises AND all core records."_ This is the deliberate **Master bypass** that powers the global head-office view.
+- **Core Operation users (existing Hyderabad riders/customers):** _"You continue to see core records (NULL `franchise_id`) exactly as before. Franchise records are invisible to you."_
 
 The link between a staff member and their franchise is attached at the identity level — the existing `users` table (which already connects a person to their `role_id` and to their login via `auth_user_id`) is the natural place to also record _which franchise_ that person belongs to.
 
@@ -200,11 +203,11 @@ The Master Dashboard is the **head-office command center.** It sits _above_ the 
 
 What the Master Admin sees and controls:
 
-- **Consolidated revenue** — total income across all franchises, with the ability to drill down per location (Hyderabad vs. Gachibowli vs. Bangalore).
-- **Network operations health** — active subscriptions, delivery performance, and rider activity rolled up across every franchise.
+- **Consolidated revenue** — total income across the Core_Operation and all franchises, with the ability to drill down per location (Hyderabad core vs. Gachibowli vs. Bangalore).
+- **Network operations health** — active subscriptions, delivery performance, and rider activity rolled up across the Core_Operation and every franchise.
 - **Franchise onboarding controls** — the ability to **create new franchises and assign their owners**, define the pincodes they serve, and activate or suspend a location.
 - **Global configuration** — management of the shared foundation (plans, meal categories, holidays, the master product catalog, system settings).
-- **Core business data** — the original Hyderabad operation, which continues to run as the founding "core" franchise while also being visible to head office.
+- **Core business data** — the original Hyderabad operation, which continues to run as the base/parent operation. Core data has no `franchise_id` and is managed through `admin.arogyadiet.com` as it always has been. The Core Admin can also oversee all franchise data from this dashboard.
 
 ### Franchise Dashboard — The Local Operating View
 
@@ -229,12 +232,19 @@ The franchise owner has **no concept that other franchises exist** within their 
 
 ```mermaid
 graph TB
-    subgraph MASTER["MASTER / CORE ADMIN — master.arogyadiet.com & admin.arogyadiet.com"]
-        M1["Consolidated cross-franchise revenue"]
+    subgraph MASTER["MASTER_ADMIN — master.arogyadiet.com"]
+        M1["Consolidated cross-franchise + core revenue"]
         M2["Network-wide operations health"]
         M3["Create & manage franchises + owners"]
         M4["Global config: plans, categories, holidays, catalog"]
-        M5["Sees ALL franchises' data"]
+        M5["Sees ALL franchises' data + Core_Operation data"]
+    end
+
+    subgraph ADMIN["CORE_ADMIN — admin.arogyadiet.com"]
+        A1["Core Hyderabad operations (unchanged)"]
+        A2["Franchise oversight capabilities"]
+        A3["No franchise-selection step for core work"]
+        A4["Same dashboard as today + franchise views"]
     end
 
     subgraph FRANCHISE["FRANCHISE OWNER — franchies.arogyadiet.com"]
@@ -243,10 +253,13 @@ graph TB
         F3["Local inventory & production only"]
         F4["Local active orders & batches only"]
         F5["Localized reports only"]
-        F6["Master features hidden"]
+        F6["Master + core features hidden"]
+        F7["Core_Operation data invisible"]
     end
 
+    MASTER -->|"global oversight"| ADMIN
     MASTER -->|"global oversight"| FRANCHISE
+    ADMIN -->|"franchise oversight"| FRANCHISE
 ```
 
 ---
@@ -435,43 +448,70 @@ Validation focuses on proving the **isolation guarantee** above all else, since 
 - Verify role-based show/hide of master-level features in the shared component layer.
 
 ### Regression Testing
-- Verify that the existing Hyderabad core operation continues to function unchanged as the founding franchise after the franchise_id model is introduced.
+- Verify that the existing Hyderabad core operation continues to function unchanged — no migration, no franchise_id filtering, no franchise-selection step required.
+- Verify that core operation daily routing runs against core records only (NULL franchise_id) without any franchise scoping.
+- Verify that franchise routing is properly scoped per franchise, excluding core records and other franchise records.
 
 > Property-based testing of the isolation invariants (below) is recommended during implementation to exercise the data boundary across randomized franchise/record combinations.
 
 ## Correctness Properties
 
-These are the invariants the system must always uphold. They are stated as universal truths to guide both implementation and verification.
+*A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
-### Property 1: Total isolation
-For every tenant-isolated record, a franchise user can access (read or modify) it _if and only if_ the record's `franchise_id` equals the user's `franchise_id`; requests for any other franchise's record return nothing and never disclose its existence, across every tenant-isolated table and regardless of how the data is requested.
+### Property 1: Total franchise isolation
+*For any* franchise user and *for any* tenant-isolated record, the franchise user can access (read, list, modify, or delete) the record *if and only if* the record's `franchise_id` equals the user's `franchise_id`; requests for any other franchise's record return nothing and never disclose its existence, across every tenant-isolated table and regardless of how the data is requested.
 
-**Validates: Requirements 5.1, 5.2, 5.3, 5.4**
+**Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5, 5.7, 13.1, 13.2, 13.3, 13.4, 13.5**
 
-### Property 2: Master completeness
-A Master/Core Admin can access every franchise's records, including the retained records of suspended franchises; no tenant data is hidden from head office.
+### Property 2: Core invisibility to franchises
+*For any* franchise user and *for any* query against tenant-isolated tables, all Core_Records (records with NULL `franchise_id` or core marker) are excluded from the results. The Core_Operation's data is completely invisible to franchise users.
 
-**Validates: Requirements 6.1, 2.6**
+**Validates: Requirements 5.8, 10.3, 11.2**
 
-### Property 3: Single assignment
-Every served pincode resolves to exactly one franchise, and every customer (and every operational record derived from them) is associated with exactly that one franchise.
+### Property 3: Core and Master completeness
+*For any* user holding the `ADMIN` or `MASTER_ADMIN` role, a data read returns both Core_Records (NULL `franchise_id`) AND Tenant_Isolated_Records across all franchises, including retained records of suspended franchises. No operational data — core or franchise — is hidden from head office.
 
-**Validates: Requirements 8.1, 8.2, 8.5**
+**Validates: Requirements 6.1, 6.2, 2.8**
 
-### Property 4: Global consistency
-Global tables present identical data to every franchise and are writable only by head office roles; a franchise user's attempt to modify a global table is rejected.
+### Property 4: Single assignment
+*For any* served pincode, it resolves to exactly one entity — either the Core_Operation or one active franchise, never both and never multiple franchises. Every customer assigned through pincode resolution, and every operational record derived from that customer, carries the correct `franchise_id` (or NULL for core) matching the resolved entity.
 
-**Validates: Requirements 7.1, 7.3**
+**Validates: Requirements 8.1, 8.2, 8.3, 8.4, 8.8**
 
 ### Property 5: No cross-contamination on write
-A record created by a franchise user is always stamped with that user's own `franchise_id` and can never be created under another franchise.
+*For any* record created by a franchise user, the record is always stamped with that user's own `franchise_id` regardless of what `franchise_id` value was supplied in the request payload. A franchise user can never create a record under another franchise's `franchise_id` or under the Core_Operation's NULL marker.
 
-**Validates: Requirements 4.2, 4.3**
+**Validates: Requirements 4.1, 4.2, 4.3, 5.5**
 
-### Property 6: Routing soundness
-A user is only ever routed into a workspace consistent with their role and franchise: a Franchise_Admin who attempts to reach the head-office global workspace is prevented from entering it and routed back to their own franchise-scoped workspace, master-level controls are hidden from franchise users and shown to head office, and any user lacking the required role is denied at the middleware layer and sent to the unauthorized page — never partial visibility and never any exposure of franchise data regardless of the unauthorized page's implementation.
+### Property 6: Core records untouched
+*For any* Core_Operation record (existing Hyderabad data), the `franchise_id` remains NULL (or core marker) and is never mutated to a non-null franchise value. Records created by Core_Admin users are persisted with NULL `franchise_id` consistent with pre-franchise behavior. No migration is applied to existing data.
 
-**Validates: Requirements 10.3, 10.4, 10.5, 10.6, 11.2, 11.3, 11.4**
+**Validates: Requirements 4.6, 4.7, 12.1, 12.2, 12.3**
+
+### Property 7: Routing soundness
+*For any* user, the portal access granted is determined solely by their role and franchise association: a Franchise_Admin is always routed to their franchise-scoped workspace and is prevented from reaching the Admin or Master dashboards; a Core_Admin is routed to the Admin_Dashboard with core + franchise oversight; a user lacking the required role is denied at the middleware layer before any page renders, exposing no data; and an undefined subdomain exposes no data.
+
+**Validates: Requirements 10.3, 10.4, 10.5, 10.7, 10.9, 11.3**
+
+### Property 8: Global consistency
+*For any* Global_Table and *for any* two consumers (whether franchise or Core_Operation), the data returned is byte-for-byte identical. A franchise user's attempt to modify a Global_Table is always rejected and persists no changes.
+
+**Validates: Requirements 7.1, 7.4, 7.5**
+
+### Property 9: Franchise routing scope isolation
+*For any* daily routing execution for a franchise, only records matching that franchise's `franchise_id` (delivery orders, rider profiles, customer addresses) are included in the computation. Core_Records and records from other franchises are excluded. Conversely, Core_Operation routing runs against Core_Records only without any `franchise_id` filtering.
+
+**Validates: Requirements 12.5, 12.6, 13.1, 13.2**
+
+### Property 10: Conflict detection prevents live activation
+*For any* territory with at least one unresolved pincode overlap conflict (a pincode mapped to multiple franchises or to both a franchise and the Core_Operation), that territory cannot transition to the live state. Once all conflicts are resolved such that each pincode maps to exactly one entity, the territory is permitted to go live.
+
+**Validates: Requirements 9.1, 9.4, 9.5, 9.6**
+
+### Property 11: Core_Operation excluded from Franchise_Registry
+*For any* state of the `franchises` table, no record represents the Core_Operation (Hyderabad). The Core_Operation exists outside the franchise registry and is never subject to franchise lifecycle operations (onboarding, suspension, activation).
+
+**Validates: Requirements 1.2, 12.1**
 
 
 
@@ -480,20 +520,21 @@ This transition deliberately leverages existing platform investments:
 | Existing asset | Role in the franchise model |
 |----------------|------------------------------|
 | `roles` table with `MASTER_ADMIN` & `FRANCHISE_ADMIN` | RBAC scaffolding already exists — no new role system needed. |
-| `users` linked to `roles` and Supabase auth | Natural home for the staff-to-franchise (`franchise_id`) association. |
-| Subdomain middleware routing | Proven pattern; the franchise portal extends it. |
+| `users` linked to `roles` and Supabase auth | Natural home for the staff-to-franchise (`franchise_id`) association for franchise users. Core users remain unmodified. |
+| Subdomain middleware routing | Proven pattern; the franchise portal extends it. Core admin portal remains unchanged. |
 | `kitchens` table with geo-coordinates | Natural physical anchor for a franchise's location. |
-| Pincode-based `rider_service_areas` | Foundation for mapping customers and territory to franchises. |
+| Pincode-based `rider_service_areas` | Foundation for mapping customers and territory to franchises. Core pincodes remain unmodified. |
 | `system_settings` singleton | Confirms which configuration is global vs. franchise-local. |
-| Supabase Row Level Security | The enforcement mechanism for unbreachable data isolation. |
+| Supabase Row Level Security | The enforcement mechanism for unbreachable data isolation between franchises, with NULL `franchise_id` preserving core access patterns. |
 
 ### New Concepts Introduced
 
-1. A central **`franchises`** registry (identity, status, kitchen anchor, served pincodes).
-2. A **`franchise_id`** stamp added across tenant-isolated operational tables.
-3. **Pincode → franchise resolution** at customer signup.
-4. **RLS policies** that scope franchise staff to their own data while letting Master/Core Admin operate globally.
-5. A **shared, RBAC-aware component layer** powering both the Admin and Franchise dashboards.
+1. A central **`franchises`** registry (identity, status, kitchen anchor, served pincodes) — Core_Operation excluded.
+2. A **`franchise_id`** column added across tenant-isolated operational tables (NULL for existing core records, non-null for franchise records).
+3. **Pincode → franchise/core resolution** at customer signup.
+4. **RLS policies** that scope franchise staff to their own data, hide core from franchises, and let Master/Core Admin operate globally.
+5. A **shared, RBAC-aware component layer** powering the Admin, Master, and Franchise dashboards.
 6. The **`franchies.arogyadiet.com`** subdomain (client spelling preserved) as the single franchise portal.
+7. **Core/franchise coexistence** — the existing `admin.arogyadiet.com` continues unchanged while new franchise portals operate independently alongside it.
 
-> _This document is a strategic blueprint. The next phase will translate these concepts into formal requirements, and a subsequent phase into implementation tasks — including the concrete database schema, security policies, and routing logic deliberately left at the conceptual level here._
+> _This document is a strategic blueprint. The next phase will translate these concepts into formal requirements, and a subsequent phase into implementation tasks — including the concrete database schema, security policies, and routing logic deliberately left at the conceptual level here. The Core_Operation (Hyderabad) requires no migration — only additive changes (the `franchise_id` column defaulting to NULL on existing tables, new RLS policies, and the new franchise portal) are needed._

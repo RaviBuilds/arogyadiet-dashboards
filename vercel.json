@@ -1,7 +1,7 @@
 {
     "crons": [
       {
-        "path": "/api/cron/activate-subscriptions?secret=YOUR_SECRET_HERE",
+        "path": "/api/cron/activate-subscriptions?secret=arogyadietcron-123",
         "schedule": "30 4 * * *"
       }
     ]
