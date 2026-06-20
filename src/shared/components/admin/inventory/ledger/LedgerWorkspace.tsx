@@ -21,6 +21,9 @@ import {
 import { type DateRange } from "react-day-picker";
 
 import {
+  DISPATCH_STOCK_REASONS,
+  INVENTORY_SOURCE_LABELS,
+  INVENTORY_SOURCE_TYPES,
   type TransactionLedgerEntry,
   type TransactionType,
 } from "@/lib/inventory/product-schema";
@@ -42,6 +45,13 @@ interface SectionConfig {
   types: readonly TransactionType[];
   exportFileName: string;
   emptyLabel: string;
+  /**
+   * Options for the Source / Destination filter shown in the table. Omitted for
+   * sections (manufacturing) where the concept doesn't apply.
+   */
+  categories?: readonly string[];
+  /** Column header + filter label for the categories filter. */
+  categoryHeader?: string;
   /** Tailwind class fragments that drive the section accent. */
   accent: {
     /** Active button container. */
@@ -68,6 +78,10 @@ const SECTIONS: SectionConfig[] = [
     types: ["IN"],
     exportFileName: "audit_ledger_incoming.csv",
     emptyLabel: "No incoming stock entries recorded yet.",
+    categories: INVENTORY_SOURCE_TYPES.map(
+      (type) => INVENTORY_SOURCE_LABELS[type],
+    ),
+    categoryHeader: "Source",
     accent: {
       activeButton:
         "border-emerald-300 bg-emerald-50/80 ring-1 ring-emerald-200",
@@ -88,6 +102,8 @@ const SECTIONS: SectionConfig[] = [
     types: ["OUT", "EXPIRED"],
     exportFileName: "audit_ledger_outgoing.csv",
     emptyLabel: "No outgoing or expired stock entries recorded yet.",
+    categories: DISPATCH_STOCK_REASONS,
+    categoryHeader: "Destination",
     accent: {
       activeButton: "border-rose-300 bg-rose-50/80 ring-1 ring-rose-200",
       activeIcon: "bg-rose-100 text-rose-700",
@@ -462,6 +478,8 @@ export default function LedgerWorkspace({ data }: LedgerWorkspaceProps) {
         key={activeId}
         data={activeData}
         availableTypes={activeSection.types}
+        availableCategories={activeSection.categories}
+        categoryHeader={activeSection.categoryHeader}
         title={`${activeSection.label} · Transaction History`}
         description={activeSection.description}
         emptyLabel={activeSection.emptyLabel}

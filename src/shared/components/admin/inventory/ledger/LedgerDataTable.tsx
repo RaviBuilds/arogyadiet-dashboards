@@ -68,6 +68,15 @@ interface LedgerDataTableProps {
   exportFileName?: string;
   /** Render the in-table date range picker. Disable when filtering upstream. */
   showDatePicker?: boolean;
+  /**
+   * Options for the Source / Destination filter. Incoming sections pass the
+   * supplier sources, outgoing sections pass the dispatch destinations.
+   * Omit (or pass empty) to hide the Source / Destination column and filter
+   * entirely (e.g. the manufacturing section).
+   */
+  availableCategories?: readonly string[];
+  /** Column header + filter button label, e.g. "Source" or "Destination". */
+  categoryHeader?: string;
 }
 
 export default function LedgerDataTable({
@@ -78,7 +87,10 @@ export default function LedgerDataTable({
   emptyLabel = "No transactions match your filters.",
   exportFileName = "audit_ledger.csv",
   showDatePicker = true,
+  availableCategories,
+  categoryHeader = "Source / Destination",
 }: LedgerDataTableProps) {
+  const showCategory = (availableCategories?.length ?? 0) > 0;
   const [sorting, setSorting] = useState<SortingState>([
     { id: "timestamp", desc: true },
   ]);
@@ -102,7 +114,13 @@ export default function LedgerDataTable({
   const table = useReactTable({
     data: dateFilteredData,
     columns: ledgerColumns,
-    state: { sorting, columnFilters, globalFilter },
+    state: {
+      sorting,
+      columnFilters,
+      globalFilter,
+      columnVisibility: { sourceOrDestination: showCategory },
+    },
+    meta: { categoryHeader },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
@@ -124,6 +142,9 @@ export default function LedgerDataTable({
 
   const typeFilterValue =
     (table.getColumn("transactionType")?.getFilterValue() as string[]) ?? [];
+  const categoryFilterValue =
+    (table.getColumn("sourceOrDestination")?.getFilterValue() as string[]) ??
+    [];
   const filteredCount = table.getFilteredRowModel().rows.length;
 
   return (
@@ -185,6 +206,42 @@ export default function LedgerDataTable({
             </DropdownMenu>
           )}
 
+          {showCategory && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="gap-2">
+                  <Filter className="h-4 w-4" />
+                  {categoryHeader}
+                  {categoryFilterValue.length > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      ({categoryFilterValue.length})
+                    </span>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-60">
+                {availableCategories!.map((category) => (
+                  <DropdownMenuCheckboxItem
+                    key={category}
+                    checked={categoryFilterValue.includes(category)}
+                    onCheckedChange={(checked) => {
+                      const next = checked
+                        ? [...categoryFilterValue, category]
+                        : categoryFilterValue.filter(
+                            (value) => value !== category,
+                          );
+                      table
+                        .getColumn("sourceOrDestination")
+                        ?.setFilterValue(next.length ? next : undefined);
+                    }}
+                  >
+                    {category}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           <Button
             variant="outline"
             className="ml-auto gap-2"
@@ -231,7 +288,7 @@ export default function LedgerDataTable({
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={ledgerColumns.length}
+                    colSpan={table.getVisibleFlatColumns().length}
                     className="h-24 text-center text-muted-foreground"
                   >
                     {emptyLabel}
