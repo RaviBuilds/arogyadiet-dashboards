@@ -1,4 +1,5 @@
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { BackToSystem } from "@/shared/components/master/BackToSystem";
 import UserManagement from "@/shared/components/master/UserManagement";
 import { getAdminUsers } from "@/actions/master-actions/adminActions";
 
@@ -12,6 +13,7 @@ export default async function UserManagementPage() {
       <AdminPageHeader
         title="User Management"
         description="Manage admin accounts — create, edit, activate, or remove admin users."
+        action={<BackToSystem />}
       />
       <UserManagement initialAdmins={admins} />
     </div>

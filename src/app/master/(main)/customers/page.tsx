@@ -1,4 +1,5 @@
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { BackToSystem } from "@/shared/components/master/BackToSystem";
 import {
   getMasterCustomerKPIs,
   getMasterCustomerList,
@@ -18,6 +19,7 @@ export default async function MasterCustomersPage() {
       <AdminPageHeader
         title="Customers"
         description="Deep-dive customer registry with lifetime value tracking and exportable chronological reports."
+        action={<BackToSystem />}
       />
       <CustomersClient kpis={kpis} customers={customers} />
     </div>

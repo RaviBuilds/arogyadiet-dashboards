@@ -17,8 +17,8 @@ import {
   Truck,
   ChefHat,
   Boxes,
-  FileBarChart,
   Settings,
+  Building2,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -52,7 +52,7 @@ const NAV_ITEMS = [
   { href: "/logistics", label: "Logistics", icon: Truck },
   { href: "/kitchen-ops", label: "Kitchen Ops", icon: ChefHat },
   { href: "/inventory", label: "Inventory BI", icon: Boxes },
-  { href: "/reports", label: "Report Engine", icon: FileBarChart },
+  { href: "/franchises", label: "Franchises", icon: Building2 },
   { href: "/system", label: "System", icon: Settings },
 ];
 

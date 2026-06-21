@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
-import { Users, DollarSign, ScrollText, Shield } from "lucide-react";
+import { Users, DollarSign, ScrollText, Shield, FileBarChart } from "lucide-react";
 
 export const revalidate = 0;
 
@@ -37,6 +37,12 @@ export default function SystemPage() {
           icon={<Shield className="h-5 w-5 text-red-600" />}
           title="Customer Data"
           description="Legacy customer and subscription tables."
+        />
+        <SystemCard
+          href="/reports"
+          icon={<FileBarChart className="h-5 w-5 text-blue-600" />}
+          title="Report Engine"
+          description="Custom reports, export data, and analytics."
         />
       </div>
     </div>
