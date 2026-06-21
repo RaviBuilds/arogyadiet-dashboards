@@ -2,236 +2,462 @@
 
 ## Overview
 
-This plan converts the franchise design into incremental coding steps for the existing Next.js 16 / React 19 / Supabase (PostgreSQL + RLS) codebase. It follows the project's structure conventions: SQL migrations under `scripts/`, types in `src/types`, Zod schemas in `src/validations`, data access in `src/repositories`, business logic in `src/services`, Server Actions in `src/actions` (master/admin actions), subdomain routing in `src/middleware.ts`, and the portal-agnostic RBAC-aware UI in `src/shared/components`.
+This plan implements the multi-tenant franchise system with **production safety as the #1 priority**. The existing Hyderabad core operation is LIVE — every change must be additive-only and backward-compatible. Tasks are organized into safety phases:
 
-The work proceeds bottom-up: the database boundary (`franchises` table, `franchise_id` stamping, RLS policies) is established first because it is the foundation of the "Isolated Data" promise; the assignment resolver, server actions, middleware routing, and shared dashboard layer are then wired on top; finally the existing Hyderabad operation is migrated as the founding franchise.
-
-A property-based test framework (Vitest + fast-check) is introduced to validate the six correctness invariants from the design. Isolation/master/global/write properties (1, 2, 4, 5) are exercised as integration property tests against a test PostgreSQL/Supabase instance with RLS enabled; assignment and routing properties (3, 6) are exercised against the resolver and routing logic.
+- **Phase 1 (SAFE):** New tables, new files, new types — zero production impact
+- **Phase 2 (SAFE):** Application code that handles franchise_id (reads NULL as core)
+- **Phase 3 (CONTROLLED RISK):** Middleware changes — backward-compatible additions only
+- **Phase 4 (HIGHEST RISK):** RLS enablement — only after code is deployed and tested
+- **Phase 5 (SAFE):** Franchise portal wiring — entirely new subdomain, no existing impact
 
 ## Tasks
 
-- [ ] 1. Establish the database boundary schema
-  - [ ] 1.1 Create the `franchises` registry table migration
-    - Add `scripts/create-franchises-table.sql` defining `franchises` with a unique id, `name` (unique, 1–100 chars, CHECK constraint), `status` enum/CHECK restricted to `active|onboarding|suspended`, and a `kitchen_id` FK referencing `kitchens(id)`
-    - Seed the founding "Hyderabad (Core)" franchise row referencing the existing core kitchen
-    - _Requirements: 1.1, 1.2, 1.3, 1.5, 6.8_
+- [ ] 1. Phase 1 — SAFE: Database schema (additive-only, no existing table modifications yet)
+  - [ ] 1.1 Create the `franchises` table and `franchise_pincodes` table
+    - Create SQL migration script `scripts/create-franchise-tables.sql`
+    - `franchises` table: `id` (uuid, PK), `name` (varchar 100, unique), `status` (enum: active/onboarding/suspended), `kitchen_id` (uuid, FK to kitchens), `owner_user_id` (uuid, FK to users), `created_at`, `updated_at`
+    - `franchise_pincodes` table: `id` (uuid, PK), `franchise_id` (uuid, FK to franchises), `pincode` (varchar 6, CHECK regex `^[0-9]{6}$`), unique constraint on `(franchise_id, pincode)`, unique constraint on `pincode` alone (enforces single-assignment)
+    - Status enum: CREATE TYPE `franchise_status` AS ENUM ('active', 'onboarding', 'suspended')
+    - These are entirely new tables — ZERO impact on existing data or code
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1_
 
-  - [ ] 1.2 Create the pincode-to-franchise mapping migration
-    - Add `scripts/create-franchise-pincodes.sql` mapping 6-digit pincodes to a single `franchise_id`, with a UNIQUE constraint on pincode to make assignment deterministic and surface overlaps at setup
-    - Add a CHECK constraint enforcing the 6-digit numeric pincode format
-    - _Requirements: 1.4, 2.3, 8.6, 9.1_
+  - [ ] 1.2 Add nullable `franchise_id` column to tenant-isolated tables
+    - Create SQL migration script `scripts/add-franchise-id-columns.sql`
+    - Add `franchise_id UUID DEFAULT NULL REFERENCES franchises(id)` to: `customer_profiles`, `subscriptions`, `delivery_orders`, `delivery_batches`, `rider_profiles`, `rider_service_areas`, `rider_live_locations`, `rider_monthly_summaries`, `rider_payouts`, `inventory_products`, `inventory_lots`, `inventory_transactions`, `manufacturing_batches`, `manufacturing_orders`, `manufacturing_outputs`, `payments`, `razorpay_transactions`, `notifications`, `addresses`, `addon_orders`, `addon_order_items`, `coupons`
+    - CRITICAL: Column is DEFAULT NULL — existing rows keep NULL (= core), existing queries unaffected
+    - NO NOT NULL constraint — core records stay NULL forever
+    - Add index on `franchise_id` for each table (CREATE INDEX IF NOT EXISTS)
+    - _Requirements: 4.1, 4.6, 12.1, 12.2_
 
-  - [ ] 1.3 Add `franchise_id` to the `users` identity record
-    - Add `scripts/add-franchise-id-to-users.sql` adding a nullable `franchise_id` FK on `users` (null for `MASTER_ADMIN`/`ADMIN`, non-null for franchise users)
-    - _Requirements: 3.1, 3.2_
+  - [ ] 1.3 Add nullable `franchise_id` column to `users` table for franchise association
+    - Create SQL migration script `scripts/add-franchise-id-to-users.sql`
+    - Add `franchise_id UUID DEFAULT NULL REFERENCES franchises(id)` to `users` table
+    - Existing users (ADMIN, MASTER_ADMIN, RIDER, CUSTOMER) keep NULL — no impact
+    - Only new FRANCHISE_ADMIN users will have non-null franchise_id
+    - _Requirements: 3.1, 3.2, 3.5_
 
-  - [ ] 1.4 Add `franchise_id` columns to all tenant-isolated tables
-    - Add `scripts/add-franchise-id-to-tenant-tables.sql` adding a `franchise_id` FK to every tenant-isolated table (customer_profiles, addresses, medical_documents, coupons, subscriptions, subscription_daily_preferences, delivery_orders, delivery_batches, delivery_status_logs, addon_orders, addon_order_items, rider_profiles, rider_service_areas, rider_live_locations, rider_monthly_summaries, rider_payouts, inventory_products, inventory_lots, inventory_transactions, manufacturing_*, payments, razorpay_transactions, notifications)
-    - Add indexes on `franchise_id` for query performance
-    - _Requirements: 4.1, 12.4_
+- [ ] 2. Phase 1 — SAFE: TypeScript types, Zod schemas, and configuration
+  - [ ] 2.1 Create franchise TypeScript types and Zod validation schemas
+    - Create `src/types/franchise.ts` with interfaces: `Franchise`, `FranchisePincode`, `FranchiseWithPincodes`, `FranchiseCreateInput`, `FranchiseUpdateInput`, `FranchiseStatusTransition`
+    - Create `src/validations/franchiseSchemas.ts` with Zod schemas for: franchise creation, pincode assignment, status transition, franchise update
+    - Pincode validation: 6-digit numeric string, max 1000 per franchise
+    - Name validation: 1-100 characters, required
+    - Status transitions: onboarding→active, active→suspended, suspended→active
+    - _Requirements: 1.1, 1.3, 1.7, 1.8, 2.5, 2.6, 2.10_
 
-- [ ] 2. Set up the property-based testing harness
-  - [ ] 2.1 Install and configure Vitest + fast-check
-    - Add Vitest, fast-check, and a `test` script to `package.json`; add `vitest.config.ts`
-    - Add a test helper that connects to a disposable test PostgreSQL/Supabase instance and can run migrations + create franchise-scoped and master sessions
-    - _Requirements: 5.7_
+  - [ ] 2.2 Create franchise context utility and session helpers
+    - Create `src/lib/franchise/context.ts` — utility to resolve franchise_id from authenticated user session
+    - Create `src/lib/franchise/constants.ts` — feature flag `FRANCHISE_FEATURES_ENABLED` (env var), core pincodes list, franchise status enum
+    - The context resolver: reads user's `franchise_id` from the `users` table; returns NULL for ADMIN/MASTER_ADMIN (they see everything); returns the franchise_id for FRANCHISE_ADMIN; returns NULL for existing RIDER/CUSTOMER (core operation)
+    - This is purely a utility — no existing code calls it yet
+    - _Requirements: 3.2, 3.3, 3.5, 4.6, 4.7_
 
-- [ ] 3. Implement RLS policies and write-stamping (the vault door)
-  - [ ] 3.1 Create RLS helper functions and session context
-    - Add `scripts/create-rls-helpers.sql` defining functions to resolve the current request's `franchise_id` and master-role status from the authenticated identity (`auth_user_id` → `users.franchise_id` / role)
-    - _Requirements: 3.3, 3.4, 5.6_
+  - [ ]* 2.3 Write property tests for franchise context resolution
+    - **Property 6: Core records untouched** — verify Core_Admin/ADMIN users always resolve to NULL franchise context
+    - **Property 3: Core and Master completeness** — verify MASTER_ADMIN/ADMIN users get unrestricted access context
+    - **Validates: Requirements 3.2, 3.5, 4.6, 4.7**
 
-  - [ ] 3.2 Create tenant isolation RLS policies for all tenant-isolated tables
-    - Add `scripts/create-tenant-rls-policies.sql` enabling RLS and adding read/list/update/delete policies that match rows only WHERE `franchise_id` = caller's franchise; deny-all when the caller's franchise is null/unresolved
-    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.6, 5.7_
+- [ ] 3. Checkpoint — Verify Phase 1 is safe
+  - Ensure SQL scripts are reviewed for backward compatibility (all columns DEFAULT NULL, no NOT NULL, no drops)
+  - Ensure no existing code is modified
+  - Ensure all new files compile without errors
+  - Ask the user if questions arise.
 
-  - [ ] 3.3 Create write-stamping enforcement for tenant-isolated inserts
-    - Add `scripts/create-franchise-stamp-trigger.sql` with a BEFORE INSERT trigger/policy that forces `franchise_id` to the caller's resolved franchise (ignoring any payload value) and rejects inserts whose resolved franchise is missing or does not match an existing franchise
-    - _Requirements: 4.2, 4.3, 4.4, 4.5, 5.5_
+- [ ] 4. Phase 2 — SAFE: Franchise registry server actions and data access layer
+  - [ ] 4.1 Create franchise CRUD server actions
+    - Create `src/actions/admin-actions/franchiseActions.ts`
+    - Implement: `createFranchise(input)` — validates name uniqueness, kitchen_id existence, assigns owner, sets status=onboarding
+    - Implement: `updateFranchise(id, input)` — validates same constraints
+    - Implement: `getFranchise(id)`, `listFranchises(filters)` — read operations
+    - Implement: `deleteFranchise(id)` — only if status=onboarding (safety)
+    - All actions use `createAdminClient` and check caller is MASTER_ADMIN
+    - _Requirements: 1.6, 1.7, 2.1, 2.2_
 
-  - [ ] 3.4 Create master-bypass RLS policies
-    - Extend policies so `MASTER_ADMIN`/`ADMIN` rows are visible/writable across all franchises, including suspended franchises' retained data
-    - _Requirements: 6.1, 6.2, 2.8_
+  - [ ] 4.2 Create franchise lifecycle (status transition) server actions
+    - Add to `src/actions/admin-actions/franchiseActions.ts`
+    - Implement: `activateFranchise(id)` — validates current status is NOT active, transitions to active
+    - Implement: `suspendFranchise(id)` — validates current status is NOT suspended, transitions to suspended
+    - Implement: `reactivateFranchise(id)` — validates current status is suspended, transitions to active
+    - Reject invalid transitions with specific error messages (already active, already suspended)
+    - All transitions verify no unresolved pincode conflicts before activation
+    - _Requirements: 2.5, 2.6, 2.9, 2.10, 9.5_
 
-  - [ ] 3.5 Create global-table policies
-    - Add `scripts/create-global-table-policies.sql` granting read to all roles and write only to master roles for `system_settings`, `roles`, `subscription_plans`, `meal_categories`, `holidays`, `products`
-    - _Requirements: 7.1, 7.4, 7.5_
+  - [ ] 4.3 Create franchise pincode management server actions
+    - Create `src/actions/admin-actions/franchisePincodeActions.ts`
+    - Implement: `assignPincodes(franchiseId, pincodes[])` — validates 6-digit format, checks no overlap with other franchises or core pincodes
+    - Implement: `removePincodes(franchiseId, pincodes[])` — removes pincode assignments
+    - Implement: `getPincodeConflicts(franchiseId)` — returns any pincodes mapped to multiple entities
+    - Overlap detection: query `franchise_pincodes` for duplicates AND check against core pincode list
+    - Return specific conflict details: which pincode, which entities conflict
+    - _Requirements: 2.3, 2.4, 8.8, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
-  - [ ]* 3.6 Write property test for Total isolation
-    - **Property 1: Total isolation**
-    - **Validates: Requirements 5.1, 5.2, 5.3, 5.4**
-    - Generate random franchise/record combinations across every tenant-isolated table; assert a franchise session can read/modify a record iff `franchise_id` matches, and other-franchise requests return results indistinguishable from non-existent
+  - [ ]* 4.4 Write property tests for pincode assignment and conflict detection
+    - **Property 4: Single assignment** — for any pincode, it resolves to exactly one entity (core or one franchise), never both
+    - **Property 10: Conflict detection prevents live activation** — any territory with unresolved overlaps cannot go live
+    - **Property 11: Core_Operation excluded from Franchise_Registry** — no franchises record represents core
+    - **Validates: Requirements 8.8, 9.1, 9.4, 9.5, 9.6, 1.2**
 
-  - [ ]* 3.7 Write property test for No cross-contamination on write
-    - **Property 5: No cross-contamination on write**
-    - **Validates: Requirements 4.2, 4.3**
-    - Generate inserts with arbitrary payload `franchise_id` values from a franchise session; assert the persisted row is always stamped with the caller's own franchise and cross-franchise inserts are rejected
+  - [ ] 4.5 Create franchise data stamping utility
+    - Create `src/lib/franchise/stamping.ts`
+    - Implement: `stampFranchiseId(record, userContext)` — stamps record with user's franchise_id
+    - Logic: if user is FRANCHISE_ADMIN → stamp with their franchise_id (ignore any payload value)
+    - Logic: if user is ADMIN/MASTER_ADMIN → stamp with NULL (core behavior unchanged)
+    - Logic: if franchise_id cannot be resolved for FRANCHISE_ADMIN → reject write
+    - This utility will be called by server actions when creating tenant-isolated records
+    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7_
 
-  - [ ]* 3.8 Write property test for Master completeness
-    - **Property 2: Master completeness**
-    - **Validates: Requirements 6.1, 2.6**
-    - Generate records across many franchises (including suspended) and assert a master session reads all of them with none hidden
+  - [ ]* 4.6 Write property tests for franchise data stamping
+    - **Property 5: No cross-contamination on write** — franchise user records always stamped with own franchise_id regardless of payload
+    - **Property 6: Core records untouched** — ADMIN/Core user records always get NULL franchise_id
+    - **Validates: Requirements 4.1, 4.2, 4.3, 4.6, 4.7**
 
-  - [ ]* 3.9 Write property test for Global consistency
-    - **Property 4: Global consistency**
-    - **Validates: Requirements 7.1, 7.3**
-    - Assert global-table reads are identical across arbitrary franchise sessions and that franchise-session writes to global tables are rejected
+  - [ ] 4.7 Create pincode-to-franchise assignment resolver
+    - Create `src/lib/franchise/assignment-resolver.ts`
+    - Implement: `resolveCustomerFranchise(pincode)` — looks up pincode in `franchise_pincodes` table for active franchises, checks core pincode list, returns franchise_id or NULL (core) or 'waitlist'
+    - Implement: `assignWaitlistedCustomers(franchiseId, pincodes[])` — batch assign waitlisted customers when pincodes are added
+    - Waitlist logic: customer can sign up but cannot place orders until assigned
+    - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8_
 
-- [ ] 4. Checkpoint - database boundary verified
+  - [ ]* 4.8 Write property tests for assignment resolver
+    - **Property 4: Single assignment** — every pincode resolves to exactly one entity, customer records carry correct franchise_id
+    - **Validates: Requirements 8.1, 8.2, 8.3, 8.4, 8.8**
+
+- [ ] 5. Checkpoint — Verify Phase 2 server actions
+  - Ensure all new server actions compile without errors
+  - Ensure no existing server actions are modified
+  - Ensure franchise CRUD, lifecycle, pincode management, and assignment resolver work correctly
+  - Ask the user if questions arise.
+
+- [ ] 6. Phase 2 — SAFE: Master Dashboard franchise management UI
+  - [ ] 6.1 Create franchise onboarding page in Master portal
+    - Create `src/app/master/franchises/page.tsx` — list all franchises with status badges
+    - Create `src/app/master/franchises/new/page.tsx` — create franchise form (name, kitchen, owner assignment, pincodes)
+    - Create `src/app/master/franchises/[id]/page.tsx` — franchise detail/edit page with status controls
+    - Use existing Shadcn UI components (Table, Badge, Form, Input, Select)
+    - Wire to franchise server actions from task 4.1-4.3
+    - This is an entirely new route in the master portal — no existing pages affected
+    - _Requirements: 1.6, 2.1, 2.3, 2.5, 2.6, 2.9_
+
+  - [ ] 6.2 Create pincode conflict resolution UI
+    - Add pincode conflict indicator component to franchise detail page
+    - Show conflicting pincodes with which entities they overlap
+    - Provide controls to resolve: reassign pincode to one entity or remove from one
+    - Block "Activate" button while conflicts exist, with explanation tooltip
+    - _Requirements: 9.1, 9.2, 9.4, 9.5, 9.6_
+
+  - [ ] 6.3 Create Master Dashboard consolidated metrics section
+    - Create `src/shared/components/master/FranchiseNetworkOverview.tsx`
+    - Display: consolidated revenue (core + all franchises), active subscription count, completed vs scheduled deliveries, active rider count
+    - Add franchise drill-down: select a franchise to see its individual metrics
+    - Add reporting period selector (defaults to current calendar month)
+    - Handle empty data (show zero values) and metric load failures (show error per metric without blocking others)
+    - Wire to existing data queries with optional franchise_id filter parameter
+    - _Requirements: 6.5, 6.6, 6.7, 6.8, 6.9_
+
+  - [ ]* 6.4 Write unit tests for franchise onboarding UI and metrics
+    - Test form validation (name length, pincode format, kitchen required)
+    - Test conflict display logic
+    - Test status transition button states
+    - Test metric fallback behavior (zero values, error states)
+    - _Requirements: 1.7, 1.8, 6.8, 6.9, 9.1_
+
+- [ ] 7. Phase 2 — SAFE: Admin Dashboard franchise oversight additions
+  - [ ] 7.1 Add franchise oversight section to Admin Dashboard
+    - Create `src/shared/components/admin/FranchiseOversight.tsx`
+    - Add a "Franchise Data" tab/section to the admin dashboard that shows franchise data grouped by location
+    - The existing admin views remain unchanged — this is additive only
+    - Core_Admin sees their Hyderabad data as primary (no franchise-selection step), with franchise data available on drill-down
+    - CRITICAL: This does NOT modify any existing admin page — it adds a new navigation item/section
+    - _Requirements: 6.3, 6.4, 12.4_
+
+  - [ ] 7.2 Create franchise-aware data query helpers
+    - Create `src/lib/franchise/queries.ts`
+    - Implement query wrappers that accept optional `franchise_id` filter
+    - When `franchise_id` is NULL (or not provided), return all records (existing behavior for core admin)
+    - When `franchise_id` is provided, filter to that franchise's records
+    - These are NEW helper functions — existing queries continue to work unchanged
+    - Used by both Admin oversight and later by the Franchise portal
+    - _Requirements: 6.1, 6.2, 11.2, 11.4, 11.5, 13.1, 13.3, 13.4, 13.5_
+
+- [ ] 8. Checkpoint — Verify Phase 2 UI is safe
+  - Ensure admin.arogyadiet.com continues to work exactly as before
+  - Ensure new master franchise pages are accessible and functional
+  - Ensure no existing pages, layouts, or components are modified
+  - Ask the user if questions arise.
+
+- [ ] 9. Phase 2 — SAFE: Shared RBAC-aware component layer
+  - [ ] 9.1 Create franchise-scoped shared operational components
+    - Create `src/shared/components/franchise/` directory
+    - Create `FranchiseCustomers.tsx` — reuses customer table/list logic, scoped by franchise_id prop
+    - Create `FranchiseRiders.tsx` — reuses rider management logic, scoped by franchise_id prop
+    - Create `FranchiseInventory.tsx` — reuses inventory views, scoped by franchise_id prop
+    - Create `FranchiseOrders.tsx` — reuses order/delivery views, scoped by franchise_id prop
+    - Create `FranchiseReports.tsx` — reuses reporting logic, scoped by franchise_id prop
+    - Each component accepts `role` and `franchiseId` props to determine scope and visibility
+    - RBAC logic: FRANCHISE_ADMIN sees only their data, master-level controls hidden
+    - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5_
+
+  - [ ] 9.2 Implement role-based show/hide logic in shared components
+    - Create `src/shared/hooks/useFranchiseScope.ts` — hook that provides current user's role and franchise_id
+    - Create `src/shared/components/shared/RBACGate.tsx` — wrapper component that conditionally renders children based on role
+    - Logic: FRANCHISE_ADMIN → hide master controls, hide core data, hide onboarding tools, hide global config
+    - Logic: ADMIN → show core data primary, show franchise oversight secondary
+    - Logic: MASTER_ADMIN → show everything including cross-franchise views
+    - Logic: no valid role → render access denied indication
+    - Logic: FRANCHISE_ADMIN with no assigned franchise → render "no franchise assigned" indication
+    - _Requirements: 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8_
+
+  - [ ]* 9.3 Write unit tests for RBAC gate and scope components
+    - Test: FRANCHISE_ADMIN cannot see master controls
+    - Test: ADMIN sees core data without franchise-selection step
+    - Test: MASTER_ADMIN sees all controls
+    - Test: Invalid role shows access denied
+    - Test: FRANCHISE_ADMIN with no franchise shows appropriate message
+    - **Validates: Requirements 11.2, 11.3, 11.6, 11.7**
+
+- [ ] 10. Phase 3 — CONTROLLED RISK: Middleware changes (backward-compatible additions)
+  - [ ] 10.1 Add franchise subdomain routing to middleware
+    - Modify `src/middleware.ts` — ADD `franchies` to the `portals` mapping: `franchies: "/franchise"`
+    - CRITICAL: This is a single-line addition to the existing portals object — all other routes unchanged
+    - The admin, customer, rider, master subdomains continue to work identically
+    - Add role check: if subdomain is `franchies` and role is not `FRANCHISE_ADMIN`, redirect to unauthorized
+    - Add suspended franchise check: if franchise status is suspended, show suspended indication
+    - _Requirements: 10.1, 10.7, 10.8, 2.7_
+
+  - [ ] 10.2 Add franchise admin cross-portal prevention to middleware
+    - In the existing gatekeeper logic section, add: if `currentSubdomain === 'admin'` and `roleCode === 'FRANCHISE_ADMIN'`, redirect to `franchies.arogyadiet.com`
+    - If `currentSubdomain === 'master'` and `roleCode === 'FRANCHISE_ADMIN'`, redirect to `franchies.arogyadiet.com`
+    - This prevents franchise admins from reaching the head-office portals
+    - CRITICAL: Only ADDS conditions — does not change existing ADMIN/MASTER_ADMIN/RIDER checks
+    - _Requirements: 10.4, 10.7_
+
+  - [ ] 10.3 Add franchise session context injection to middleware
+    - After successful FRANCHISE_ADMIN auth, resolve user's `franchise_id` from users table
+    - Set franchise_id in response headers or cookies for downstream use by server components
+    - If FRANCHISE_ADMIN has no franchise_id → redirect to an error page (no franchise assigned)
+    - For ADMIN/MASTER_ADMIN: do NOT set franchise context (they operate globally)
+    - For existing RIDER/CUSTOMER: do NOT set franchise context (core operation unchanged)
+    - _Requirements: 3.3, 3.4, 10.3, 10.5, 10.6_
+
+  - [ ]* 10.4 Write property tests for routing middleware
+    - **Property 7: Routing soundness** — FRANCHISE_ADMIN always routed to franchise workspace, prevented from admin/master; Core_Admin routed to admin; undefined subdomain exposes no data
+    - **Validates: Requirements 10.3, 10.4, 10.5, 10.7, 10.9**
+
+- [ ] 11. Checkpoint — Verify middleware changes are backward-compatible
+  - Test: admin.arogyadiet.com still works for ADMIN users exactly as before
+  - Test: master.arogyadiet.com still works for MASTER_ADMIN users
+  - Test: customer and rider portals unaffected
+  - Test: franchies.arogyadiet.com routes correctly for FRANCHISE_ADMIN
+  - Test: FRANCHISE_ADMIN cannot reach admin or master portals
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 5. Implement franchise domain types, validation, and data access
-  - [ ] 5.1 Define franchise types
-    - Add franchise, franchise-status, and pincode-mapping TypeScript types to `src/types`
-    - _Requirements: 1.1, 1.2_
+- [ ] 12. Phase 4 — HIGHEST RISK: RLS policies (deploy ONLY after code is tested)
+  - [ ] 12.1 Create RLS policies SQL script (DO NOT ENABLE YET)
+    - Create `scripts/create-franchise-rls-policies.sql`
+    - Write policies for ALL tenant-isolated tables with this logic:
+    - SELECT policy: `franchise_id = current_setting('app.franchise_id')::uuid OR franchise_id IS NULL AND current_setting('app.role') IN ('ADMIN', 'MASTER_ADMIN') OR franchise_id IS NOT NULL AND current_setting('app.role') IN ('ADMIN', 'MASTER_ADMIN')`
+    - INSERT policy: for FRANCHISE_ADMIN, new row `franchise_id` must equal session franchise_id; for ADMIN, franchise_id must be NULL
+    - UPDATE/DELETE policy: same ownership check as SELECT
+    - Master bypass: ADMIN and MASTER_ADMIN see ALL rows (core + all franchises)
+    - Franchise isolation: FRANCHISE_ADMIN sees only rows matching their franchise_id
+    - Core user isolation: existing users (NULL franchise context) see only NULL franchise_id rows (unchanged behavior)
+    - IMPORTANT: Script creates policies but does NOT run `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` yet
+    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 6.1, 6.2_
 
-  - [ ] 5.2 Define franchise Zod validation schemas
-    - Add `src/validations` schemas validating name (1–100 chars, non-empty), status set membership, kitchen reference presence, 6-digit pincodes, and the 0–1000 pincode count limit
-    - _Requirements: 1.6, 1.7_
+  - [ ] 12.2 Add Supabase session context setting to server-side clients
+    - Modify `src/lib/supabase/server.ts` — after auth, call `SET LOCAL app.franchise_id = '<uuid>'` and `SET LOCAL app.role = '<role_code>'` on each request
+    - Modify `src/lib/supabase/admin.ts` — ensure admin client sets `app.role = 'MASTER_ADMIN'` for unrestricted access
+    - CRITICAL: When franchise features are disabled (feature flag OFF), skip the SET LOCAL calls — existing behavior preserved
+    - When franchise features are enabled, set context variables that RLS policies will read
+    - For ADMIN/MASTER_ADMIN: set role but do NOT set franchise_id (they bypass isolation)
+    - For FRANCHISE_ADMIN: set both role and franchise_id
+    - For existing RIDER/CUSTOMER: set role only, no franchise_id (they see core records as before)
+    - _Requirements: 5.1, 5.7, 6.1, 12.3_
 
-  - [ ] 5.3 Implement the franchise repository
-    - Add `src/repositories` data-access functions for create/read/update franchise, owner association, and pincode read/write using the admin client
-    - _Requirements: 1.1, 1.5, 3.1_
+  - [ ]* 12.3 Write property tests for RLS data isolation
+    - **Property 1: Total franchise isolation** — franchise user can only access records where franchise_id matches their own
+    - **Property 2: Core invisibility to franchises** — franchise user never sees NULL franchise_id (core) records
+    - **Property 3: Core and Master completeness** — ADMIN/MASTER_ADMIN see all records (core + all franchises)
+    - **Property 8: Global consistency** — global tables return identical data to all consumers
+    - **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.7, 5.8, 6.1, 7.1, 7.4**
 
-  - [ ]* 5.4 Write unit tests for franchise validation schemas
-    - Cover name length/uniqueness-shape, invalid status, invalid kitchen reference, malformed pincode, and over-limit pincode count
-    - _Requirements: 1.6, 1.7_
+  - [ ] 12.4 Create RLS enablement script with rollback
+    - Create `scripts/enable-franchise-rls.sql` — enables RLS on each tenant-isolated table one at a time
+    - Create `scripts/disable-franchise-rls.sql` — ROLLBACK script that disables RLS if issues arise
+    - Include a pre-check: verify that `app.role` and `app.franchise_id` session settings are working before enabling
+    - Include a smoke test query: after enabling on each table, run a test query as admin to verify access is not broken
+    - This script should ONLY be run after: (1) code is deployed with session context setting, (2) smoke tests pass in staging
+    - _Requirements: 5.7, 12.3_
 
-- [ ] 6. Implement franchise registry and lifecycle Server Actions
-  - [ ] 6.1 Implement create-franchise action with owner assignment
-    - Add `src/actions/master-actions/franchiseActions.ts` creating a franchise with status `onboarding`, requiring exactly one `FRANCHISE_ADMIN` owner, validating name/kitchen, and rejecting invalid input without persisting changes
-    - _Requirements: 1.5, 1.6, 2.1, 2.2_
-
-  - [ ] 6.2 Implement served-pincode assignment action
-    - Add an action to assign/extend a franchise's served pincodes, rejecting malformed pincodes, over-limit counts, and pincodes already assigned to another franchise (conflict)
-    - _Requirements: 1.4, 1.7, 2.3, 2.4_
-
-  - [ ] 6.3 Implement franchise status-transition actions
-    - Add activate/suspend/reactivate actions enforcing valid transitions (reject activating an already-active franchise, reject reactivating an already-active franchise, and reject suspending an already-suspended franchise), applying within the 5s budget, and restoring dashboard access on reactivation
-    - _Requirements: 2.5, 2.6, 2.7, 2.9, 2.10_
-
-  - [ ]* 6.4 Write unit tests for lifecycle actions
-    - Cover missing-owner rejection, pincode-conflict rejection, and invalid status-transition rejection
-    - _Requirements: 2.2, 2.4, 2.10_
-
-- [ ] 7. Implement pincode overlap detection
-  - [ ] 7.1 Implement overlap-detection service
-    - Add `src/services` logic that, at franchise setup, detects pincodes mapped to more than one franchise, names the duplicated pincode, and lists every franchise it maps to
-    - _Requirements: 9.1, 9.2, 9.3_
-
-  - [ ] 7.2 Gate territory go-live on unresolved overlaps
-    - While any overlap is unresolved, block only the territory's transition to the live state while still permitting non-live state transitions (such as draft → review) and still allowing the territory's non-conflicting pincodes to receive customers (partial activation); reject the live activation and report each conflicting pincode; clear the indication and permit go-live once each pincode maps to exactly one franchise
-    - _Requirements: 9.4, 9.5, 9.6_
-
-  - [ ]* 7.3 Write unit tests for overlap detection and go-live gating
-    - Cover single-overlap detection, multi-franchise listing, blocked live activation, permitted non-live transitions and non-conflicting-pincode customer assignment while conflicts remain (partial activation), and cleared-conflict activation
-    - _Requirements: 9.1, 9.4, 9.6_
-
-- [ ] 8. Implement pincode-to-franchise assignment and waitlist
-  - [ ] 8.1 Implement the Assignment_Resolver service
-    - Add `src/services` resolver that maps a delivery pincode to exactly one active franchise and exposes the resolved `franchise_id` for stamping
-    - _Requirements: 8.1, 8.6_
-
-  - [ ] 8.2 Wire assignment into customer signup and waitlist handling
-    - Stamp the resolved `franchise_id` onto the customer profile before signup completes; place customers with no active franchise (or with a multi-franchise conflict) into the Waitlist_State, block their ordering, and surface conflicts to the Master Admin
-    - _Requirements: 8.1, 8.3, 8.4, 8.7_
-
-  - [ ] 8.3 Propagate assignment to derived operational records
-    - Ensure subscriptions, orders, and payments derived from an assigned customer inherit the customer's `franchise_id`
-    - _Requirements: 8.2_
-
-  - [ ] 8.4 Implement waitlist resolution on pincode/franchise changes
-    - When a franchise's pincodes are extended or a new franchise covers a waitlisted pincode, assign the servicing `franchise_id` and remove the customer from the Waitlist_State
-    - _Requirements: 8.5_
-
-  - [ ]* 8.5 Write property test for Single assignment
-    - **Property 3: Single assignment**
-    - **Validates: Requirements 8.1, 8.2, 8.5**
-    - Generate random pincode→franchise maps and customer pincodes; assert each served pincode resolves to exactly one franchise and a customer plus derived records associate with exactly that one franchise
-
-  - [ ]* 8.6 Write unit tests for waitlist scenarios
-    - Cover unmatched pincode, multi-franchise conflict, and waitlist clearing on coverage extension
-    - _Requirements: 8.3, 8.4, 8.7_
-
-- [ ] 9. Checkpoint - registry, assignment, and isolation verified
+- [ ] 13. Checkpoint — Verify RLS is safe before enabling in production
+  - Run RLS enablement script in a test/staging environment first
+  - Verify: ADMIN users can still see all core records (NULL franchise_id)
+  - Verify: existing API calls from admin.arogyadiet.com continue to work
+  - Verify: FRANCHISE_ADMIN users see only their franchise data
+  - Verify: core RIDER/CUSTOMER users still see their data unchanged
+  - Have rollback script ready: `scripts/disable-franchise-rls.sql`
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 10. Implement subdomain portal routing
-  - [ ] 10.1 Extend middleware for the franchise portal
-    - Update `src/middleware.ts` to detect `franchies.arogyadiet.com` and `admin.arogyadiet.com`, route within the latency budget, verify role + `franchise_id`, route franchise admins into a franchise-scoped workspace and master admins into the global workspace, and prevent an authenticated Franchise_Admin from reaching the head-office global workspace by routing them back to their franchise-scoped workspace
-    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
+- [ ] 14. Phase 5 — SAFE: Franchise portal (entirely new, zero existing impact)
+  - [ ] 14.1 Create franchise portal app directory and layout
+    - Create `src/app/franchise/` directory structure mirroring admin portal
+    - Create `src/app/franchise/layout.tsx` — franchise portal layout with franchise-scoped navigation
+    - Create `src/app/franchise/(auth)/login/page.tsx` — franchise admin login page
+    - Create `src/app/franchise/(main)/layout.tsx` — authenticated layout with sidebar navigation
+    - Navigation items: Dashboard, Customers, Riders, Inventory, Orders, Reports
+    - No master-level items (franchise onboarding, global config) in navigation
+    - _Requirements: 10.1, 10.3, 11.2, 11.3_
 
-  - [ ] 10.2 Implement access denial and unauthenticated handling
-    - Deny insufficient-role access at the middleware layer (before any page renders) to the unauthorized page exposing no franchise data regardless of the unauthorized page's implementation, redirect unauthenticated users to login preserving the subdomain, and route undefined subdomains to the unauthorized page
-    - _Requirements: 10.6, 10.7, 10.8, 3.4_
+  - [ ] 14.2 Create franchise dashboard page
+    - Create `src/app/franchise/(main)/dashboard/page.tsx`
+    - Display franchise-specific metrics: active subscriptions, today's deliveries, active riders, revenue this month
+    - Use shared franchise-scoped components from task 9.1
+    - Pass franchise_id from session context (resolved in middleware)
+    - _Requirements: 11.2, 13.5_
 
-  - [ ]* 10.3 Write property test for Routing soundness
-    - **Property 6: Routing soundness**
-    - **Validates: Requirements 10.3, 10.4, 10.5, 10.6, 11.2, 11.3, 11.4**
-    - Generate random (role, franchise, subdomain, auth-state) combinations; assert users are only routed into workspaces consistent with their role/franchise (including a Franchise_Admin being routed back from the head-office workspace), master controls are hidden from franchise users and shown to head office, and unauthorized access yields middleware-layer denial with no partial visibility
+  - [ ] 14.3 Create franchise customers management page
+    - Create `src/app/franchise/(main)/customers/page.tsx`
+    - Render `FranchiseCustomers` component with franchise_id from session
+    - Franchise admin sees only their franchise's customers
+    - Supports: view customer profiles, subscriptions, delivery history
+    - _Requirements: 11.1, 11.2, 13.3_
 
-- [ ] 11. Implement the shared RBAC-aware dashboard layer
-  - [ ] 11.1 Implement role/scope context and RBAC gate
-    - Add a scope-context provider and an RBAC gate component in `src/shared/components` that receives role + `franchise_id` props and conditionally renders master-only controls
-    - _Requirements: 11.3, 11.4, 11.5, 11.6_
+  - [ ] 14.4 Create franchise riders management page
+    - Create `src/app/franchise/(main)/riders/page.tsx`
+    - Render `FranchiseRiders` component with franchise_id from session
+    - Supports: view/manage rider profiles, service areas, live tracking
+    - _Requirements: 11.1, 11.2, 13.4_
 
-  - [ ] 11.2 Make shared operational interfaces scope-aware
-    - Update the shared customer, rider, inventory, order, and reporting components in `src/shared/components` to consume scope context so a single implementation serves both dashboards and scopes franchise data to the viewer's franchise
-    - _Requirements: 11.1, 11.2_
+  - [ ] 14.5 Create franchise inventory management page
+    - Create `src/app/franchise/(main)/inventory/page.tsx`
+    - Render `FranchiseInventory` component with franchise_id from session
+    - Supports: view/manage inventory lots, products, transactions, manufacturing
+    - _Requirements: 11.1, 11.2, 13.3_
 
-  - [ ] 11.3 Implement per-interface error and empty handling
-    - Show a per-interface error indication on data-load failure without leaking other-franchise/role data and while retaining the viewer's role scope; show the no-franchise-assigned indication for unassigned franchise admins
-    - _Requirements: 11.6, 11.7_
+  - [ ] 14.6 Create franchise orders and delivery management page
+    - Create `src/app/franchise/(main)/orders/page.tsx`
+    - Render `FranchiseOrders` component with franchise_id from session
+    - Supports: view today's orders, delivery batches, status tracking
+    - _Requirements: 11.1, 11.2, 13.1, 13.2_
 
-  - [ ]* 11.4 Write unit tests for RBAC show/hide and scope behavior
-    - Cover master control visibility per role, franchise scoping, unauthorized-role denial, and unassigned-franchise indication
-    - _Requirements: 11.3, 11.4, 11.5, 11.6_
+  - [ ] 14.7 Create franchise reports page
+    - Create `src/app/franchise/(main)/reports/page.tsx`
+    - Render `FranchiseReports` component with franchise_id from session
+    - Supports: revenue, delivery counts, subscription counts — scoped to franchise only
+    - _Requirements: 11.1, 11.2, 13.5_
 
-- [ ] 12. Implement the Master and Franchise dashboards
-  - [ ] 12.1 Implement Master dashboard data actions and views
-    - Add master-action data fetchers and the master dashboard view rendering consolidated revenue (default current calendar month), network operations health (active subscriptions, completed vs scheduled deliveries, active riders), per-franchise drill-down, the founding-franchise label, zero-value handling, and per-metric error handling
-    - _Requirements: 6.3, 6.4, 6.5, 6.6, 6.7, 6.8_
+  - [ ] 14.8 Create franchise profile/settings page
+    - Create `src/app/franchise/(main)/profile/page.tsx`
+    - Display franchise info (name, status, kitchen, served pincodes) — read-only for franchise admin
+    - Display franchise admin profile and account settings
+    - _Requirements: 10.3, 11.2_
 
-  - [ ] 12.2 Implement Franchise dashboard at the franchise portal
-    - Wire the `franchies` portal route to render the shared operational dashboard scoped to the authenticated franchise, with master features hidden, and deny operation when the franchise is suspended
-    - _Requirements: 2.7, 11.1, 11.2, 11.3_
+  - [ ]* 14.9 Write integration tests for franchise portal
+    - Test: franchise admin login flow resolves correct franchise_id
+    - Test: all franchise pages only display data matching the franchise_id
+    - Test: master-level controls are hidden from franchise admin
+    - Test: suspended franchise shows suspended indication
+    - **Property 1: Total franchise isolation** — portal only shows franchise's own data
+    - **Property 2: Core invisibility to franchises** — no core data visible
+    - **Property 7: Routing soundness** — correct portal routing for franchise admin
+    - **Validates: Requirements 10.1, 10.3, 11.2, 11.3, 2.7**
 
-  - [ ]* 12.3 Write unit tests for master metric scoping and drill-down
-    - Cover consolidated vs single-franchise scoping, default reporting period, and zero/error metric states
-    - _Requirements: 6.3, 6.4, 6.6, 6.7_
+- [ ] 15. Phase 5 — SAFE: Franchise-scoped daily operations
+  - [ ] 15.1 Create franchise-scoped delivery routing logic
+    - Create `src/lib/franchise/routing.ts`
+    - Implement: `runFranchiseRouting(franchiseId, date)` — executes routing using only records matching franchise_id
+    - Include only: delivery_orders, rider_profiles, customer addresses WHERE franchise_id matches
+    - Exclude: all core records (NULL franchise_id) and other franchise records
+    - For core routing: existing `src/lib/routing/` logic remains unchanged — operates on NULL franchise_id records as before
+    - _Requirements: 12.5, 12.6, 13.1, 13.2_
 
-- [ ] 13. Implement global-table modification flow for head office
-  - [ ] 13.1 Implement master global-config Server Actions
-    - Add/extend master actions to persist global-table modifications, propagate within the 5s budget, reject and roll back on persistence failure retaining prior data, and reject franchise-user modification attempts
-    - _Requirements: 7.2, 7.3, 7.4_
+  - [ ]* 15.2 Write property tests for franchise-scoped routing
+    - **Property 9: Franchise routing scope isolation** — only records matching franchise_id included in computation; core records and other franchise records excluded
+    - **Validates: Requirements 12.5, 12.6, 13.1, 13.2**
 
-  - [ ]* 13.2 Write unit tests for global-config persistence and rejection
-    - Cover successful persist+propagate, failed-persist rollback, and franchise-user write rejection
-    - _Requirements: 7.2, 7.3, 7.4_
+  - [ ] 15.3 Add franchise_id stamping to existing record creation flows
+    - Modify relevant server actions to call `stampFranchiseId()` utility when creating records:
+    - `customerActions.ts` — stamp customer_profiles on creation
+    - `subscriptionActions.ts` — stamp subscriptions on creation
+    - `adminDeliveryActions.ts` — stamp delivery_orders on creation
+    - `inventoryActions.ts` — stamp inventory records on creation
+    - `riderActions.ts` — stamp rider_profiles on creation
+    - CRITICAL: stampFranchiseId returns NULL for non-franchise contexts (ADMIN, existing users) — so existing flows persist NULL as before, ZERO behavior change for core operation
+    - Only FRANCHISE_ADMIN users will trigger non-null stamping
+    - _Requirements: 4.1, 4.2, 4.6, 4.7, 8.3, 8.4, 12.3_
 
-- [ ] 14. Migrate the existing Hyderabad operation as the founding franchise
-  - [ ] 14.1 Implement the founding-franchise backfill migration
-    - Add `scripts/backfill-founding-franchise.sql` associating every existing tenant-isolated record and existing core users with the founding franchise inside a single transaction, rolling back on any failure so no record is left partially migrated, and verifying no tenant-isolated record remains without a `franchise_id`
-    - _Requirements: 12.2, 12.3, 12.4_
+  - [ ] 15.4 Add franchise assignment to customer signup flow
+    - Modify customer signup action to call `resolveCustomerFranchise(pincode)` before completing signup
+    - If pincode → active franchise: stamp customer with franchise_id
+    - If pincode → core operation: stamp with NULL (existing behavior)
+    - If pincode → no match: set customer to waitlist state (accepted but cannot place orders)
+    - CRITICAL: For existing core pincodes, resolver returns NULL — signup behavior unchanged
+    - _Requirements: 8.1, 8.2, 8.5, 8.6_
 
-  - [ ] 14.2 Preserve founding-franchise workflows without a franchise-selection step
-    - Ensure founding-franchise users continue the existing customer, rider, inventory, and delivery workflows unchanged with no added franchise-selection step
-    - _Requirements: 12.1_
+  - [ ] 15.5 Implement global table write protection for franchise users
+    - Add role check to any server actions that modify global tables (subscription_plans, meal_categories, holidays, products, system_settings)
+    - If caller is FRANCHISE_ADMIN → reject modification with "not permitted" error
+    - If caller is ADMIN/MASTER_ADMIN → allow modification (existing behavior)
+    - FRANCHISE_ADMIN can READ global tables but not modify them
+    - _Requirements: 7.2, 7.3, 7.4, 7.5_
 
-  - [ ]* 14.3 Write integration test for migration completeness
-    - Assert post-migration there are zero tenant-isolated records without a `franchise_id` and that a simulated mid-migration failure rolls back cleanly
-    - _Requirements: 12.3, 12.4_
+  - [ ]* 15.6 Write property tests for global table protection and customer assignment
+    - **Property 8: Global consistency** — franchise user modification of global table always rejected
+    - **Property 4: Single assignment** — customer signup with pincode resolves to exactly one entity
+    - **Validates: Requirements 7.4, 8.1, 8.2, 8.8**
 
-- [ ] 15. Final checkpoint - full franchise model verified
+- [ ] 16. Phase 5 — SAFE: Vercel routing configuration
+  - [ ] 16.1 Update Vercel configuration for franchise subdomain
+    - Update `vercel.json` to add `franchies.arogyadiet.com` domain routing
+    - This is a new domain addition — does NOT affect existing domain configurations
+    - The franchise portal will only become accessible after DNS is configured by the user
+    - No production impact until DNS points to Vercel
+    - _Requirements: 10.1_
+
+- [ ] 17. Final checkpoint — End-to-end verification
+  - Verify: admin.arogyadiet.com works exactly as before for all existing workflows
+  - Verify: master.arogyadiet.com shows franchise management and consolidated metrics
+  - Verify: franchies.arogyadiet.com shows franchise-scoped dashboard for FRANCHISE_ADMIN
+  - Verify: RLS isolates franchise data correctly (run property tests)
+  - Verify: core operation routing runs on NULL franchise_id records only
+  - Verify: franchise routing runs on matching franchise_id records only
+  - Verify: customer signup assigns correct franchise or waitlists correctly
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
 
-- Tasks marked with `*` are optional test sub-tasks and can be skipped for a faster MVP, but they validate the platform's core isolation promise and are strongly recommended.
-- Each task references specific granular requirements clauses for traceability.
-- Property-based tests (3.6–3.9, 8.5, 10.3) map one-to-one to the six correctness properties in the design; isolation/master/global/write properties run against a test PostgreSQL/Supabase instance with RLS enabled.
-- Checkpoints (4, 9, 15) provide incremental validation at the database, registry/assignment, and full-system boundaries.
-- All database changes ship as `scripts/*.sql` migrations consistent with the existing project structure; data access stays in repositories/services and mutations in Server Actions per steering.
+- Tasks marked with `*` are optional and can be skipped for faster MVP
+- Each task references specific requirements for traceability
+- Checkpoints ensure incremental validation at each safety boundary
+- Property tests validate universal correctness properties from the design document
+- Unit tests validate specific examples and edge cases
+
+### Production Safety Summary
+
+| Phase | Risk Level | What Changes | Rollback Strategy |
+|-------|-----------|--------------|-------------------|
+| Phase 1 (Tasks 1-2) | ✅ SAFE | New tables, nullable columns, new files | DROP new tables/columns |
+| Phase 2 (Tasks 4-9) | ✅ SAFE | New server actions, new pages, new components | Delete new files |
+| Phase 3 (Tasks 10) | ⚠️ CONTROLLED | Middleware additions | Revert single file to previous version |
+| Phase 4 (Tasks 12) | 🔴 HIGHEST RISK | RLS enablement | Run `disable-franchise-rls.sql` rollback script |
+| Phase 5 (Tasks 14-16) | ✅ SAFE | New portal, new routing logic, Vercel config | Delete new files, revert vercel.json |
+
+### Deploy Order (CRITICAL)
+
+1. **Deploy Phase 1** — Run SQL scripts to add tables and columns (safe, no code impact)
+2. **Deploy Phase 2** — Deploy new server actions and UI pages (safe, no existing code changed)
+3. **Deploy Phase 3** — Deploy middleware changes (backward-compatible additions)
+4. **TEST IN STAGING** — Verify admin.arogyadiet.com still works perfectly
+5. **Deploy Phase 4** — Enable RLS ONLY after code is deployed and session context is working
+6. **Deploy Phase 5** — Wire up franchise portal (no impact until DNS configured)
+7. **Configure DNS** — Point franchies.arogyadiet.com to Vercel (final activation)
+
+### Feature Flag Strategy
+
+- Environment variable `FRANCHISE_FEATURES_ENABLED=true/false` controls whether franchise context is injected
+- When OFF: all existing behavior preserved exactly, middleware skips franchise logic, RLS session vars not set
+- When ON: franchise routing, session context, and RLS policies are active
+- Gradual rollout: enable in staging first, then production after verification
 
 ## Task Dependency Graph
 
@@ -239,15 +465,22 @@ A property-based test framework (Vitest + fast-check) is introduced to validate 
 {
   "waves": [
     { "id": 0, "tasks": ["1.1", "2.1"] },
-    { "id": 1, "tasks": ["1.2", "1.3", "1.4", "5.1"] },
-    { "id": 2, "tasks": ["3.1", "5.2", "5.3"] },
-    { "id": 3, "tasks": ["3.2", "3.3", "3.4", "3.5", "5.4"] },
-    { "id": 4, "tasks": ["3.6", "3.7", "3.8", "3.9", "6.1", "6.2", "6.3", "7.1"] },
-    { "id": 5, "tasks": ["6.4", "7.2", "8.1", "10.1", "11.1"] },
-    { "id": 6, "tasks": ["7.3", "8.2", "8.3", "8.4", "10.2", "11.2", "13.1"] },
-    { "id": 7, "tasks": ["8.5", "8.6", "10.3", "11.3", "12.1", "12.2", "13.2"] },
-    { "id": 8, "tasks": ["11.4", "12.3", "14.1", "14.2"] },
-    { "id": 9, "tasks": ["14.3"] }
+    { "id": 1, "tasks": ["1.2", "1.3", "2.2"] },
+    { "id": 2, "tasks": ["2.3", "4.1"] },
+    { "id": 3, "tasks": ["4.2", "4.3", "4.5"] },
+    { "id": 4, "tasks": ["4.4", "4.6", "4.7"] },
+    { "id": 5, "tasks": ["4.8", "6.1", "7.2"] },
+    { "id": 6, "tasks": ["6.2", "6.3", "7.1"] },
+    { "id": 7, "tasks": ["6.4", "9.1"] },
+    { "id": 8, "tasks": ["9.2", "9.3"] },
+    { "id": 9, "tasks": ["10.1", "10.2"] },
+    { "id": 10, "tasks": ["10.3", "10.4"] },
+    { "id": 11, "tasks": ["12.1"] },
+    { "id": 12, "tasks": ["12.2", "12.3"] },
+    { "id": 13, "tasks": ["12.4"] },
+    { "id": 14, "tasks": ["14.1", "15.1", "15.5"] },
+    { "id": 15, "tasks": ["14.2", "14.3", "14.4", "14.5", "14.6", "14.7", "14.8", "15.3", "15.4"] },
+    { "id": 16, "tasks": ["14.9", "15.2", "15.6", "16.1"] }
   ]
 }
 ```
