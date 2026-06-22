@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { updatePasswordAction } from "@/actions/authActions";
+import { Eye, EyeOff } from "lucide-react";
 
 export function UpdatePasswordForm({
   className,
@@ -21,6 +22,8 @@ export function UpdatePasswordForm({
     updatePasswordAction,
     null,
   );
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -40,7 +43,27 @@ export function UpdatePasswordForm({
               >
                 New Password
               </label>
-              <Input id="password" name="password" type="password" required />
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowPassword(!showPassword)}
+                  tabIndex={-1}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="grid gap-2">
@@ -50,12 +73,27 @@ export function UpdatePasswordForm({
               >
                 Confirm Password
               </label>
-              <Input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type={showConfirmPassword ? "text" : "password"}
+                  required
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  tabIndex={-1}
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {state?.error && (

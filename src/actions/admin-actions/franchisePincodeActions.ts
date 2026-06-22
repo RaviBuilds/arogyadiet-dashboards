@@ -286,3 +286,28 @@ export async function listFranchisePincodes(
 
   return { success: true, data: data ?? [] };
 }
+
+
+/**
+ * List all franchises for admin oversight.
+ * Uses admin client (service role) to bypass any RLS on the franchises table.
+ */
+export async function listAllFranchisesForAdmin(): Promise<
+  { success: true; data: any[] } | { success: false; error: string }
+> {
+  const authCheck = await assertCallerIsAdminOrMaster();
+  if (!authCheck.success) return authCheck;
+
+  const adminClient = createAdminClient();
+
+  const { data, error } = await adminClient
+    .from("franchises")
+    .select("*")
+    .order("name");
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  return { success: true, data: data ?? [] };
+}

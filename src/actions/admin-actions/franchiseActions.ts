@@ -7,10 +7,14 @@ import {
   createFranchiseSchema,
   updateFranchiseSchema,
 } from "@/validations/franchiseSchemas";
+import { sendEmail } from "@/services/emailService";
+import {
+  franchiseWelcomeEmailHtml,
+  FRANCHISE_WELCOME_SUBJECT,
+} from "@/emails/FranchiseWelcomeEmail";
 import type {
   Franchise,
   FranchiseWithPincodes,
-  FranchiseStatus,
   FranchiseListFilters,
 } from "@/types/franchise";
 import { revalidatePath } from "next/cache";
@@ -327,7 +331,7 @@ export async function activateFranchise(
 
   const { data: franchise } = await adminClient
     .from("franchises")
-    .select("id, status, name")
+    .select("id, status, name, kitchen_id")
     .eq("id", franchiseId)
     .single();
 
@@ -347,6 +351,14 @@ export async function activateFranchise(
     return {
       success: false,
       error: `Cannot activate from "${franchise.status}" status. Valid source: ${allowedFrom.join(", ")}`,
+    };
+  }
+
+  // Check franchise has a kitchen assigned
+  if (!franchise.kitchen_id) {
+    return {
+      success: false,
+      error: "Cannot activate — no kitchen location set. Set up the kitchen address first.",
     };
   }
 
@@ -372,6 +384,33 @@ export async function activateFranchise(
 
   if (updateError || !updated) {
     return { success: false, error: updateError?.message ?? "Failed to activate franchise" };
+  }
+
+  // Send welcome email to franchise owner (non-blocking)
+  try {
+    const { data: ownerUser } = await adminClient
+      .from("users")
+      .select("email, full_name")
+      .eq("franchise_id", franchiseId)
+      .single();
+
+    if (ownerUser?.email) {
+      const loginUrl = "https://franchies.arogyadiet.com/login";
+      const supportEmail = "arogyadiet.dashboard@gmail.com";
+
+      void sendEmail(
+        ownerUser.email,
+        FRANCHISE_WELCOME_SUBJECT,
+        franchiseWelcomeEmailHtml({
+          ownerName: ownerUser.full_name ?? "Franchise Admin",
+          franchiseName: franchise.name,
+          loginUrl,
+          supportEmail,
+        })
+      );
+    }
+  } catch {
+    // Email failure should not block activation
   }
 
   revalidatePath("/franchises");

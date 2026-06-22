@@ -1,4 +1,4 @@
-import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { MasterPageHeader } from "@/shared/components/master/MasterPageHeader";
 import {
   getMasterSubscriptionKPIs,
   getMasterSubscriptionList,
@@ -15,7 +15,7 @@ export default async function MasterSubscriptionsPage() {
 
   return (
     <div className="space-y-6">
-      <AdminPageHeader
+      <MasterPageHeader
         title="Subscriptions"
         description="Granular subscription lifecycle tracking with pause credit visibility and exportable reports."
       />

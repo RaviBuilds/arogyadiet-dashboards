@@ -28,7 +28,6 @@ import {
   getPincodeConflicts,
 } from "@/actions/admin-actions/franchisePincodeActions";
 import type { Franchise, FranchisePincodeConflict } from "@/types/franchise";
-import { createClient } from "@/lib/supabase/client";
 
 /**
  * FranchiseOversight — Admin Dashboard Section
@@ -52,12 +51,12 @@ export default function FranchiseOversight() {
 
   useEffect(() => {
     async function loadFranchises() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("franchises")
-        .select("*")
-        .order("name");
-      setFranchises((data as Franchise[]) ?? []);
+      // Use the pincode actions' server context (admin client) to fetch franchises
+      const { listAllFranchisesForAdmin } = await import("@/actions/admin-actions/franchisePincodeActions");
+      const result = await listAllFranchisesForAdmin();
+      if (result.success) {
+        setFranchises(result.data as Franchise[]);
+      }
       setLoading(false);
     }
     loadFranchises();

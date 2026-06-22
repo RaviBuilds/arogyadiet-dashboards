@@ -6,14 +6,6 @@ import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Input } from "@/shared/components/ui/input";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/shared/components/ui/table";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -21,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/shared/components/ui/dialog";
-import { Plus, Search, Building2, Eye } from "lucide-react";
+import { Plus, Search, Building2, ChevronRight, TrendingUp, Clock, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { createFranchise } from "@/actions/admin-actions/franchiseActions";
 import type { Franchise, FranchiseStatus } from "@/types/franchise";
@@ -30,10 +22,10 @@ interface FranchiseListClientProps {
   franchises: Franchise[];
 }
 
-const STATUS_COLORS: Record<FranchiseStatus, string> = {
-  onboarding: "bg-amber-50 text-amber-700 border-amber-200",
-  active: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  suspended: "bg-red-50 text-red-700 border-red-200",
+const STATUS_CONFIG: Record<FranchiseStatus, { bg: string; text: string; dot: string; icon: any }> = {
+  onboarding: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-500", icon: Clock },
+  active: { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500", icon: TrendingUp },
+  suspended: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-500", icon: AlertTriangle },
 };
 
 export default function FranchiseListClient({ franchises }: FranchiseListClientProps) {
@@ -47,25 +39,22 @@ export default function FranchiseListClient({ franchises }: FranchiseListClientP
   );
 
   const handleCreate = () => {
-    if (!newName.trim()) {
-      toast.error("Franchise name is required");
-      return;
-    }
-
+    if (!newName.trim()) { toast.error("Franchise name is required"); return; }
     startTransition(async () => {
       const result = await createFranchise({ name: newName.trim() });
       if (result.success) {
         toast.success(`Franchise "${result.data.name}" created`);
-        setNewName("");
-        setIsCreateOpen(false);
-      } else {
-        toast.error(result.error);
-      }
+        setNewName(""); setIsCreateOpen(false);
+      } else { toast.error(result.error); }
     });
   };
 
+  const totalActive = franchises.filter((f) => f.status === "active").length;
+  const totalOnboarding = franchises.filter((f) => f.status === "onboarding").length;
+  const totalSuspended = franchises.filter((f) => f.status === "suspended").length;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
         <div className="relative flex-1 max-w-sm">
@@ -74,45 +63,38 @@ export default function FranchiseListClient({ franchises }: FranchiseListClientP
             placeholder="Search franchises..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+            className="pl-10 h-10 bg-white border-slate-200"
           />
         </div>
 
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogTrigger asChild>
-            <Button className="gap-2">
+            <Button className="gap-2 h-10 px-5 bg-slate-900 hover:bg-slate-800 shadow-sm">
               <Plus className="h-4 w-4" />
               New Franchise
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[420px]">
             <DialogHeader>
               <DialogTitle>Create New Franchise</DialogTitle>
               <DialogDescription>
-                Create a new franchise entry. It will start in &quot;onboarding&quot; status.
-                Admin will assign pincodes separately.
+                Start onboarding a new franchise location. You&apos;ll set up the admin, kitchen, and pincodes next.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-4">
               <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Franchise Name
-                </label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Franchise Name</label>
                 <Input
                   placeholder="e.g. ArogyaDiet Bangalore"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  className="mt-1"
+                  className="mt-1.5 h-10"
                   onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                  autoFocus
                 />
               </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsCreateOpen(false)}
-                >
-                  Cancel
-                </Button>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
                 <Button onClick={handleCreate} disabled={isPending}>
                   {isPending ? "Creating..." : "Create Franchise"}
                 </Button>
@@ -122,92 +104,105 @@ export default function FranchiseListClient({ franchises }: FranchiseListClientP
         </Dialog>
       </div>
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard
-          label="Total"
-          value={franchises.length}
-          color="text-slate-700"
-        />
-        <StatCard
-          label="Active"
-          value={franchises.filter((f) => f.status === "active").length}
-          color="text-emerald-700"
-        />
-        <StatCard
-          label="Onboarding"
-          value={franchises.filter((f) => f.status === "onboarding").length}
-          color="text-amber-700"
-        />
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <KPICard icon={Building2} label="TOTAL FRANCHISES" value={franchises.length} color="text-slate-800" bgIcon="bg-slate-100" />
+        <KPICard icon={TrendingUp} label="ACTIVE" value={totalActive} color="text-emerald-700" bgIcon="bg-emerald-100" sub={totalActive > 0 ? "Operational" : undefined} />
+        <KPICard icon={Clock} label="ONBOARDING" value={totalOnboarding} color="text-amber-700" bgIcon="bg-amber-100" sub={totalOnboarding > 0 ? "Setting up" : undefined} />
+        <KPICard icon={AlertTriangle} label="SUSPENDED" value={totalSuspended} color="text-red-700" bgIcon="bg-red-100" sub={totalSuspended > 0 ? "Needs attention" : undefined} />
       </div>
 
-      {/* Table */}
+      {/* Franchise List */}
       {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <Building2 className="h-12 w-12 text-slate-300 mb-3" />
-          <p className="text-sm text-slate-500">
-            {franchises.length === 0
-              ? "No franchises yet. Create one to get started."
-              : "No franchises match your search."}
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white/50 py-16 text-center">
+          <Building2 className="h-12 w-12 text-slate-200 mx-auto mb-3" />
+          <p className="text-sm font-medium text-slate-500">
+            {franchises.length === 0 ? "No franchises yet" : "No franchises match your search"}
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            {franchises.length === 0 && "Click \"New Franchise\" to start onboarding."}
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-200 bg-white">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((franchise) => (
-                <TableRow key={franchise.id}>
-                  <TableCell className="font-medium">{franchise.name}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={STATUS_COLORS[franchise.status]}
-                    >
+        <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+          {/* Table Header */}
+          <div className="grid grid-cols-[1fr_120px_140px_80px] gap-4 px-6 py-3 bg-slate-50 border-b border-slate-100">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Name</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Status</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Created</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Action</span>
+          </div>
+
+          {/* Rows */}
+          {filtered.map((franchise, idx) => {
+            const style = STATUS_CONFIG[franchise.status];
+            return (
+              <Link
+                key={franchise.id}
+                href={`/franchises/${franchise.id}`}
+                className={`grid grid-cols-[1fr_120px_140px_80px] gap-4 px-6 py-4 items-center transition-colors hover:bg-slate-50/80 group ${
+                  idx < filtered.length - 1 ? "border-b border-slate-100" : ""
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${style.bg}`}>
+                    <Building2 className={`h-4 w-4 ${style.text}`} />
+                  </div>
+                  <span className="text-sm font-semibold text-slate-800 group-hover:text-slate-900">
+                    {franchise.name}
+                  </span>
+                </div>
+
+                <div>
+                  <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${style.bg}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+                    <span className={`text-[11px] font-semibold capitalize ${style.text}`}>
                       {franchise.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-slate-500 text-sm">
-                    {new Date(franchise.created_at).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Link href={`/franchises/${franchise.id}`}>
-                      <Button variant="ghost" size="sm" className="gap-1.5">
-                        <Eye className="h-3.5 w-3.5" />
-                        View
-                      </Button>
-                    </Link>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    </span>
+                  </div>
+                </div>
+
+                <span className="text-xs text-slate-500">
+                  {new Date(franchise.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                </span>
+
+                <div className="flex justify-end">
+                  <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-function StatCard({
+function KPICard({
+  icon: Icon,
   label,
   value,
   color,
+  bgIcon,
+  sub,
 }: {
+  icon: any;
   label: string;
   value: number;
   color: string;
+  bgIcon: string;
+  sub?: string;
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className={`text-xl font-bold ${color}`}>{value}</p>
+    <div className="rounded-2xl border border-slate-200/80 bg-white px-5 py-4 shadow-sm">
+      <div className="flex items-center gap-2.5 mb-2">
+        <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${bgIcon}`}>
+          <Icon className={`h-3.5 w-3.5 ${color}`} />
+        </div>
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</span>
+      </div>
+      <p className={`text-2xl font-bold ${color}`}>{value}</p>
+      {sub && <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>}
     </div>
   );
 }

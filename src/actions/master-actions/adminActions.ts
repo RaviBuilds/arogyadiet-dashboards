@@ -37,12 +37,48 @@ export async function createAdminUser(formData: {
   // Check for existing email
   const { data: existing } = await supabaseAdmin
     .from("users")
-    .select("id")
+    .select("id, is_active")
     .eq("email", formData.email)
     .single();
 
   if (existing) {
-    return { success: false, error: "An account with this email already exists." };
+    // If user is deactivated, reactivate them with ADMIN role
+    if (!existing.is_active) {
+      const { data: roleData } = await supabaseAdmin
+        .from("roles")
+        .select("id")
+        .eq("code", "ADMIN")
+        .single();
+
+      if (!roleData) {
+        return { success: false, error: "System configuration error: ADMIN role not found." };
+      }
+
+      const { error: reactivateError } = await supabaseAdmin
+        .from("users")
+        .update({
+          is_active: true,
+          role_id: roleData.id,
+          full_name: formData.fullName,
+          mobile: formData.mobile || null,
+          force_password_change: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+
+      if (reactivateError) {
+        return { success: false, error: reactivateError.message };
+      }
+
+      await logAdminAction("REACTIVATE", "admin_user", existing.id, {
+        email: formData.email,
+        full_name: formData.fullName,
+      });
+      revalidatePath("/master/user-management");
+      return { success: true };
+    }
+
+    return { success: false, error: "An account with this email is already active." };
   }
 
   // Create auth user
