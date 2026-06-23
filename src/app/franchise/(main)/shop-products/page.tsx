@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ShoppingBag } from "lucide-react";
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
+import { getFranchiseShopProducts } from "@/actions/admin-actions/franchiseProductActions";
 import FranchiseShopProductsClient from "./FranchiseShopProductsClient";
 
 export const revalidate = 0;
@@ -20,12 +21,8 @@ export default async function FranchiseShopProductsPage() {
 
   const supabase = createAdminClient();
 
-  // Fetch all active products (catalog is shared across all franchises)
-  const { data: products } = await supabase
-    .from("products")
-    .select("id, sku, name, category, original_price, sale_price, stock_quantity, is_active, image_urls, banner_image_url")
-    .is("deleted_at", null)
-    .order("name", { ascending: true });
+  // Shared catalog merged with this franchise's stock + visibility overlay.
+  const products = await getFranchiseShopProducts(franchiseId);
 
   // Fetch addon orders for this franchise's customers
   const { data: recentOrders } = await supabase
@@ -43,11 +40,11 @@ export default async function FranchiseShopProductsPage() {
     <div className="flex flex-col gap-8 animate-in fade-in duration-500">
       <PageHeader
         title="Shop Products"
-        subtitle="View product catalog and manage addon orders for your franchise customers."
+        subtitle="Set your own stock and choose which products your customers can see."
         icon={ShoppingBag}
       />
       <FranchiseShopProductsClient
-        products={products ?? []}
+        products={products}
         recentOrders={(recentOrders ?? []) as any[]}
       />
     </div>
