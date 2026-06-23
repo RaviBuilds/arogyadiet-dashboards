@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Badge } from "@/shared/components/ui/badge";
+import { Button } from "@/shared/components/ui/button";
 import {
   Table,
   TableBody,
@@ -17,21 +20,14 @@ import {
   TabsTrigger,
 } from "@/shared/components/ui/tabs";
 import { Input } from "@/shared/components/ui/input";
-import { ShoppingBag, Package, Search } from "lucide-react";
+import { Switch } from "@/shared/components/ui/switch";
+import { ShoppingBag, Package, Search, Check, Loader2 } from "lucide-react";
 import { SectionCard } from "@/shared/components/franchise/ui/GlassCard";
-
-interface Product {
-  id: string;
-  sku: string | null;
-  name: string;
-  category: string | null;
-  original_price: number;
-  sale_price: number | null;
-  stock_quantity: number | null;
-  is_active: boolean;
-  image_urls: string[] | null;
-  banner_image_url: string | null;
-}
+import {
+  updateFranchiseProductStock,
+  toggleFranchiseProductVisibility,
+  type FranchiseShopProduct,
+} from "@/actions/admin-actions/franchiseProductActions";
 
 interface OrderRow {
   id: string;
@@ -44,7 +40,7 @@ interface OrderRow {
 }
 
 interface Props {
-  products: Product[];
+  products: FranchiseShopProduct[];
   recentOrders: OrderRow[];
 }
 
@@ -53,32 +49,36 @@ const TH = "text-[11px] font-medium uppercase tracking-wider text-slate-400";
 export default function FranchiseShopProductsClient({ products, recentOrders }: Props) {
   const [search, setSearch] = useState("");
 
-  const activeProducts = useMemo(() => products.filter((p) => p.is_active), [products]);
-
   const filteredProducts = useMemo(() => {
-    if (!search) return activeProducts;
+    if (!search) return products;
     const term = search.toLowerCase();
-    return activeProducts.filter(
+    return products.filter(
       (p) =>
         p.name.toLowerCase().includes(term) ||
         p.category?.toLowerCase().includes(term) ||
-        p.sku?.toLowerCase().includes(term)
+        p.sku?.toLowerCase().includes(term),
     );
-  }, [search, activeProducts]);
+  }, [search, products]);
+
+  const visibleCount = products.filter((p) => p.is_visible).length;
 
   return (
     <div className="space-y-8">
       <Tabs defaultValue="catalog" className="w-full">
         <TabsList>
-          <TabsTrigger value="catalog">Product Catalog ({activeProducts.length})</TabsTrigger>
-          <TabsTrigger value="orders">Recent Orders ({recentOrders.length})</TabsTrigger>
+          <TabsTrigger value="catalog">
+            My Products ({products.length})
+          </TabsTrigger>
+          <TabsTrigger value="orders">
+            Recent Orders ({recentOrders.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="catalog" className="mt-4">
           <SectionCard
             icon={ShoppingBag}
-            title="Active Products"
-            subtitle="Available for your franchise customers"
+            title="Product Availability"
+            subtitle={`${visibleCount} of ${products.length} shown to your customers. Set your stock and toggle visibility.`}
             actions={
               <div className="relative w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
@@ -92,50 +92,13 @@ export default function FranchiseShopProductsClient({ products, recentOrders }: 
             }
           >
             {filteredProducts.length === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-12">No products found.</p>
+              <p className="text-sm text-slate-400 text-center py-12">
+                No products found.
+              </p>
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredProducts.map((product) => (
-                  <div
-                    key={product.id}
-                    className="rounded-xl bg-white/60 p-4 ring-1 ring-slate-100 transition-all hover:ring-slate-200"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="min-w-0">
-                        <h3 className="text-sm font-semibold text-slate-800 truncate">{product.name}</h3>
-                        {product.category && (
-                          <span className="text-[10px] uppercase tracking-wider text-slate-400">{product.category}</span>
-                        )}
-                      </div>
-                      <Badge variant="outline" className={`rounded-lg text-[10px] shrink-0 ${product.is_active ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "text-slate-500"}`}>
-                        {product.is_active ? "Active" : "Inactive"}
-                      </Badge>
-                    </div>
-                    <div className="flex items-baseline gap-2 mt-2">
-                      {product.sale_price ? (
-                        <>
-                          <span className="text-xl font-semibold tracking-tight text-primary">
-                            ₹{Number(product.sale_price).toFixed(0)}
-                          </span>
-                          <span className="text-xs text-slate-400 line-through">
-                            ₹{Number(product.original_price).toFixed(0)}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-xl font-semibold tracking-tight text-slate-800">
-                          ₹{Number(product.original_price).toFixed(0)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
-                      {product.sku && <span>SKU: {product.sku}</span>}
-                      {product.stock_quantity != null && (
-                        <span className={product.stock_quantity < 10 ? "text-rose-500 font-medium" : ""}>
-                          Stock: {product.stock_quantity}
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  <ProductCard key={product.id} product={product} />
                 ))}
               </div>
             )}
@@ -196,6 +159,139 @@ export default function FranchiseShopProductsClient({ products, recentOrders }: 
           </SectionCard>
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function ProductCard({ product }: { product: FranchiseShopProduct }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [stock, setStock] = useState<string>(String(product.stock_quantity));
+  const [isVisible, setIsVisible] = useState(product.is_visible);
+
+  const stockChanged = Number(stock) !== product.stock_quantity;
+  const inStock = product.stock_quantity > 0;
+
+  const handleSaveStock = () => {
+    const qty = Number(stock);
+    if (Number.isNaN(qty) || qty < 0) {
+      toast.error("Enter a valid stock quantity.");
+      return;
+    }
+    startTransition(async () => {
+      const res = await updateFranchiseProductStock(product.id, qty);
+      if (res.success) {
+        toast.success("Stock updated.");
+        router.refresh();
+      } else {
+        toast.error(res.error ?? "Failed to update stock.");
+      }
+    });
+  };
+
+  const handleToggleVisibility = (checked: boolean) => {
+    setIsVisible(checked);
+    startTransition(async () => {
+      const res = await toggleFranchiseProductVisibility(product.id, checked);
+      if (res.success) {
+        toast.success(checked ? "Product visible to customers." : "Product hidden.");
+        router.refresh();
+      } else {
+        setIsVisible(!checked);
+        toast.error(res.error ?? "Failed to update visibility.");
+      }
+    });
+  };
+
+  return (
+    <div className="rounded-xl bg-white/60 p-4 ring-1 ring-slate-100 transition-all hover:ring-slate-200">
+      <div className="flex items-start justify-between mb-2">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-slate-800 truncate">{product.name}</h3>
+          {product.category && (
+            <span className="text-[10px] uppercase tracking-wider text-slate-400">
+              {product.category}
+            </span>
+          )}
+        </div>
+        <Badge
+          variant="outline"
+          className={`rounded-lg text-[10px] shrink-0 ${
+            !inStock
+              ? "bg-rose-50 text-rose-700 border-rose-200"
+              : isVisible
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : "text-slate-500"
+          }`}
+        >
+          {!inStock ? "Out of stock" : isVisible ? "Shown" : "Hidden"}
+        </Badge>
+      </div>
+
+      <div className="flex items-baseline gap-2 mt-2">
+        {product.sale_price ? (
+          <>
+            <span className="text-xl font-semibold tracking-tight text-primary">
+              ₹{Number(product.sale_price).toFixed(0)}
+            </span>
+            <span className="text-xs text-slate-400 line-through">
+              ₹{Number(product.original_price).toFixed(0)}
+            </span>
+          </>
+        ) : (
+          <span className="text-xl font-semibold tracking-tight text-slate-800">
+            ₹{Number(product.original_price).toFixed(0)}
+          </span>
+        )}
+      </div>
+      {product.sku && (
+        <p className="mt-1 text-xs text-slate-400">SKU: {product.sku}</p>
+      )}
+
+      {!product.catalog_active && (
+        <p className="mt-2 text-[11px] text-amber-600">
+          Disabled in the central catalog by admin.
+        </p>
+      )}
+
+      {/* Stock control */}
+      <div className="mt-3 flex items-end gap-2">
+        <div className="flex-1">
+          <label className="text-[11px] font-medium text-slate-500">My Stock</label>
+          <Input
+            type="number"
+            min={0}
+            value={stock}
+            onChange={(e) => setStock(e.target.value)}
+            disabled={isPending}
+            className="h-9 rounded-lg bg-white/70 text-sm"
+          />
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-9"
+          onClick={handleSaveStock}
+          disabled={isPending || !stockChanged}
+        >
+          {isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+          Save
+        </Button>
+      </div>
+
+      {/* Visibility toggle */}
+      <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+        <span className="text-xs text-slate-500">Show to my customers</span>
+        <Switch
+          checked={isVisible}
+          disabled={isPending}
+          onCheckedChange={handleToggleVisibility}
+        />
+      </div>
     </div>
   );
 }
