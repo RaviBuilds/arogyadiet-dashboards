@@ -986,10 +986,10 @@ export default function CustomerDashboard({
                     </TableCell>
                     <TableCell>
                       <div className="text-sm">
-                        Starts: {new Date(sub.starts_on).toLocaleDateString()}
+                        Starts: {new Date(sub.starts_on).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                       </div>
                       <div className="text-sm">
-                        Ends: {new Date(sub.ends_on).toLocaleDateString()}
+                        Ends: {new Date(sub.ends_on).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -1102,7 +1102,7 @@ export default function CustomerDashboard({
                     </TableCell>
                     <TableCell>
                       <div className="text-sm font-medium">
-                        {new Date(sub.starts_on).toLocaleDateString()}
+                        {new Date(sub.starts_on).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -1207,14 +1207,14 @@ export default function CustomerDashboard({
                     <TableCell>
                       <div className="text-sm">
                         {sub.starts_on
-                          ? new Date(sub.starts_on).toLocaleDateString()
+                          ? new Date(sub.starts_on).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
                           : "—"}
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="text-sm">
                         {sub.ends_on
-                          ? new Date(sub.ends_on).toLocaleDateString()
+                          ? new Date(sub.ends_on).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
                           : "—"}
                       </div>
                     </TableCell>

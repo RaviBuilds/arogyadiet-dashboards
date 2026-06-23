@@ -126,14 +126,62 @@ export async function onboardRider(formData: {
   
   const { data: existingUser } = await supabaseAdmin
     .from("users")
-    .select("id")
+    .select("id, is_active")
     .eq("email", formData.email)
     .single();
-  if (existingUser)
+  if (existingUser) {
+    // If user is deactivated, reactivate as rider
+    if (!existingUser.is_active) {
+      const { data: roleData } = await supabaseAdmin
+        .from("roles")
+        .select("id")
+        .eq("code", "RIDER")
+        .single();
+
+      if (roleData?.id) {
+        await supabaseAdmin
+          .from("users")
+          .update({
+            is_active: true,
+            role_id: roleData.id,
+            full_name: formData.fullName,
+            mobile: formData.mobile,
+            force_password_change: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingUser.id);
+
+        // Check if rider profile exists, if not create one
+        const { data: existingProfile } = await supabaseAdmin
+          .from("rider_profiles")
+          .select("id")
+          .eq("user_id", existingUser.id)
+          .single();
+
+        if (!existingProfile) {
+          await supabaseAdmin
+            .from("rider_profiles")
+            .insert({
+              user_id: existingUser.id,
+              employee_code: formData.employeeCode,
+              is_online: false,
+            });
+        }
+
+        await logAdminAction("REACTIVATE", "rider", existingUser.id, {
+          employee_code: formData.employeeCode,
+          email: formData.email,
+        });
+        revalidatePath("/riders");
+        return { success: true };
+      }
+    }
+
     return {
       success: false,
-      error: "This email ID is already linked to an account.",
+      error: "This email ID is already linked to an active account.",
     };
+  }
 
   const { data: authData, error: authError } =
     await supabaseAdmin.auth.admin.createUser({

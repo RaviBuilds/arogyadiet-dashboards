@@ -1,14 +1,14 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
-import { Users, DollarSign, ScrollText, Shield } from "lucide-react";
+import { MasterPageHeader } from "@/shared/components/master/MasterPageHeader";
+import { Users, DollarSign, ScrollText, Shield, FileBarChart } from "lucide-react";
 
 export const revalidate = 0;
 
 export default function SystemPage() {
   return (
     <div className="space-y-6">
-      <AdminPageHeader
+      <MasterPageHeader
         title="System & Configuration"
         description="User management, finance settings, activity logs, and system health."
       />
@@ -37,6 +37,12 @@ export default function SystemPage() {
           icon={<Shield className="h-5 w-5 text-red-600" />}
           title="Customer Data"
           description="Legacy customer and subscription tables."
+        />
+        <SystemCard
+          href="/reports"
+          icon={<FileBarChart className="h-5 w-5 text-blue-600" />}
+          title="Report Engine"
+          description="Custom reports, export data, and analytics."
         />
       </div>
     </div>

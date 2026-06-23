@@ -20,6 +20,7 @@ import { useActionState, useState } from "react";
 import { LoginAction } from "@/actions/authActions";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
+import { Eye, EyeOff } from "lucide-react";
 
 interface LoginFormProps extends React.ComponentProps<"div"> {
   socialLogin?: boolean;
@@ -42,6 +43,7 @@ export function LoginForm({
 }: LoginFormProps) {
   const [state, formAction, isPending] = useActionState(LoginAction, null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleGoogleLogin = async () => {
     setIsGoogleLoading(true);
@@ -125,7 +127,27 @@ export function LoginForm({
                     </Link>
                   )}
                 </div>
-                <Input id="password" name="password" type="password" required />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               </Field>
 
               {state?.error && (
