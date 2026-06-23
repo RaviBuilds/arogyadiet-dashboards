@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import FranchiseNavbar from "./FranchiseNavbar";
+import { AmbientBackground } from "@/shared/components/franchise/ui/AmbientBackground";
 
 export default async function FranchiseLayout({
   children,
@@ -71,9 +72,10 @@ export default async function FranchiseLayout({
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-muted/20">
+    <div className="relative flex min-h-screen flex-col">
+      <AmbientBackground />
       <FranchiseNavbar userProfile={userProfile} email={user.email!} />
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-10 sm:px-6 lg:px-8">
         {children}
       </main>
     </div>

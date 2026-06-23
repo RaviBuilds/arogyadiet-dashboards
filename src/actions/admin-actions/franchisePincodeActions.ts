@@ -3,13 +3,19 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getCoreServicePincodes } from "@/lib/franchise/context";
+import { assignWaitlistedCustomers } from "@/lib/franchise/assignment-resolver";
 import {
   assignPincodesSchema,
   removePincodesSchema,
+  reviewPincodeRequestSchema,
   type AssignPincodesInput,
   type RemovePincodesInput,
+  type ReviewPincodeRequestInput,
 } from "@/validations/franchiseSchemas";
-import type { FranchisePincodeConflict } from "@/types/franchise";
+import type {
+  FranchisePincodeConflict,
+  FranchisePincodeRequestWithMeta,
+} from "@/types/franchise";
 import { revalidatePath } from "next/cache";
 
 // ─── Auth Helper ───────────────────────────────────────────────────────────
@@ -310,4 +316,235 @@ export async function listAllFranchisesForAdmin(): Promise<
   }
 
   return { success: true, data: data ?? [] };
+}
+
+// ─── Pincode Request Approval Queue (Admin) ──────────────────────────────────
+
+/**
+ * Resolves the calling admin's internal user id (for reviewed_by stamping).
+ * Returns null id if not resolvable, but auth is still enforced separately.
+ */
+async function getCallerInternalUserId(): Promise<string | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("users")
+    .select("id")
+    .eq("auth_user_id", user.id)
+    .single();
+
+  return data?.id ?? null;
+}
+
+/**
+ * List franchise pincode requests for the admin approval queue.
+ * @param status - optional filter; defaults to "pending"
+ */
+export async function listPincodeRequests(
+  status: "pending" | "approved" | "rejected" | "all" = "pending"
+): Promise<
+  | { success: true; data: FranchisePincodeRequestWithMeta[] }
+  | { success: false; error: string }
+> {
+  const authCheck = await assertCallerIsAdminOrMaster();
+  if (!authCheck.success) return authCheck;
+
+  const adminClient = createAdminClient();
+
+  let query = adminClient
+    .from("franchise_pincode_requests")
+    .select(
+      "id, franchise_id, pincode, status, requested_by, reviewed_by, review_notes, created_at, reviewed_at, franchises(name), requester:users!franchise_pincode_requests_requested_by_fkey(full_name)"
+    )
+    .order("created_at", { ascending: false });
+
+  if (status !== "all") {
+    query = query.eq("status", status);
+  }
+
+  const { data, error } = await query;
+
+  if (error) return { success: false, error: error.message };
+
+  const mapped: FranchisePincodeRequestWithMeta[] = (data ?? []).map((row: any) => ({
+    id: row.id,
+    franchise_id: row.franchise_id,
+    pincode: row.pincode,
+    status: row.status,
+    requested_by: row.requested_by,
+    reviewed_by: row.reviewed_by,
+    review_notes: row.review_notes,
+    created_at: row.created_at,
+    reviewed_at: row.reviewed_at,
+    franchise_name: row.franchises?.name ?? "Unknown",
+    requested_by_name: row.requester?.full_name ?? null,
+  }));
+
+  return { success: true, data: mapped };
+}
+
+/**
+ * Count of pending pincode requests — used for the admin nav badge.
+ */
+export async function countPendingPincodeRequests(): Promise<number> {
+  const authCheck = await assertCallerIsAdminOrMaster();
+  if (!authCheck.success) return 0;
+
+  const adminClient = createAdminClient();
+  const { count } = await adminClient
+    .from("franchise_pincode_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
+
+  return count ?? 0;
+}
+
+/**
+ * Approve a pending pincode request.
+ * Re-checks conflicts (core + other franchises), promotes the pincode into the
+ * live franchise_pincodes table, marks the request approved, and assigns any
+ * waitlisted customers in that pincode to the franchise.
+ */
+export async function approvePincodeRequest(
+  input: ReviewPincodeRequestInput
+): Promise<
+  | { success: true; assignedCustomers: number }
+  | { success: false; error: string; conflicts?: FranchisePincodeConflict[] }
+> {
+  const authCheck = await assertCallerIsAdminOrMaster();
+  if (!authCheck.success) return authCheck;
+
+  const parsed = reviewPincodeRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message };
+  }
+
+  const adminClient = createAdminClient();
+  const reviewerId = await getCallerInternalUserId();
+
+  // Load the request
+  const { data: request } = await adminClient
+    .from("franchise_pincode_requests")
+    .select("id, franchise_id, pincode, status")
+    .eq("id", parsed.data.request_id)
+    .single();
+
+  if (!request) return { success: false, error: "Request not found" };
+  if (request.status !== "pending") {
+    return { success: false, error: "This request has already been reviewed" };
+  }
+
+  const { franchise_id, pincode } = request;
+
+  // Conflict: core operation pincode
+  const corePincodes = await getCoreServicePincodes();
+  if (corePincodes.includes(pincode)) {
+    return {
+      success: false,
+      error: `Pincode ${pincode} is reserved for core operation and cannot be assigned.`,
+      conflicts: [{ pincode, conflicting_entity: "core" }],
+    };
+  }
+
+  // Conflict: already assigned to another franchise
+  const { data: existing } = await adminClient
+    .from("franchise_pincodes")
+    .select("pincode, franchise_id, franchises(name)")
+    .eq("pincode", pincode)
+    .maybeSingle();
+
+  if (existing && existing.franchise_id !== franchise_id) {
+    return {
+      success: false,
+      error: `Pincode ${pincode} is already assigned to another franchise.`,
+      conflicts: [
+        {
+          pincode,
+          conflicting_entity: "franchise",
+          conflicting_franchise_id: existing.franchise_id,
+          conflicting_franchise_name: (existing as any).franchises?.name ?? "Unknown",
+        },
+      ],
+    };
+  }
+
+  // Promote into the live service-area table (skip if it somehow already exists)
+  if (!existing) {
+    const { error: insertError } = await adminClient
+      .from("franchise_pincodes")
+      .insert({ franchise_id, pincode });
+
+    if (insertError && insertError.code !== "23505") {
+      return { success: false, error: insertError.message };
+    }
+  }
+
+  // Mark the request approved
+  const { error: updateError } = await adminClient
+    .from("franchise_pincode_requests")
+    .update({
+      status: "approved",
+      reviewed_by: reviewerId,
+      reviewed_at: new Date().toISOString(),
+      review_notes: parsed.data.notes ?? null,
+    })
+    .eq("id", request.id);
+
+  if (updateError) return { success: false, error: updateError.message };
+
+  // Auto-assign waitlisted customers sitting in this pincode
+  const { assigned } = await assignWaitlistedCustomers(franchise_id, [pincode]);
+
+  revalidatePath("/franchises");
+  revalidatePath("/franchise/profile");
+  return { success: true, assignedCustomers: assigned };
+}
+
+/**
+ * Reject a pending pincode request with an optional note.
+ */
+export async function rejectPincodeRequest(
+  input: ReviewPincodeRequestInput
+): Promise<{ success: true } | { success: false; error: string }> {
+  const authCheck = await assertCallerIsAdminOrMaster();
+  if (!authCheck.success) return authCheck;
+
+  const parsed = reviewPincodeRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message };
+  }
+
+  const adminClient = createAdminClient();
+  const reviewerId = await getCallerInternalUserId();
+
+  const { data: request } = await adminClient
+    .from("franchise_pincode_requests")
+    .select("id, status")
+    .eq("id", parsed.data.request_id)
+    .single();
+
+  if (!request) return { success: false, error: "Request not found" };
+  if (request.status !== "pending") {
+    return { success: false, error: "This request has already been reviewed" };
+  }
+
+  const { error: updateError } = await adminClient
+    .from("franchise_pincode_requests")
+    .update({
+      status: "rejected",
+      reviewed_by: reviewerId,
+      reviewed_at: new Date().toISOString(),
+      review_notes: parsed.data.notes ?? null,
+    })
+    .eq("id", request.id);
+
+  if (updateError) return { success: false, error: updateError.message };
+
+  revalidatePath("/franchises");
+  revalidatePath("/franchise/profile");
+  return { success: true };
 }

@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import CustomerDashboard from "@/shared/components/admin/customers/CustomerDashboard";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { AdminCustomersWrapper } from "./AdminCustomersWrapper";
 
 export const revalidate = false;
 
@@ -16,6 +16,7 @@ export default async function CustomersPage() {
       date_of_birth,
       allergies,
       has_medical_history,
+      franchise_id,
       users!inner ( id, full_name, email, mobile, is_active ),
       addresses ( pincode, is_primary ),
       subscriptions ( status, subscription_plans ( name ) )
@@ -80,6 +81,7 @@ export default async function CustomersPage() {
       allergies: customer.allergies || null,
       hasMedicalHistory: customer.has_medical_history || false,
       activePlanName: activePlanName,
+      franchiseId: customer.franchise_id || null,
     };
   });
 
@@ -201,7 +203,7 @@ export default async function CustomersPage() {
         description="Manage your subscriber base and account statuses."
       />
 
-      <CustomerDashboard
+      <AdminCustomersWrapper
         customers={customers}
         activeSubscriptions={activeSubs}
         pendingSubscriptions={pendingSubs}

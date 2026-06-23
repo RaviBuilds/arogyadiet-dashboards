@@ -56,6 +56,29 @@ export interface FranchisePincodeConflict {
   conflicting_franchise_name?: string;
 }
 
+export type FranchisePincodeRequestStatus = "pending" | "approved" | "rejected";
+
+export interface FranchisePincodeRequest {
+  id: string;
+  franchise_id: string;
+  pincode: string;
+  status: FranchisePincodeRequestStatus;
+  requested_by: string | null;
+  reviewed_by: string | null;
+  review_notes: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+/**
+ * Pincode request joined with franchise + requester display info,
+ * used in the admin approval queue.
+ */
+export interface FranchisePincodeRequestWithMeta extends FranchisePincodeRequest {
+  franchise_name: string;
+  requested_by_name: string | null;
+}
+
 export interface FranchiseListFilters {
   status?: FranchiseStatus;
   search?: string;

@@ -1,8 +1,7 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import RiderManagement, {
-  RiderData,
-} from "@/shared/components/admin/riders/RiderManagement";
+import type { RiderData } from "@/shared/components/admin/riders/RiderManagement";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { AdminRidersWrapper } from "./AdminRidersWrapper";
 
 export const revalidate = 0;
 
@@ -120,7 +119,7 @@ export default async function RidersPage() {
     supabaseAdmin
       .from("rider_profiles")
       .select(
-        `id, employee_code, is_active, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
+        `id, employee_code, is_active, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, franchise_id, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
       )
       .eq("is_active", true),
     supabaseAdmin
@@ -137,7 +136,7 @@ export default async function RidersPage() {
     );
   }
 
-  const riders: RiderData[] = (ridersRes.data || []).map((rider: any) => {
+  const riders: (RiderData & { franchiseId: string | null })[] = (ridersRes.data || []).map((rider: any) => {
     const serviceAreas =
       rider.rider_service_areas?.map((area: any) => area.pincode) || [];
     const todaysBatches = (rider.delivery_batches || []).filter(
@@ -203,6 +202,7 @@ export default async function RidersPage() {
       totalEarned: totalEarned,
       lastPayoutAmount: lastPayoutAmount,
       lastPayoutDate: lastPayoutDate,
+      franchiseId: rider.franchise_id || null,
     };
   });
 
@@ -212,7 +212,7 @@ export default async function RidersPage() {
         title="Operations & Riders"
         description="Manage delivery personnel, daily activity, service areas,onboarding."
       />
-      <RiderManagement data={riders} allAreas={areasRes.data || []} />
+      <AdminRidersWrapper data={riders} allAreas={areasRes.data || []} />
     </div>
   );
 }

@@ -59,10 +59,12 @@ export function SubscriptionDashboard({
   plans,
   activeSubscriptions,
   initialGlobalCoupons = [],
+  scope = "core",
 }: {
   plans: any[];
   activeSubscriptions: any[];
   initialGlobalCoupons?: CouponRow[];
+  scope?: string;
 }) {
   const [activeTab, setActiveTab] = useState("Subscription Plans");
   const [isPending, startTransition] = useTransition();
@@ -374,10 +376,11 @@ export function SubscriptionDashboard({
         </div>
       )}
 
-      {activeTab === "Holiday Calendar" && <HolidayCalendarClient />}
+      {activeTab === "Holiday Calendar" && <HolidayCalendarClient scope={scope} />}
 
       {activeTab === "Global Discount" && (
         <GlobalDiscountClient
+          scope={scope}
           initialCoupons={initialGlobalCoupons}
           subscriptionPlans={plans.map((plan) => ({
             id: plan.id,

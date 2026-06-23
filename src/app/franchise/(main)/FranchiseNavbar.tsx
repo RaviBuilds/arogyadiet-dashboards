@@ -16,8 +16,10 @@ import {
   Users,
   Truck,
   Package,
-  BarChart3,
   User,
+  CreditCard,
+  Settings2,
+  ShoppingBag,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -51,9 +53,11 @@ interface FranchiseNavbarProps {
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/customers", label: "Customers", icon: Users },
+  { href: "/subscriptions", label: "Subscriptions", icon: CreditCard },
   { href: "/riders", label: "Riders", icon: Truck },
+  { href: "/operations", label: "Operations", icon: Settings2 },
   { href: "/orders", label: "Orders", icon: Package },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
+  { href: "/shop-products", label: "Shop Products", icon: ShoppingBag },
   { href: "/profile", label: "Profile", icon: User },
 ];
 
@@ -69,7 +73,7 @@ export default function FranchiseNavbar({ userProfile, email }: FranchiseNavbarP
   const isActive = (path: string) => pathname.startsWith(path);
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-200 bg-white/95 backdrop-blur-sm shadow-sm">
+    <header className="sticky top-0 z-40 w-full border-b border-white/40 bg-white/70 shadow-[0_4px_30px_rgb(0,0,0,0.03)] backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Left: Brand + Franchise Name */}
         <Link href="/dashboard" className="flex items-center gap-2.5">

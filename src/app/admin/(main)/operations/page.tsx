@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase/server";
-import OperationsDashboard from "@/shared/components/admin/operations/OperationsDashboard";
 import {
   fetchPendingFailureApprovals,
   fetchRosterData,
@@ -9,6 +8,7 @@ import {
 import { getISTDateString } from "@/lib/dates/ist";
 import FailedDeliveryApprovals from "@/shared/components/admin/operations/FailedDeliveryApprovals";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { AdminOperationsWrapper } from "./AdminOperationsWrapper";
 
 // Live ops data: fetch fresh on every request (matches riders page)
 export const revalidate = 0;
@@ -26,7 +26,7 @@ export default async function OperationsPage() {
     .from("delivery_orders")
     .select(
       `
-      id, status, delivery_date, route_sequence, payout_amount, created_at, pickup_marked_at, delivered_at,
+      id, status, delivery_date, route_sequence, payout_amount, created_at, pickup_marked_at, delivered_at, franchise_id,
       customer_profiles ( users ( full_name, mobile ), addresses ( street_1, city, pincode ) ),
       rider_profiles ( id, emergency_contact, users ( full_name ), rider_service_areas ( area_name ) ),
       meal_categories ( name ),
@@ -43,6 +43,7 @@ export default async function OperationsPage() {
     .select(`
       id, 
       status, 
+      franchise_id,
       customer_profiles ( users(full_name, mobile) ), 
       addresses ( street_1, city, pincode ), 
       meal_categories ( name )
@@ -69,7 +70,7 @@ export default async function OperationsPage() {
         description="Manage daily dispatch, route sequences, and planned deliveries."
       />
 
-      <OperationsDashboard
+      <AdminOperationsWrapper
         deliveries={rawDeliveries || []}
         plannedDeliveries={rawPlannedDeliveries || []}
         rosterData={initialRosterData}

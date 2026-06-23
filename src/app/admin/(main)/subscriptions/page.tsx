@@ -1,6 +1,6 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
-import { SubscriptionDashboard } from "@/shared/components/admin/subscriptions/SubscriptionDashboard";
+import { AdminSubscriptionsWrapper } from "./AdminSubscriptionsWrapper";
 
 export const revalidate = 0;
 
@@ -19,7 +19,7 @@ export default async function SubscriptionsPage() {
   // 2. Fetch all user subscriptions for modeling/analytics
   const { data: activeSubs } = await supabaseAdmin
     .from("subscriptions")
-    .select("id, status, starts_on, ends_on, plan_id, subscription_plans(name)")
+    .select("id, status, starts_on, ends_on, plan_id, franchise_id, subscription_plans(name)")
     .in("status", ["ACTIVE", "PENDING"]);
 
   // 3. Fetch global discount coupons (not tied to any customer)
@@ -29,6 +29,7 @@ export default async function SubscriptionsPage() {
       "id, code, discount_type, discount_value_30_days, discount_value_60_days, discount_value_90_days, flat_discounts_by_plan, discount_value, max_uses, times_used, expires_at, created_at",
     )
     .is("customer_profile_id", null)
+    .is("franchise_id", null)
     .order("created_at", { ascending: false });
 
   return (
@@ -37,7 +38,7 @@ export default async function SubscriptionsPage() {
         title="Subscription Management"
         description="Manage master plans and view subscription analytics."
       />
-      <SubscriptionDashboard
+      <AdminSubscriptionsWrapper
         plans={plans || []}
         activeSubscriptions={activeSubs || []}
         initialGlobalCoupons={globalCoupons || []}

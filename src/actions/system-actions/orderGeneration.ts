@@ -79,7 +79,7 @@ export async function generateDailyOrders(
       meal_category_id,
       delivery_address_id,
       preference_date,
-      subscriptions!inner ( status )
+      subscriptions!inner ( status, franchise_id )
     `,
     )
     .eq("preference_date", targetDate)
@@ -125,13 +125,24 @@ export async function generateDailyOrders(
           `${pref.customer_profile_id}:${pref.meal_category_id}`,
         ),
     )
-    .map((pref) => ({
-      customer_profile_id: pref.customer_profile_id,
-      meal_category_id: pref.meal_category_id,
-      delivery_address_id: pref.delivery_address_id,
-      delivery_date: targetDate,
-      status: "ORDER_CREATED" as const,
-    }));
+    .map((pref) => {
+      // Stamp the order with the subscription's franchise_id.
+      // Core subscriptions have NULL franchise_id → core orders stay NULL
+      // (unchanged behavior). Only franchise subscriptions produce
+      // franchise-attributed orders, keeping core and franchise data isolated.
+      const sub = Array.isArray(pref.subscriptions)
+        ? pref.subscriptions[0]
+        : pref.subscriptions;
+
+      return {
+        customer_profile_id: pref.customer_profile_id,
+        meal_category_id: pref.meal_category_id,
+        delivery_address_id: pref.delivery_address_id,
+        delivery_date: targetDate,
+        status: "ORDER_CREATED" as const,
+        franchise_id: (sub as { franchise_id?: string | null })?.franchise_id ?? null,
+      };
+    });
 
   if (ordersToInsert.length === 0) {
     await logOrderGenerationRun({

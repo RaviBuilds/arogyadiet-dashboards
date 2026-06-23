@@ -1,5 +1,6 @@
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import FranchiseOversight from "@/shared/components/admin/FranchiseOversight";
+import FranchisePincodeRequests from "@/shared/components/admin/FranchisePincodeRequests";
 
 export const revalidate = 0;
 
@@ -10,6 +11,7 @@ export default function AdminFranchisesPage() {
         title="Franchise Pincodes"
         description="Manage service area pincodes for franchises. Assign, remove, and resolve conflicts."
       />
+      <FranchisePincodeRequests />
       <FranchiseOversight />
     </div>
   );

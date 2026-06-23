@@ -107,23 +107,43 @@ export async function getAutomationLogs(
   return (data || []) as AutomationLogRow[];
 }
 
-export async function fetchPendingFailureApprovals(): Promise<
-  PendingFailureApprovalRow[]
-> {
+/**
+ * Fetch pending failed-delivery approval requests.
+ *
+ * Scope:
+ * - "core" (default) → only CORE business riders (franchise_id IS NULL).
+ *   The head-office admin must NEVER receive failure requests raised by
+ *   franchise riders — those are routed to the franchise owner instead.
+ * - <franchise uuid> → only that franchise's riders. Used by the franchise
+ *   portal so the franchise owner handles their own riders' requests.
+ */
+export async function fetchPendingFailureApprovals(
+  scope: "core" | string = "core",
+): Promise<PendingFailureApprovalRow[]> {
   const supabase = createAdminClient();
 
-  const { data: rawPendingFailures, error } = await supabase
+  let query = supabase
     .from("delivery_orders")
     .select(
       `
       id,
+      franchise_id,
       customer_profiles ( users ( full_name ) ),
       rider_profiles ( users ( full_name ) ),
       delivery_status_logs ( note, status, created_at )
     `,
     )
-    .eq("status", "PENDING_FAILURE_APPROVAL")
-    .order("created_at", { ascending: false });
+    .eq("status", "PENDING_FAILURE_APPROVAL");
+
+  // Core admin sees only core (NULL franchise) failures; a franchise sees only its own.
+  query =
+    scope === "core"
+      ? query.is("franchise_id", null)
+      : query.eq("franchise_id", scope);
+
+  const { data: rawPendingFailures, error } = await query.order("created_at", {
+    ascending: false,
+  });
 
   if (error) {
     console.error("Error fetching pending failure approvals:", error);

@@ -24,8 +24,16 @@ import { Button } from "@/shared/components/ui/button";
 
 export default function FailedDeliveryApprovals({
   approvals,
+  onApprove = approveFailedDeliveryAction,
+  onReject = rejectFailedDeliveryAction,
 }: {
   approvals: PendingFailureApprovalRow[];
+  /**
+   * Injectable actions so this table can be reused by the franchise portal.
+   * Defaults to the core admin actions — admin behavior is unchanged.
+   */
+  onApprove?: (orderId: string) => Promise<{ success: boolean; error?: string }>;
+  onReject?: (orderId: string) => Promise<{ success: boolean; error?: string }>;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -46,8 +54,8 @@ export default function FailedDeliveryApprovals({
     startTransition(async () => {
       const result =
         action === "approve"
-          ? await approveFailedDeliveryAction(orderId)
-          : await rejectFailedDeliveryAction(orderId);
+          ? await onApprove(orderId)
+          : await onReject(orderId);
 
       setPendingOrderId(null);
       setPendingAction(null);
@@ -60,7 +68,7 @@ export default function FailedDeliveryApprovals({
         );
         router.refresh();
       } else {
-        toast.error(result.error);
+        toast.error(result.error || "Action failed.");
       }
     });
   };
