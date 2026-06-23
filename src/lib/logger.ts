@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export type AdminActionType = "CREATE" | "UPDATE" | "DELETE";
+export type AdminActionType = "CREATE" | "UPDATE" | "DELETE" | "REACTIVATE";
 
 export async function logAdminAction(
   actionType: AdminActionType,

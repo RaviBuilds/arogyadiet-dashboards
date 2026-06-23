@@ -50,7 +50,7 @@ export default function FranchiseRiders({ role, franchiseId }: FranchiseRidersPr
         .select("id, employee_code, is_active, is_online, users(full_name, email, mobile)")
         .eq("franchise_id", franchiseId)
         .order("created_at", { ascending: false });
-      setRiders((data as RiderRow[]) ?? []);
+      setRiders((data as unknown as RiderRow[]) ?? []);
       setLoading(false);
     }
     load();

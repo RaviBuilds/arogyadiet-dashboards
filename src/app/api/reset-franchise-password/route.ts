@@ -49,12 +49,14 @@ export async function POST(request: Request) {
     }
 
     // Try auth.admin.updateUser
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const adminApi = supabaseAdmin.auth.admin as any;
     if (
       supabaseAdmin.auth &&
-      supabaseAdmin.auth.admin &&
-      typeof supabaseAdmin.auth.admin.updateUser === "function"
+      adminApi &&
+      typeof adminApi.updateUser === "function"
     ) {
-      const { error: updateError } = await supabaseAdmin.auth.admin.updateUser(
+      const { error: updateError } = await adminApi.updateUser(
         userRecord.auth_user_id,
         { password: newPassword }
       );

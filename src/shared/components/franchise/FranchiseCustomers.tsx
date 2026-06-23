@@ -52,7 +52,7 @@ export default function FranchiseCustomers({ role, franchiseId }: FranchiseCusto
         .eq("franchise_id", franchiseId)
         .order("created_at", { ascending: false })
         .limit(50);
-      setCustomers((data as CustomerRow[]) ?? []);
+      setCustomers((data as unknown as CustomerRow[]) ?? []);
       setLoading(false);
     }
     load();

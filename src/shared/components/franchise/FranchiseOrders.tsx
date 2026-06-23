@@ -59,7 +59,7 @@ export default function FranchiseOrders({ role, franchiseId }: FranchiseOrdersPr
         .eq("franchise_id", franchiseId)
         .eq("delivery_date", today)
         .order("route_sequence", { ascending: true });
-      setOrders((data as OrderRow[]) ?? []);
+      setOrders((data as unknown as OrderRow[]) ?? []);
       setLoading(false);
     }
     load();
