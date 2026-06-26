@@ -61,6 +61,14 @@ export async function registerCustomer(data: {
   if (profileError)
     throw new Error("Failed to create customer extension profile.");
 
+  // NOTE (core-clinic-architecture, Req 6.1): signup does NOT create a delivery
+  // address inline — the profile is created without a pincode here, so there is
+  // no clinic to resolve yet. The customer's `clinic_id` is stamped later, in
+  // the same operation that writes their first/updated address, by
+  // `stampCustomerClinic` wired into `addressActions.saveAddressAction`. Adding a
+  // stamp here would be a no-op (no pincode) and is intentionally omitted to
+  // preserve the existing signup inputs/outputs/completion behavior (Req 6.7).
+
   return userData.id;
 }
 

@@ -15,6 +15,7 @@ import {
   notifyAddressDeleted,
   notifyAddressSaved,
 } from "@/lib/customer/customerProfileNotifications";
+import { stampCustomerClinic } from "@/lib/clinic/stamping";
 
 // 2. The Server Action
 
@@ -94,13 +95,36 @@ export async function saveAddressAction(data: AddressFormValues) {
 
   const isEdit = Boolean(parsed.data.id);
 
+  // The address row id we just wrote — used to stamp the exact address (Req 6.2).
+  let stampedAddressId: string | null = null;
+
   if (isEdit) {
     await supabase
       .from("addresses")
       .update(addressData)
       .eq("id", parsed.data.id);
+    stampedAddressId = parsed.data.id ?? null;
   } else {
-    await supabase.from("addresses").insert(addressData);
+    // Return the new id so we can stamp the exact row we just created.
+    const { data: inserted } = await supabase
+      .from("addresses")
+      .insert(addressData)
+      .select("id")
+      .single();
+    stampedAddressId = inserted?.id ?? null;
+  }
+
+  // Stamp the customer + this address with their resolved clinic within the same
+  // operation, before reporting completion (Req 6.1–6.5). Only the stamp is
+  // added; the accepted inputs, outputs, return shape and completion behavior of
+  // saveAddressAction are otherwise unchanged (Req 6.7).
+  if (stampedAddressId) {
+    await stampCustomerClinic({
+      supabase,
+      customerProfileId: profile.id,
+      addressId: stampedAddressId,
+      pincode: parsed.data.pincode,
+    });
   }
 
   await notifyAddressSaved(dbUser.id, {
