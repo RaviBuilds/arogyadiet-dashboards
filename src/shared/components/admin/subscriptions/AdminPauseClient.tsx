@@ -25,8 +25,9 @@ const ActiveSvg = ({ className }: { className?: string }) => (
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
-export function AdminPauseClient({ subscriptionId, scheduleDays, initialPausedDates, maxPauses, initialPausesUsed }: any) {
+export function AdminPauseClient({ subscriptionId, scheduleDays, initialPausedDates, maxPauses, initialPausesUsed, pauseAction }: any) {
   const router = useRouter();
+  const savePauses = pauseAction ?? adminBulkUpdatePausePreferences;
   const [pausedDates, setPausedDates] = useState<string[]>(initialPausedDates);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string; } | null>(null);
@@ -91,7 +92,7 @@ export function AdminPauseClient({ subscriptionId, scheduleDays, initialPausedDa
       return;
     }
 
-    const result = await adminBulkUpdatePausePreferences(subscriptionId, updates);
+    const result = await savePauses(subscriptionId, updates);
 
     if (result.success) {
       setSaveMessage({ type: "success", text: "Pause schedule successfully updated!" });

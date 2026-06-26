@@ -1,5 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  resolveAccessLevel,
+  isAdminPathAllowed,
+  landingRouteFor,
+  type AdminAccessLevel,
+} from "@/lib/auth/adminAccessCore";
 
 export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api")) {
@@ -79,15 +85,21 @@ export async function middleware(request: NextRequest) {
 
   // FIX: Safely extract role code
   let roleCode = null;
+  let accessLevel: AdminAccessLevel = "inventory_operations";
   if (user) {
     const { data: userProfile } = await supabase
       .from("users")
-      .select("roles(code)")
+      .select("admin_access_level, roles(code)")
       .eq("auth_user_id", user.id)
       .single();
 
-    const rolesData: any = userProfile?.roles;
+    const rolesData = userProfile?.roles as
+      | { code: string }[]
+      | { code: string }
+      | null
+      | undefined;
     roleCode = Array.isArray(rolesData) ? rolesData[0]?.code : rolesData?.code;
+    accessLevel = resolveAccessLevel(userProfile?.admin_access_level);
   }
 
   // 3. Route protection, gatekeeper logic
@@ -119,6 +131,20 @@ export async function middleware(request: NextRequest) {
           return NextResponse.redirect(new URL("/unauthorized", request.url));
         }
         return NextResponse.redirect(new URL("/unauthorized", request.url));
+      }
+      // Admin access-level path gate. `url.pathname` on the admin subdomain is
+      // the pre-rewrite path (e.g. "/dashboard"); reconstruct the rewritten
+      // "/admin/..." path for classification. On deny, send the admin to THEIR
+      // OWN landing route (inventory-only → /inventory, others → /dashboard).
+      if (currentSubdomain === "admin" && roleCode === "ADMIN") {
+        const adminPath = url.pathname.startsWith("/admin")
+          ? url.pathname
+          : `/admin${url.pathname}`;
+        if (!isAdminPathAllowed(accessLevel, adminPath)) {
+          return NextResponse.redirect(
+            new URL(landingRouteFor(accessLevel), request.url),
+          );
+        }
       }
       if (currentSubdomain === "deliverypartner" && roleCode !== "RIDER") {
         return NextResponse.redirect(new URL("/unauthorized", request.url));
@@ -171,7 +197,9 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // If logged in and trying to go to root or auth pages, send to dashboard
+  // If logged in and trying to go to root or auth pages, send to the landing
+  // route for the user's access level. Non-admins (and admins without a level)
+  // resolve to full access → /dashboard, preserving prior behavior.
   if (
     user &&
     (url.pathname === "/" ||
@@ -179,8 +207,8 @@ export async function middleware(request: NextRequest) {
       url.pathname.startsWith("/signup")) &&
     !url.pathname.startsWith("/update-password")
   ) {
-    const dashboardUrl = new URL("/dashboard", request.url);
-    return NextResponse.redirect(dashboardUrl);
+    const home = landingRouteFor(accessLevel);
+    return NextResponse.redirect(new URL(home, request.url));
   }
 
   return response;

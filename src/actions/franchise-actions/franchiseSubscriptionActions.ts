@@ -186,16 +186,18 @@ export async function franchiseAddSubscription(
       throw new Error(subInsertErr?.message ?? "Failed to create subscription");
     }
 
-    // Generate daily preferences
+    // Generate daily preferences (must match the admin schema exactly)
     const dailyRows = [];
     for (let i = 0; i < totalDays; i++) {
       const date = format(addDays(start, i), "yyyy-MM-dd");
       dailyRows.push({
         subscription_id: newSub.id,
+        customer_profile_id: customerProfileId,
         preference_date: date,
         meal_category_id: mealCategoryId,
         delivery_address_id: deliveryAddressId,
-        status: "ACTIVE",
+        is_paused: false,
+        pause_credit_used: false,
       });
     }
 
@@ -203,10 +205,14 @@ export async function franchiseAddSubscription(
       const { error: prefErr } = await supabase
         .from("subscription_daily_preferences")
         .insert(dailyRows);
-      if (prefErr) console.error("Daily prefs insert error:", prefErr.message);
+      if (prefErr) {
+        throw new Error(`Failed to create daily preferences: ${prefErr.message}`);
+      }
     }
 
     // Insert payment record
+    const isPaid = paymentStatus === "Payment Collected";
+
     const paymentRecord = {
       subscription_id: newSub.id,
       customer_profile_id: customerProfileId,
@@ -214,17 +220,36 @@ export async function franchiseAddSubscription(
       base_amount: baseAmount,
       tax_percent: taxPercent,
       tax_amount: taxAmount,
+      discount_amount: 0,
       payment_method: "MANUAL",
-      payment_status: paymentStatus === "Payment Collected" ? "PAID" : "PENDING",
-      reference_id: paymentReference || null,
-      notes: paymentNotes || null,
+      status: isPaid ? "PAID" : "PENDING",
+      paid_at: isPaid ? new Date().toISOString() : null,
+      invoice_type: "SUBSCRIPTION",
+      payment_reference: paymentReference || null,
+      payment_notes: paymentNotes || null,
     };
 
-    const { data: paymentData, error: payErr } = await supabase
+    let { data: paymentData, error: payErr } = await supabase
       .from("payments")
       .insert(paymentRecord)
       .select("id")
       .single();
+
+    // Fallback for environments where invoice breakdown columns are missing
+    if (payErr && payErr.message.includes("column")) {
+      ({ data: paymentData, error: payErr } = await supabase
+        .from("payments")
+        .insert({
+          subscription_id: newSub.id,
+          customer_profile_id: customerProfileId,
+          amount: totalAmount,
+          payment_method: "MANUAL",
+          status: isPaid ? "PAID" : "PENDING",
+          paid_at: isPaid ? new Date().toISOString() : null,
+        })
+        .select("id")
+        .single());
+    }
 
     if (payErr) console.error("Payment insert error:", payErr.message);
 
@@ -243,4 +268,116 @@ export async function franchiseAddSubscription(
     console.error("franchiseAddSubscription error:", error);
     return { success: false, error: error.message || "Failed to add subscription." };
   }
+}
+
+// ─── Subscription 360 management (franchise-scoped) ──────────────────────────
+//
+// These wrap the existing admin subscription actions, but first verify that the
+// target subscription belongs to the calling franchise admin's franchise.
+// This lets the franchise portal reuse the shared Subscription360Dashboard.
+
+import { resolveFranchiseContext } from "@/lib/franchise/context";
+import {
+  managePendingSubscription,
+  updateActiveSubscriptionDates,
+  stopActiveSubscription,
+} from "@/actions/admin-actions/adminLifecycleActions";
+import {
+  adminBulkUpdatePausePreferences,
+  adminBulkUpdateMealPreferences,
+} from "@/actions/admin-actions/adminMealActions";
+import { bulkUpdateAdminAddressPreferencesAction } from "@/actions/admin-actions/adminDeliveryActions";
+
+type SubGuard =
+  | { success: true; franchiseId: string }
+  | { success: false; error: string };
+
+/**
+ * Resolves the calling franchise admin's franchise_id from their session,
+ * then verifies the target subscription belongs to that franchise.
+ */
+async function guardSubscription(subscriptionId: string): Promise<SubGuard> {
+  const ctx = await resolveFranchiseContext();
+
+  if (!ctx) {
+    return { success: false, error: "Unable to resolve franchise context." };
+  }
+  if (ctx.role !== "FRANCHISE_ADMIN") {
+    return {
+      success: false,
+      error: "You are not authorized to perform franchise operations.",
+    };
+  }
+  if (!ctx.franchise_id) {
+    return { success: false, error: "No franchise is assigned to your account." };
+  }
+
+  const supabase = createAdminClient();
+  const { data: sub, error } = await supabase
+    .from("subscriptions")
+    .select("id, franchise_id")
+    .eq("id", subscriptionId)
+    .maybeSingle();
+
+  if (error) return { success: false, error: error.message };
+  if (!sub) return { success: false, error: "Subscription not found." };
+  if (sub.franchise_id !== ctx.franchise_id) {
+    return {
+      success: false,
+      error: "This subscription does not belong to your franchise.",
+    };
+  }
+
+  return { success: true, franchiseId: ctx.franchise_id };
+}
+
+export async function franchiseManagePendingSubscription(
+  subscriptionId: string,
+  payload: { starts_on?: string; status: string },
+) {
+  const guard = await guardSubscription(subscriptionId);
+  if (!guard.success) return { success: false, error: guard.error };
+  return managePendingSubscription(subscriptionId, payload);
+}
+
+export async function franchiseUpdateActiveSubscriptionDates(
+  subscriptionId: string,
+  payload: { starts_on: string; pause_credits_total: number },
+) {
+  const guard = await guardSubscription(subscriptionId);
+  if (!guard.success) return { success: false, error: guard.error };
+  return updateActiveSubscriptionDates(subscriptionId, payload);
+}
+
+export async function franchiseStopActiveSubscription(subscriptionId: string) {
+  const guard = await guardSubscription(subscriptionId);
+  if (!guard.success) return { success: false, error: guard.error };
+  return stopActiveSubscription(subscriptionId);
+}
+
+export async function franchiseBulkUpdatePausePreferences(
+  subscriptionId: string,
+  updates: { date: string; isPaused: boolean }[],
+) {
+  const guard = await guardSubscription(subscriptionId);
+  if (!guard.success) return { success: false, error: guard.error };
+  return adminBulkUpdatePausePreferences(subscriptionId, updates);
+}
+
+export async function franchiseBulkUpdateMealPreferences(
+  subscriptionId: string,
+  updates: { date: string; categoryId: string | null }[],
+) {
+  const guard = await guardSubscription(subscriptionId);
+  if (!guard.success) return { success: false, error: guard.error };
+  return adminBulkUpdateMealPreferences(subscriptionId, updates);
+}
+
+export async function franchiseBulkUpdateAddressPreferences(
+  subscriptionId: string,
+  updates: { date: string; addressId: string }[],
+) {
+  const guard = await guardSubscription(subscriptionId);
+  if (!guard.success) return { success: false, error: guard.error };
+  return bulkUpdateAdminAddressPreferencesAction(subscriptionId, updates);
 }

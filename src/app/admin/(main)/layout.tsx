@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import AdminNavbar from "./AdminNavbar";
 import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
+import { resolveAccessLevel, canAccess, landingRouteFor } from "@/lib/auth/adminAccess";
 
 export default async function AdminLayout({
   children,
@@ -33,11 +34,11 @@ export default async function AdminLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return redirect("/login");
+  if (!user) return redirect("/unauthorized");
 
   const { data: userProfileData } = await supabase
     .from("users")
-    .select("id, full_name, avatar_url, roles(code)")
+    .select("id, full_name, avatar_url, admin_access_level, roles(code)")
     .eq("auth_user_id", user.id)
     .single();
 
@@ -51,6 +52,15 @@ export default async function AdminLayout({
 
   if (roleCode !== "ADMIN") return redirect("/unauthorized");
 
+  // The (main) group includes the dashboard, classified as an OPERATIONS area.
+  // Inventory-only admins are redirected away to their own landing route
+  // (landingRouteFor === "/inventory"); operations / full-access admins land
+  // on /dashboard. accessLevel is passed down so the navbar can trim its items.
+  const accessLevel = resolveAccessLevel(userProfileData?.admin_access_level);
+  if (!canAccess(accessLevel, "operations")) {
+    return redirect(landingRouteFor(accessLevel));
+  }
+
   const userProfile = {
     id: userProfileData?.id ?? "",
     fullName: userProfileData?.full_name || "Admin",
@@ -61,7 +71,11 @@ export default async function AdminLayout({
   return (
     <div className="flex min-h-screen flex-col bg-muted/20">
       <OneSignalProvider userId={userProfile.id || null} />
-      <AdminNavbar userProfile={userProfile} email={user.email!} />
+      <AdminNavbar
+        userProfile={userProfile}
+        email={user.email!}
+        accessLevel={accessLevel}
+      />
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
         {children}
       </main>

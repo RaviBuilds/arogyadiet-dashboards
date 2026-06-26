@@ -21,6 +21,7 @@ import {
 import { getFailureReasonFromLogs } from "@/lib/delivery/failureApproval";
 import { getISTDateString } from "@/lib/dates/ist";
 import { revalidatePath } from "next/cache";
+import { applyOperationsScope, type OperationsScope } from "@/lib/franchise/scope";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -58,10 +59,23 @@ function revalidateBatchPickupPaths() {
   revalidatePath("/rider/dashboard");
 }
 
-export async function fetchRosterData(startDate: string, endDate: string) {
-  const supabase = await createClient();
+export async function fetchRosterData(
+  startDate: string,
+  endDate: string,
+  scope?: OperationsScope,
+) {
+  // Use the service-role client (like the other operations reads in this file)
+  // and rely on `applyOperationsScope` for tenant isolation. The RLS-bound
+  // session client would silently return zero rows for FRANCHISE_ADMIN
+  // sessions, which don't have admin-level read access to these tables.
+  const supabase = createAdminClient();
 
-  const { data, error } = await supabase
+  const cpEmbed =
+    scope && scope !== "all"
+      ? "customer_profiles!inner ( franchise_id, users ( full_name ) )"
+      : "customer_profiles ( franchise_id, users ( full_name ) )";
+
+  let query = supabase
     .from("subscription_daily_preferences")
     .select(
       `
@@ -69,7 +83,7 @@ export async function fetchRosterData(startDate: string, endDate: string) {
       preference_date,
       is_paused,
       subscriptions ( subscription_code ),
-      customer_profiles ( users ( full_name ) ),
+      ${cpEmbed},
       meal_categories ( name ),
       addresses ( pincode )
     `,
@@ -77,6 +91,11 @@ export async function fetchRosterData(startDate: string, endDate: string) {
     .gte("preference_date", startDate)
     .lte("preference_date", endDate)
     .order("preference_date", { ascending: true });
+
+  // Scope by the customer's franchise (core = NULL).
+  query = applyOperationsScope(query, scope, "customer_profiles.franchise_id");
+
+  const { data, error } = await query;
   if (error) {
     console.error("Error fetching roster data:", error);
     return [];

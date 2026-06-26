@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import Link from "next/link";
 import { Badge } from "@/shared/components/ui/badge";
 import {
   Table,
@@ -11,6 +12,13 @@ import {
   TableRow,
 } from "@/shared/components/ui/table";
 import { Input } from "@/shared/components/ui/input";
+import { Button } from "@/shared/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/components/ui/dropdown-menu";
 import {
   Tabs,
   TabsContent,
@@ -25,8 +33,15 @@ import {
   CheckCircle2,
   XCircle,
   Info,
+  MoreHorizontal,
+  Eye,
+  TicketPercent,
+  CalendarDays,
 } from "lucide-react";
 import { StatCard, SectionCard } from "@/shared/components/franchise/ui/GlassCard";
+import type { CouponRow } from "@/shared/components/admin/customers/AdminCouponsTab";
+import FranchiseGlobalDiscount from "./FranchiseGlobalDiscount";
+import FranchiseHolidayCalendar from "./FranchiseHolidayCalendar";
 
 interface SubRow {
   id: string;
@@ -54,6 +69,7 @@ interface Plan {
 
 interface Props {
   plans: Plan[];
+  globalCoupons: CouponRow[];
   activeSubscriptions: SubRow[];
   pendingSubscriptions: SubRow[];
   stoppedSubscriptions: SubRow[];
@@ -61,6 +77,7 @@ interface Props {
 
 export default function FranchiseSubscriptionsClient({
   plans,
+  globalCoupons,
   activeSubscriptions,
   pendingSubscriptions,
   stoppedSubscriptions,
@@ -83,9 +100,25 @@ export default function FranchiseSubscriptionsClient({
   const filteredStopped = useMemo(() => filterSubs(stoppedSubscriptions), [search, stoppedSubscriptions]);
 
   return (
-    <div className="space-y-8">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
+    <Tabs defaultValue="subscriptions" className="w-full space-y-8">
+      <TabsList className="w-full justify-start overflow-x-auto">
+        <TabsTrigger value="subscriptions" className="gap-1.5">
+          <Users className="h-3.5 w-3.5" />
+          Subscriptions
+        </TabsTrigger>
+        <TabsTrigger value="discount" className="gap-1.5">
+          <TicketPercent className="h-3.5 w-3.5" />
+          Global Discount
+        </TabsTrigger>
+        <TabsTrigger value="holidays" className="gap-1.5">
+          <CalendarDays className="h-3.5 w-3.5" />
+          Holiday Calendar
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="subscriptions" className="space-y-8 mt-0">
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
         <StatCard icon={CheckCircle2} label="Active" value={activeSubscriptions.length} accent="text-emerald-600" accentBg="bg-emerald-50" />
         <StatCard icon={Clock} label="Pending" value={pendingSubscriptions.length} accent="text-blue-600" accentBg="bg-blue-50" />
         <StatCard icon={XCircle} label="Expired / Stopped" value={stoppedSubscriptions.length} accent="text-rose-600" accentBg="bg-rose-50" />
@@ -174,7 +207,24 @@ export default function FranchiseSubscriptionsClient({
           </TabsContent>
         </Tabs>
       </SectionCard>
-    </div>
+      </TabsContent>
+
+      <TabsContent value="discount" className="mt-0">
+        <FranchiseGlobalDiscount
+          initialCoupons={globalCoupons}
+          subscriptionPlans={plans.map((p) => ({
+            id: p.id,
+            name: p.name,
+            duration_days: p.duration_days,
+            is_active: p.is_active,
+          }))}
+        />
+      </TabsContent>
+
+      <TabsContent value="holidays" className="mt-0">
+        <FranchiseHolidayCalendar />
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -194,6 +244,7 @@ function SubTable({ subs }: { subs: SubRow[] }) {
             <TableHead className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Period</TableHead>
             <TableHead className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Pause Credits</TableHead>
             <TableHead className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Status</TableHead>
+            <TableHead className="text-[11px] font-medium uppercase tracking-wider text-slate-400 text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -217,6 +268,26 @@ function SubTable({ subs }: { subs: SubRow[] }) {
               </TableCell>
               <TableCell>
                 <StatusBadge status={sub.status} />
+              </TableCell>
+              <TableCell className="text-right">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="h-8 w-8 p-0 transition-all duration-200 hover:bg-slate-100">
+                      <MoreHorizontal className="h-4 w-4 text-slate-500" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-[180px]">
+                    <DropdownMenuItem asChild>
+                      <Link
+                        href={`/subscriptions/${sub.id}`}
+                        className="cursor-pointer font-medium flex items-center"
+                      >
+                        <Eye className="mr-2 h-4 w-4 text-primary" />
+                        View Subscription 360
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </TableCell>
             </TableRow>
           ))}

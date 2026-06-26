@@ -123,11 +123,23 @@ type FormValues = z.infer<typeof formSchema>;
 interface AdminAddSubscriptionFormProps {
   customerProfileId: string;
   initialData: InitialSubscriptionData;
+  /**
+   * Injectable submit action. Defaults to the admin-scoped addSubscription.
+   * Franchise callers pass franchiseAddSubscription.
+   */
+  submitAction?: (
+    payload: any,
+    isCustom: boolean,
+  ) => Promise<{ success: boolean; error?: string }>;
+  /** When provided, stamped into the payload (franchise portal). */
+  franchiseId?: string;
 }
 
 export function AdminAddSubscriptionForm({
   customerProfileId,
   initialData,
+  submitAction = addSubscription,
+  franchiseId,
 }: AdminAddSubscriptionFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -217,6 +229,7 @@ export function AdminAddSubscriptionForm({
             totalAmount: values.totalAmount!,
             pauseCredits: values.pauseCredits!,
             endDate: format(values.endDate!, "yyyy-MM-dd"),
+            ...(franchiseId ? { franchiseId } : {}),
           }
         : {
             customerProfileId,
@@ -225,9 +238,10 @@ export function AdminAddSubscriptionForm({
             ...commonPaymentFields,
             startDate: format(values.startDate, "yyyy-MM-dd"),
             planId: values.planId!,
+            ...(franchiseId ? { franchiseId } : {}),
           };
 
-      const res = await addSubscription(payload, isCustom);
+      const res = await submitAction(payload, isCustom);
 
       if (res.success) {
         toast.success("Subscription created successfully!");

@@ -33,6 +33,19 @@ import {
 } from "@/shared/components/ui/table";
 import { Switch } from "@/shared/components/ui/switch";
 import { Label } from "@/shared/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/components/ui/select";
+import {
+  ADMIN_ACCESS_LEVELS,
+  ACCESS_LEVEL_LABELS,
+  resolveAccessLevel,
+  type AdminAccessLevel,
+} from "@/lib/auth/adminAccessCore";
 
 interface AdminUser {
   id: string;
@@ -42,6 +55,7 @@ interface AdminUser {
   mobile: string | null;
   is_active: boolean;
   created_at: string;
+  admin_access_level: string | null;
 }
 
 interface UserManagementProps {
@@ -66,12 +80,17 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
     email: "",
     mobile: "",
     password: "",
+    accessLevel: "inventory_operations" as AdminAccessLevel,
   });
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
-  const [editForm, setEditForm] = useState({ fullName: "", mobile: "" });
+  const [editForm, setEditForm] = useState({
+    fullName: "",
+    mobile: "",
+    accessLevel: "inventory_operations" as AdminAccessLevel,
+  });
 
   // Delete dialog
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -83,7 +102,10 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
   // --- Filtering ---
   const filtered = admins.filter((a) => {
     if (!searchTerm) return true;
-    const val = (a as any)[searchColumn]?.toLowerCase() ?? "";
+    const val =
+      String(
+        (a as unknown as Record<string, unknown>)[searchColumn] ?? "",
+      ).toLowerCase();
     return val.includes(searchTerm.toLowerCase());
   });
 
@@ -94,7 +116,13 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
       if (result.success) {
         toast.success("Admin user created successfully.");
         setCreateOpen(false);
-        setCreateForm({ fullName: "", email: "", mobile: "", password: "" });
+        setCreateForm({
+          fullName: "",
+          email: "",
+          mobile: "",
+          password: "",
+          accessLevel: "inventory_operations",
+        });
         // Refresh list from server would happen via revalidation; optimistic update:
         window.location.reload();
       } else {
@@ -106,7 +134,11 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
   // --- Edit ---
   const openEdit = (admin: AdminUser) => {
     setEditTarget(admin);
-    setEditForm({ fullName: admin.full_name, mobile: admin.mobile || "" });
+    setEditForm({
+      fullName: admin.full_name,
+      mobile: admin.mobile || "",
+      accessLevel: resolveAccessLevel(admin.admin_access_level),
+    });
     setEditOpen(true);
   };
 
@@ -119,7 +151,12 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
         setAdmins((prev) =>
           prev.map((a) =>
             a.id === editTarget.id
-              ? { ...a, full_name: editForm.fullName, mobile: editForm.mobile || null }
+              ? {
+                  ...a,
+                  full_name: editForm.fullName,
+                  mobile: editForm.mobile || null,
+                  admin_access_level: editForm.accessLevel,
+                }
               : a,
           ),
         );
@@ -205,6 +242,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Mobile</TableHead>
+              <TableHead>Access Level</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Created</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -214,7 +252,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={7}
                   className="text-center py-10 text-muted-foreground"
                 >
                   No admin users found.
@@ -234,6 +272,9 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {admin.mobile || "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {ACCESS_LEVEL_LABELS[resolveAccessLevel(admin.admin_access_level)]}
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={admin.is_active ? "ACTIVE" : "PAUSED"} />
@@ -333,6 +374,29 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 }
               />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="create-access-level">Access Level</Label>
+              <Select
+                value={createForm.accessLevel}
+                onValueChange={(value) =>
+                  setCreateForm((f) => ({
+                    ...f,
+                    accessLevel: value as AdminAccessLevel,
+                  }))
+                }
+              >
+                <SelectTrigger id="create-access-level">
+                  <SelectValue placeholder="Select access level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ADMIN_ACCESS_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {ACCESS_LEVEL_LABELS[level]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -381,6 +445,29 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                   setEditForm((f) => ({ ...f, mobile: e.target.value }))
                 }
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-access-level">Access Level</Label>
+              <Select
+                value={editForm.accessLevel}
+                onValueChange={(value) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    accessLevel: value as AdminAccessLevel,
+                  }))
+                }
+              >
+                <SelectTrigger id="edit-access-level">
+                  <SelectValue placeholder="Select access level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ADMIN_ACCESS_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {ACCESS_LEVEL_LABELS[level]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

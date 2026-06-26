@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
-import { fetchCatalogProducts } from "@/lib/products/catalog-queries";
+import {
+  fetchCatalogProducts,
+  fetchShopProductsForCustomer,
+} from "@/lib/products/catalog-queries";
 import { Product } from "@/types/product";
 import ProductCard from "@/shared/components/customer/product-card";
 import { CartStockSync } from "@/shared/components/customer/cart-stock-sync";
@@ -12,7 +15,33 @@ import { Package } from "lucide-react";
 export default async function ShopPage() {
   const supabase = await createClient();
 
-  const { data, error } = await fetchCatalogProducts(supabase);
+  // Resolve the customer's franchise (null = core customer) so the shop only
+  // shows products their franchise has made available + in stock.
+  let franchiseId: string | null = null;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (user) {
+    const { data: dbUser } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+
+    if (dbUser) {
+      const { data: profile } = await supabase
+        .from("customer_profiles")
+        .select("franchise_id")
+        .eq("user_id", dbUser.id)
+        .maybeSingle();
+      franchiseId = profile?.franchise_id ?? null;
+    }
+  }
+
+  const { data, error } = franchiseId
+    ? await fetchShopProductsForCustomer(supabase, franchiseId)
+    : await fetchCatalogProducts(supabase);
 
   if (error) {
     console.error(

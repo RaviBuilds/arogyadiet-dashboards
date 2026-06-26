@@ -8,6 +8,7 @@ import {
 import { resolveAddressCoordinates } from "@/lib/geocoding";
 import { computeFixedOrderRoutePreview } from "@/lib/routing/googleRoutes";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { applyOperationsScope, isFranchiseScope, type OperationsScope } from "@/lib/franchise/scope";
 
 const ASSIGNED_ORDER_STATUSES = [
   "ASSIGNED",
@@ -73,7 +74,63 @@ function readStatsNumber(stats: Record<string, unknown> | null, key: string) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-export async function getRoutingSandboxMeta(): Promise<RoutingSandboxMeta> {
+/**
+ * Resolves the route-origin kitchen for a rider.
+ *
+ * A franchise rider draws from its franchise kitchen; a core rider draws from
+ * the core kitchen (the active kitchen not owned by any franchise). This avoids
+ * the previous `.maybeSingle()` on `is_active=true`, which errored — and
+ * returned a null route, hiding the map — whenever more than one kitchen was
+ * active (e.g. core + a franchise kitchen).
+ */
+async function resolveSandboxKitchen(
+  supabase: ReturnType<typeof createAdminClient>,
+  riderFranchiseId: string | null,
+): Promise<{ lat: number; lng: number } | null> {
+  if (riderFranchiseId) {
+    const { data: franchise } = await supabase
+      .from("franchises")
+      .select("kitchen_id, kitchens:kitchen_id ( lat, lng )")
+      .eq("id", riderFranchiseId)
+      .maybeSingle();
+
+    const kitchen = Array.isArray((franchise as any)?.kitchens)
+      ? (franchise as any).kitchens[0]
+      : (franchise as any)?.kitchens;
+
+    if (kitchen?.lat != null && kitchen?.lng != null) {
+      return { lat: Number(kitchen.lat), lng: Number(kitchen.lng) };
+    }
+  }
+
+  // Core kitchen = an active kitchen that is not owned by any franchise.
+  const { data: franchiseRows } = await supabase
+    .from("franchises")
+    .select("kitchen_id");
+  const franchiseKitchenIds = (franchiseRows ?? [])
+    .map((f: any) => f.kitchen_id)
+    .filter(Boolean);
+
+  const { data: activeKitchens } = await supabase
+    .from("kitchens")
+    .select("id, lat, lng")
+    .eq("is_active", true);
+
+  const core =
+    (activeKitchens ?? []).find(
+      (k: any) => !franchiseKitchenIds.includes(k.id),
+    ) ?? (activeKitchens ?? [])[0];
+
+  if (core?.lat != null && core?.lng != null) {
+    return { lat: Number(core.lat), lng: Number(core.lng) };
+  }
+
+  return null;
+}
+
+export async function getRoutingSandboxMeta(
+  scope?: OperationsScope,
+): Promise<RoutingSandboxMeta> {
   const supabase = createAdminClient();
   const fallbackDate = getISTDateString(0);
 
@@ -102,33 +159,59 @@ export async function getRoutingSandboxMeta(): Promise<RoutingSandboxMeta> {
     return batchesCreated > 0 || ordersAssigned > 0;
   });
 
-  if (!successfulLog) {
-    return {
-      targetDate: fallbackDate,
-      lastRunAt: null,
-      batchesCreated: 0,
-      ordersAssigned: 0,
-      spilloverCount: 0,
-    };
-  }
+  // The automation log holds GLOBAL run info (one row per date). We keep its
+  // date + timestamp for display, but derive the Batches/Assigned counts
+  // directly from the DB scoped to the selected view so "Core Business" shows
+  // only core numbers and a franchise shows only its own.
+  const targetDate = successfulLog?.target_date || fallbackDate;
+  const lastRunAt = successfulLog?.last_run_at ?? null;
 
-  const stats = successfulLog.latest_stats as Record<string, unknown> | null;
+  const batchesPromise = applyOperationsScope(
+    supabase
+      .from("delivery_batches")
+      .select("id", { count: "exact", head: true })
+      .eq("delivery_date", targetDate),
+    scope,
+  );
+
+  const ordersPromise = applyOperationsScope(
+    supabase
+      .from("delivery_orders")
+      .select("id", { count: "exact", head: true })
+      .eq("delivery_date", targetDate)
+      .not("assigned_rider_id", "is", null)
+      .in("status", [...ASSIGNED_ORDER_STATUSES]),
+    scope,
+  );
+
+  const [batchesRes, ordersRes] = await Promise.all([
+    batchesPromise,
+    ordersPromise,
+  ]);
+
+  // Spillover isn't a stored column, so it comes from the run log. When viewing
+  // a single franchise we don't have a scoped figure, so report 0 there.
+  const stats = successfulLog?.latest_stats as Record<string, unknown> | null;
+  const spilloverCount = isFranchiseScope(scope)
+    ? 0
+    : readStatsNumber(stats, "spilloverCount");
 
   return {
-    targetDate: successfulLog.target_date || fallbackDate,
-    lastRunAt: successfulLog.last_run_at,
-    batchesCreated: readStatsNumber(stats, "batchesCreated"),
-    ordersAssigned: readStatsNumber(stats, "ordersAssigned"),
-    spilloverCount: readStatsNumber(stats, "spilloverCount"),
+    targetDate,
+    lastRunAt,
+    batchesCreated: batchesRes.count ?? 0,
+    ordersAssigned: ordersRes.count ?? 0,
+    spilloverCount,
   };
 }
 
 export async function getRoutingSandboxRiders(
   targetDate: string,
+  scope?: OperationsScope,
 ): Promise<RoutingSandboxRiderOption[]> {
   const supabase = createAdminClient();
 
-  const { data: orders, error } = await supabase
+  let query = supabase
     .from("delivery_orders")
     .select(
       `
@@ -143,6 +226,10 @@ export async function getRoutingSandboxRiders(
     .eq("delivery_date", targetDate)
     .not("assigned_rider_id", "is", null)
     .in("status", [...ASSIGNED_ORDER_STATUSES]);
+
+  query = applyOperationsScope(query, scope);
+
+  const { data: orders, error } = await query;
 
   if (error) {
     console.error("[getRoutingSandboxRiders]", error);
@@ -194,6 +281,7 @@ export async function getRoutingSandboxRiderRoute(
   riderId: string,
   targetDate: string,
   batchId?: string,
+  scope?: OperationsScope,
 ): Promise<RoutingSandboxRiderRoute | null> {
   const supabase = createAdminClient();
 
@@ -201,15 +289,10 @@ export async function getRoutingSandboxRiderRoute(
     process.env.GOOGLE_MAPS_API_KEY ||
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-  const [kitchenRes, riderRes, batchesRes] = await Promise.all([
-    supabase
-      .from("kitchens")
-      .select("lat, lng")
-      .eq("is_active", true)
-      .maybeSingle(),
+  const [riderRes, batchesRes] = await Promise.all([
     supabase
       .from("rider_profiles")
-      .select("id, users ( full_name )")
+      .select("id, franchise_id, users ( full_name )")
       .eq("id", riderId)
       .single(),
     supabase
@@ -220,13 +303,18 @@ export async function getRoutingSandboxRiderRoute(
       .order("created_at", { ascending: false }),
   ]);
 
-  if (kitchenRes.error || !kitchenRes.data) {
-    console.error("[getRoutingSandboxRiderRoute] kitchen", kitchenRes.error);
+  if (riderRes.error || !riderRes.data) {
+    console.error("[getRoutingSandboxRiderRoute] rider", riderRes.error);
     return null;
   }
 
-  if (riderRes.error || !riderRes.data) {
-    console.error("[getRoutingSandboxRiderRoute] rider", riderRes.error);
+  // Origin kitchen follows the rider's franchise (core rider → core kitchen).
+  const riderFranchiseId = (riderRes.data as { franchise_id?: string | null })
+    .franchise_id ?? null;
+  const kitchenCoords = await resolveSandboxKitchen(supabase, riderFranchiseId);
+
+  if (!kitchenCoords) {
+    console.error("[getRoutingSandboxRiderRoute] no kitchen resolved");
     return null;
   }
 
@@ -254,18 +342,20 @@ export async function getRoutingSandboxRiderRoute(
   const selectedBatch =
     batches.find((batch) => batch.id === selectedBatchId) ?? batches[0];
 
-  const { data: orders, error: ordersError } = await supabase
-    .from("delivery_orders")
-    .select(
-      `
+  const { data: orders, error: ordersError } = await applyOperationsScope(
+    supabase
+      .from("delivery_orders")
+      .select(
+        `
       id,
       route_sequence,
       customer_profiles ( users ( full_name ) ),
       addresses!delivery_address_id ( lat, lng, pincode, city, state )
     `,
-    )
-    .eq("batch_id", selectedBatch.id)
-    .order("route_sequence", { ascending: true, nullsFirst: false });
+      )
+      .eq("batch_id", selectedBatch.id),
+    scope,
+  ).order("route_sequence", { ascending: true, nullsFirst: false });
 
   if (ordersError) {
     console.error("[getRoutingSandboxRiderRoute] orders", ordersError);
@@ -319,8 +409,8 @@ export async function getRoutingSandboxRiderRoute(
 
   stops.sort((a, b) => a.sequence - b.sequence);
 
-  const kitchenLat = Number(kitchenRes.data.lat);
-  const kitchenLng = Number(kitchenRes.data.lng);
+  const kitchenLat = kitchenCoords.lat;
+  const kitchenLng = kitchenCoords.lng;
 
   const mappableStops = stops.filter(
     (stop) =>

@@ -15,7 +15,7 @@ export default async function CheckoutPage() {
 
   const profileResponse = await supbase
     .from("customer_profiles")
-    .select("dietary_preference, id, users!inner(auth_user_id)")
+    .select("dietary_preference, id, franchise_id, users!inner(auth_user_id)")
     .eq("users.auth_user_id", user.id)
     .maybeSingle();
 
@@ -44,7 +44,11 @@ export default async function CheckoutPage() {
         .order("code", { ascending: true }),
     ]);
 
-  const holidaysByDate = await fetchHolidaysInRange(todayStr, holidaysEndStr);
+  const holidaysByDate = await fetchHolidaysInRange(
+    todayStr,
+    holidaysEndStr,
+    profileResponse.data?.franchise_id ?? null,
+  );
 
   return (
     <div className="bg-slate-50/50 min-h-screen">

@@ -1,19 +1,15 @@
 import { cookies } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { Settings2, Info } from "lucide-react";
+import { Settings2 } from "lucide-react";
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
-import TodaysDeliveries from "@/shared/components/admin/operations/TodaysDeliveries";
-import FailedDeliveryApprovals from "@/shared/components/admin/operations/FailedDeliveryApprovals";
-import { reconcileDeliveryBatchStatusesAction } from "@/actions/admin-actions/operationsActions";
 import {
-  franchiseUpdateOrderStatusAction,
-  franchiseMarkBatchPickedUpAction,
-  franchiseApproveFailedDeliveryAction,
-  franchiseRejectFailedDeliveryAction,
-  revalidateFranchiseOperationsPage,
-  fetchFranchisePendingFailureApprovals,
-} from "@/actions/franchise-actions/franchiseOperationsActions";
+  reconcileDeliveryBatchStatusesAction,
+  fetchRosterData,
+  getAutomationLogs,
+} from "@/actions/admin-actions/operationsActions";
+import { fetchFranchisePendingFailureApprovals } from "@/actions/franchise-actions/franchiseOperationsActions";
 import { getISTDateString } from "@/lib/dates/ist";
+import FranchiseOperationsClient from "./FranchiseOperationsClient";
 
 export const revalidate = 0;
 
@@ -33,6 +29,8 @@ export default async function FranchiseOperationsPage() {
 
   const today = getISTDateString();
   const tomorrow = getISTDateString(1);
+  const tenDaysOut = getISTDateString(10);
+  const automationLogsStart = getISTDateString(-5);
 
   // Keep batch statuses in sync (idempotent, same as the admin page).
   await reconcileDeliveryBatchStatusesAction();
@@ -54,6 +52,28 @@ export default async function FranchiseOperationsPage() {
     .eq("franchise_id", franchiseId)
     .in("delivery_date", [today, tomorrow]);
 
+  // Planned (Tomorrow) — tomorrow's freshly created orders for this franchise.
+  const { data: rawPlanned } = await supabase
+    .from("delivery_orders")
+    .select(
+      `
+      id, status, franchise_id,
+      customer_profiles ( users ( full_name, mobile ) ),
+      addresses ( street_1, city, pincode ),
+      meal_categories ( name )
+    `,
+    )
+    .eq("franchise_id", franchiseId)
+    .eq("delivery_date", tomorrow)
+    .eq("status", "ORDER_CREATED");
+
+  // Daily Meal Roster (next 10 days), scoped to this franchise.
+  const rosterData = await fetchRosterData(today, tenDaysOut, franchiseId);
+
+  // Automation last-run info (read-only — automations run centrally).
+  const automationLogs = await getAutomationLogs(automationLogsStart, tomorrow);
+
+  // Failed-delivery approvals raised by THIS franchise's riders only.
   const pendingFailures = await fetchFranchisePendingFailureApprovals();
 
   return (
@@ -64,30 +84,14 @@ export default async function FranchiseOperationsPage() {
         icon={Settings2}
       />
 
-      {/* Automations are owned centrally — only daily dispatch is managed here. */}
-      <div className="flex items-center gap-2.5 rounded-2xl border border-amber-200/70 bg-amber-50/70 px-4 py-3 shadow-[0_8px_30px_rgb(0,0,0,0.03)] ring-1 ring-inset ring-white/40">
-        <Info className="h-4 w-4 text-amber-600 shrink-0" />
-        <p className="text-xs text-amber-800">
-          System automations (Order Creation, Product Linking, Routing &amp;
-          Batching) are managed centrally by the Admin team. Orders and routes
-          for your franchise are generated automatically every day.
-        </p>
-      </div>
-
-      <TodaysDeliveries
-        data={rawDeliveries || []}
-        onUpdateStatus={franchiseUpdateOrderStatusAction}
-        onMarkBatchPickup={franchiseMarkBatchPickedUpAction}
-        onRevalidate={revalidateFranchiseOperationsPage}
+      <FranchiseOperationsClient
+        franchiseId={franchiseId}
+        todayDeliveries={rawDeliveries ?? []}
+        plannedDeliveries={rawPlanned ?? []}
+        rosterData={rosterData ?? []}
+        automationLogs={automationLogs ?? []}
+        pendingFailures={pendingFailures ?? []}
       />
-
-      {pendingFailures.length > 0 && (
-        <FailedDeliveryApprovals
-          approvals={pendingFailures}
-          onApprove={franchiseApproveFailedDeliveryAction}
-          onReject={franchiseRejectFailedDeliveryAction}
-        />
-      )}
     </div>
   );
 }

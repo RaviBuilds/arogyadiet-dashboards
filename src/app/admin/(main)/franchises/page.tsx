@@ -1,10 +1,12 @@
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import FranchiseOversight from "@/shared/components/admin/FranchiseOversight";
 import FranchisePincodeRequests from "@/shared/components/admin/FranchisePincodeRequests";
+import { guardAdminPage } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
-export default function AdminFranchisesPage() {
+export default async function AdminFranchisesPage() {
+  await guardAdminPage("operations");
   return (
     <div className="space-y-6">
       <AdminPageHeader

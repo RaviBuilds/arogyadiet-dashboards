@@ -2,10 +2,12 @@ import { createClient as createAdminClient } from "@supabase/supabase-js";
 import type { RiderData } from "@/shared/components/admin/riders/RiderManagement";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { AdminRidersWrapper } from "./AdminRidersWrapper";
+import { guardAdminPage } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
 export default async function RidersPage() {
+  await guardAdminPage("operations");
   // Use Service Role for Admin Dashboard to securely bypass RLS
   const supabaseAdmin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

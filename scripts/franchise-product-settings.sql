@@ -48,6 +48,11 @@ CREATE TRIGGER trg_fps_updated_at
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.franchise_product_settings ENABLE ROW LEVEL SECURITY;
 
+-- Table-level privilege. RLS only decides WHICH rows are visible; the role
+-- still needs a base GRANT or every query fails with 42501 "permission denied
+-- for table". Supabase does not always auto-grant tables created via SQL.
+GRANT SELECT ON public.franchise_product_settings TO authenticated;
+
 DROP POLICY IF EXISTS "fps_read_authenticated" ON public.franchise_product_settings;
 CREATE POLICY "fps_read_authenticated"
   ON public.franchise_product_settings FOR SELECT

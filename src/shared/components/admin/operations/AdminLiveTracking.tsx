@@ -31,7 +31,19 @@ import { cn } from "@/lib/utils";
 
 const TRACKING_POLL_MS = 10_000;
 
-export default function AdminLiveTracking() {
+export default function AdminLiveTracking({
+  scope,
+  getRiders = getLiveTrackingRiders,
+  getTrackingData = getAdminLiveTrackingData,
+}: {
+  /** Operations scope ("core" | "all" | franchise uuid) passed to admin fetches. */
+  scope?: string;
+  getRiders?: (scope?: string) => Promise<LiveTrackingRiderOption[]>;
+  getTrackingData?: (
+    riderId: string,
+    scope?: string,
+  ) => Promise<LiveTrackingPayload | null>;
+} = {}) {
   const [riders, setRiders] = useState<LiveTrackingRiderOption[]>([]);
   const [selectedRiderId, setSelectedRiderId] = useState<string>("");
   const [payload, setPayload] = useState<LiveTrackingPayload | null>(null);
@@ -41,7 +53,7 @@ export default function AdminLiveTracking() {
   const loadRiders = useCallback(async () => {
     setIsLoadingRiders(true);
     try {
-      const list = await getLiveTrackingRiders();
+      const list = await getRiders(scope);
       setRiders(list);
       setSelectedRiderId((current) => {
         if (current && list.some((r) => r.id === current)) return current;
@@ -50,21 +62,21 @@ export default function AdminLiveTracking() {
     } finally {
       setIsLoadingRiders(false);
     }
-  }, []);
+  }, [getRiders, scope]);
 
   const loadTrackingData = useCallback((riderId: string) => {
     if (!riderId) return;
     startTransition(async () => {
-      const data = await getAdminLiveTrackingData(riderId);
+      const data = await getTrackingData(riderId, scope);
       setPayload(data);
     });
-  }, []);
+  }, [getTrackingData, scope]);
 
   const pollTrackingData = useCallback(async (riderId: string) => {
     if (!riderId) return;
-    const data = await getAdminLiveTrackingData(riderId);
+    const data = await getTrackingData(riderId, scope);
     setPayload(data);
-  }, []);
+  }, [getTrackingData, scope]);
 
   useEffect(() => {
     loadRiders();

@@ -1,10 +1,12 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { AdminSubscriptionsWrapper } from "./AdminSubscriptionsWrapper";
+import { guardAdminPage } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
 export default async function SubscriptionsPage() {
+  await guardAdminPage("operations");
   const supabaseAdmin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!

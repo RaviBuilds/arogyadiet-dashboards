@@ -44,7 +44,7 @@ export async function processStandaloneCheckout(items: CartItem[]) {
 
     const { data: profile, error: profileError } = await supabase
       .from("customer_profiles")
-      .select("id")
+      .select("id, franchise_id")
       .eq("user_id", dbUser.id)
       .single();
 
@@ -53,6 +53,7 @@ export async function processStandaloneCheckout(items: CartItem[]) {
     }
 
     const customer_profile_id = profile.id;
+    const customerFranchiseId: string | null = profile.franchise_id ?? null;
 
     const { data: activeSubscription, error: subscriptionError } =
       await supabase
@@ -101,6 +102,22 @@ export async function processStandaloneCheckout(items: CartItem[]) {
         throw new Error("Product is no longer available.");
       }
 
+      if (customerFranchiseId) {
+        const { data: setting } = await supabase
+          .from("franchise_product_settings")
+          .select("stock_quantity, is_visible")
+          .eq("franchise_id", customerFranchiseId)
+          .eq("product_id", item.id)
+          .maybeSingle();
+
+        if (!setting || !setting.is_visible) {
+          throw new Error("One of your items is not available in your area.");
+        }
+        if ((setting.stock_quantity ?? 0) < item.quantity) {
+          throw new Error("Not enough stock available for one of your items.");
+        }
+      }
+
       const unitPrice = product!.sale_price ?? product!.original_price;
       const lineTotal = unitPrice * item.quantity;
       true_total += lineTotal;
@@ -117,6 +134,7 @@ export async function processStandaloneCheckout(items: CartItem[]) {
       .from("addon_orders")
       .insert({
         customer_profile_id,
+        franchise_id: customerFranchiseId,
         total_amount: true_total,
         target_delivery_date: nextActiveDay.preference_date,
         status: "PENDING",
@@ -224,7 +242,7 @@ export async function createAddonCheckoutOrder(
 
     const { data: profile, error: profileError } = await supabase
       .from("customer_profiles")
-      .select("id")
+      .select("id, franchise_id")
       .eq("user_id", dbUser.id)
       .single();
 
@@ -233,6 +251,7 @@ export async function createAddonCheckoutOrder(
     }
 
     const customer_profile_id = profile.id;
+    const customerFranchiseId: string | null = profile.franchise_id ?? null;
 
     const { data: activeSubscription, error: subscriptionError } =
       await supabase
@@ -291,6 +310,25 @@ export async function createAddonCheckoutOrder(
 
       if (isProductUnavailable(product, productError)) {
         throw new Error("Product is no longer available.");
+      }
+
+      // Franchise customers buy against their franchise's stock + visibility.
+      if (customerFranchiseId) {
+        const { data: setting } = await supabase
+          .from("franchise_product_settings")
+          .select("stock_quantity, is_visible")
+          .eq("franchise_id", customerFranchiseId)
+          .eq("product_id", item.id)
+          .maybeSingle();
+
+        if (!setting || !setting.is_visible) {
+          throw new Error("One of your items is not available in your area.");
+        }
+        if ((setting.stock_quantity ?? 0) < item.quantity) {
+          throw new Error(
+            "Not enough stock available for one of your items.",
+          );
+        }
       }
 
       const unitPrice = product!.sale_price ?? product!.original_price;
@@ -364,6 +402,7 @@ export async function createAddonCheckoutOrder(
       .from("addon_orders")
       .insert({
         customer_profile_id,
+        franchise_id: customerFranchiseId,
         total_amount: total,
         target_delivery_date: nextActiveDay.preference_date,
         status: "PENDING",
@@ -669,6 +708,42 @@ export async function verifyAddonPayment(
       throw new Error(
         `Addon Order Update Error: ${addonOrderUpdateError.message}`,
       );
+
+    // Franchise orders: deduct from the FRANCHISE's stock (never core stock).
+    // Core orders (franchise_id null) keep their existing behaviour (no decrement).
+    const { data: paidOrder } = await supabase
+      .from("addon_orders")
+      .select("id, franchise_id, addon_order_items(product_id, quantity)")
+      .eq("payment_id", paymentId)
+      .maybeSingle();
+
+    if (paidOrder?.franchise_id) {
+      const orderItems = (paidOrder.addon_order_items ?? []) as Array<{
+        product_id: string;
+        quantity: number;
+      }>;
+
+      for (const orderItem of orderItems) {
+        const { data: decremented, error: decError } = await supabase.rpc(
+          "decrement_franchise_product_stock",
+          {
+            p_franchise_id: paidOrder.franchise_id,
+            p_product_id: orderItem.product_id,
+            p_quantity: orderItem.quantity,
+          },
+        );
+
+        if (decError || decremented === false) {
+          // Stock could not be reduced (e.g. concurrent sale). Log for ops —
+          // payment already succeeded, so we don't fail the whole flow.
+          console.error(
+            "Franchise stock decrement issue:",
+            decError?.message ?? "insufficient stock",
+            { product_id: orderItem.product_id },
+          );
+        }
+      }
+    }
 
     const { data: payment } = await supabase
       .from("payments")

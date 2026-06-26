@@ -18,7 +18,7 @@ export default async function ManageMealPlannerPage() {
 
   const { data: profile } = await supabase
     .from("customer_profiles")
-    .select("id, dietary_preference")
+    .select("id, dietary_preference, franchise_id")
     .eq(
       "user_id",
       (
@@ -122,6 +122,7 @@ export default async function ManageMealPlannerPage() {
   const holidaysByDate = await fetchHolidaysInRange(
     startDate,
     activeSub.effective_end_on,
+    profile.franchise_id ?? null,
   );
 
   const planData = Array.isArray(activeSub.subscription_plans)

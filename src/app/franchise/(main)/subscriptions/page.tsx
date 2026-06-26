@@ -27,6 +27,16 @@ export default async function FranchiseSubscriptionsPage() {
     .eq("is_active", true)
     .order("duration_days", { ascending: true });
 
+  // Fetch this franchise's global discount coupons (not tied to a customer)
+  const { data: globalCoupons } = await supabase
+    .from("coupons")
+    .select(
+      "id, code, discount_type, discount_value_30_days, discount_value_60_days, discount_value_90_days, flat_discounts_by_plan, discount_value, max_uses, times_used, expires_at, created_at",
+    )
+    .is("customer_profile_id", null)
+    .eq("franchise_id", franchiseId)
+    .order("created_at", { ascending: false });
+
   // Fetch franchise-scoped subscriptions with customer info
   const subSelectFields = `
     id, starts_on, effective_end_on, ends_on, total_days, 
@@ -89,6 +99,7 @@ export default async function FranchiseSubscriptionsPage() {
       />
       <FranchiseSubscriptionsClient
         plans={plans ?? []}
+        globalCoupons={globalCoupons ?? []}
         activeSubscriptions={activeSubs}
         pendingSubscriptions={pendingSubs}
         stoppedSubscriptions={stoppedSubs}

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Badge } from "@/shared/components/ui/badge";
 import {
   Table,
@@ -21,6 +23,14 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shared/components/ui/dropdown-menu";
+import { ConfirmDeleteModal } from "@/shared/components/admin/core/ConfirmDeleteModal";
+import {
   Users,
   Search,
   Download,
@@ -29,9 +39,13 @@ import {
   XCircle,
   UserX,
   Plus,
+  MoreHorizontal,
+  Eye,
+  Trash2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { FranchiseCreateCustomerModal } from "./FranchiseCreateCustomerModal";
+import { franchiseDeactivateCustomerAccount } from "@/actions/franchise-actions/franchiseCustomerManagementActions";
 import { GlassCard, StatCard } from "@/shared/components/franchise/ui/GlassCard";
 
 interface CustomerData {
@@ -58,9 +72,29 @@ interface Props {
 }
 
 export default function FranchiseCustomerDashboard({ customers, franchiseId }: Props) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [deactivateTarget, setDeactivateTarget] = useState<CustomerData | null>(null);
+
+  const handleDeactivate = () => {
+    if (!deactivateTarget) return;
+    startTransition(async () => {
+      const res = await franchiseDeactivateCustomerAccount(
+        deactivateTarget.id,
+        deactivateTarget.userId,
+      );
+      if (res.success) {
+        toast.success("Customer account deactivated.");
+        setDeactivateTarget(null);
+        router.refresh();
+      } else {
+        toast.error(res.error || "Failed to deactivate customer.");
+      }
+    });
+  };
 
   const activeCount = customers.filter((c) => c.status === "Active").length;
   const pendingCount = customers.filter((c) => c.status === "Pending").length;
@@ -182,6 +216,7 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId }: P
                     <TableHead className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Pincode</TableHead>
                     <TableHead className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Plan</TableHead>
                     <TableHead className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Status</TableHead>
+                    <TableHead className="text-[11px] font-medium uppercase tracking-wider text-slate-400 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -215,6 +250,35 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId }: P
                       <TableCell>
                         <CustomerStatusBadge status={customer.status} />
                       </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0 hover:bg-slate-100">
+                              <MoreHorizontal className="h-4 w-4 text-slate-500" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-[180px]">
+                            <DropdownMenuItem asChild>
+                              <Link
+                                href={`/customers/${customer.id}`}
+                                className="cursor-pointer font-medium flex items-center"
+                              >
+                                <Eye className="mr-2 h-4 w-4 text-primary" />
+                                View 360 Dashboard
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
+                              onClick={() => setDeactivateTarget(customer)}
+                              disabled={!customer.isActive}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Deactivate Customer
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -229,6 +293,16 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId }: P
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         franchiseId={franchiseId}
+      />
+
+      {/* Deactivate confirmation */}
+      <ConfirmDeleteModal
+        isOpen={deactivateTarget !== null}
+        onClose={() => setDeactivateTarget(null)}
+        onConfirm={handleDeactivate}
+        title="Deactivate Customer"
+        description={`Deactivate ${deactivateTarget?.fullName ?? "this customer"}? Login will be blocked, but billing history is preserved. This cannot be done while the customer has an active subscription.`}
+        isPending={isPending}
       />
     </div>
   );

@@ -9,6 +9,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // `server-only` throws when imported outside a server graph; stub it so
+      // pure server utilities remain unit-testable.
+      "server-only": path.resolve(__dirname, "./src/test/stubs/server-only.ts"),
     },
   },
 });

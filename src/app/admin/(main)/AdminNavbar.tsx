@@ -38,6 +38,11 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { NotificationBell } from "@/components/shared/NotificationBell";
 import { FranchiseRequestNavBadge } from "@/shared/components/admin/FranchiseRequestNavBadge";
+import {
+  canAccess,
+  type AccessArea,
+  type AdminAccessLevel,
+} from "@/lib/auth/adminAccessCore";
 
 interface AdminNavbarProps {
   userProfile: {
@@ -47,21 +52,41 @@ interface AdminNavbarProps {
     roleCode: string;
   };
   email: string;
+  // Nav items are filtered by this level. When absent, only neutral items show.
+  accessLevel?: AdminAccessLevel;
 }
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/customers", label: "Customers", icon: Users },
-  { href: "/subscriptions", label: "Subscriptions", icon: CreditCard },
-  { href: "/riders", label: "Riders", icon: Truck },
-  { href: "/operations", label: "Operations", icon: Settings2 },
-  { href: "/kitchen-shop", label: "Shop Products", icon: ShoppingBag },
-  { href: "/franchises", label: "Franchises", icon: Building2 },
+const NAV_ITEMS: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  // Capability area; undefined => neutral (always visible).
+  area?: AccessArea;
+}[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, area: "operations" },
+  { href: "/customers", label: "Customers", icon: Users, area: "operations" },
+  { href: "/subscriptions", label: "Subscriptions", icon: CreditCard, area: "operations" },
+  { href: "/riders", label: "Riders", icon: Truck, area: "operations" },
+  { href: "/operations", label: "Operations", icon: Settings2, area: "operations" },
+  { href: "/kitchen-shop", label: "Shop Products", icon: ShoppingBag, area: "operations" },
+  { href: "/franchises", label: "Franchises", icon: Building2, area: "operations" },
 ];
 
-export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
+export default function AdminNavbar({
+  userProfile,
+  email,
+  accessLevel,
+}: AdminNavbarProps) {
   const supabase = createClient();
   const pathname = usePathname();
+
+  // UI-only gating (server guards are the real barrier): show neutral items and
+  // any area the level permits; when accessLevel is absent, show neutral only.
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) =>
+      item.area == null ||
+      (accessLevel != null && canAccess(accessLevel, item.area)),
+  );
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -89,7 +114,7 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
 
         {/* Center: Desktop Navigation */}
         <nav className="hidden items-center gap-1 text-sm lg:flex">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
             return (
@@ -175,7 +200,7 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
                 <SheetTitle>Admin Menu</SheetTitle>
               </SheetHeader>
               <nav className="grid gap-1 text-sm mt-4">
-                {NAV_ITEMS.map((item) => {
+                {visibleNavItems.map((item) => {
                   const Icon = item.icon;
                   const active = isActive(item.href);
                   return (

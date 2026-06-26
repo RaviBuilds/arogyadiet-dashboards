@@ -1,15 +1,29 @@
 "use server";
 
+import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
+import { sendNotificationToUser } from "@/lib/notifications";
+import {
+  ADMIN_ACCESS_LEVELS,
+  ACCESS_LEVEL_LABELS,
+  resolveAccessLevel,
+  landingRouteFor,
+  type AdminAccessLevel,
+} from "@/lib/auth/adminAccessCore";
+
+/** Zod schema rejecting any value outside the permitted access-level set. */
+const accessLevelSchema = z.enum(ADMIN_ACCESS_LEVELS);
 
 export async function getAdminUsers() {
   const supabaseAdmin = createAdminClient();
 
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, auth_user_id, full_name, email, mobile, is_active, created_at, roles(code)")
+    .select(
+      "id, auth_user_id, full_name, email, mobile, is_active, created_at, admin_access_level, roles(code)",
+    )
     .eq("roles.code", "ADMIN")
     .not("roles", "is", null)
     .order("created_at", { ascending: false });
@@ -20,8 +34,13 @@ export async function getAdminUsers() {
   }
 
   // Filter to only ADMIN role users (the join filter above may not fully work with all Supabase versions)
-  return (data || []).filter((u: any) => {
-    const roleCode = Array.isArray(u.roles) ? u.roles[0]?.code : u.roles?.code;
+  return (data || []).filter((u) => {
+    const roles = u.roles as
+      | { code: string }[]
+      | { code: string }
+      | null
+      | undefined;
+    const roleCode = Array.isArray(roles) ? roles[0]?.code : roles?.code;
     return roleCode === "ADMIN";
   });
 }
@@ -31,8 +50,20 @@ export async function createAdminUser(formData: {
   email: string;
   mobile: string;
   password: string;
+  accessLevel?: string;
 }) {
   const supabaseAdmin = createAdminClient();
+
+  // Validate the access level: reject invalid values; default to full access
+  // when omitted (Req 9.3/9.4/9.5).
+  let accessLevel: AdminAccessLevel = "inventory_operations";
+  if (formData.accessLevel !== undefined) {
+    const parsed = accessLevelSchema.safeParse(formData.accessLevel);
+    if (!parsed.success) {
+      return { success: false, error: "Invalid access level." };
+    }
+    accessLevel = parsed.data;
+  }
 
   // Check for existing email
   const { data: existing } = await supabaseAdmin
@@ -61,6 +92,7 @@ export async function createAdminUser(formData: {
           role_id: roleData.id,
           full_name: formData.fullName,
           mobile: formData.mobile || null,
+          admin_access_level: accessLevel,
           force_password_change: true,
           updated_at: new Date().toISOString(),
         })
@@ -73,9 +105,10 @@ export async function createAdminUser(formData: {
       await logAdminAction("REACTIVATE", "admin_user", existing.id, {
         email: formData.email,
         full_name: formData.fullName,
+        admin_access_level: accessLevel,
       });
       revalidatePath("/master/user-management");
-      return { success: true };
+      return { success: true, accessLevel };
     }
 
     return { success: false, error: "An account with this email is already active." };
@@ -112,6 +145,7 @@ export async function createAdminUser(formData: {
     full_name: formData.fullName,
     email: formData.email,
     mobile: formData.mobile || null,
+    admin_access_level: accessLevel,
     is_active: true,
     is_email_verified: true,
   });
@@ -130,9 +164,10 @@ export async function createAdminUser(formData: {
   await logAdminAction("CREATE", "admin_user", createdUser?.id ?? authUserId, {
     email: formData.email,
     full_name: formData.fullName,
+    admin_access_level: accessLevel,
   });
   revalidatePath("/master/user-management");
-  return { success: true };
+  return { success: true, accessLevel };
 }
 
 export async function updateAdminUser(
@@ -140,24 +175,67 @@ export async function updateAdminUser(
   formData: {
     fullName: string;
     mobile: string;
+    accessLevel?: string;
   },
 ) {
   const supabaseAdmin = createAdminClient();
+
+  // Resolve the target admin and its current level before mutating.
+  const { data: current, error: fetchError } = await supabaseAdmin
+    .from("users")
+    .select("id, admin_access_level")
+    .eq("id", userId)
+    .single();
+
+  if (fetchError || !current) {
+    return { success: false, error: "Admin user not found." };
+  }
+
+  const prevLevel = resolveAccessLevel(current.admin_access_level);
+
+  // Reject an invalid submitted level (leave stored value unchanged). When the
+  // level is omitted from the submission, keep the existing level (no change).
+  let nextLevel: AdminAccessLevel = prevLevel;
+  if (formData.accessLevel !== undefined) {
+    const parsed = accessLevelSchema.safeParse(formData.accessLevel);
+    if (!parsed.success) {
+      return { success: false, error: "Invalid access level." };
+    }
+    nextLevel = parsed.data;
+  }
 
   const { error } = await supabaseAdmin
     .from("users")
     .update({
       full_name: formData.fullName,
       mobile: formData.mobile || null,
+      admin_access_level: nextLevel,
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId);
 
+  // On persist failure, the stored level is unchanged and no notification fires.
   if (error) return { success: false, error: error.message };
 
-  await logAdminAction("UPDATE", "admin_user", userId, formData);
+  // Send exactly one access-level-changed notification only when it changed.
+  // sendNotificationToUser swallows its own errors, so a notification failure
+  // never reverts the persisted change (Req 11.3/11.4).
+  if (prevLevel !== nextLevel) {
+    await sendNotificationToUser(userId, {
+      title: "Access level updated",
+      message: `Your admin access level has been updated to ${ACCESS_LEVEL_LABELS[nextLevel]}.`,
+      actionUrl: landingRouteFor(nextLevel),
+      type: "ADMIN_ACCESS_LEVEL_CHANGED",
+    });
+  }
+
+  await logAdminAction("UPDATE", "admin_user", userId, {
+    full_name: formData.fullName,
+    mobile: formData.mobile,
+    admin_access_level: nextLevel,
+  });
   revalidatePath("/master/user-management");
-  return { success: true };
+  return { success: true, accessLevel: nextLevel };
 }
 
 export async function deleteAdminUser(userId: string) {

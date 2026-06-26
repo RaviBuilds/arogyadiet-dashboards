@@ -15,6 +15,7 @@ export default function OperationsDashboard({
   plannedDeliveries,
   rosterData,
   automationLogs,
+  scope,
 }: any) {
   const [activeTab, setActiveTab] = useState("Today's Scheduled");
 
@@ -45,19 +46,19 @@ export default function OperationsDashboard({
         />
       )}
 
-      {activeTab === "Live Routing" && <LiveRoutingBoard />}
+      {activeTab === "Live Routing" && <LiveRoutingBoard scope={scope} />}
 
       {activeTab === "Daily Meal Roster" && (
-        <DailyMealRoster initialRosterData={rosterData} />
+        <DailyMealRoster initialRosterData={rosterData} scope={scope} />
       )}
 
-      {activeTab === "Live Tracking" && <AdminLiveTracking />}
+      {activeTab === "Live Tracking" && <AdminLiveTracking scope={scope} />}
 
       {activeTab === "Automation Logs" && (
         <AutomationLogs initialLogs={automationLogs} />
       )}
 
-      {activeTab === "Sandbox" && <RoutingSandbox />}
+      {activeTab === "Sandbox" && <RoutingSandbox scope={scope} />}
     </div>
   );
 }

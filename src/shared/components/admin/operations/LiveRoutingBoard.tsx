@@ -95,7 +95,39 @@ export interface RoutingRider {
   assignedPincodes: string[];
 }
 
-export default function LiveRoutingBoard() {
+type FixedAssignmentsInjectedProps = {
+  getAssignments?: () => Promise<any[]>;
+  getRiders?: () => Promise<any[]>;
+  searchCustomers?: (query: string) => Promise<any[]>;
+  upsert?: (
+    customerProfileId: string,
+    riderId: string,
+    note?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  remove?: (id: string) => Promise<{ success: boolean; error?: string }>;
+};
+
+interface LiveRoutingBoardProps {
+  /** Operations scope ("core" | "all" | franchise uuid) passed to admin fetches. */
+  scope?: string;
+  /** Injectable data fetch + commit so the franchise portal can scope to itself. */
+  getData?: (
+    scope?: string,
+  ) => Promise<{ orders: RoutingOrder[]; riders: RoutingRider[] }>;
+  commit?: (
+    moves: { orderId: string; newRiderId: string | null }[],
+    scope?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  /** Injected actions for the nested Fixed Rider Assignments panel. */
+  fixedAssignmentsProps?: FixedAssignmentsInjectedProps;
+}
+
+export default function LiveRoutingBoard({
+  scope,
+  getData = getRoutingData,
+  commit = commitRouteChanges,
+  fixedAssignmentsProps,
+}: LiveRoutingBoardProps = {}) {
   const [initialOrders, setInitialOrders] = useState<RoutingOrder[]>([]);
   const [orders, setOrders] = useState<RoutingOrder[]>([]);
   const [riders, setRiders] = useState<RoutingRider[]>([]);
@@ -112,7 +144,7 @@ export default function LiveRoutingBoard() {
 
   const fetchBoardData = async () => {
     setIsLoading(true);
-    const res = await getRoutingData();
+    const res = await getData(scope);
     setInitialOrders(res.orders);
     setOrders(res.orders);
     setRiders(res.riders);
@@ -126,7 +158,9 @@ export default function LiveRoutingBoard() {
 
   useEffect(() => {
     fetchBoardData();
-  }, []);
+    // Re-fetch when the operations scope changes (admin selector).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   const unsavedChanges = orders.filter((o) => {
     const original = initialOrders.find((io) => io.id === o.id);
@@ -173,7 +207,7 @@ export default function LiveRoutingBoard() {
     }));
 
     startTransition(async () => {
-      const res = await commitRouteChanges(moves);
+      const res = await commit(moves, scope);
       if (res.success) {
         toast.success(`Successfully re-routed ${moves.length} deliveries.`);
         setIsConfirmModalOpen(false);
@@ -406,7 +440,7 @@ export default function LiveRoutingBoard() {
 
       {/* Permanent customer -> rider overrides, managed inline below the board */}
       <div className="pt-2 border-t border-dashed border-border/60">
-        <FixedRiderAssignments onChanged={fetchBoardData} />
+        <FixedRiderAssignments onChanged={fetchBoardData} {...fixedAssignmentsProps} />
       </div>
     </div>
   );

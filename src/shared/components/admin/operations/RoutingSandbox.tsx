@@ -386,7 +386,26 @@ function RouteMetrics({
   );
 }
 
-export default function RoutingSandbox() {
+export default function RoutingSandbox({
+  scope,
+  getMeta = getRoutingSandboxMeta,
+  getRiders = getRoutingSandboxRiders,
+  getRiderRoute = getRoutingSandboxRiderRoute,
+}: {
+  /** Operations scope ("core" | "all" | franchise uuid) passed to admin fetches. */
+  scope?: string;
+  getMeta?: (scope?: string) => Promise<RoutingSandboxMeta>;
+  getRiders?: (
+    targetDate: string,
+    scope?: string,
+  ) => Promise<RoutingSandboxRiderOption[]>;
+  getRiderRoute?: (
+    riderId: string,
+    targetDate: string,
+    batchId?: string,
+    scope?: string,
+  ) => Promise<RoutingSandboxRiderRoute | null>;
+} = {}) {
   const [meta, setMeta] = useState<RoutingSandboxMeta | null>(null);
   const [riders, setRiders] = useState<RoutingSandboxRiderOption[]>([]);
   const [selectedRiderId, setSelectedRiderId] = useState("");
@@ -400,10 +419,10 @@ export default function RoutingSandbox() {
   const loadSandbox = useCallback(async () => {
     setIsLoading(true);
     try {
-      const sandboxMeta = await getRoutingSandboxMeta();
+      const sandboxMeta = await getMeta(scope);
       setMeta(sandboxMeta);
 
-      const riderList = await getRoutingSandboxRiders(sandboxMeta.targetDate);
+      const riderList = await getRiders(sandboxMeta.targetDate, scope);
       setRiders(riderList);
 
       setSelectedRiderId((current) => {
@@ -415,16 +434,17 @@ export default function RoutingSandbox() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [getMeta, getRiders, scope]);
 
   const loadRiderRoute = useCallback(
     (riderId: string, targetDate: string, batchId?: string) => {
       if (!riderId) return;
       startTransition(async () => {
-        const data = await getRoutingSandboxRiderRoute(
+        const data = await getRiderRoute(
           riderId,
           targetDate,
           batchId,
+          scope,
         );
         setRouteData(data);
         if (data && data.batches.length > 0) {
@@ -432,7 +452,7 @@ export default function RoutingSandbox() {
         }
       });
     },
-    [],
+    [getRiderRoute, scope],
   );
 
   useEffect(() => {

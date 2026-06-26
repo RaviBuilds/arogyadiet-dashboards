@@ -46,6 +46,7 @@ export function AdminOperationsWrapper({
         plannedDeliveries={filteredPlanned}
         rosterData={rosterData}
         automationLogs={automationLogs}
+        scope={scope}
       />
     </div>
   );

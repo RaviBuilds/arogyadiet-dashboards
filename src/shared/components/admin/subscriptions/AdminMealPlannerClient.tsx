@@ -22,9 +22,11 @@ export function AdminMealPlannerClient({
   mealCategories,
   customerDietaryPreference,
   deliveryOrders,
+  mealAction,
 }: any) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const saveMeals = mealAction ?? adminBulkUpdateMealPreferences;
 
   const sortedCategories = useMemo(() => {
     const PREFERRED_ORDER = ["VEG", "EGG", "CHICKEN"];
@@ -95,7 +97,7 @@ export function AdminMealPlannerClient({
       return;
     }
 
-    const result = await adminBulkUpdateMealPreferences(
+    const result = await saveMeals(
       subscriptionId,
       updates,
     );
