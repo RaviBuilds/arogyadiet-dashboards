@@ -3,8 +3,8 @@
 -- ============================================================================
 -- Defines move_pincode_and_reassign(p_pincode, p_from_clinic, p_to_clinic):
 -- the AUTHORITATIVE, single-transaction path that moves a pincode from one
--- Clinic to another and re-stamps the affected customers and addresses
--- (Requirements 4.4, 4.5, 5.7, 7.1, 7.2, 7.3).
+-- Clinic to another and re-stamps the affected customers and their PRIMARY
+-- addresses (Requirements 4.4, 4.5, 5.7, 7.1, 7.2, 7.3).
 --
 -- A plpgsql function body runs inside a single implicit transaction, so all
 -- three writes either commit together or roll back together. On failure the
@@ -16,14 +16,22 @@
 --        UPDATE rider_service_areas SET clinic_id = p_to_clinic
 --        WHERE pincode = p_pincode AND clinic_id = p_from_clinic
 --   2. Reassign matching customers (BEFORE addresses are re-stamped, so the
---      address scope still matches the source clinic):
+--      address scope still matches the source clinic). Keyed on the customer's
+--      PRIMARY address (is_primary = true):
 --        UPDATE customer_profiles SET clinic_id = p_to_clinic
 --        WHERE clinic_id = p_from_clinic
---          AND id IN (matching addresses with pincode + source clinic)
+--          AND id IN (customers whose PRIMARY address carries the moved
+--                     pincode + source clinic)
 --      The count of reassigned customers is captured here and RETURNed.
---   3. Reassign matching addresses:
+--   3. Reassign matching PRIMARY addresses:
 --        UPDATE addresses SET clinic_id = p_to_clinic
---        WHERE pincode = p_pincode AND clinic_id = p_from_clinic
+--        WHERE is_primary = true AND pincode = p_pincode
+--          AND clinic_id = p_from_clinic
+--
+-- PRIMARY-ADDRESS KEYING (Req 7.1, 7.2): both the customer subquery and the
+-- address re-stamp filter is_primary = true. A customer is reassigned ONLY when
+-- their primary address carries the moved pincode and is stamped to the source
+-- clinic; secondary addresses never trigger a move and are never re-stamped.
 --
 -- Returns: the integer count of customers reassigned (0 when none match, Req 7.3).
 --
@@ -73,9 +81,11 @@ BEGIN
      AND clinic_id = p_from_clinic;
 
   -- 2. Reassign the affected customers and capture the count. Scoped to the
-  --    source clinic so only genuinely-affected customers move. Done BEFORE the
-  --    address re-stamp so the matching-address subquery still sees the source
-  --    clinic_id.
+  --    source clinic so only genuinely-affected customers move, and keyed on the
+  --    customer's PRIMARY address (is_primary = true) so only customers whose
+  --    primary address carries the moved pincode are reassigned — secondary
+  --    addresses never trigger a reassignment (Req 7.1). Done BEFORE the address
+  --    re-stamp so the matching-address subquery still sees the source clinic_id.
   WITH affected AS (
     UPDATE public.customer_profiles cp
        SET clinic_id = p_to_clinic
@@ -83,7 +93,8 @@ BEGIN
        AND cp.id IN (
          SELECT a.customer_profile_id
            FROM public.addresses a
-          WHERE a.pincode = p_pincode
+          WHERE a.is_primary = true
+            AND a.pincode = p_pincode
             AND a.clinic_id = p_from_clinic
             AND a.customer_profile_id IS NOT NULL
        )
@@ -91,10 +102,14 @@ BEGIN
   )
   SELECT count(*)::integer INTO v_reassigned FROM affected;
 
-  -- 3. Re-stamp the matching address records to the destination clinic.
+  -- 3. Re-stamp the matching PRIMARY address records to the destination clinic.
+  --    Only primary addresses (is_primary = true) are re-stamped so the address
+  --    stamp stays anchored to the customer's primary address (Req 7.2);
+  --    secondary addresses are left untouched.
   UPDATE public.addresses
      SET clinic_id = p_to_clinic
-   WHERE pincode = p_pincode
+   WHERE is_primary = true
+     AND pincode = p_pincode
      AND clinic_id = p_from_clinic;
 
   -- NOTE: delivery_orders.clinic_id / delivery_batches.clinic_id are NEVER

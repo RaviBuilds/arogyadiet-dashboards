@@ -2,13 +2,19 @@
 
 ## Introduction
 
-This feature introduces a City → Kitchen → Clinic hierarchy for the ArogyaDiet CORE business. It repurposes the existing kitchen entity from a rider pickup / routing origin into a meal-preparation and workload-aggregation entity, and introduces a new Clinic entity that becomes the rider pickup origin and geographic routing origin.
+This feature introduces a Business → Kitchen → Clinic hierarchy for the ArogyaDiet CORE business. It adds a new Business entity as the top-level grouping that separates Core operations from Franchise operations through a business type of Core or Franchise. It repurposes the existing kitchen entity from a rider pickup / routing origin into a meal-preparation and workload-aggregation entity that belongs to exactly one Business and no longer carries any address or geo coordinates. It relies on the Clinic entity as the sole rider pickup origin and geographic routing origin, where the full address and geo coordinates (latitude and longitude) live only on the Clinic. The existing City entity is retained where it currently fits.
 
-The Clinic model is built generically so it can later extend to franchises (a franchise will relate 1:1 to a clinic), but only the CORE path is implemented in this spec. All franchise behavior remains gated behind the existing `FRANCHISE_FEATURES_ENABLED` flag and is out of scope to implement here; the data model is kept franchise-ready (for example, `clinics.franchise_id` nullable, where `NULL` means a core clinic).
+The Clinic model is built generically so it can later extend to franchises (a franchise will relate 1:1 to a clinic), but only the CORE path is implemented in this spec. All franchise behavior remains gated behind the existing `FRANCHISE_FEATURES_ENABLED` flag and is out of scope to implement here; the data model is kept franchise-ready (for example, `clinics.franchise_id` nullable, where `NULL` means a core clinic, and `Business.type` distinguishing Core from Franchise so franchise business records can be wired in a later spec).
 
 This is the first of three sequenced specs. The following are explicitly OUT OF SCOPE and belong to later specs: scope-based access-control overhaul; shop-products → warehouse relocation; franchise warehouse and core→franchise stock transfer; full franchise clinic wiring.
 
+### Future Direction (Franchise Hierarchy — NOT implemented in this spec)
+
+A later spec will implement a richer franchise hierarchy that this feature does not build. It is documented here only so the core model stays compatible; no franchise acceptance criteria appear in this spec and all franchise behavior remains gated behind `FRANCHISE_FEATURES_ENABLED`. The planned franchise hierarchy is: Business (type `Franchise`) → City → Group → Franchise → Clinic, where a Group owns a Kitchen created at group-creation time and all Franchises in that Group link to that Kitchen by default. Franchise onboarding will include agreement document uploads stored in a private Supabase Storage bucket (suggested name `franchise-documents`), and a Franchise will be movable between Groups within the same City. This is a forward-looking note only; this spec implements neither the Group entity, the franchise onboarding documents, nor inter-group franchise moves.
+
 Key invariants established by this feature:
+- A Business has a business type of Core or Franchise; a Kitchen belongs to exactly one Business; a Business owns one or more Kitchens; a Clinic resolves to its Business via its Kitchen (Clinic → Kitchen → Business).
+- The full address and geo coordinates (latitude and longitude) are stored only on the Clinic; the Kitchen carries no address or geo coordinates. Every order is picked up by the rider from the Clinic linked to that rider, which is the sole pickup and routing origin.
 - One pincode belongs to exactly one clinic (no duplicates across clinics).
 - When a pincode is moved between clinics, associated customers are automatically reassigned to the new clinic.
 - A rider is linked to exactly one clinic, and a rider's service-area pincodes must belong to that rider's clinic.
@@ -17,25 +23,35 @@ Key invariants established by this feature:
 
 ## Glossary
 
-- **City**: A new database entity representing a geographic city. Cities own kitchens. Created/edited/deleted by the Master_Admin.
-- **Kitchen**: An existing entity (table `kitchens`, retained — not dropped) that belongs to a City. After this feature, the Kitchen performs meal preparation and workload aggregation and serves many Clinics. The Kitchen is no longer the rider pickup or routing origin.
-- **Clinic**: A new entity representing a rider pickup origin and geographic routing origin. Each Clinic has a name and a full address with geo location (latitude and longitude) and belongs to exactly one Kitchen via `clinics.kitchen_id`. A Clinic optionally references a franchise via nullable `clinics.franchise_id` (`NULL` = core clinic).
+- **Business**: A new database entity representing a business that owns one or more Kitchens. A Business has a name and a business type of Core or Franchise. Created/edited/deleted by the Master_Admin. The Business is the top-level grouping that separates Core operations from Franchise operations.
+- **Business_Type**: The classification of a Business as either `Core` or `Franchise`.
+- **Core_Business**: A Business whose Business_Type is `Core`.
+- **Core_Hyderabad_Business**: The single seed Business created during data migration, named "Core Hyderabad Business" with Business_Type `Core`.
+- **City**: A new database entity representing a geographic city. Cities own kitchens. Created/edited/deleted by the Master_Admin. Retained where it currently fits in the hierarchy; the new top-level grouping for separating Core from Franchise operations is the Business entity.
+- **Kitchen**: An existing entity (table `kitchens`, retained — not dropped) that belongs to exactly one Business and to exactly one City. After this feature, the Kitchen performs meal preparation and workload aggregation and serves many Clinics. The Kitchen is no longer the rider pickup or routing origin and no longer carries any street address or geo coordinates (latitude/longitude); address and geo live only on the Clinic.
+- **Hyderabad_Central_Kitchen**: The single seed Kitchen created during data migration, named "Hyderabad Central Kitchen" and owned by the Core_Hyderabad_Business.
+- **Clinic**: A new entity representing a rider pickup origin and geographic routing origin. Each Clinic has a name and a full address with geo location (latitude and longitude), belongs to exactly one Kitchen via `clinics.kitchen_id`, and resolves to its Business through that Kitchen (Clinic → Kitchen → Business). A Clinic optionally references a franchise via nullable `clinics.franchise_id` (`NULL` = core clinic).
 - **Core Clinic**: A Clinic where `franchise_id` is `NULL`.
-- **Franchise**: An existing, feature-flagged entity that will later relate 1:1 to a Clinic. Not implemented in this feature beyond keeping the model franchise-ready.
+- **Franchise**: An existing, feature-flagged entity that will later relate 1:1 to a Clinic and correspond to a Business of type Franchise. Not implemented in this feature beyond keeping the model franchise-ready.
 - **Routing_Engine**: The routing and batching engine implemented in `src/actions/system-actions/routeEngine.ts`.
 - **Service_Area**: A record in `rider_service_areas` (pincode, rider_id, area_name, franchise_id) that maps a pincode to a rider, extended by this feature to also associate with a Clinic.
-- **Customer**: A subscriber record (`customer_profiles`) with one or more `addresses`. Linked to a Clinic via the address pincode.
+- **Customer**: A subscriber record (`customer_profiles`) with one or more `addresses`. Linked to a Clinic automatically via the pincode of the Customer's Primary_Address (see Requirement 6).
+- **Primary_Address**: The Customer's designated primary (default) address. The pincode of the Primary_Address determines the Customer's clinic association; a Customer's stamped `clinic_id` is anchored to the clinic that owns the Primary_Address pincode's service area.
+- **Delivery_Address**: The address selected for delivery on a specific delivery day, which may differ from the Primary_Address when the Customer chooses a different address before the 5:00 PM IST next-day cutoff. The Delivery_Address governs that day's routing and food dispatch (see Requirement 19 and Requirement 22) but does NOT change the Customer's clinic association.
 - **Rider**: A delivery partner (`rider_profiles`) linked to exactly one Clinic and assigned service-area pincodes.
 - **Automation_Pipeline**: The existing central daily automation that runs order creation, product linking, workload snapshotting, and routing for all scopes.
 - **Workload_Snapshot**: A persisted, finalized record of a Clinic's prep workload for a target date, including meal counts broken down by veg / non-veg / egg and shop product counts.
 - **Admin**: A user with the `ADMIN` role (core admin).
 - **Master_Admin**: A super-admin user with the `MASTER_ADMIN` role operating in the master portal.
-- **Madhapur_Clinic**: The single temporary seed Clinic created during data migration using the existing central kitchen's address and coordinates as a placeholder.
+- **Madhapur_Clinic**: A Core Clinic named "Madhapur Clinic" seeded during data migration under the Hyderabad_Central_Kitchen, with its own address and geo coordinates entered directly on the Clinic. All existing customers currently listed under the Madhapur_Clinic remain under it.
+- **Uppal_Clinic**: A Core Clinic named "Uppal Clinic" seeded during data migration under the Hyderabad_Central_Kitchen, with its own address and geo coordinates entered directly on the Clinic.
 - **Haversine_Multiplier**: The fixed `1.3` multiplier applied to Haversine distance to estimate road distance for payout.
 - **Payout_Per_Km**: The system-wide setting `rider_payout_per_km` used to compute rider payout.
 - **Delivery_Order**: A record in `delivery_orders` representing one delivery for one Customer on one delivery date, extended by this feature with a `clinic_id` column.
 - **Delivery_Batch**: A record in `delivery_batches` representing a Rider's daily batch of deliveries for a delivery date, extended by this feature with a `clinic_id` column.
 - **Order_Clinic_Stamp**: The `clinic_id` value recorded on a Delivery_Order at the time the order is created, and on a Delivery_Batch at the time the batch is created during routing. The Order_Clinic_Stamp is immutable after creation and is the authoritative basis for per-Clinic workload snapshots and per-Clinic routing and delivery history.
+- **Clinic_Conflict**: A per-delivery-day, needs-attention flag raised for a Customer when the Customer's selected Delivery_Address for that delivery day resolves to a Clinic that differs from (or does not resolve to) the Clinic of the Customer's Primary_Address. A Clinic_Conflict surfaces the Customer for Admin review but does NOT change the Customer's clinic association.
+- **Conflict_Clinic_List**: The Admin-facing list (presented in the admin dashboard) of Customers flagged with a Clinic_Conflict for a given delivery day, enabling manual Admin review and intervention.
 
 ## Requirements
 
@@ -53,20 +69,26 @@ Key invariants established by this feature:
 6. IF a Master_Admin attempts to delete a City that has at least one associated Kitchen record, THEN THE System SHALL reject the deletion, retain the City record and its associations, and return an error message indicating the City has associated Kitchens.
 7. IF a Master_Admin attempts to edit or delete a City identifier that does not exist, THEN THE System SHALL reject the operation and return an error message indicating the City was not found.
 
-### Requirement 2: Kitchen Belongs to City and Is Repurposed
+### Requirement 2: Kitchen Belongs to Business and Is Repurposed
 
-**User Story:** As a Master_Admin, I want kitchens to belong to a city and serve many clinics, so that the kitchen represents meal preparation and workload aggregation rather than the rider pickup origin.
+**User Story:** As a Master_Admin, I want kitchens to belong to a business and serve many clinics, so that the kitchen represents meal preparation and workload aggregation rather than the rider pickup origin.
 
 #### Acceptance Criteria
 
 1. THE System SHALL retain the existing `kitchens` table without dropping it.
-2. THE System SHALL associate each Kitchen with exactly one City.
-3. THE System SHALL allow one Kitchen to be associated with one or more Clinics, with no upper limit on the number of Clinics served.
-4. THE Routing_Engine SHALL NOT use Kitchen coordinates as the routing origin for core dispatch.
-5. WHEN a Master_Admin saves a Kitchen (create or edit) with a valid associated City, THE System SHALL persist the Kitchen together with its City association and indicate that the save succeeded.
-6. IF a Master_Admin attempts to save a Kitchen without a valid associated City, THEN THE System SHALL reject the operation, leave any existing Kitchen record unchanged, and display an error message indicating that a City association is required.
-7. IF a Master_Admin attempts to associate a Clinic with a Kitchen whose City differs from the Clinic's City, THEN THE System SHALL reject the association, leave the existing Clinic-to-Kitchen associations unchanged, and display an error message indicating that the Kitchen and Clinic must belong to the same City.
-8. THE System SHALL retain Kitchen records for use by the workload view and historical statistics.
+2. THE System SHALL associate each Kitchen with exactly one Business via `kitchens.business_id`.
+3. THE System SHALL allow one Business to own one or more Kitchens, with no upper limit on the number of Kitchens owned.
+4. THE System SHALL retain the association between each Kitchen and exactly one City.
+5. THE System SHALL NOT store a street address, a latitude, or a longitude on the Kitchen entity; the full address and geo coordinates SHALL be stored only on the Clinic entity.
+6. THE System SHALL allow one Kitchen to be associated with one or more Clinics, with no upper limit on the number of Clinics served.
+7. THE Routing_Engine SHALL use the Clinic location, and never Kitchen coordinates, as the rider pickup and routing origin for core dispatch.
+8. WHEN a Master_Admin saves a Kitchen (create or edit) with a valid associated Business, THE System SHALL persist the Kitchen together with its Business association and indicate that the save succeeded.
+9. IF a Master_Admin attempts to save a Kitchen without a valid associated Business, THEN THE System SHALL reject the operation, leave any existing Kitchen record unchanged, and display an error message indicating that a Business association is required.
+10. IF a Master_Admin attempts to associate a Clinic with a Kitchen whose City differs from the Clinic's City, THEN THE System SHALL reject the association, leave the existing Clinic-to-Kitchen associations unchanged, and display an error message indicating that the Kitchen and Clinic must belong to the same City.
+11. THE System SHALL retain Kitchen records for use by the workload view and historical statistics.
+12. THE System SHALL allow a Master_Admin to create more than one Kitchen under the Core_Business, with no upper limit, even while only the Hyderabad_Central_Kitchen is currently in active use.
+13. WHEN a Master_Admin reassigns a Clinic to a different Kitchen that belongs to the same City as the Clinic, THE System SHALL update the Clinic's `kitchen_id` to the new Kitchen and re-resolve the Clinic's Business through the new Kitchen (Clinic → Kitchen → Business).
+14. IF a Master_Admin attempts to reassign a Clinic to a Kitchen whose City differs from the Clinic's City, THEN THE System SHALL reject the reassignment, leave the Clinic's existing `kitchen_id` unchanged, and display an error message indicating that the Kitchen and Clinic must belong to the same City.
 
 ### Requirement 3: Clinic Entity (Routing Origin)
 
@@ -83,6 +105,8 @@ Key invariants established by this feature:
 7. IF a Master_Admin submits a Clinic with a missing clinic name, a missing full address, a clinic name exceeding 120 characters, or a full address exceeding 255 characters, THEN THE System SHALL reject the creation, return an error message indicating the offending field, and persist no Clinic record.
 8. IF a Master_Admin submits a Clinic with a `kitchen_id` that does not reference an existing Kitchen, THEN THE System SHALL reject the creation, return an error message indicating the Kitchen does not exist, and persist no Clinic record.
 9. THE System SHALL keep the Clinic model franchise-ready WITHOUT implementing franchise-specific behavior in this feature.
+10. THE System SHALL resolve each Clinic's Business through that Clinic's Kitchen (Clinic → Kitchen → Business), such that a Clinic belongs to the Business that owns its Kitchen.
+11. THE System SHALL treat the Clinic as the sole rider pickup and routing origin, storing the full address and geo coordinates (latitude and longitude) on the Clinic and never on the Kitchen.
 
 ### Requirement 4: One-Pincode-One-Clinic Invariant
 
@@ -109,20 +133,22 @@ Key invariants established by this feature:
 5. WHEN an Admin edits a pincode entry within a Clinic to a new value that is a 6-digit pincode not associated with any other Clinic, THE System SHALL update the corresponding Service_Area record to the new pincode value.
 6. WHEN an Admin deletes a pincode from a Clinic, THE System SHALL remove the Service_Area association for that pincode and remove the pincode from that Clinic's subsection.
 7. WHEN an Admin moves a pincode from a source Clinic to a destination Clinic, THE System SHALL reassign the pincode association to the destination Clinic, remove it from the source Clinic, and ensure the pincode remains associated with exactly one Clinic.
+8. THE System SHALL expose pincode-to-Clinic assignment (and Rider-to-Clinic assignment per Requirement 8) to the Admin from the admin dashboard as explicit manual Admin actions, while Customer-to-Clinic association remains automatic and determined solely by the Customer's Primary_Address pincode per Requirement 6 and SHALL NOT be a manual Admin action.
 
-### Requirement 6: Customer Linked to Clinic by Pincode (Stamping)
+### Requirement 6: Customer Linked to Clinic by Primary Address Pincode (Stamping)
 
-**User Story:** As an Admin, I want customers linked to a clinic based on their address pincode, so that customer-to-clinic assignment is consistent and stored.
+**User Story:** As an Admin, I want customers linked to a clinic based on their primary address pincode, so that customer-to-clinic assignment is consistent, stored, and anchored to the customer's primary address regardless of which address is selected for delivery on any given day.
 
 #### Acceptance Criteria
 
-1. WHEN a Customer creates an account with a delivery address whose pincode resolves to exactly one Clinic, THE System SHALL stamp the Customer with the corresponding `clinic_id` within the same operation before reporting completion.
-2. WHEN a Customer updates a delivery address to a pincode that resolves to exactly one Clinic, THE System SHALL update the stamped `clinic_id` to that Clinic within the same operation before reporting completion.
+1. WHEN a Customer creates an account and the pincode of the Customer's Primary_Address resolves to exactly one Clinic, THE System SHALL stamp the Customer with the corresponding `clinic_id` within the same operation before reporting completion.
+2. WHEN a Customer saves a change to the Customer's Primary_Address such that the new Primary_Address pincode resolves to exactly one Clinic that differs from the currently stamped Clinic, THE System SHALL re-anchor the Customer's stamped `clinic_id` to that Clinic immediately within the same operation before reporting completion.
 3. THE System SHALL persist the resolved `clinic_id` on the Customer record and SHALL NOT recompute it only at read time.
-4. IF a Customer's address pincode at signup does not resolve to any Clinic, THEN THE System SHALL leave the Customer `clinic_id` unset.
-5. WHEN a Customer who was previously stamped updates a delivery address to a pincode that resolves to no Clinic, THE System SHALL set that Customer's `clinic_id` to unset.
-6. IF a Customer's address pincode resolves to more than one Clinic, THEN THE System SHALL leave the Customer `clinic_id` unchanged and surface an ambiguity indication.
-7. THE System SHALL preserve the existing outcomes, accepted inputs, and completion behavior of the customer signup and address-update flows, adding only the `clinic_id` stamping and clearing actions.
+4. IF the pincode of a Customer's Primary_Address at signup does not resolve to any Clinic, THEN THE System SHALL leave the Customer `clinic_id` unset.
+5. WHEN a Customer who was previously stamped saves a change to the Customer's Primary_Address such that the new Primary_Address pincode resolves to no Clinic, THE System SHALL set that Customer's `clinic_id` to unset.
+6. IF the pincode of a Customer's Primary_Address resolves to more than one Clinic, THEN THE System SHALL leave the Customer `clinic_id` unchanged and surface an ambiguity indication (defensive only; the database-level unique constraint in Requirement 4 makes this state unreachable in practice).
+7. THE System SHALL determine the Customer's clinic association solely from the Customer's Primary_Address, and SHALL NOT change the Customer's stamped `clinic_id` when the Customer selects a different Delivery_Address for a specific delivery day.
+8. THE System SHALL preserve the existing outcomes, accepted inputs, and completion behavior of the customer signup and address-update flows, adding only the `clinic_id` stamping and clearing actions.
 
 ### Requirement 7: Customer Auto-Reassignment on Pincode Move
 
@@ -130,8 +156,8 @@ Key invariants established by this feature:
 
 #### Acceptance Criteria
 
-1. WHEN a pincode is moved from Clinic A to Clinic B, THE System SHALL identify every Customer whose stamped address pincode equals the moved pincode and whose current stamped clinic is Clinic A, and reassign each such Customer to Clinic B.
-2. WHEN reassigning an affected Customer, THE System SHALL update both that Customer's stamped `clinic_id` and the `clinic_id` of that Customer's matching address record to Clinic B.
+1. WHEN a pincode is moved from Clinic A to Clinic B, THE System SHALL identify every Customer whose Primary_Address pincode equals the moved pincode and whose current stamped clinic is Clinic A, and reassign each such Customer to Clinic B.
+2. WHEN reassigning an affected Customer, THE System SHALL update both that Customer's stamped `clinic_id` and the `clinic_id` of that Customer's matching Primary_Address record to Clinic B.
 3. WHEN the reassignment completes successfully, THE System SHALL report the total count of Customers reassigned, returning a count of zero when no Customer matches the moved pincode.
 4. THE System SHALL apply the reassignment using the same batch-assignment pattern established by `assignWaitlistedCustomers` in `assignment-resolver.ts`.
 5. IF the batch reassignment operation fails, THEN THE System SHALL leave the stamped `clinic_id` of all affected Customers unchanged and return an error indication describing the failure.
@@ -229,22 +255,23 @@ Key invariants established by this feature:
 6. IF a Master_Admin requests deletion of a Clinic, Kitchen, or City that is referenced by one or more dependent records, THEN THE System SHALL reject the deletion, retain the record unchanged, and display an error message indicating that dependent records prevent deletion.
 7. WHEN a Master_Admin submits a create or edit for a Kitchen or a City, THE System SHALL persist the submitted Kitchen or City record to maintain the clinic hierarchy.
 
-### Requirement 15: Data Migration and Seed (Madhapur Clinic)
+### Requirement 15: Data Migration and Seed (Core Hyderabad Business)
 
-**User Story:** As a Master_Admin, I want a temporary seed clinic created from the existing kitchen, so that existing customers, riders, and pincodes are migrated without orphaning any records.
+**User Story:** As a Master_Admin, I want the core business, kitchen, and clinics seeded during migration, so that existing customers, riders, and pincodes are migrated without orphaning any records.
 
 #### Acceptance Criteria
 
-1. WHEN the migration script runs, THE System SHALL create exactly one Madhapur_Clinic using the existing central kitchen's address, latitude, and longitude copied verbatim as placeholder values.
-2. WHEN the migration script runs, THE System SHALL associate the Madhapur_Clinic with the existing central kitchen via `kitchen_id`.
-3. WHEN the migration script runs, THE System SHALL stamp every existing Customer's `clinic_id` to reference the Madhapur_Clinic.
-4. WHEN the migration script runs, THE System SHALL link every existing Rider to the Madhapur_Clinic.
-5. WHEN the migration script runs, THE System SHALL associate every existing Service_Area pincode with the Madhapur_Clinic.
-6. WHEN the migration completes, THE System SHALL leave zero existing Customer, Rider, or Service_Area records with a null or unset Clinic association.
-7. IF the migration script is run more than once, THEN THE System SHALL ensure exactly one Madhapur_Clinic exists and SHALL create no duplicate Clinic associations (idempotent execution).
-8. IF the migration fails partway through, THEN THE System SHALL roll back all changes transactionally so that no partial migration persists, and surface an error indication.
-9. THE System SHALL allow the Master_Admin to edit the Madhapur_Clinic details and create additional Core Clinics after migration.
-10. THE System SHALL deliver migration logic as additive SQL scripts in `/scripts` following the established additive pattern and respecting Supabase Row Level Security.
+1. WHEN the migration script runs, THE System SHALL create exactly one Core_Hyderabad_Business named "Core Hyderabad Business" with Business_Type `Core`.
+2. WHEN the migration script runs, THE System SHALL create exactly one Hyderabad_Central_Kitchen named "Hyderabad Central Kitchen" owned by the Core_Hyderabad_Business, and SHALL store no street address, latitude, or longitude on that Kitchen.
+3. WHEN the migration script runs, THE System SHALL create exactly two Core Clinics named "Madhapur Clinic" and "Uppal Clinic", each associated with the Hyderabad_Central_Kitchen via `kitchen_id`, and SHALL set each Clinic's full address, latitude, and longitude directly on the Clinic record from the seeded clinic values rather than copying any value from the Kitchen.
+4. WHEN the migration script runs, THE System SHALL keep every existing Customer currently stamped to the Madhapur_Clinic stamped to the Madhapur_Clinic, leaving those Customer-to-Clinic associations unchanged.
+5. WHEN the migration script runs, THE System SHALL link every existing Rider to the Madhapur_Clinic.
+6. WHEN the migration script runs, THE System SHALL associate every existing Service_Area pincode with the Madhapur_Clinic.
+7. WHEN the migration completes, THE System SHALL leave zero existing Customer, Rider, or Service_Area records with a null or unset Clinic association.
+8. IF the migration script is run more than once, THEN THE System SHALL ensure exactly one Core_Hyderabad_Business, one Hyderabad_Central_Kitchen, one Madhapur_Clinic, and one Uppal_Clinic exist and SHALL create no duplicate Business, Kitchen, Clinic, or association records (idempotent execution).
+9. IF the migration fails partway through, THEN THE System SHALL roll back all changes transactionally so that no partial migration persists, and surface an error indication.
+10. THE System SHALL allow the Master_Admin to edit the seeded Business, Kitchen, and Clinic details, add additional Kitchens to the Core_Hyderabad_Business, and create additional Core Clinics after migration.
+11. THE System SHALL deliver migration logic as additive SQL scripts in `/scripts` following the established additive pattern and respecting Supabase Row Level Security.
 
 ### Requirement 16: Clinic Visibility and Filters in Admin Portal
 
@@ -306,3 +333,54 @@ Key invariants established by this feature:
 7. WHEN a Customer is later moved to a different Clinic, THE System SHALL retain that Customer's prior Delivery_Orders under the Clinic recorded in each order's Order_Clinic_Stamp at the time those orders were created.
 8. IF a Delivery_Order is created for a Customer whose delivery address does not resolve to any Clinic at creation time, THEN THE System SHALL leave the Delivery_Order `clinic_id` null, consistent with the customer stamping rules in Requirement 6, and SHALL NOT block order creation solely due to the unresolved Clinic.
 9. IF a Delivery_Batch is created during routing for a Rider with no linked Clinic at routing time, THEN THE System SHALL leave the Delivery_Batch `clinic_id` null and SHALL NOT block batch creation solely due to the unresolved Clinic.
+
+### Requirement 20: Business Entity (Core / Franchise)
+
+**User Story:** As a Master_Admin, I want to manage businesses with a business type of Core or Franchise, so that core operations are separated from franchise operations at the top of the hierarchy and kitchens are organized under the correct business.
+
+#### Acceptance Criteria
+
+1. THE System SHALL persist a Business entity with a system-generated unique identifier, a business name that is a string of 1 to 100 characters after trimming leading and trailing whitespace, and a Business_Type that is exactly one of `Core` or `Franchise`.
+2. WHEN a Master_Admin submits a Business whose name is 1 to 100 characters after trimming and whose Business_Type is `Core` or `Franchise`, THE System SHALL create a Business record and return its unique identifier.
+3. IF a Master_Admin submits a Business whose name is empty after trimming, whose name exceeds 100 characters, or whose Business_Type is neither `Core` nor `Franchise`, THEN THE System SHALL reject the create or update operation, leave existing Business records unchanged, and return an error message identifying the specific field that failed validation (empty name, length exceeded, or invalid business type).
+4. WHEN a Master_Admin edits an existing Business with a name that is 1 to 100 characters after trimming and a valid Business_Type, THE System SHALL update the Business record while retaining its existing unique identifier.
+5. WHEN a Master_Admin deletes an existing Business that has zero dependent records referencing it, THE System SHALL delete the Business record.
+6. IF a Master_Admin attempts to delete a Business that is referenced by one or more dependent records (for example, one or more Kitchens), THEN THE System SHALL reject the deletion, retain the Business record and its associations unchanged, and return an error message indicating that dependent records prevent deletion.
+7. IF a Master_Admin attempts to edit or delete a Business identifier that does not exist, THEN THE System SHALL reject the operation and return an error message indicating the Business was not found.
+8. THE System SHALL associate each Kitchen with exactly one Business, and SHALL allow one Business to own one or more Kitchens.
+9. THE System SHALL resolve each Clinic's Business through that Clinic's Kitchen (Clinic → Kitchen → Business).
+10. THE System SHALL manage Business records of Business_Type `Core` independently from Business records of Business_Type `Franchise`, distinguishing the two solely by Business_Type.
+11. WHERE a Business has Business_Type `Franchise`, THE System SHALL keep all franchise-specific behavior gated behind `FRANCHISE_FEATURES_ENABLED` and SHALL NOT implement franchise behavior in this feature beyond persisting the Business_Type distinction.
+
+### Requirement 21: Core Business Management UI (Additive Section)
+
+**User Story:** As a Master_Admin, I want a separate Core Business section in the master portal that is added below the existing Core Clinic Management area, so that I can manage the core business, its kitchens, and its core clinics without disturbing the existing legacy flow.
+
+#### Acceptance Criteria
+
+1. THE System SHALL retain the existing "Core Clinic Management" card (the current Cities/Kitchens/Clinics area) within the master portal `/system` area without changing or deleting it, so that it continues to serve the franchise/legacy flow.
+2. THE System SHALL present a new, separate "Core Business" section within the master portal `/system` area, positioned below the existing "Core Clinic Management" card.
+3. THE System SHALL scope the "Core Business" section to the Core business only, allowing a Master_Admin to create, edit, and delete the Core_Hyderabad_Business, its Kitchens, and its Core Clinics.
+4. WHEN a Master_Admin manages a Kitchen within the "Core Business" section, THE System SHALL present and persist the Kitchen without any street address, latitude, or longitude fields.
+5. WHEN a Master_Admin creates or edits a Core Clinic within the "Core Business" section with a full address of 1 to 500 characters, a latitude in the range -90.0 to 90.0 inclusive, and a longitude in the range -180.0 to 180.0 inclusive, THE System SHALL present and persist the Clinic with its full address, latitude, and longitude fields.
+6. IF a Master_Admin submits a Core Clinic in the "Core Business" section with an empty or missing address, an address exceeding 500 characters, a missing latitude or longitude, or a latitude or longitude outside the allowed range, THEN THE System SHALL reject the save, retain any previously stored values unchanged, and display an error message identifying the invalid field.
+7. THE System SHALL operate the "Core Business" section as a purely additive surface that coexists with the existing "Core Clinic Management" card, such that create, edit, and delete actions in one section do not remove or alter the other section.
+
+### Requirement 22: Conflict Clinic Flow (Next-Day Delivery Address Differs From Primary Address)
+
+**User Story:** As an Admin, I want customers whose chosen next-day delivery address falls under a different clinic than their primary address to be flagged for manual review, so that the day's dispatch and routing originate from the correct clinic while the customer stays anchored to their primary clinic.
+
+**User Story:** As a Customer, I want to select a different delivery address for the next delivery day before the cutoff, so that my order is prepared and routed from the clinic that serves that address without permanently changing my clinic association.
+
+**Rationale / Worked Example:** A Customer's Primary_Address pincode `500010` resolves to Clinic 1, and a secondary address pincode `500050` resolves to Clinic 2. If the Customer selects the primary address (`500010`) for the next delivery day, the Customer stays on Clinic 1 with no conflict. If, before the 5:00 PM IST next-day cutoff (Requirement 11), the Customer selects the secondary address (`500050`) as the Delivery_Address for the next delivery day, the Customer remains listed under Clinic 1 (their Primary_Address clinic) but is flagged as a Clinic_Conflict for that delivery day; that day's food dispatch and routing originate from Clinic 2, and the resulting Delivery_Order's `clinic_id` is stamped to Clinic 2 at creation time per Requirement 19.2. If the Customer later changes the Primary_Address pincode to `500050` and saves, the Customer is re-anchored to Clinic 2 immediately per Requirement 6.2 and the conflict is cleared.
+
+#### Acceptance Criteria
+
+1. WHERE a Customer selects, before the 5:00 PM IST next-day cutoff, a Delivery_Address for the next delivery day that differs from the Customer's Primary_Address, THE System SHALL evaluate the selected Delivery_Address pincode against the Customer's Primary_Address Clinic to determine whether a Clinic_Conflict exists for that delivery day.
+2. WHEN the selected Delivery_Address pincode resolves to a Clinic that differs from the Customer's Primary_Address Clinic, THE System SHALL flag that Customer with a Clinic_Conflict for that delivery day, add the Customer to the Conflict_Clinic_List available to the Admin for manual review, and SHALL keep the Customer's stamped `clinic_id` set to the Customer's Primary_Address Clinic unchanged.
+3. WHEN a Clinic_Conflict is raised for a delivery day, THE System SHALL originate that delivery day's routing and food dispatch for the Customer's order from the Clinic that owns the selected Delivery_Address pincode's Service_Area, and SHALL stamp the resulting Delivery_Order `clinic_id` to that Clinic at creation time, consistent with Requirement 19.2.
+4. WHEN the selected Delivery_Address pincode resolves to the same Clinic as the Customer's Primary_Address, THE System SHALL raise no Clinic_Conflict and SHALL omit the Customer from the Conflict_Clinic_List for that delivery day.
+5. IF the selected Delivery_Address pincode resolves to no Clinic, THEN THE System SHALL leave the resulting Delivery_Order `clinic_id` null per Requirement 19.8, SHALL NOT block order creation, and SHALL add the Customer to the Conflict_Clinic_List as a needs-attention entry for that delivery day so the Admin is aware.
+6. WHEN a Customer later updates the Customer's Primary_Address pincode to one that resolves to the Clinic of a previously conflicting Delivery_Address and saves, THE System SHALL re-anchor the Customer's stamped `clinic_id` to that Clinic immediately per Requirement 6.2 and SHALL clear the corresponding Clinic_Conflict.
+7. THE System SHALL expose the Conflict_Clinic_List to the Admin within the admin dashboard so the Admin can manually review and intervene on each flagged Customer.
+8. THE System SHALL treat a Clinic_Conflict as a per-delivery-day flag only and SHALL NOT move the Customer between Clinics or alter the Customer's stamped `clinic_id` as a result of raising or clearing the conflict; only a Primary_Address change re-anchors the Customer per Requirement 6.

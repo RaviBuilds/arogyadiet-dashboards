@@ -15,7 +15,7 @@ import {
   notifyAddressDeleted,
   notifyAddressSaved,
 } from "@/lib/customer/customerProfileNotifications";
-import { stampCustomerClinic } from "@/lib/clinic/stamping";
+import { stampCustomerByPrimaryAddress } from "@/lib/clinic/stamping";
 
 // 2. The Server Action
 
@@ -95,37 +95,28 @@ export async function saveAddressAction(data: AddressFormValues) {
 
   const isEdit = Boolean(parsed.data.id);
 
-  // The address row id we just wrote — used to stamp the exact address (Req 6.2).
-  let stampedAddressId: string | null = null;
-
   if (isEdit) {
     await supabase
       .from("addresses")
       .update(addressData)
       .eq("id", parsed.data.id);
-    stampedAddressId = parsed.data.id ?? null;
   } else {
-    // Return the new id so we can stamp the exact row we just created.
-    const { data: inserted } = await supabase
-      .from("addresses")
-      .insert(addressData)
-      .select("id")
-      .single();
-    stampedAddressId = inserted?.id ?? null;
+    await supabase.from("addresses").insert(addressData);
   }
 
-  // Stamp the customer + this address with their resolved clinic within the same
-  // operation, before reporting completion (Req 6.1–6.5). Only the stamp is
-  // added; the accepted inputs, outputs, return shape and completion behavior of
-  // saveAddressAction are otherwise unchanged (Req 6.7).
-  if (stampedAddressId) {
-    await stampCustomerClinic({
-      supabase,
-      customerProfileId: profile.id,
-      addressId: stampedAddressId,
-      pincode: parsed.data.pincode,
-    });
-  }
+  // Stamp the customer with their resolved clinic, anchored to the PRIMARY
+  // address pincode, within this same operation before reporting completion
+  // (Req 6.1–6.5). Saving or editing any address re-anchors the stamp to
+  // whichever address is currently primary (is_primary = true): resolved → set
+  // clinic_id; no-resolution → clear to unset; ambiguous → leave unchanged.
+  // Selecting a per-day Delivery_Address is a separate flow that never reaches
+  // this stamper, so it can never change customer_profiles.clinic_id (Req 6.7).
+  // Only the stamp is added; the accepted inputs, outputs, return shape and
+  // completion behavior of saveAddressAction are otherwise unchanged (Req 6.8).
+  await stampCustomerByPrimaryAddress({
+    supabase,
+    customerProfileId: profile.id,
+  });
 
   await notifyAddressSaved(dbUser.id, {
     isEdit,

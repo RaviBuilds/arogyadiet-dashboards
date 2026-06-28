@@ -2,25 +2,26 @@
 
 // src/actions/admin-actions/serviceAreaActions.ts
 // Admin-portal, clinic-aware Server Actions for the Service Areas section
-// (core-clinic-architecture, task 4.1).
+// (core-clinic-architecture, task 5.1).
 //
 // A Service_Area is a row in `rider_service_areas` mapping a single pincode to a
 // Clinic (and, later, to a Rider). This module lets an Admin add, edit, and
 // delete pincodes per Clinic. The one-pincode-one-clinic invariant (Req 4.1,
 // 4.2) is enforced at the database level by the UNIQUE index
 // `uq_service_area_pincode`; these actions surface that constraint as a
-// friendly "already assigned" error (Req 4.3, 5.3) and reject bad pincode
-// formats before any write (Req 5.4) using the pure `isValidPincode` validator.
+// friendly "already assigned" error identifying the current owning clinic
+// (Req 4.3, 5.3) and reject bad pincode formats before any write (Req 5.4)
+// using the pure `isValidPincode` validator.
 //
-// LAYERING: Mirrors the existing admin service-area pattern in
-// `riderActions.ts` — the data writes use the service-role admin client
-// (`createAdminClient`), while authorization resolves the caller via the
-// SSR server client (`createClient`). Returns the shared `ActionResult<T>`
-// discriminated union from `@/types/clinic`.
+// LAYERING: Server Actions → repository (`serviceAreaRepository`) → Supabase.
+// CRUD writes/reads delegate to the repository data-access functions
+// (`getServiceAreaByPincode`, `getServiceAreaById`, `insertServiceArea`,
+// `updateServiceAreaPincode`, `deleteServiceArea`); authorization resolves the
+// caller via the SSR server client (`createClient`). Returns the shared
+// `ActionResult<T>` discriminated union from `@/types/clinic`.
 //
-// NOTE: `movePincode` (atomic move + customer reassignment) is intentionally
-// NOT implemented here — it is task 4.2. The "Pincode move" section below marks
-// where that action will be added.
+// NOTE: `movePincode` (atomic move + customer reassignment) is task 5.2 and is
+// kept in the "Pincode move" section below.
 
 import { revalidatePath } from "next/cache";
 
@@ -28,6 +29,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
 import { isValidPincode } from "@/lib/clinic/validation";
+import {
+  getServiceAreaByPincode,
+  getServiceAreaById,
+  insertServiceArea,
+  updateServiceAreaPincode,
+  deleteServiceArea,
+} from "@/repositories/clinic/serviceAreaRepository";
 import {
   buildRiderClinicWarnings,
   type PincodeRiderMapping,
@@ -90,48 +98,46 @@ async function assertCallerCanManageServiceAreas(): Promise<
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
+ * True when `error` represents a violation of the global pincode uniqueness
+ * constraint `uq_service_area_pincode` (Req 4.2, 4.3).
+ *
+ * The repository layer wraps Postgres errors in a plain `Error` (which drops
+ * the `23505` SQLSTATE code), while raw Supabase errors carry `.code`. This
+ * helper detects both: the structured code on a raw error, and the
+ * unique-violation signature embedded in a wrapped error's message.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === UNIQUE_VIOLATION) return true;
+
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message.includes(UNIQUE_VIOLATION) ||
+    /duplicate key|uq_service_area_pincode|unique constraint/i.test(message)
+  );
+}
+
+/**
  * Build the user-facing "already assigned" message for a pincode that violates
  * `uq_service_area_pincode`, identifying the owning Clinic by name where it can
  * be resolved (Req 4.3, 5.3).
+ *
+ * Resolves the current owner from the single `rider_service_areas` row for the
+ * pincode via the repository (`getServiceAreaByPincode`), then looks up the
+ * owning Clinic's name.
  */
 async function alreadyAssignedError(pincode: string): Promise<string> {
-  const owner = await findPincodeOwnerClinic(pincode);
-  if (owner?.clinicName) {
-    return `Pincode ${pincode} is already assigned to clinic "${owner.clinicName}".`;
+  const existing = await getServiceAreaByPincode(pincode);
+  if (existing?.clinic_id) {
+    const owner = await findClinicById(existing.clinic_id);
+    if (owner?.name) {
+      return `Pincode ${pincode} is already assigned to clinic "${owner.name}".`;
+    }
   }
   return `Pincode ${pincode} is already assigned to a clinic.`;
 }
 
-/**
- * Look up the Clinic that currently owns a pincode via its `rider_service_areas`
- * row. Returns the clinic id and name where available, or `null` when the
- * pincode is not associated with any Service_Area.
- */
-async function findPincodeOwnerClinic(
-  pincode: string
-): Promise<{ clinicId: string | null; clinicName: string | null } | null> {
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("rider_service_areas")
-    .select("clinic_id, clinics(name)")
-    .eq("pincode", pincode)
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data) return null;
-
-  const clinicRel = (data as { clinics?: { name?: string } | { name?: string }[] | null }).clinics;
-  const clinicName = Array.isArray(clinicRel)
-    ? clinicRel[0]?.name ?? null
-    : clinicRel?.name ?? null;
-
-  return {
-    clinicId: (data as { clinic_id: string | null }).clinic_id ?? null,
-    clinicName,
-  };
-}
-
-// ─── Service Area CRUD by Clinic (Task 4.1) ──────────────────────────────────
+// ─── Service Area CRUD by Clinic (Task 5.1) ──────────────────────────────────
 
 /**
  * Add a 6-digit pincode to a Clinic, creating a Service_Area association.
@@ -172,22 +178,26 @@ export async function addPincodeToClinic(
 
   const resolvedAreaName = (areaName ?? "").trim() || trimmedPincode;
 
+  // Pre-check the global owner so we can identify the current owning clinic
+  // before attempting a write (Req 4.3, 5.3). The DB unique index remains the
+  // authoritative source of truth and is re-checked in the catch below.
+  const preexisting = await getServiceAreaByPincode(trimmedPincode);
+  if (preexisting) {
+    return {
+      success: false,
+      error: await alreadyAssignedError(trimmedPincode),
+      field: "pincode",
+    };
+  }
+
   try {
-    const admin = createAdminClient();
-    const { data: inserted, error } = await admin
-      .from("rider_service_areas")
-      .insert({
-        clinic_id: clinicId,
-        pincode: trimmedPincode,
-        area_name: resolvedAreaName,
-        rider_id: null,
-      })
-      .select("id")
-      .single();
+    const inserted = await insertServiceArea({
+      clinic_id: clinicId,
+      pincode: trimmedPincode,
+      area_name: resolvedAreaName,
+    });
 
-    if (error) throw error;
-
-    await logAdminAction("CREATE", "service_area", inserted?.id ?? null, {
+    await logAdminAction("CREATE", "service_area", inserted.id, {
       clinic_id: clinicId,
       pincode: trimmedPincode,
       area_name: resolvedAreaName,
@@ -195,9 +205,9 @@ export async function addPincodeToClinic(
 
     revalidatePath(ADMIN_RIDERS_PATH);
     return { success: true, data: undefined };
-  } catch (error: any) {
+  } catch (error) {
     // Already-assigned: unique-violation on the global pincode index (Req 4.3, 5.3).
-    if (error?.code === UNIQUE_VIOLATION) {
+    if (isUniqueViolation(error)) {
       return {
         success: false,
         error: await alreadyAssignedError(trimmedPincode),
@@ -205,9 +215,11 @@ export async function addPincodeToClinic(
       };
     }
     console.error("addPincodeToClinic error:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to add pincode to clinic";
     return {
       success: false,
-      error: error?.message ?? "Failed to add pincode to clinic",
+      error: message,
     };
   }
 }
@@ -243,27 +255,25 @@ export async function editPincode(
     return { success: false, error: "Service area not found" };
   }
 
+  // Not-found handling: confirm the record exists before updating.
+  const existing = await getServiceAreaById(serviceAreaId);
+  if (!existing) {
+    return { success: false, error: "Service area not found" };
+  }
+
+  // Pre-check a collision with ANOTHER clinic's pincode; renaming to the same
+  // record's own value is a no-op and allowed (Req 4.3, 5.3, 5.5).
+  const owner = await getServiceAreaByPincode(trimmedPincode);
+  if (owner && owner.id !== serviceAreaId) {
+    return {
+      success: false,
+      error: await alreadyAssignedError(trimmedPincode),
+      field: "pincode",
+    };
+  }
+
   try {
-    const admin = createAdminClient();
-
-    // Not-found handling: confirm the record exists before updating.
-    const { data: existing, error: fetchError } = await admin
-      .from("rider_service_areas")
-      .select("id")
-      .eq("id", serviceAreaId)
-      .maybeSingle();
-
-    if (fetchError) throw fetchError;
-    if (!existing) {
-      return { success: false, error: "Service area not found" };
-    }
-
-    const { error } = await admin
-      .from("rider_service_areas")
-      .update({ pincode: trimmedPincode })
-      .eq("id", serviceAreaId);
-
-    if (error) throw error;
+    await updateServiceAreaPincode(serviceAreaId, trimmedPincode);
 
     await logAdminAction("UPDATE", "service_area", serviceAreaId, {
       pincode: trimmedPincode,
@@ -271,9 +281,9 @@ export async function editPincode(
 
     revalidatePath(ADMIN_RIDERS_PATH);
     return { success: true, data: undefined };
-  } catch (error: any) {
+  } catch (error) {
     // Already-assigned: unique-violation on the global pincode index (Req 4.3, 5.3).
-    if (error?.code === UNIQUE_VIOLATION) {
+    if (isUniqueViolation(error)) {
       return {
         success: false,
         error: await alreadyAssignedError(trimmedPincode),
@@ -281,9 +291,11 @@ export async function editPincode(
       };
     }
     console.error("editPincode error:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to update pincode";
     return {
       success: false,
-      error: error?.message ?? "Failed to update pincode",
+      error: message,
     };
   }
 }
@@ -303,29 +315,31 @@ export async function deletePincode(
     return { success: false, error: "Service area not found" };
   }
 
-  try {
-    const admin = createAdminClient();
-    const { error } = await admin
-      .from("rider_service_areas")
-      .delete()
-      .eq("id", serviceAreaId);
+  // Not-found handling: confirm the record exists before deleting.
+  const existing = await getServiceAreaById(serviceAreaId);
+  if (!existing) {
+    return { success: false, error: "Service area not found" };
+  }
 
-    if (error) throw error;
+  try {
+    await deleteServiceArea(serviceAreaId);
 
     await logAdminAction("DELETE", "service_area", serviceAreaId, {});
 
     revalidatePath(ADMIN_RIDERS_PATH);
     return { success: true, data: undefined };
-  } catch (error: any) {
+  } catch (error) {
     console.error("deletePincode error:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to delete pincode";
     return {
       success: false,
-      error: error?.message ?? "Failed to delete pincode",
+      error: message,
     };
   }
 }
 
-// ─── Pincode move (Task 4.2) ─────────────────────────────────────────────────
+// ─── Pincode move (Task 5.2) ─────────────────────────────────────────────────
 
 /**
  * Confirm a Clinic exists by id. Returns its name when found, else `null`.
@@ -362,23 +376,46 @@ async function fetchPincodeRiderMappings(
 
   if (error || !data) return [];
 
-  return (data as any[]).reduce<PincodeRiderMapping[]>((acc, row) => {
-    const riderId = row.rider_id as string | null;
-    if (!riderId) return acc;
+  type ServiceAreaRiderRow = {
+    rider_id: string | null;
+    rider_profiles?:
+      | {
+          clinic_id?: string | null;
+          users?:
+            | { full_name?: string | null }
+            | { full_name?: string | null }[]
+            | null;
+        }
+      | {
+          clinic_id?: string | null;
+          users?:
+            | { full_name?: string | null }
+            | { full_name?: string | null }[]
+            | null;
+        }[]
+      | null;
+  };
 
-    const profileRel = row.rider_profiles;
-    const profile = Array.isArray(profileRel) ? profileRel[0] : profileRel;
+  return (data as ServiceAreaRiderRow[]).reduce<PincodeRiderMapping[]>(
+    (acc, row) => {
+      const riderId = row.rider_id;
+      if (!riderId) return acc;
 
-    const userRel = profile?.users;
-    const user = Array.isArray(userRel) ? userRel[0] : userRel;
+      const profileRel = row.rider_profiles;
+      const profile = Array.isArray(profileRel) ? profileRel[0] : profileRel;
 
-    acc.push({
-      riderId,
-      riderName: user?.full_name ?? undefined,
-      clinicId: (profile?.clinic_id as string | null) ?? null,
-    });
-    return acc;
-  }, []);
+      const userRel = profile?.users;
+      const user = Array.isArray(userRel) ? userRel[0] : userRel;
+
+      acc.push({
+        riderId,
+        riderName: user?.full_name ?? undefined,
+        clinicId: profile?.clinic_id ?? null,
+      });
+      return acc;
+    },
+    []
+  );
 }
 
 /**
@@ -492,9 +529,10 @@ export async function movePincode(
       success: true,
       data: { reassignedCount, riderWarnings },
     };
-  } catch (error: any) {
+  } catch (error) {
     // Already-assigned: unique-violation on the global pincode index (Req 4.5).
-    if (error?.code === UNIQUE_VIOLATION) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code === UNIQUE_VIOLATION) {
       return {
         success: false,
         error: await alreadyAssignedError(trimmedPincode),
@@ -502,9 +540,11 @@ export async function movePincode(
       };
     }
     console.error("movePincode error:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to move pincode";
     return {
       success: false,
-      error: error?.message ?? "Failed to move pincode",
+      error: message,
     };
   }
 }

@@ -1,8 +1,8 @@
 // src/lib/clinic/__tests__/reassignment-atomic.property.test.ts
 //
-// Feature: core-clinic-architecture, Property 13: Reassignment is atomic on failure
+// Feature: core-clinic-architecture, Property 16: Reassignment is atomic on failure
 //
-// Property 13: Reassignment is atomic on failure — For any reassignment batch
+// Property 16: Reassignment is atomic on failure — For any reassignment batch
 // that fails, the stamped clinic_id of every affected customer is left
 // unchanged and an error indication describing the failure is returned.
 //
@@ -36,6 +36,7 @@ type AddressRow = {
   customer_profile_id: string | null;
   pincode: string;
   clinic_id: string | null;
+  is_primary: boolean;
 };
 type Filter =
   | { type: "eq"; col: string; val: unknown }
@@ -203,14 +204,14 @@ function buildScenario(args: {
 
   // Guaranteed matcher.
   customers.push({ id: "cust-0", clinic_id: from });
-  addresses.push({ customer_profile_id: "cust-0", pincode, clinic_id: from });
+  addresses.push({ customer_profile_id: "cust-0", pincode, clinic_id: from, is_primary: true });
   let expectedMatches = 1;
 
   extras.forEach((spec, i) => {
     const id = `cust-${i + 1}`;
     if (spec.matches) {
       customers.push({ id, clinic_id: from });
-      addresses.push({ customer_profile_id: id, pincode, clinic_id: from });
+      addresses.push({ customer_profile_id: id, pincode, clinic_id: from, is_primary: true });
       expectedMatches += 1;
     } else {
       // Stamped to `to` so the address never matches the `from` filter.
@@ -219,6 +220,7 @@ function buildScenario(args: {
         customer_profile_id: id,
         pincode: spec.otherPincode,
         clinic_id: to,
+        is_primary: true,
       });
     }
   });
@@ -229,7 +231,7 @@ function buildScenario(args: {
 
 // ─── Property Tests ─────────────────────────────────────────────────────────
 
-describe("reassignCustomersOnPincodeMove - Property 13: atomic on failure", () => {
+describe("reassignCustomersOnPincodeMove - Property 16: atomic on failure", () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReset();
   });

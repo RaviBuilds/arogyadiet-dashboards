@@ -9,6 +9,7 @@ interface Props {
   plannedDeliveries: any[];
   rosterData: any;
   automationLogs: any;
+  shopOrders?: any[];
 }
 
 /**
@@ -20,6 +21,7 @@ export function AdminOperationsWrapper({
   plannedDeliveries,
   rosterData,
   automationLogs,
+  shopOrders = [],
 }: Props) {
   const [scope, setScope] = useState("core");
 
@@ -35,6 +37,12 @@ export function AdminOperationsWrapper({
     return plannedDeliveries.filter((d: any) => d.franchise_id === scope);
   }, [plannedDeliveries, scope]);
 
+  const filteredShopOrders = useMemo(() => {
+    if (scope === "all") return shopOrders;
+    if (scope === "core") return shopOrders.filter((o: any) => !o.franchise_id);
+    return shopOrders.filter((o: any) => o.franchise_id === scope);
+  }, [shopOrders, scope]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
@@ -47,6 +55,7 @@ export function AdminOperationsWrapper({
         rosterData={rosterData}
         automationLogs={automationLogs}
         scope={scope}
+        shopOrders={filteredShopOrders}
       />
     </div>
   );

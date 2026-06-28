@@ -2,7 +2,7 @@
 
 // src/actions/master-actions/clinicActions.ts
 // Master-portal Server Actions for the Clinic entity within the
-// City → Kitchen → Clinic hierarchy (core-clinic-architecture, Task 2.4).
+// Business → Kitchen → Clinic hierarchy (core-clinic-architecture, Task 3.5).
 //
 // LAYERING: Action layer ONLY. Business rules (authorization, field validation,
 // the clinic↔kitchen same-city rule, kitchen-reference validation, and
@@ -10,20 +10,30 @@
 // clinic-domain repositories (clinicRepository / kitchenRepository). This file
 // NEVER touches Supabase directly.
 //
+// A Clinic resolves its Business through its Kitchen (Clinic → Kitchen →
+// Business, Req 3.10) and is the sole rider pickup / geographic routing origin,
+// so the full address + coordinates live on the Clinic and never on the Kitchen
+// (Req 3.11). A Clinic therefore NEVER stores `business_id` — only `kitchen_id`
+// and a nullable `franchise_id` (NULL = Core Clinic, Req 3.4, 3.9).
+//
 // Authorization mirrors the `assertCallerCanManageCities` helper in
 // src/actions/master-actions/cityActions.ts: the clinic hierarchy is managed by
 // the global ADMIN / MASTER_ADMIN roles, aligning with the `is_global_role()`
 // RLS policy created in scripts/create-clinic-hierarchy-tables.sql.
 //
-// Same-city rule interpretation (Req 2.7): the `clinics` table has no `city_id`
-// column — a clinic's city is derived through its kitchen's `city_id`. Per the
-// design, "a clinic and its kitchen must share a city". Because a Clinic has no
-// independent city of its own at create time, the rule is enforced on
-// RE-ASSOCIATION: when an existing Clinic's `kitchen_id` is changed, the new
-// Kitchen MUST belong to the same City as the Clinic's current Kitchen,
-// otherwise the association is rejected and the existing linkage is left
-// unchanged. On create there is no prior city context, so the create path only
-// validates that the referenced Kitchen exists (Req 3.8).
+// Surface-parameterized bounds: the canonical create path validates against the
+// stricter CLINIC_CREATE_BOUNDS (name 1..120 / address 1..255, Req 3.5–3.7),
+// while the master-portal edit form validates against the wider
+// CLINIC_FORM_BOUNDS (name 1..200 / address 1..500, Req 14.2/14.3, 21.5/21.6).
+//
+// Same-city rule (Req 3.8, 2.10/2.13/2.14): the `clinics` table has no `city_id`
+// column — a clinic's city is derived through its kitchen's `city_id`. Because a
+// Clinic has no independent city at create time, the create path only validates
+// that the referenced Kitchen exists (Req 3.8). On RE-ASSOCIATION (an existing
+// Clinic's `kitchen_id` is changed) the new Kitchen MUST belong to the same City
+// as the Clinic's current Kitchen, otherwise the association is rejected and the
+// existing linkage is left unchanged; the Clinic's Business then re-resolves
+// through the new Kitchen (Req 3.10).
 
 import { revalidatePath } from "next/cache";
 
@@ -38,6 +48,7 @@ import {
 import { getKitchenById } from "@/repositories/clinic/kitchenRepository";
 import {
   validateClinicInput,
+  sameCity,
   CLINIC_CREATE_BOUNDS,
   CLINIC_FORM_BOUNDS,
   type ClinicValidationError,
@@ -50,6 +61,9 @@ import type {
 } from "@/types/clinic";
 
 const MASTER_SYSTEM_PATH = "/system";
+
+// Roles permitted to manage the Core Clinic hierarchy (mirrors cityActions).
+const ALLOWED_ROLES = new Set(["ADMIN", "MASTER_ADMIN"]);
 
 // ─── Authorization ───────────────────────────────────────────────────────────
 
@@ -84,7 +98,7 @@ async function assertCallerCanManageClinics(): Promise<
     ? rolesData[0]?.code
     : rolesData?.code;
 
-  if (roleCode !== "ADMIN" && roleCode !== "MASTER_ADMIN") {
+  if (!roleCode || !ALLOWED_ROLES.has(roleCode)) {
     return {
       ok: false,
       error: "Only an Admin or Master Admin can manage clinics",
@@ -140,13 +154,15 @@ function firstValidationFailure(
 // ─── Actions ───────────────────────────────────────────────────────────────────
 
 /**
- * Create a Clinic (Req 3.1, 3.5–3.9, 2.7).
+ * Create a Clinic (Req 3.1, 3.5–3.9).
  *
  * Validates fields against the canonical create bounds (Req 3.5–3.7), confirms
  * the referenced Kitchen exists (Req 3.8), and persists the Clinic. A clinic has
- * no independent city at create time, so the same-city rule (Req 2.7) reduces to
- * "the kitchen must exist" here. `franchise_id` defaults to `null` (Core Clinic,
- * Req 3.4, 3.9). On any failure no Clinic record is created.
+ * no independent city at create time, so the same-city rule reduces to "the
+ * kitchen must exist" here. `franchise_id` defaults to `null` (Core Clinic,
+ * Req 3.4, 3.9). The Clinic's Business resolves through its Kitchen (Req 3.10);
+ * no `business_id` is ever stored on the clinic. On any failure no Clinic record
+ * is created.
  *
  * Validates: Requirements 3.1, 3.5, 3.6, 3.7, 3.8, 3.9.
  */
@@ -202,16 +218,18 @@ export async function createClinic(
 }
 
 /**
- * Update an existing Clinic (Req 14.4, 2.7, 3.8).
+ * Update an existing Clinic (Req 14.4, 3.8, 3.10).
  *
  * Only supplied fields are written. Validation runs against the merged record
  * (existing values overlaid with the submitted edits) using the wider
- * master-portal form bounds (Req 14.2–14.3). When `kitchen_id` is changed, the
- * new Kitchen must exist (Req 3.8) and must belong to the same City as the
- * Clinic's current Kitchen (Req 2.7); otherwise the association is rejected and
- * the existing linkage is left unchanged. Handles not-found.
+ * master-portal form bounds (Req 14.2–14.3, 21.5–21.6). When `kitchen_id` is
+ * changed, the new Kitchen must exist (Req 3.8) and must belong to the same City
+ * as the Clinic's current Kitchen (Req 2.14); otherwise the association is
+ * rejected and the existing linkage is left unchanged. On a successful
+ * reassociation the Clinic's Business re-resolves through the new Kitchen
+ * (Req 3.10). Handles not-found.
  *
- * Validates: Requirements 2.7, 3.8, 14.4, 14.5.
+ * Validates: Requirements 3.8, 3.10, 14.4, 14.5.
  */
 export async function updateClinic(
   id: string,
@@ -246,8 +264,9 @@ export async function updateClinic(
   );
   if (fieldFailure) return fieldFailure;
 
-  // Same-city rule on re-association (Req 2.7, 3.8): a changed kitchen must
-  // exist and must share the City of the Clinic's current kitchen.
+  // Same-city rule on re-association (Req 2.14, 3.8): a changed kitchen must
+  // exist and must share the City of the Clinic's current kitchen. On success
+  // the Business re-resolves through the new kitchen (Req 3.10).
   if (input.kitchen_id !== undefined && input.kitchen_id !== existing.kitchen_id) {
     const [newKitchen, currentKitchen] = await Promise.all([
       getKitchenById(input.kitchen_id),
@@ -267,7 +286,7 @@ export async function updateClinic(
     // compare against, so the existence check above is sufficient.
     if (
       currentKitchen?.city_id &&
-      newKitchen.city_id !== currentKitchen.city_id
+      !sameCity(currentKitchen.city_id, newKitchen.city_id)
     ) {
       return {
         success: false,

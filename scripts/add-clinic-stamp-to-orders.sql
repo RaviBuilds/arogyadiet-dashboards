@@ -1,24 +1,35 @@
 -- ============================================================================
--- CORE CLINIC ARCHITECTURE — Order-Level Clinic Stamp (SAFE: Additive only)
+-- CORE CLINIC ARCHITECTURE — Order/Batch Clinic Stamp (SAFE: Additive only)
 -- ============================================================================
 -- Adds the immutable per-order / per-batch Clinic stamp that is the
 -- authoritative basis for per-clinic workload snapshots, routing attribution,
--- and delivery history (Requirement 19).
+-- delivery history, and the Conflict_Clinic_List (Requirements 19, 22.7).
+--
+-- Standalone additive migration — run SEPARATELY from
+-- scripts/create-clinic-hierarchy-tables.sql (Task 1.1), which creates the
+-- public.clinics(id) table referenced below.
 --
 -- Adds (nullable, NULL = unresolved at creation, zero production impact):
---   - delivery_orders.clinic_id   — the customer's resolved clinic for the
---                                   delivery address at order-creation time.
+--   - delivery_orders.clinic_id   — the customer's resolved DELIVERY-address
+--                                   clinic at order-creation time (Req 19.2, 22.3).
 --   - delivery_batches.clinic_id  — the routing rider's linked clinic at
---                                   routing (batch-creation) time.
+--                                   routing (batch-creation) time (Req 19.3).
 --
--- Adds indexes (drive per-clinic workload aggregation + history off the stamp):
+-- Adds indexes:
 --   - idx_delivery_orders_clinic_date   ON delivery_orders(clinic_id, delivery_date)
+--       drives per-clinic workload aggregation + history off the stamp (Req 19.6, 12).
+--   - idx_delivery_orders_date          ON delivery_orders(delivery_date)
+--       supports the Conflict_Clinic_List per-day scan (Req 22.7).
 --   - idx_delivery_batches_clinic_date  ON delivery_batches(clinic_id, delivery_date)
+--
+-- ADDON ORDERS: addon_orders inherit their clinic via delivery_order_id and do
+-- NOT carry their own clinic_id column (no schema change here).
 --
 -- NULLABILITY (Req 19.8, 19.9): Both columns are NULLABLE on purpose. An
 -- unresolved clinic must NEVER block order or batch creation. When the delivery
 -- address resolves to no clinic, or the routing rider has no linked clinic, the
--- stamp is simply left NULL and creation proceeds normally.
+-- stamp is simply left NULL and creation proceeds normally. A NULL order stamp
+-- surfaces in the Conflict_Clinic_List as a needs-attention entry (Req 22.7).
 --
 -- IMMUTABILITY (Req 19.4, 19.5): These stamps are set EXACTLY ONCE at creation
 -- and are immutable thereafter. Immutability is enforced at the APPLICATION
@@ -40,6 +51,7 @@
 --
 -- Rollback:
 --   DROP INDEX IF EXISTS public.idx_delivery_orders_clinic_date;
+--   DROP INDEX IF EXISTS public.idx_delivery_orders_date;
 --   DROP INDEX IF EXISTS public.idx_delivery_batches_clinic_date;
 --   ALTER TABLE public.delivery_orders  DROP COLUMN IF EXISTS clinic_id;
 --   ALTER TABLE public.delivery_batches DROP COLUMN IF EXISTS clinic_id;
@@ -48,9 +60,10 @@
 -- ============================================================================
 -- 1. DELIVERY_ORDERS (existing) — creation-time clinic stamp (Req 19.2, 19.8)
 -- ============================================================================
--- clinic_id = the customer's resolved clinic for the delivery address at the
--- moment the order is created. NULL when unresolved (never blocks creation).
--- Immutable after creation (enforced at the application write layer).
+-- clinic_id = the customer's resolved DELIVERY-address clinic at the moment the
+-- order is created (Req 19.2 / 22.3). NULL when unresolved (never blocks
+-- creation; surfaces in the Conflict_Clinic_List). Immutable after creation
+-- (enforced at the application write layer).
 
 ALTER TABLE public.delivery_orders
   ADD COLUMN IF NOT EXISTS clinic_id UUID REFERENCES public.clinics(id);
@@ -59,6 +72,12 @@ ALTER TABLE public.delivery_orders
 -- (Req 19.6, Req 12): count delivery_orders by stamped clinic_id and delivery_date.
 CREATE INDEX IF NOT EXISTS idx_delivery_orders_clinic_date
   ON public.delivery_orders(clinic_id, delivery_date);
+
+-- Supports the Conflict_Clinic_List per-day scan (Req 22.7), which filters
+-- delivery_orders by delivery_date and compares the order stamp against the
+-- owning customer's Primary_Address clinic.
+CREATE INDEX IF NOT EXISTS idx_delivery_orders_date
+  ON public.delivery_orders(delivery_date);
 
 -- ============================================================================
 -- 2. DELIVERY_BATCHES (existing) — routing-time clinic stamp (Req 19.3, 19.9)
@@ -75,6 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_delivery_batches_clinic_date
 
 -- ============================================================================
 -- DONE. Both clinic_id columns are additive and nullable; immutability is
--- enforced at the application write layer (not the DB). Run the seed migration
+-- enforced at the application write layer (not the DB). addon_orders inherit
+-- their clinic via delivery_order_id (no own column). Run the seed migration
 -- (seed-madhapur-clinic.sql) separately to back-stamp existing history.
 -- ============================================================================

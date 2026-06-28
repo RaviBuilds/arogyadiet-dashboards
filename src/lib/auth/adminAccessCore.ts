@@ -149,15 +149,10 @@ export function classifyAdminPath(pathname: unknown): AccessArea | null {
  *   - neutral path                -> true
  *   - area path & canAccess       -> true
  *   - area path & !canAccess      -> false
+ *
+ * NOTE: the implementation lives below as an overload that also accepts an
+ * AccessConfiguration (group-aware gate). The level-only form is preserved.
  */
-export function isAdminPathAllowed(
-  level: AdminAccessLevel,
-  pathname: unknown,
-): boolean {
-  const area = classifyAdminPath(pathname);
-  if (area === null) return true;
-  return canAccess(level, area);
-}
 
 /**
  * The landing/home route for an access level.
@@ -171,4 +166,195 @@ export function landingRouteFor(
   level: AdminAccessLevel,
 ): "/dashboard" | "/inventory" {
   return level === "inventory" ? "/inventory" : "/dashboard";
+}
+
+// ─── Operations groups, permissions & configuration (admin-access-control) ────
+//
+// The richer per-group model layered on top of the `operations` level. These
+// primitives are ROLE-NEUTRAL: they operate purely on an AccessConfiguration
+// and a path, with no assumption about the caller's role, so the same logic can
+// later govern FRANCHISE_ADMIN without rework (Req 13.1, 13.4).
+
+/** The six configurable operations capability groups (Req 4.1, 6.1). */
+export const OPERATIONS_GROUPS = [
+  "customers",
+  "subscriptions",
+  "riders",
+  "operations",
+  "franchises",
+  "shop_products",
+] as const;
+
+export type OperationsGroup = (typeof OPERATIONS_GROUPS)[number];
+
+/** Per-group permission: manage (read + write) or view (read-only). */
+export const PERMISSION_LEVELS = ["manage", "view"] as const;
+export type PermissionLevel = (typeof PERMISSION_LEVELS)[number];
+
+/** Per-group permissions; non-empty only for the `operations` level. */
+export type OperationsAccess = Partial<Record<OperationsGroup, PermissionLevel>>;
+
+/** A fully-resolved, always-valid access configuration for one admin. */
+export interface AccessConfiguration {
+  level: AdminAccessLevel;
+  /** Empty object for `inventory` / `inventory_operations`. */
+  groups: OperationsAccess;
+}
+
+/** Group → rewritten admin route prefix (Req 6.1). */
+export const GROUP_ROUTE_PREFIX: Record<OperationsGroup, string> = {
+  customers: "/admin/customers",
+  subscriptions: "/admin/subscriptions",
+  riders: "/admin/riders",
+  operations: "/admin/operations",
+  franchises: "/admin/franchises",
+  shop_products: "/admin/kitchen-shop",
+};
+
+/** Human-readable group labels (master UI). */
+export const GROUP_LABELS: Record<OperationsGroup, string> = {
+  customers: "Customers",
+  subscriptions: "Subscriptions",
+  riders: "Riders",
+  operations: "Operations",
+  franchises: "Franchises",
+  shop_products: "Shop Products",
+};
+
+// Membership test helpers (type guards) over the readonly tuples.
+function isOperationsGroup(value: unknown): value is OperationsGroup {
+  return (
+    typeof value === "string" &&
+    (OPERATIONS_GROUPS as readonly string[]).includes(value)
+  );
+}
+
+function isPermissionLevel(value: unknown): value is PermissionLevel {
+  return (
+    typeof value === "string" &&
+    (PERMISSION_LEVELS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Normalize raw DB values into an always-valid AccessConfiguration. Never
+ * throws (Req 10.1, 10.3, 10.4).
+ *
+ * Postcondition:
+ *   - level ∈ ADMIN_ACCESS_LEVELS (unknown/non-string => DEFAULT_ACCESS_LEVEL)
+ *   - groups is populated ONLY when level === "operations"; each kept entry has
+ *     key ∈ OPERATIONS_GROUPS and value ∈ PERMISSION_LEVELS (malformed dropped)
+ *   - groups === {} for `inventory` / `inventory_operations`
+ *   - a string `rawGroups` is parsed as JSON; parse failure => {}
+ */
+export function resolveAccessConfiguration(
+  rawLevel: unknown,
+  rawGroups: unknown,
+): AccessConfiguration {
+  const level = resolveAccessLevel(rawLevel);
+  if (level !== "operations") {
+    return { level, groups: {} };
+  }
+
+  // Accept either a pre-parsed object (Supabase JSONB) or a JSON string.
+  let source: unknown = rawGroups;
+  if (typeof source === "string") {
+    try {
+      source = JSON.parse(source);
+    } catch {
+      source = null;
+    }
+  }
+
+  const groups: OperationsAccess = {};
+  if (source !== null && typeof source === "object" && !Array.isArray(source)) {
+    for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
+      if (isOperationsGroup(key) && isPermissionLevel(value)) {
+        groups[key] = value;
+      }
+    }
+  }
+
+  return { level, groups };
+}
+
+/**
+ * Classify a rewritten admin pathname into an OperationsGroup, or null when the
+ * path is not a group page. Case-sensitive, path-segment boundary matching,
+ * longest-prefix wins (Req 6.4, 8.5).
+ */
+export function classifyOperationsGroup(pathname: unknown): OperationsGroup | null {
+  if (
+    typeof pathname !== "string" ||
+    pathname.length === 0 ||
+    !pathname.startsWith("/")
+  ) {
+    return null;
+  }
+
+  let best: OperationsGroup | null = null;
+  let bestLen = -1;
+  for (const group of OPERATIONS_GROUPS) {
+    const prefix = GROUP_ROUTE_PREFIX[group];
+    if (matchesPrefixAtBoundary(pathname, prefix) && prefix.length > bestLen) {
+      best = group;
+      bestLen = prefix.length;
+    }
+  }
+  return best;
+}
+
+/** Does the configuration grant any (read) access to the group (Req 5)? */
+export function hasGroupAccess(
+  config: AccessConfiguration,
+  group: OperationsGroup,
+): boolean {
+  if (config.level === "inventory_operations") return true;
+  if (config.level === "operations") return config.groups[group] !== undefined;
+  return false; // inventory
+}
+
+/** Does the configuration grant manage (write) access to the group (Req 5)? */
+export function canManageGroup(
+  config: AccessConfiguration,
+  group: OperationsGroup,
+): boolean {
+  if (config.level === "inventory_operations") return true;
+  if (config.level === "operations") return config.groups[group] === "manage";
+  return false; // inventory
+}
+
+/**
+ * Configuration-aware path gate. Accepts EITHER a legacy `AdminAccessLevel`
+ * (coarse inventory-vs-operations area gate, preserved for existing callers)
+ * OR an `AccessConfiguration` (group-aware gate).
+ *
+ * Config-aware postcondition (Req 2.3, 3, 6, 8):
+ *   - neutral path                         -> true
+ *   - inventory-area path                  -> level grants inventory
+ *   - operations group page                -> hasGroupAccess(config, group)
+ *   - operations-area non-group (dashboard)-> level is operations or full
+ */
+export function isAdminPathAllowed(
+  levelOrConfig: AdminAccessLevel | AccessConfiguration,
+  pathname: unknown,
+): boolean {
+  // Legacy overload: bare level string uses the coarse area gate unchanged.
+  if (typeof levelOrConfig === "string") {
+    const area = classifyAdminPath(pathname);
+    if (area === null) return true;
+    return canAccess(levelOrConfig, area);
+  }
+
+  const config = levelOrConfig;
+  const area = classifyAdminPath(pathname);
+  if (area === null) return true; // neutral (profile, unclassified)
+  if (area === "inventory") {
+    return config.level === "inventory" || config.level === "inventory_operations";
+  }
+  // Operations area: gate by specific group when the path maps to one;
+  // otherwise it is an operations-neutral page (e.g. /admin/dashboard).
+  const group = classifyOperationsGroup(pathname);
+  if (group !== null) return hasGroupAccess(config, group);
+  return config.level === "operations" || config.level === "inventory_operations";
 }

@@ -121,7 +121,7 @@ export default async function RidersPage() {
     supabaseAdmin
       .from("rider_profiles")
       .select(
-        `id, employee_code, is_active, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, franchise_id, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
+        `id, employee_code, is_active, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, franchise_id, clinic_id, clinics (name), users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
       )
       .eq("is_active", true),
     supabaseAdmin
@@ -204,6 +204,8 @@ export default async function RidersPage() {
       totalEarned: totalEarned,
       lastPayoutAmount: lastPayoutAmount,
       lastPayoutDate: lastPayoutDate,
+      clinic_id: rider.clinic_id || null,
+      clinicName: rider.clinics?.name || null,
       franchiseId: rider.franchise_id || null,
     };
   });

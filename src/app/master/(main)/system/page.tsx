@@ -1,7 +1,8 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { MasterPageHeader } from "@/shared/components/master/MasterPageHeader";
-import { Users, DollarSign, ScrollText, Shield, FileBarChart } from "lucide-react";
+import { Users, DollarSign, ScrollText, Shield, FileBarChart, Hospital } from "lucide-react";
+import { CoreBusinessSection } from "@/shared/components/master/core-business/CoreBusinessSection";
 
 export const revalidate = 0;
 
@@ -19,6 +20,12 @@ export default function SystemPage() {
           icon={<Users className="h-5 w-5 text-emerald-600" />}
           title="User Management"
           description="Create, edit, and manage admin accounts."
+        />
+        <SystemCard
+          href="/core-clinics"
+          icon={<Hospital className="h-5 w-5 text-emerald-600" />}
+          title="Core Clinic Management"
+          description="Manage cities, kitchens, and clinics in the core hierarchy."
         />
         <SystemCard
           href="/finance"
@@ -45,6 +52,16 @@ export default function SystemPage() {
           description="Custom reports, export data, and analytics."
         />
       </div>
+
+      {/* Additive Core Business section — positioned BELOW the existing Core
+          Clinic Management card, which is left untouched (Req 21.2, 21.7). */}
+      <Suspense
+        fallback={
+          <p className="pt-6 text-sm text-slate-500">Loading Core Business…</p>
+        }
+      >
+        <CoreBusinessSection />
+      </Suspense>
     </div>
   );
 }

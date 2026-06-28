@@ -53,6 +53,8 @@ export type LiveTrackingRiderOption = {
   id: string;
   fullName: string;
   hint: string;
+  /** Rider's linked Clinic — drives clinic-selector-first gating (Req 17). */
+  clinic_id: string | null;
 };
 
 export type RiderLiveLocation = {
@@ -125,6 +127,7 @@ export async function getLiveTrackingRiders(
       status,
       rider_profiles (
         id,
+        clinic_id,
         users ( full_name )
       )
     `,
@@ -153,6 +156,8 @@ export async function getLiveTrackingRiders(
     const users = riderProfile?.users;
     const user = Array.isArray(users) ? users[0] : users;
     const fullName = user?.full_name || "Unknown Rider";
+    const clinicId =
+      (riderProfile as { clinic_id?: string | null } | null)?.clinic_id ?? null;
 
     const existing = riderMap.get(riderId);
     const status = order.status as string;
@@ -166,6 +171,7 @@ export async function getLiveTrackingRiders(
         id: riderId,
         fullName,
         hint: isOut ? "Out for delivery" : "",
+        clinic_id: clinicId,
       });
     } else if (isOut && !existing.hint) {
       existing.hint = "Out for delivery";

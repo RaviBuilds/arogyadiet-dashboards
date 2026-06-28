@@ -1,7 +1,7 @@
 // src/lib/clinic/__tests__/rider-warnings.property.test.ts
 // Property test for the pincode-move rider clinic-mismatch warning.
 //
-// Feature: core-clinic-architecture, Property 17: Pincode-move clinic-mismatch warning
+// Feature: core-clinic-architecture, Property 20: Pincode-move clinic-mismatch warning
 //
 // Validates: Requirements 9.4
 
@@ -41,7 +41,7 @@ function arbMappingRiders(destinationClinicId: string) {
 
 // ─── Property Test ─────────────────────────────────────────────────────────
 
-describe("Property 17: Pincode-move clinic-mismatch warning", () => {
+describe("Property 20: Pincode-move clinic-mismatch warning", () => {
   it("emits exactly one warning per mismatched rider (and none for matches), each correctly identifying rider and pincode", () => {
     fc.assert(
       fc.property(

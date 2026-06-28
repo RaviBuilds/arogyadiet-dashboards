@@ -73,7 +73,7 @@ export async function getRoutingData(scope?: OperationsScope) {
   let ridersQuery = supabase
     .from("rider_profiles")
     .select(`
-      id, employee_code,
+      id, employee_code, clinic_id,
       users!inner ( full_name ),
       rider_service_areas ( pincode )
     `)
@@ -89,6 +89,8 @@ export async function getRoutingData(scope?: OperationsScope) {
     id: r.id,
     fullName: r.users?.full_name || "Unknown",
     employeeCode: r.employee_code || "N/A",
+    // Rider's linked Clinic — drives clinic-selector-first gating (Req 17).
+    clinic_id: r.clinic_id ?? null,
     assignedPincodes: r.rider_service_areas?.map((a: any) => a.pincode) || []
   }));
 

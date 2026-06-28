@@ -1,14 +1,14 @@
-// Feature: core-clinic-architecture, Property 12: Customer auto-reassignment selects exactly the matching subset
+// Feature: core-clinic-architecture, Property 15: Customer auto-reassignment selects exactly the matching Primary_Address subset
 //
 // Property test for `reassignCustomersOnPincodeMove`
 // (src/lib/clinic/reassignment.ts).
 //
-// Property 12: Customer auto-reassignment selects exactly the matching subset
+// Property 15: Customer auto-reassignment selects exactly the matching Primary_Address subset
 //   For any set of customers and a pincode move A→B, exactly the customers
-//   whose stamped address pincode equals the moved pincode AND whose current
+//   whose Primary_Address pincode equals the moved pincode AND whose current
 //   stamped clinic is A are reassigned to B (both their clinic_id and matching
-//   address clinic_id become B); all others are left unchanged; the returned
-//   count equals the matching subset size (0 when none).
+//   primary address clinic_id become B); all others are left unchanged; the
+//   returned count equals the matching subset size (0 when none).
 //
 // A live Supabase connection is not available in unit tests, so
 // `@/lib/supabase/admin`'s `createAdminClient` is mocked with an in-memory
@@ -166,7 +166,7 @@ const arbPopulation = fc.array(arbCustomerSpec, {
 
 // ─── Property Test ─────────────────────────────────────────────────────────────
 
-describe("Customer auto-reassignment selects exactly the matching subset - Property 12", () => {
+describe("Customer auto-reassignment selects exactly the matching subset - Property 15", () => {
   it("reassigns exactly the (moved-pincode ∧ clinic-A) customers to B, leaves all others unchanged, and returns the subset size", async () => {
     await fc.assert(
       fc.asyncProperty(arbPopulation, async (specs) => {
@@ -180,6 +180,7 @@ describe("Customer auto-reassignment selects exactly the matching subset - Prope
           customer_profile_id: `cust-${i}`,
           pincode: s.pincode,
           clinic_id: s.clinic,
+          is_primary: true,
         }));
         // An orphan address (no owning customer) that matches the move filter:
         // it must be ignored because customer_profile_id is null.
@@ -188,6 +189,7 @@ describe("Customer auto-reassignment selects exactly the matching subset - Prope
           customer_profile_id: null,
           pincode: MOVED_PINCODE,
           clinic_id: CLINIC_A,
+          is_primary: true,
         });
 
         mock.__setState(addresses, profiles);
@@ -249,12 +251,14 @@ describe("Customer auto-reassignment selects exactly the matching subset - Prope
           customer_profile_id: "cust-0",
           pincode: OTHER_PINCODE,
           clinic_id: CLINIC_A,
+          is_primary: true,
         },
         {
           id: "addr-1",
           customer_profile_id: "cust-1",
           pincode: MOVED_PINCODE,
           clinic_id: CLINIC_B,
+          is_primary: true,
         },
       ],
       [

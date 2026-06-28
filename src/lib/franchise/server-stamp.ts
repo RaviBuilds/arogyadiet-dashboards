@@ -19,6 +19,10 @@ import { stampFranchiseId } from "./stamping";
  * Only returns a non-null value for FRANCHISE_ADMIN users.
  */
 export async function getStampFranchiseId(): Promise<string | null> {
+  // Equivalence guard (Req 18.2, 18.3): when franchise features are off — which
+  // includes the env var being unset (Req 18.4) — core inserts receive a NULL
+  // franchise_id with no franchise context read. The franchise resolution path
+  // below is retained so it still compiles, but stays inert at runtime.
   if (!FRANCHISE_FEATURES_ENABLED) return null;
 
   try {

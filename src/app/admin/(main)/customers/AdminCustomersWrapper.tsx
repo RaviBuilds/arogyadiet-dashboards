@@ -3,14 +3,13 @@
 import { useState, useMemo } from "react";
 import { FranchiseSelector } from "@/shared/components/admin/core/FranchiseSelector";
 import CustomerDashboard from "@/shared/components/admin/customers/CustomerDashboard";
-import type { CustomerData, ActiveSubscriptionData, ShopOrderAdminData } from "@/shared/components/admin/customers/CustomerDashboard";
+import type { CustomerData, ActiveSubscriptionData } from "@/shared/components/admin/customers/CustomerDashboard";
 
 interface Props {
   customers: (CustomerData & { franchiseId?: string | null })[];
   activeSubscriptions: ActiveSubscriptionData[];
   pendingSubscriptions: ActiveSubscriptionData[];
   stoppedSubscriptions: ActiveSubscriptionData[];
-  shopOrders: ShopOrderAdminData[];
 }
 
 /**
@@ -22,15 +21,8 @@ export function AdminCustomersWrapper({
   activeSubscriptions,
   pendingSubscriptions,
   stoppedSubscriptions,
-  shopOrders,
 }: Props) {
   const [scope, setScope] = useState("core");
-
-  const filterByScope = <T extends { customer_profile_id?: string }>(items: T[]) => {
-    // For subscription/shop data we don't have franchise_id directly, 
-    // so we rely on the customer_profile_id matching filtered customers.
-    return items;
-  };
 
   const filteredCustomers = useMemo(() => {
     if (scope === "all") return customers;
@@ -59,12 +51,6 @@ export function AdminCustomersWrapper({
     return stoppedSubscriptions.filter((s) => filteredCustomerEmails.has(s.email));
   }, [stoppedSubscriptions, scope, filteredCustomerEmails]);
 
-  const filteredShopOrders = useMemo(() => {
-    if (scope === "all") return shopOrders;
-    const customerIds = new Set(filteredCustomers.map((c) => c.id));
-    return shopOrders.filter((o) => customerIds.has(o.customer_profile_id));
-  }, [shopOrders, scope, filteredCustomers]);
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
@@ -76,7 +62,6 @@ export function AdminCustomersWrapper({
         activeSubscriptions={filteredActiveSubs}
         pendingSubscriptions={filteredPendingSubs}
         stoppedSubscriptions={filteredStoppedSubs}
-        shopOrders={filteredShopOrders}
       />
     </div>
   );

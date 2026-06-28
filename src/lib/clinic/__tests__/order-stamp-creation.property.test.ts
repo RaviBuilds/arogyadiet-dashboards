@@ -1,7 +1,8 @@
 // src/lib/clinic/__tests__/order-stamp-creation.property.test.ts
-// Feature: core-clinic-architecture, Property 37: Order and batch clinic stamps are set once at creation
+// Feature: core-clinic-architecture, Property 40: Order and batch clinic stamps are set once at creation from the delivery-address / rider clinic
 //
-// Property 37: Order and batch clinic stamps are set once at creation.
+// Property 40: Order and batch clinic stamps are set once at creation from the
+// delivery-address / rider clinic.
 // When a Delivery_Order is created, its clinic_id equals the clinic the
 // customer's delivery address resolves to at that time (null when unresolved,
 // without blocking); when a Delivery_Batch is created during routing, its
@@ -9,7 +10,7 @@
 // unlinked, without blocking). In every case the stamp equals the resolved
 // clinic at creation time and is written exactly once.
 //
-// Validates: Requirements 19.2, 19.3, 19.8, 19.9
+// **Validates: Requirements 19.2, 19.3, 19.8, 19.9, 22.3**
 
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
@@ -27,7 +28,7 @@ const arbClinicIdOrNull: fc.Arbitrary<string | null> = fc.oneof(
   fc.constant(null)
 );
 
-describe("Property 37: Order and batch clinic stamps are set once at creation", () => {
+describe("Property 40: Order and batch clinic stamps are set once at creation from the delivery-address / rider clinic", () => {
   it("order stamp equals the address's resolved clinic (null when unresolved)", () => {
     fc.assert(
       fc.property(arbClinicIdOrNull, (addressClinicId) => {

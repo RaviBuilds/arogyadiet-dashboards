@@ -2,7 +2,7 @@
 // Property test for the immutability of order/batch clinic stamps
 // (core-clinic-architecture, Requirement 19).
 //
-// Feature: core-clinic-architecture, Property 38: Clinic stamp is immutable after creation
+// Feature: core-clinic-architecture, Property 41: Clinic stamp is immutable after creation
 
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
@@ -21,9 +21,9 @@ const arbStamp: fc.Arbitrary<string | null> = fc.oneof(
 );
 
 describe("Order/Batch Clinic Stamp Immutability - Property Tests", () => {
-  // Feature: core-clinic-architecture, Property 38: Clinic stamp is immutable after creation
+  // Feature: core-clinic-architecture, Property 41: Clinic stamp is immutable after creation
   // **Validates: Requirements 19.4, 19.5**
-  describe("Property 38: Clinic stamp is immutable after creation", () => {
+  describe("Property 41: Clinic stamp is immutable after creation", () => {
     it("a stamp may only transition from unset (null) to set; an already-set stamp cannot change to a different value, while re-writing the same value is an allowed no-op", () => {
       fc.assert(
         fc.property(arbStamp, arbStamp, (current, incoming) => {

@@ -2,7 +2,7 @@
 
 // src/actions/master-actions/cityActions.ts
 // Master-portal Server Actions for City CRUD in the Core Clinic Management
-// surface (core-clinic-architecture, task 2.2).
+// surface (core-clinic-architecture, task 3.3).
 //
 // LAYERING: These actions orchestrate authorization, pure validation
 // (src/lib/clinic/validation.ts), and data access (src/repositories/clinic/*).
@@ -91,7 +91,7 @@ function cityNameErrorMessage(
   }
 }
 
-// ─── CRUD Operations (Task 2.2) ──────────────────────────────────────────────
+// ─── CRUD Operations (Task 3.3) ──────────────────────────────────────────────
 
 /**
  * Create a City after validating the name and enforcing case-insensitive

@@ -9,6 +9,7 @@ import { resolveAddressCoordinates } from "@/lib/geocoding";
 import { computeFixedOrderRoutePreview } from "@/lib/routing/googleRoutes";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { applyOperationsScope, isFranchiseScope, type OperationsScope } from "@/lib/franchise/scope";
+import { isFranchiseRuntimeEnabled } from "@/lib/franchise/constants";
 
 const ASSIGNED_ORDER_STATUSES = [
   "ASSIGNED",
@@ -33,6 +34,8 @@ export type RoutingSandboxRiderOption = {
   fullName: string;
   stopCount: number;
   batchCount: number;
+  /** Rider's linked Clinic — drives clinic-selector-first gating (Req 17). */
+  clinic_id: string | null;
 };
 
 export type RoutingSandboxStop = {
@@ -87,7 +90,12 @@ async function resolveSandboxKitchen(
   supabase: ReturnType<typeof createAdminClient>,
   riderFranchiseId: string | null,
 ): Promise<{ lat: number; lng: number } | null> {
-  if (riderFranchiseId) {
+  // Equivalence guard (Req 18.3, 18.6): franchise origin resolution and the
+  // franchise-kitchen exclusion read only run when franchise features are
+  // enabled. With the flag off — including when the env var is unset (Req
+  // 18.4) — no franchise table read occurs and the core kitchen is selected
+  // directly, leaving the franchise branches present-but-inert.
+  if (isFranchiseRuntimeEnabled() && riderFranchiseId) {
     const { data: franchise } = await supabase
       .from("franchises")
       .select("kitchen_id, kitchens:kitchen_id ( lat, lng )")
@@ -103,13 +111,18 @@ async function resolveSandboxKitchen(
     }
   }
 
-  // Core kitchen = an active kitchen that is not owned by any franchise.
-  const { data: franchiseRows } = await supabase
-    .from("franchises")
-    .select("kitchen_id");
-  const franchiseKitchenIds = (franchiseRows ?? [])
-    .map((f: any) => f.kitchen_id)
-    .filter(Boolean);
+  // Core kitchen = an active kitchen that is not owned by any franchise. The
+  // franchise-ownership exclusion only needs a franchise read when the flag is
+  // on; with it off there are no franchise kitchens to exclude.
+  let franchiseKitchenIds: (string | null)[] = [];
+  if (isFranchiseRuntimeEnabled()) {
+    const { data: franchiseRows } = await supabase
+      .from("franchises")
+      .select("kitchen_id");
+    franchiseKitchenIds = (franchiseRows ?? [])
+      .map((f: any) => f.kitchen_id)
+      .filter(Boolean);
+  }
 
   const { data: activeKitchens } = await supabase
     .from("kitchens")
@@ -219,6 +232,7 @@ export async function getRoutingSandboxRiders(
       batch_id,
       rider_profiles (
         id,
+        clinic_id,
         users ( full_name )
       )
     `,
@@ -249,6 +263,8 @@ export async function getRoutingSandboxRiders(
     const users = riderProfile?.users;
     const user = Array.isArray(users) ? users[0] : users;
     const fullName = user?.full_name || "Unknown Rider";
+    const clinicId =
+      (riderProfile as { clinic_id?: string | null } | null)?.clinic_id ?? null;
 
     const existing = riderMap.get(riderId);
     if (!existing) {
@@ -257,6 +273,7 @@ export async function getRoutingSandboxRiders(
         fullName,
         stopCount: 1,
         batchCount: 0,
+        clinic_id: clinicId,
       });
       batchIdsByRider.set(riderId, new Set());
     } else {

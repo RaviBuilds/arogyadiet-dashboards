@@ -1,15 +1,21 @@
 // src/repositories/clinic/kitchenRepository.ts
 // Data-access layer for the `kitchens` table as it participates in the
-// City → Kitchen → Clinic hierarchy (core-clinic-architecture).
+// Business → Kitchen → Clinic hierarchy (core-clinic-architecture).
 //
 // LAYERING: Data-access ONLY. No business validation, no 'use server' wrappers.
-// The `kitchens` table is pre-existing and carries additional operational
-// columns; only the columns relevant to the clinic hierarchy are selected here.
+//
+// SCHEMA (revised, no geo): A Kitchen is a meal-prep / workload-aggregation
+// entity that belongs to exactly one Business (`business_id`, Req 2.2, 20.8) and
+// exactly one City (`city_id`, Req 2.4). It carries NO street address, latitude,
+// or longitude — the geographic routing origin is always the Clinic (Req 2.5).
+// Any pre-existing lat/lng/address/is_active columns on the live `kitchens`
+// table are NO LONGER USED by this feature and are intentionally not selected
+// or written here.
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Kitchen } from "@/types/clinic";
 
-const KITCHEN_COLUMNS = "id, name, address_text, lat, lng, is_active, city_id";
+const KITCHEN_COLUMNS = "id, name, business_id, city_id";
 
 /**
  * List all kitchens ordered by name.
@@ -62,20 +68,41 @@ export async function listKitchensByCity(cityId: string): Promise<Kitchen[]> {
 }
 
 /**
- * Input accepted when creating a kitchen within the clinic hierarchy.
+ * List all kitchens owned by a given business via `business_id` (Req 20.8).
  */
-export interface KitchenInsert {
-  name: string;
-  city_id: string;
-  address_text?: string | null;
-  lat?: number | null;
-  lng?: number | null;
-  is_active?: boolean;
+export async function listKitchensByBusiness(
+  businessId: string
+): Promise<Kitchen[]> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("kitchens")
+    .select(KITCHEN_COLUMNS)
+    .eq("business_id", businessId)
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(
+      `Failed to list kitchens for business ${businessId}: ${error.message}`
+    );
+  }
+  return (data ?? []) as Kitchen[];
 }
 
 /**
- * Insert a new kitchen with a city association. Validation that the `city_id`
- * references an existing city (Req 2.6) is the action layer's responsibility.
+ * Input accepted when creating a kitchen within the clinic hierarchy. Both a
+ * `business_id` (Req 2.2, 2.8, 2.9) and a `city_id` (Req 2.4) are required; no
+ * geo fields are accepted or persisted (Req 2.5).
+ */
+export interface KitchenInsert {
+  name: string;
+  business_id: string;
+  city_id: string;
+}
+
+/**
+ * Insert a new kitchen with its Business + City association. Validation that
+ * the `business_id` / `city_id` reference existing records (Req 2.6, 2.8, 2.9)
+ * is the action layer's responsibility; the database enforces the foreign keys.
  */
 export async function insertKitchen(input: KitchenInsert): Promise<Kitchen> {
   const admin = createAdminClient();
@@ -83,11 +110,8 @@ export async function insertKitchen(input: KitchenInsert): Promise<Kitchen> {
     .from("kitchens")
     .insert({
       name: input.name,
+      business_id: input.business_id,
       city_id: input.city_id,
-      address_text: input.address_text ?? null,
-      lat: input.lat ?? null,
-      lng: input.lng ?? null,
-      is_active: input.is_active ?? true,
     })
     .select(KITCHEN_COLUMNS)
     .single();
@@ -100,15 +124,12 @@ export async function insertKitchen(input: KitchenInsert): Promise<Kitchen> {
 
 /**
  * Fields that may be updated on an existing kitchen. Only supplied keys are
- * written.
+ * written. No geo fields (Req 2.5).
  */
 export interface KitchenUpdate {
   name?: string;
+  business_id?: string;
   city_id?: string;
-  address_text?: string | null;
-  lat?: number | null;
-  lng?: number | null;
-  is_active?: boolean;
 }
 
 /**
@@ -122,11 +143,8 @@ export async function updateKitchen(
 
   const payload: Record<string, unknown> = {};
   if (input.name !== undefined) payload.name = input.name;
+  if (input.business_id !== undefined) payload.business_id = input.business_id;
   if (input.city_id !== undefined) payload.city_id = input.city_id;
-  if (input.address_text !== undefined) payload.address_text = input.address_text;
-  if (input.lat !== undefined) payload.lat = input.lat;
-  if (input.lng !== undefined) payload.lng = input.lng;
-  if (input.is_active !== undefined) payload.is_active = input.is_active;
 
   const { data, error } = await admin
     .from("kitchens")
@@ -157,7 +175,7 @@ export async function deleteKitchen(id: string): Promise<void> {
 
 /**
  * Count the number of clinics that reference the given kitchen via `kitchen_id`.
- * Supports dependency-guarded kitchen deletion (Req 14.6).
+ * Supports dependency-guarded kitchen deletion (Req 2 deletion guard, 14.6).
  */
 export async function countClinicsForKitchen(kitchenId: string): Promise<number> {
   const admin = createAdminClient();

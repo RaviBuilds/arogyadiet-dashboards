@@ -31,10 +31,12 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * Reassigns every customer whose stamped address pincode equals the moved
- * pincode AND whose matching address is currently stamped to `fromClinicId`,
- * moving both the customer's stamped `clinic_id` and the matching address's
- * `clinic_id` to `toClinicId` (Req 7.1, 7.2).
+ * Reassigns every customer whose PRIMARY address (`is_primary = true`) pincode
+ * equals the moved pincode AND whose matching primary address is currently
+ * stamped to `fromClinicId`, moving both the customer's stamped `clinic_id` and
+ * that customer's matching primary address `clinic_id` to `toClinicId`
+ * (Req 7.1, 7.2). Selection is keyed on the Primary_Address only — secondary
+ * addresses and customers stamped to a different clinic are left untouched.
  *
  * @param params.pincode      The pincode that was moved between clinics.
  * @param params.fromClinicId The clinic the pincode was moved away from.
@@ -56,13 +58,15 @@ export async function reassignCustomersOnPincodeMove(params: {
 
   const adminClient = createAdminClient();
 
-  // 1. Find addresses that:
+  // 1. Find PRIMARY addresses that:
+  //    - are the customer's primary address (is_primary = true)
   //    - have the moved pincode
   //    - are currently stamped to the source clinic (fromClinicId)
   //    - belong to a customer profile
   const { data: matchingAddresses, error: lookupError } = await adminClient
     .from("addresses")
     .select("customer_profile_id")
+    .eq("is_primary", true)
     .eq("pincode", pincode)
     .eq("clinic_id", fromClinicId)
     .not("customer_profile_id", "is", null);
@@ -100,13 +104,14 @@ export async function reassignCustomersOnPincodeMove(params: {
     return { reassigned: 0, error: profileError.message };
   }
 
-  // 3. Re-stamp the matching address records to the destination clinic.
-  //    Scoped to the moved pincode + source clinic so other addresses owned by
-  //    the same customers are left untouched.
+  // 3. Re-stamp the matching PRIMARY address records to the destination clinic.
+  //    Scoped to primary + the moved pincode + source clinic so secondary
+  //    addresses owned by the same customers are left untouched.
   const { error: addressError } = await adminClient
     .from("addresses")
     .update({ clinic_id: toClinicId })
     .in("customer_profile_id", customerProfileIds)
+    .eq("is_primary", true)
     .eq("pincode", pincode)
     .eq("clinic_id", fromClinicId);
 

@@ -2,7 +2,7 @@
 
 // src/actions/admin-actions/riderClinicActions.ts
 // Admin-portal Server Actions for the Rider ↔ Clinic linkage and the
-// rider service-area constraint (core-clinic-architecture, task 6.1).
+// rider service-area constraint (core-clinic-architecture, task 9.1).
 //
 // A Rider (`rider_profiles`) is linked to at most ONE Clinic at a time via the
 // single `rider_profiles.clinic_id` column. Because the linkage is one column,
@@ -179,11 +179,15 @@ export async function assignRiderToClinic(
 
     revalidatePath(ADMIN_RIDERS_PATH);
     return { success: true, data: undefined };
-  } catch (error: any) {
+  } catch (error) {
     console.error("assignRiderToClinic error:", error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to assign rider to clinic";
     return {
       success: false,
-      error: error?.message ?? "Failed to assign rider to clinic",
+      error: message,
     };
   }
 }
@@ -243,11 +247,15 @@ export async function getAssignablePincodesForRider(
     );
 
     return { success: true, data: pincodes };
-  } catch (error: any) {
+  } catch (error) {
     console.error("getAssignablePincodesForRider error:", error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to load assignable pincodes";
     return {
       success: false,
-      error: error?.message ?? "Failed to load assignable pincodes",
+      error: message,
     };
   }
 }
@@ -336,11 +344,15 @@ export async function assignServiceAreaToRider(
 
     revalidatePath(ADMIN_RIDERS_PATH);
     return { success: true, data: undefined };
-  } catch (error: any) {
+  } catch (error) {
     console.error("assignServiceAreaToRider error:", error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to assign service area to rider";
     return {
       success: false,
-      error: error?.message ?? "Failed to assign service area to rider",
+      error: message,
     };
   }
 }

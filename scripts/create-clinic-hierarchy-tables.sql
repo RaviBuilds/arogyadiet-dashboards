@@ -1,15 +1,24 @@
 -- ============================================================================
 -- CORE CLINIC ARCHITECTURE — Schema Foundation (SAFE: Additive only)
 -- ============================================================================
--- Establishes the City -> Kitchen -> Clinic hierarchy for the CORE business.
+-- Establishes the Business -> Kitchen -> Clinic hierarchy for the CORE business.
+-- City is retained where it currently fits: a Kitchen belongs to exactly one
+-- City, and a Clinic must share its Kitchen's City.
 --
 -- Creates:
---   1. cities                (new) — geographic city, owns kitchens
---   2. clinics               (new) — rider pickup + routing origin; franchise-ready
---   3. workload_snapshots    (new) — persisted, finalized per-clinic prep workload
+--   1. businesses            (new) — top-level grouping, type Core | Franchise
+--   2. cities                (new) — geographic city, owns kitchens
+--   3. clinics               (new) — rider pickup + routing origin; franchise-ready
+--   4. workload_snapshots    (new) — persisted, finalized per-clinic prep workload
 --
 -- Adds (nullable, NULL = unassigned, zero production impact):
---   - kitchens.city_id
+--   - kitchens.business_id   — each Kitchen belongs to exactly one Business.
+--                              Added NULLABLE for a safe additive rollout; the
+--                              seed (seed-madhapur-clinic.sql) backfills it to
+--                              the Core Hyderabad Business and then promotes it
+--                              to NOT NULL within the seed transaction (Req 2.2,
+--                              20.8). This script does NOT promote it.
+--   - kitchens.city_id       — each Kitchen belongs to exactly one City (Req 2.4).
 --   - rider_service_areas.clinic_id
 --   - rider_profiles.clinic_id
 --   - customer_profiles.clinic_id
@@ -19,8 +28,21 @@
 --   - uq_cities_name_lower             (case-insensitive unique city name)
 --   - uq_service_area_pincode          (one pincode -> exactly one clinic)
 --   - uq_snapshot_clinic_kitchen_date  (one snapshot per clinic/kitchen/date)
+--   - businesses.type CHECK IN ('Core','Franchise')
 --   - latitude/longitude CHECK ranges on clinics
 --   - 0..100000 count CHECK ranges on workload_snapshots
+--
+-- KITCHEN GEO (Req 2.5, 2.7, 3.11): The Kitchen carries NO street address,
+-- latitude, or longitude used as a routing origin or seed source. The full
+-- address and geo coordinates live ONLY on the Clinic. If the live kitchens
+-- table already has lat/lng (or address) columns, they are NO LONGER USED by
+-- this feature — neither the routing origin nor a seed source. This additive
+-- migration intentionally does NOT drop them; it simply stops relying on them.
+--
+-- BUSINESS RESOLUTION (Req 3.10, 20.9): A Clinic NEVER stores business_id. A
+-- Clinic's Business is always derived: clinics.kitchen_id -> kitchens.business_id
+-- (Clinic -> Kitchen -> Business). Reassigning a Clinic to a different Kitchen
+-- automatically re-resolves its Business.
 --
 -- Franchise readiness (Req 18):
 --   clinics.franchise_id is nullable; NULL = Core Clinic. New table, so every
@@ -38,6 +60,8 @@
 --   DROP TABLE IF EXISTS public.workload_snapshots;
 --   DROP TABLE IF EXISTS public.clinics;
 --   DROP TABLE IF EXISTS public.cities;
+--   DROP TABLE IF EXISTS public.businesses;
+--   ALTER TABLE public.kitchens             DROP COLUMN IF EXISTS business_id;
 --   ALTER TABLE public.kitchens             DROP COLUMN IF EXISTS city_id;
 --   ALTER TABLE public.rider_service_areas  DROP COLUMN IF EXISTS clinic_id;
 --   ALTER TABLE public.rider_profiles       DROP COLUMN IF EXISTS clinic_id;
@@ -46,7 +70,25 @@
 -- ============================================================================
 
 -- ============================================================================
--- 1. CITIES (new) — Requirement 1, 2.2
+-- 1. BUSINESSES (new) — Requirement 20 — top-level grouping (Core | Franchise)
+-- ============================================================================
+-- The Business separates Core operations from Franchise operations. A Kitchen
+-- belongs to exactly one Business via kitchens.business_id (added below). A
+-- Clinic resolves to its Business through its Kitchen (Clinic -> Kitchen ->
+-- Business); clinics never store business_id directly.
+
+CREATE TABLE IF NOT EXISTS public.businesses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL,                                       -- 1..100 after trim (Req 20.1)
+  type VARCHAR(20) NOT NULL CHECK (type IN ('Core','Franchise')),  -- Req 20.1, 20.10
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_businesses_type ON public.businesses(type);
+
+-- ============================================================================
+-- 2. CITIES (new) — Requirement 1
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS public.cities (
@@ -61,21 +103,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_cities_name_lower
   ON public.cities (lower(name));
 
 -- ============================================================================
--- 2. KITCHENS (existing, retained) — add city_id (Req 2.1, 2.2)
+-- 3. KITCHENS (existing, retained) — add business_id + city_id (Req 2)
 -- ============================================================================
+-- The Kitchen is repurposed: meal-prep + workload aggregation + Business/City
+-- association ONLY. It carries NO routing-origin geo (see KITCHEN GEO note in
+-- the header). business_id is NULLABLE here (safe additive rollout); the seed
+-- backfills it and promotes to NOT NULL within its own transaction (Req 2.2,
+-- 20.8) — this script does NOT promote it.
+
+ALTER TABLE public.kitchens
+  ADD COLUMN IF NOT EXISTS business_id UUID REFERENCES public.businesses(id);
 
 ALTER TABLE public.kitchens
   ADD COLUMN IF NOT EXISTS city_id UUID REFERENCES public.cities(id);
 
-CREATE INDEX IF NOT EXISTS idx_kitchens_city ON public.kitchens(city_id);
+CREATE INDEX IF NOT EXISTS idx_kitchens_business ON public.kitchens(business_id);
+CREATE INDEX IF NOT EXISTS idx_kitchens_city     ON public.kitchens(city_id);
 
 -- ============================================================================
--- 3. CLINICS (new) — Requirements 3, 18
+-- 4. CLINICS (new) — Requirements 3, 18 — sole routing origin; address + geo
 -- ============================================================================
--- Widest declared name/address bounds (Req 14: 1..200 / 1..500). The stricter
+-- Widest declared name/address bounds (Req 14/21: 1..200 / 1..500). The stricter
 -- Req 3 create bounds (1..120 / 1..255) are enforced by the application-layer
 -- validator per the design ("validate against the field's declared bound for
 -- the surface, persist within column width").
+--
+-- A Clinic belongs to exactly one Kitchen via kitchen_id (NOT NULL) and resolves
+-- its Business through that Kitchen (Req 3.2, 3.10). No business_id on clinics.
 --
 -- franchise_id is nullable; NULL = Core Clinic (Req 3.4, 18.1, 18.2). The FK to
 -- public.franchises is added conditionally below so the script remains robust
@@ -87,7 +141,7 @@ CREATE TABLE IF NOT EXISTS public.clinics (
   address VARCHAR(500) NOT NULL,
   latitude  DOUBLE PRECISION NOT NULL CHECK (latitude  BETWEEN -90  AND 90),
   longitude DOUBLE PRECISION NOT NULL CHECK (longitude BETWEEN -180 AND 180),
-  kitchen_id   UUID NOT NULL REFERENCES public.kitchens(id),
+  kitchen_id   UUID NOT NULL REFERENCES public.kitchens(id),  -- Business resolved via this
   franchise_id UUID NULL,  -- NULL = Core Clinic; FK added conditionally below
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -118,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_clinics_kitchen   ON public.clinics(kitchen_id);
 CREATE INDEX IF NOT EXISTS idx_clinics_franchise ON public.clinics(franchise_id);
 
 -- ============================================================================
--- 4. RIDER_SERVICE_AREAS (existing) — clinic_id + one-pincode-one-clinic (Req 4)
+-- 5. RIDER_SERVICE_AREAS (existing) — clinic_id + one-pincode-one-clinic (Req 4)
 -- ============================================================================
 
 ALTER TABLE public.rider_service_areas
@@ -134,7 +188,7 @@ CREATE INDEX IF NOT EXISTS idx_service_areas_clinic
   ON public.rider_service_areas(clinic_id);
 
 -- ============================================================================
--- 5. RIDER_PROFILES (existing) — single clinic linkage (Req 8)
+-- 6. RIDER_PROFILES (existing) — single clinic linkage (Req 8)
 -- ============================================================================
 
 ALTER TABLE public.rider_profiles
@@ -144,7 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_rider_profiles_clinic
   ON public.rider_profiles(clinic_id);
 
 -- ============================================================================
--- 6. CUSTOMER_PROFILES (existing) — stamped clinic (Req 6)
+-- 7. CUSTOMER_PROFILES (existing) — stamped clinic anchored to PRIMARY address (Req 6)
 -- ============================================================================
 
 ALTER TABLE public.customer_profiles
@@ -154,7 +208,7 @@ CREATE INDEX IF NOT EXISTS idx_customer_profiles_clinic
   ON public.customer_profiles(clinic_id);
 
 -- ============================================================================
--- 7. ADDRESSES (existing) — clinic stamp mirrors customer (Req 6.2, 7.2)
+-- 8. ADDRESSES (existing) — clinic stamp on the PRIMARY address (Req 6.2, 7.2)
 -- ============================================================================
 
 ALTER TABLE public.addresses
@@ -164,7 +218,7 @@ CREATE INDEX IF NOT EXISTS idx_addresses_clinic
   ON public.addresses(clinic_id);
 
 -- ============================================================================
--- 8. WORKLOAD_SNAPSHOTS (new, persisted) — Requirement 12
+-- 9. WORKLOAD_SNAPSHOTS (new, persisted) — Requirement 12
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS public.workload_snapshots (
@@ -186,8 +240,22 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_clinic      ON public.workload_snapshot
 CREATE INDEX IF NOT EXISTS idx_snapshots_kitchen     ON public.workload_snapshots(kitchen_id);
 
 -- ============================================================================
--- 9. updated_at TRIGGERS for cities and clinics (mirrors franchise pattern)
+-- 10. updated_at TRIGGERS for businesses, cities and clinics (franchise pattern)
 -- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.update_businesses_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_businesses_updated_at ON public.businesses;
+CREATE TRIGGER trg_businesses_updated_at
+  BEFORE UPDATE ON public.businesses
+  FOR EACH ROW
+  EXECUTE FUNCTION public.update_businesses_updated_at();
 
 CREATE OR REPLACE FUNCTION public.update_cities_updated_at()
 RETURNS TRIGGER AS $$
@@ -218,7 +286,7 @@ CREATE TRIGGER trg_clinics_updated_at
   EXECUTE FUNCTION public.update_clinics_updated_at();
 
 -- ============================================================================
--- 10. RLS POLICIES (CREATED, NOT ENABLED) — additive pattern, Req 15.10
+-- 11. RLS POLICIES (CREATED, NOT ENABLED) — additive pattern, Req 15.10
 -- ============================================================================
 -- IMPORTANT: This section CREATES policies only. RLS is NOT enabled here, so
 -- policies sit idle and production behavior is unchanged — identical to the
@@ -226,10 +294,10 @@ CREATE TRIGGER trg_clinics_updated_at
 -- with: ALTER TABLE public.<table> ENABLE ROW LEVEL SECURITY;
 --
 -- Policy intent:
---   cities / clinics            — global roles (ADMIN, MASTER_ADMIN) manage;
---                                 franchise users see their own clinic, core
---                                 users see Core Clinics (franchise_id IS NULL).
---   workload_snapshots          — global roles only (Req 13.4 / 13.5).
+--   businesses / cities / clinics — global roles (ADMIN, MASTER_ADMIN) manage;
+--                                   franchise users see their own clinic, core
+--                                   users see Core Clinics (franchise_id IS NULL).
+--   workload_snapshots            — global roles only (Req 13.4 / 13.5).
 --
 -- Reuses the franchise session helpers is_global_role() / current_franchise_id().
 -- They are defined defensively below only if absent, so this script is
@@ -279,6 +347,24 @@ BEGIN
   END IF;
 END
 $$;
+
+-- ─── businesses (reference data: global roles manage; everyone may read) ─────
+
+DROP POLICY IF EXISTS clinic_select_businesses ON public.businesses;
+CREATE POLICY clinic_select_businesses ON public.businesses
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS clinic_insert_businesses ON public.businesses;
+CREATE POLICY clinic_insert_businesses ON public.businesses
+  FOR INSERT WITH CHECK (is_global_role());
+
+DROP POLICY IF EXISTS clinic_update_businesses ON public.businesses;
+CREATE POLICY clinic_update_businesses ON public.businesses
+  FOR UPDATE USING (is_global_role());
+
+DROP POLICY IF EXISTS clinic_delete_businesses ON public.businesses;
+CREATE POLICY clinic_delete_businesses ON public.businesses
+  FOR DELETE USING (is_global_role());
 
 -- ─── cities (reference data: global roles manage; everyone may read) ─────────
 
@@ -340,6 +426,8 @@ CREATE POLICY clinic_delete_workload_snapshots ON public.workload_snapshots
 
 -- ============================================================================
 -- DONE. New tables and columns are additive and nullable; RLS policies are
--- created but not enabled. Run the seed migration (seed-madhapur-clinic.sql)
--- separately to populate the initial Core Clinic and backfill associations.
+-- created but not enabled. kitchens.business_id stays NULLABLE here — the seed
+-- (seed-madhapur-clinic.sql) backfills it to the Core Hyderabad Business and
+-- promotes it to NOT NULL within its own transaction. Run that seed separately
+-- to populate the initial Core Clinics and backfill associations.
 -- ============================================================================

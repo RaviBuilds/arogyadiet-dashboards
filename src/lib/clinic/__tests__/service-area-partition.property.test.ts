@@ -1,8 +1,8 @@
-// Feature: core-clinic-architecture, Property 10: Service areas partition by clinic
+// Feature: core-clinic-architecture, Property 12: Service areas partition by clinic
 //
 // Property tests for `groupServiceAreasByClinic` (src/lib/clinic/service-area-grouping.ts).
 //
-// Property 10: Service areas partition by clinic
+// Property 12: Service areas partition by clinic
 //   For any set of service-area records, grouping them by clinic produces a
 //   partition: the union of all clinic groups equals the input set, and the
 //   groups are pairwise disjoint (each pincode appears under exactly one
@@ -54,7 +54,7 @@ function rowKey(row: ServiceAreaRow): string {
 
 // ─── Property Tests ──────────────────────────────────────────────────────────
 
-describe("Property 10: Service areas partition by clinic", () => {
+describe("Property 12: Service areas partition by clinic", () => {
   it("union of all groups is a permutation of the input set", () => {
     fc.assert(
       fc.property(arbServiceAreaRows, (rows) => {

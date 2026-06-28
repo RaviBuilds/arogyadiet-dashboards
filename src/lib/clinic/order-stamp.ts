@@ -1,65 +1,48 @@
 // src/lib/clinic/order-stamp.ts
-// Pure, side-effect-free helpers for the order/batch clinic stamp
-// (core-clinic-architecture, Requirement 19). This module performs NO
-// Supabase / network / IO work so it can be unit- and property-tested in
-// isolation.
+// Pure, side-effect-free clinic-stamp logic for Delivery_Orders and
+// Delivery_Batches (core-clinic-architecture, Requirement 19 / 22.3). These
+// functions perform NO Supabase / network / IO work so they can be unit- and
+// property-tested in isolation.
 //
-// Delivery orders and batches each carry an IMMUTABLE `clinic_id` recorded at
-// the moment they are created. This stamp is the authoritative basis for
-// per-clinic workload snapshots, routing, and delivery history — it must never
-// drift when a customer later moves between clinics (Req 19.6, 19.7).
+// Two clinic stamps are recorded once, at creation time, and are then immutable:
+//   - Order_Clinic_Stamp on `delivery_orders.clinic_id`  — set from the
+//     customer's DELIVERY address resolution for that delivery day (Req 19.2 /
+//     22.3). This is the value the Conflict_Clinic flow compares against the
+//     customer's Primary_Address clinic.
+//   - Order_Clinic_Stamp on `delivery_batches.clinic_id` — set from the rider's
+//     linked clinic for the routing scope at routing time (Req 19.3).
 //
-//   - Order stamp (creation-time): the customer's resolved clinic for the
-//     delivery address at the time the order is created (Req 19.2). When the
-//     address resolves to no clinic, the stamp is `null` and order creation is
-//     NOT blocked (Req 19.8).
-//   - Batch stamp (routing-time): the routing rider's linked clinic for that
-//     routing scope (Req 19.3). When the rider has no linked clinic, the stamp
-//     is `null` and batch creation is NOT blocked (Req 19.9).
-//   - Immutability: once a stamp is set (non-null) it can never change
-//     (Req 19.4, 19.5). The {@link assertStampImmutable} guard is used by every
-//     order/batch writer to reject any attempt to mutate an already-set stamp.
-//
-// The actual persistence (the INSERT that creates the order/batch) happens
-// within the same write that creates the row — these helpers only resolve the
-// value to stamp and guard against later mutation.
+// Neither stamp blocks creation: an unresolved delivery address (Req 19.8) or an
+// unlinked rider (Req 19.9) yields a `null` stamp rather than an error.
 
 /**
- * Resolve the clinic stamp for a delivery order at creation time.
+ * Resolve the Order_Clinic_Stamp for a Delivery_Order at creation time
+ * (Requirement 19.2 / 22.3).
  *
- * Pure. The order stamp is the customer's resolved clinic for the delivery
- * address at creation time. The caller supplies the already-resolved clinic id
- * stamped on the delivery address (`addresses.clinic_id`), which was computed
- * by the pincode resolver / customer stamp at signup or address-update. This
- * helper returns that value as-is, or `null` when the address resolves to no
- * clinic — in which case order creation proceeds with a `null` stamp and is
- * never blocked.
+ * The stamp is the clinic the customer's delivery address for that day resolves
+ * to. When the delivery address does not resolve to any clinic the stamp is
+ * `null` and order creation is NOT blocked (Requirement 19.8).
  *
- * Validates: Requirements 19.2, 19.8.
- *
- * @param addressClinicId the clinic stamped on the delivery address, or `null`
- *   when the address does not resolve to a clinic
- * @returns the clinic id to stamp on the order, or `null` when unresolved
+ * @param deliveryAddressClinicId The clinic the delivery address resolved to, or
+ *   `null` when it resolves to no clinic.
+ * @returns The clinic id to stamp, or `null` when unresolved.
  */
 export function resolveOrderClinicStamp(
-  addressClinicId: string | null
+  deliveryAddressClinicId: string | null
 ): string | null {
-  return addressClinicId;
+  return deliveryAddressClinicId;
 }
 
 /**
- * Resolve the clinic stamp for a delivery batch at routing time.
+ * Resolve the Order_Clinic_Stamp for a Delivery_Batch at routing time
+ * (Requirement 19.3).
  *
- * Pure. The batch stamp is the routing rider's linked clinic for that routing
- * scope. The caller supplies the rider's currently linked clinic id
- * (`rider_profiles.clinic_id`). This helper returns that value as-is, or `null`
- * when the rider has no linked clinic — in which case batch creation proceeds
- * with a `null` stamp and is never blocked.
+ * The stamp is the rider's linked clinic for the routing scope. When the rider
+ * has no linked clinic the stamp is `null` and batch creation is NOT blocked
+ * (Requirement 19.9).
  *
- * Validates: Requirements 19.3, 19.9.
- *
- * @param riderClinicId the rider's linked clinic id, or `null` when unlinked
- * @returns the clinic id to stamp on the batch, or `null` when unlinked
+ * @param riderClinicId The rider's linked clinic, or `null` when unlinked.
+ * @returns The clinic id to stamp, or `null` when the rider has no linked clinic.
  */
 export function resolveBatchClinicStamp(
   riderClinicId: string | null
@@ -67,51 +50,39 @@ export function resolveBatchClinicStamp(
   return riderClinicId;
 }
 
-/**
- * The result of an immutability check on a clinic stamp. `ok: true` means the
- * write is allowed (a first-time set, or a no-op re-write of the same value);
- * `ok: false` with `reason: "immutable"` means the write would change an
- * already-set stamp and must be rejected, leaving the original value intact.
- */
-export type StampImmutabilityResult =
+/** Result of an immutability check on an order/batch clinic stamp. */
+export type StampImmutableResult =
   | { ok: true }
   | { ok: false; reason: "immutable" };
 
 /**
- * Guard the immutability of an order/batch clinic stamp (Req 19.4, 19.5).
+ * Immutability guard for an order/batch Order_Clinic_Stamp (Requirements 19.4,
+ * 19.5).
  *
- * Pure. Used by every order/batch writer before persisting a `clinic_id`:
+ * A stamp may only transition from unset (`null`) to a set value. This permits
+ * the single creation-time write while rejecting any later modification of an
+ * already-set stamp — including a change to a different value, a change back to
+ * `null`, or any other mutation. A no-op write that keeps an already-set stamp
+ * at its current value is allowed (it does not modify the value).
  *
- *   - When `current === null` the stamp has never been set, so setting it to
- *     any `incoming` value (including `null`) is allowed — returns `{ ok: true }`.
- *   - When the stamp is already set (`current !== null`):
- *       - if `incoming === current` the write is a no-op change and is allowed
- *         — returns `{ ok: true }`.
- *       - otherwise the write would change an already-set stamp and is rejected
- *         — returns `{ ok: false, reason: "immutable" }`, leaving the original
- *         value intact.
- *
- * Validates: Requirements 19.4, 19.5.
- *
- * @param current the stamp currently persisted on the order/batch (`null` when
- *   it has never been set)
- * @param incoming the stamp value the caller wants to write
+ * @param current The currently persisted stamp (`null` when unset).
+ * @param incoming The stamp value an operation is attempting to write.
+ * @returns `{ ok: true }` when the write is permitted; otherwise
+ *   `{ ok: false, reason: "immutable" }`.
  */
 export function assertStampImmutable(
   current: string | null,
   incoming: string | null
-): StampImmutabilityResult {
-  // First-time set: any incoming value is allowed when nothing is set yet.
+): StampImmutableResult {
+  // Unset -> set (or unset -> unset): the creation-time write is allowed.
   if (current === null) {
     return { ok: true };
   }
 
-  // Already set: only a no-op re-write of the identical value is permitted.
-  if (incoming === current) {
+  // Already set: only an identical no-op write is allowed; any change is rejected.
+  if (current === incoming) {
     return { ok: true };
   }
 
-  // Any attempt to change an already-set stamp is rejected; the original value
-  // is left intact by the caller.
   return { ok: false, reason: "immutable" };
 }

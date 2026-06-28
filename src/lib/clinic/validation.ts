@@ -14,7 +14,7 @@
 // surface can validate against its own declared bound while the persisted
 // column widths use the widest declared bound.
 
-import type { Clinic, ClinicCreateInput } from "@/types/clinic";
+import type { ClinicCreateInput } from "@/types/clinic";
 
 /** Latitude bounds (inclusive), per Requirements 3.6 / 14.2. */
 export const LATITUDE_MIN = -90;
@@ -26,6 +26,12 @@ export const LONGITUDE_MAX = 180;
 
 /** Maximum length for a city name (Requirement 1.1). */
 export const CITY_NAME_MAX = 100;
+
+/** Maximum length for a business name after trimming (Requirement 20.1). */
+export const BUSINESS_NAME_MAX = 100;
+
+/** The two valid Business_Type values (Requirement 20.1). */
+export const BUSINESS_TYPES = ["Core", "Franchise"] as const;
 
 /**
  * Canonical create bounds (Requirement 3.5/3.7) — the stricter domain bounds.
@@ -42,6 +48,47 @@ export const CLINIC_FORM_BOUNDS: ClinicLengthBounds = {
   nameMax: 200,
   addressMax: 500,
 };
+
+/**
+ * The per-field, per-reason failures returned by {@link validateBusinessInput}.
+ * Identifies the specific field that failed validation (Requirement 20.3).
+ */
+export type BusinessValidationError =
+  | { field: "name"; reason: "empty" | "too_long" }
+  | { field: "type"; reason: "invalid" };
+
+/**
+ * Validate a business create/edit input.
+ *
+ * Pure, side-effect-free. The name is trimmed before length checks
+ * (Requirement 20.1). Returns `[]` when the input is valid, otherwise returns
+ * one {@link BusinessValidationError} per offending field. A business is valid
+ * iff:
+ *   - name is non-empty after trimming and at most {@link BUSINESS_NAME_MAX}
+ *     characters, and
+ *   - type is exactly one of `Core` or `Franchise`.
+ *
+ * Validates: Requirements 20.1, 20.3, 20.4.
+ */
+export function validateBusinessInput(input: {
+  name: string;
+  type: string;
+}): BusinessValidationError[] {
+  const errors: BusinessValidationError[] = [];
+
+  const name = (input.name ?? "").trim();
+  if (name.length === 0) {
+    errors.push({ field: "name", reason: "empty" });
+  } else if (name.length > BUSINESS_NAME_MAX) {
+    errors.push({ field: "name", reason: "too_long" });
+  }
+
+  if (input.type !== "Core" && input.type !== "Franchise") {
+    errors.push({ field: "type", reason: "invalid" });
+  }
+
+  return errors;
+}
 
 /**
  * The per-field, per-reason failures returned by {@link validateClinicInput}.
@@ -187,7 +234,20 @@ export function isValidPincode(value: string): boolean {
 }
 
 /**
- * Classify a clinic as a Core Clinic.
+ * Same-city rule for clinic↔kitchen association and reassignment.
+ *
+ * Pure, side-effect-free. Returns `true` iff the Clinic's City equals the
+ * Kitchen's City, i.e. the association/reassignment is allowed. A Clinic may
+ * only be associated with (or reassigned to) a Kitchen in the same City.
+ *
+ * Validates: Requirements 2.10, 2.13, 2.14.
+ */
+export function sameCity(clinicCityId: string, kitchenCityId: string): boolean {
+  return clinicCityId === kitchenCityId;
+}
+
+/**
+ * Classify a clinic as a Core Clinic from its `franchise_id`.
  *
  * Pure, side-effect-free. A clinic is a Core Clinic if and only if its
  * `franchise_id` is `null` (i.e. it is not associated with any franchise).
@@ -196,8 +256,8 @@ export function isValidPincode(value: string): boolean {
  *
  * Validates: Requirements 3.4, 18.1.
  */
-export function isCoreClinic(clinic: Pick<Clinic, "franchise_id">): boolean {
-  return clinic.franchise_id === null;
+export function isCoreClinic(franchiseId: string | null): boolean {
+  return franchiseId === null;
 }
 
 /** Internal: a finite, present number (rejects null/undefined/NaN/Infinity). */

@@ -35,6 +35,13 @@ import {
 } from "@/actions/admin-actions/routingActions";
 import { SectionHeader } from "../core/SectionHeader";
 import FixedRiderAssignments from "./FixedRiderAssignments";
+import { ridersForSelectedClinic } from "@/lib/clinic/visibility";
+import {
+  ClinicSelectControl,
+  SelectClinicPrompt,
+  useClinicSelector,
+  type GetClinics,
+} from "./clinicSelector";
 
 const getISTDateString = (offsetDays = 0) => {
   const date = new Date();
@@ -93,6 +100,8 @@ export interface RoutingRider {
   fullName: string;
   employeeCode: string;
   assignedPincodes: string[];
+  /** Rider's linked Clinic — drives clinic-selector-first gating (Req 17). */
+  clinic_id: string | null;
 }
 
 type FixedAssignmentsInjectedProps = {
@@ -120,6 +129,12 @@ interface LiveRoutingBoardProps {
   ) => Promise<{ success: boolean; error?: string }>;
   /** Injected actions for the nested Fixed Rider Assignments panel. */
   fixedAssignmentsProps?: FixedAssignmentsInjectedProps;
+  /**
+   * When provided, enables clinic-selector-first mode (Req 17): no order/rider
+   * data is fetched or rendered until a clinic is selected, then only that
+   * clinic's riders are shown. Omitted by the franchise portal.
+   */
+  getClinics?: GetClinics;
 }
 
 export default function LiveRoutingBoard({
@@ -127,7 +142,16 @@ export default function LiveRoutingBoard({
   getData = getRoutingData,
   commit = commitRouteChanges,
   fixedAssignmentsProps,
+  getClinics,
 }: LiveRoutingBoardProps = {}) {
+  const {
+    selectorFirst,
+    clinicOptions,
+    clinicsLoading,
+    selectedClinicId,
+    setSelectedClinicId,
+  } = useClinicSelector(getClinics);
+
   const [initialOrders, setInitialOrders] = useState<RoutingOrder[]>([]);
   const [orders, setOrders] = useState<RoutingOrder[]>([]);
   const [riders, setRiders] = useState<RoutingRider[]>([]);
@@ -135,7 +159,7 @@ export default function LiveRoutingBoard({
   const [riderOneId, setRiderOneId] = useState<string>("");
   const [riderTwoId, setRiderTwoId] = useState<string>("");
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!selectorFirst);
   const [isPending, startTransition] = useTransition();
   const [draggedOrderId, setDraggedOrderId] = useState<string | null>(null);
 
@@ -143,13 +167,22 @@ export default function LiveRoutingBoard({
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
 
   const fetchBoardData = async () => {
+    // Selector-first gating: fetch nothing until a clinic is chosen
+    // (Req 17.1, 17.3, 17.5).
+    if (selectorFirst && !selectedClinicId) return;
+
     setIsLoading(true);
     const res = await getData(scope);
     setInitialOrders(res.orders);
     setOrders(res.orders);
     setRiders(res.riders);
 
-    const { riderOne, riderTwo } = pickDefaultRiders(res.orders, res.riders);
+    // Default-rider selection is drawn from the clinic-scoped riders so the
+    // board opens on the selected clinic's riders (Req 17.2, 17.4, 17.6).
+    const riderSet = selectorFirst
+      ? ridersForSelectedClinic(selectedClinicId || null, res.riders)
+      : res.riders;
+    const { riderOne, riderTwo } = pickDefaultRiders(res.orders, riderSet);
     setRiderOneId(riderOne);
     setRiderTwoId(riderTwo);
 
@@ -158,9 +191,25 @@ export default function LiveRoutingBoard({
 
   useEffect(() => {
     fetchBoardData();
-    // Re-fetch when the operations scope changes (admin selector).
+    // Re-fetch when the operations scope or selected clinic changes. Changing
+    // the clinic re-derives the board purely from the new selection so no stale
+    // riders/orders remain (Req 17.7).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope]);
+  }, [scope, selectedClinicId]);
+
+  // Riders actually shown: only the selected clinic's riders in selector-first
+  // mode (Req 17.2, 17.4, 17.6); empty until a clinic is chosen (Req 17.1).
+  const displayedRiders = selectorFirst
+    ? ridersForSelectedClinic(selectedClinicId || null, riders)
+    : riders;
+
+  // Changing the clinic discards any prior rider selection so nothing stale
+  // remains (Req 17.7). The board reloads via the effect above.
+  const handleClinicChange = (clinicId: string) => {
+    setSelectedClinicId(clinicId);
+    setRiderOneId("");
+    setRiderTwoId("");
+  };
 
   const unsavedChanges = orders.filter((o) => {
     const original = initialOrders.find((io) => io.id === o.id);
@@ -224,14 +273,13 @@ export default function LiveRoutingBoard({
     toast.info("Reverted all unsaved routing changes.");
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border rounded-xl bg-card shadow-sm">
-        <Loader2 className="h-8 w-8 animate-spin mb-4 text-primary" />
-        <p>Loading routing board data...</p>
-      </div>
-    );
-  }
+  // Selector-first gate: render only the selector + prompt until a clinic is
+  // selected (Req 17.1, 17.3, 17.5).
+  const gatePending = selectorFirst && !selectedClinicId;
+  // Selected clinic with zero riders → empty state (Req 17.8).
+  const noClinicRiders =
+    selectorFirst && !isLoading && displayedRiders.length === 0;
+  const showBoard = !gatePending && !isLoading && !noClinicRiders;
 
   const unassignedOrders = orders.filter((o) => o.assigned_rider_id === "");
 
@@ -240,7 +288,7 @@ export default function LiveRoutingBoard({
     setRiderFn: (id: string) => void,
     placeholder: string,
   ) => {
-    const rider = riders.find((r) => r.id === currentRiderId);
+    const rider = displayedRiders.find((r) => r.id === currentRiderId);
     const riderOrders = rider
       ? orders.filter((o) => o.assigned_rider_id === rider.id)
       : [];
@@ -257,7 +305,7 @@ export default function LiveRoutingBoard({
               <SelectValue placeholder={placeholder} />
             </SelectTrigger>
             <SelectContent>
-              {riders.map((r) => (
+              {displayedRiders.map((r) => (
                 <SelectItem
                   key={r.id}
                   value={r.id}
@@ -328,77 +376,125 @@ export default function LiveRoutingBoard({
           </p>
         </div>
 
-        <div className="flex items-center gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
-          {unsavedChanges.length > 0 && (
-            <Badge
-              variant="destructive"
-              className="animate-pulse bg-amber-500 hover:bg-amber-600"
-            >
-              {unsavedChanges.length} Unsaved Changes
-            </Badge>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
+          {selectorFirst && (
+            <ClinicSelectControl
+              clinicOptions={clinicOptions}
+              clinicsLoading={clinicsLoading}
+              selectedClinicId={selectedClinicId}
+              onSelect={handleClinicChange}
+              className="min-w-[220px]"
+            />
           )}
-          <Button
-            variant="outline"
-            onClick={handleRevert}
-            disabled={unsavedChanges.length === 0 || isPending}
-          >
-            <Undo2 className="h-4 w-4 mr-2" /> Revert
-          </Button>
 
-          {/* Changed onClick to open the modal instead of committing directly */}
-          <Button
-            onClick={() => setIsConfirmModalOpen(true)}
-            disabled={unsavedChanges.length === 0 || isPending}
-            className="bg-primary shadow-sm"
-          >
-            {isPending ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4 mr-2" />
-            )}
-            Confirm Re-Routes
-          </Button>
+          {showBoard && (
+            <div className="flex items-center gap-3">
+              {unsavedChanges.length > 0 && (
+                <Badge
+                  variant="destructive"
+                  className="animate-pulse bg-amber-500 hover:bg-amber-600"
+                >
+                  {unsavedChanges.length} Unsaved Changes
+                </Badge>
+              )}
+              <Button
+                variant="outline"
+                onClick={handleRevert}
+                disabled={unsavedChanges.length === 0 || isPending}
+              >
+                <Undo2 className="h-4 w-4 mr-2" /> Revert
+              </Button>
+
+              {/* Changed onClick to open the modal instead of committing directly */}
+              <Button
+                onClick={() => setIsConfirmModalOpen(true)}
+                disabled={unsavedChanges.length === 0 || isPending}
+                className="bg-primary shadow-sm"
+              >
+                {isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Confirm Re-Routes
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 3-Column Kanban Layout */}
-      <div className="flex flex-col lg:flex-row gap-4">
-        {/* Column 1: Unassigned (Narrow) */}
-        <div
-          className="w-full lg:w-[280px] flex-shrink-0 bg-muted/20 border border-dashed border-border rounded-xl p-3 flex flex-col h-[700px]"
-          onDragOver={handleDragOver}
-          onDrop={(e) => handleDrop(e, "")}
-        >
-          <div className="mb-3 px-2 flex justify-between items-center pb-2 border-b border-border/50">
-            <h3 className="font-semibold text-muted-foreground flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" /> Unassigned
-            </h3>
-            <Badge variant="secondary">{unassignedOrders.length}</Badge>
-          </div>
-          <div className="flex flex-col gap-3 h-full overflow-y-auto pr-1 pb-4">
-            {unassignedOrders.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-muted-foreground/50 text-sm italic">
-                All orders assigned!
+      {gatePending && (
+        <SelectClinicPrompt message="Select a clinic to view and re-route its riders' deliveries." />
+      )}
+
+      {!gatePending && isLoading && (
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border rounded-xl bg-card shadow-sm">
+          <Loader2 className="h-8 w-8 animate-spin mb-4 text-primary" />
+          <p>Loading routing board data...</p>
+        </div>
+      )}
+
+      {noClinicRiders && (
+        <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">
+          <Route className="mx-auto mb-3 h-10 w-10 opacity-40" />
+          <p className="font-medium">No riders for this clinic</p>
+          <p className="mt-1 text-sm">
+            This clinic has no active riders to route. Assign riders to this
+            clinic to begin.
+          </p>
+        </div>
+      )}
+
+      {showBoard && (
+        <>
+          {/* 3-Column Kanban Layout */}
+          <div className="flex flex-col lg:flex-row gap-4">
+            {/* Column 1: Unassigned (Narrow) */}
+            <div
+              className="w-full lg:w-[280px] flex-shrink-0 bg-muted/20 border border-dashed border-border rounded-xl p-3 flex flex-col h-[700px]"
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, "")}
+            >
+              <div className="mb-3 px-2 flex justify-between items-center pb-2 border-b border-border/50">
+                <h3 className="font-semibold text-muted-foreground flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" /> Unassigned
+                </h3>
+                <Badge variant="secondary">{unassignedOrders.length}</Badge>
               </div>
-            ) : (
-              unassignedOrders.map((order) => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                />
-              ))
-            )}
+              <div className="flex flex-col gap-3 h-full overflow-y-auto pr-1 pb-4">
+                {unassignedOrders.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-muted-foreground/50 text-sm italic">
+                    All orders assigned!
+                  </div>
+                ) : (
+                  unassignedOrders.map((order) => (
+                    <OrderCard
+                      key={order.id}
+                      order={order}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Column 2: Selected Rider 1 */}
+            {renderRiderColumn(riderOneId, setRiderOneId, "Select Rider One...")}
+
+            {/* Column 3: Selected Rider 2 */}
+            {renderRiderColumn(riderTwoId, setRiderTwoId, "Select Rider Two...")}
           </div>
-        </div>
 
-        {/* Column 2: Selected Rider 1 */}
-        {renderRiderColumn(riderOneId, setRiderOneId, "Select Rider One...")}
-
-        {/* Column 3: Selected Rider 2 */}
-        {renderRiderColumn(riderTwoId, setRiderTwoId, "Select Rider Two...")}
-      </div>
+          {/* Permanent customer -> rider overrides, managed inline below the board */}
+          <div className="pt-2 border-t border-dashed border-border/60">
+            <FixedRiderAssignments
+              onChanged={fetchBoardData}
+              {...fixedAssignmentsProps}
+            />
+          </div>
+        </>
+      )}
 
       {/* NEW: Confirmation Modal */}
       <Dialog open={isConfirmModalOpen} onOpenChange={setIsConfirmModalOpen}>
@@ -437,11 +533,6 @@ export default function LiveRoutingBoard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Permanent customer -> rider overrides, managed inline below the board */}
-      <div className="pt-2 border-t border-dashed border-border/60">
-        <FixedRiderAssignments onChanged={fetchBoardData} {...fixedAssignmentsProps} />
-      </div>
     </div>
   );
 }

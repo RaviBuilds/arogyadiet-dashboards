@@ -3,11 +3,19 @@
 import { useState } from "react";
 import { FranchiseSelector } from "@/shared/components/admin/core/FranchiseSelector";
 import { SubscriptionDashboard } from "@/shared/components/admin/subscriptions/SubscriptionDashboard";
+import type { ActiveSubscriptionData } from "@/shared/components/admin/customers/CustomerDashboard";
+
+interface SubscriptionRecord extends ActiveSubscriptionData {
+  franchise_id?: string | null;
+}
 
 interface Props {
   plans: any[];
   activeSubscriptions: any[];
   initialGlobalCoupons: any[];
+  subscriptionRecordsActive?: SubscriptionRecord[];
+  subscriptionRecordsPending?: SubscriptionRecord[];
+  subscriptionRecordsStopped?: SubscriptionRecord[];
 }
 
 /**
@@ -20,6 +28,9 @@ export function AdminSubscriptionsWrapper({
   plans,
   activeSubscriptions,
   initialGlobalCoupons,
+  subscriptionRecordsActive = [],
+  subscriptionRecordsPending = [],
+  subscriptionRecordsStopped = [],
 }: Props) {
   const [scope, setScope] = useState("core");
 
@@ -28,6 +39,11 @@ export function AdminSubscriptionsWrapper({
     scope === "core"
       ? activeSubscriptions.filter((s: any) => !s.franchise_id)
       : activeSubscriptions.filter((s: any) => s.franchise_id === scope);
+
+  const filterRecords = (records: SubscriptionRecord[]) =>
+    scope === "core"
+      ? records.filter((s) => !s.franchise_id)
+      : records.filter((s) => s.franchise_id === scope);
 
   return (
     <div className="space-y-4">
@@ -40,6 +56,9 @@ export function AdminSubscriptionsWrapper({
         activeSubscriptions={filteredSubs}
         initialGlobalCoupons={initialGlobalCoupons}
         scope={scope}
+        subscriptionRecordsActive={filterRecords(subscriptionRecordsActive)}
+        subscriptionRecordsPending={filterRecords(subscriptionRecordsPending)}
+        subscriptionRecordsStopped={filterRecords(subscriptionRecordsStopped)}
       />
     </div>
   );
