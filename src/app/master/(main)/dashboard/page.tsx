@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import OverviewShell from "./OverviewShell";
+import NetworkReportSection from "./NetworkReportSection";
 
 export const revalidate = 0;
 
@@ -18,6 +19,9 @@ export default function MasterOverviewPage() {
       <Suspense fallback={<OverviewSkeleton />}>
         <OverviewShell />
       </Suspense>
+
+      {/* Consolidated cross-franchise reporting (additive, Task 13.7 — Req 11.5–11.9) */}
+      <NetworkReportSection />
     </div>
   );
 }

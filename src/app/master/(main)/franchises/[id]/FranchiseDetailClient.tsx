@@ -206,7 +206,7 @@ export default function FranchiseDetailClient({
           <div className="grid grid-cols-2 gap-4">
             <DetailItem icon={Hash} label="Franchise ID" value={franchise.id.slice(0, 8) + "..."} mono />
             <DetailItem icon={Calendar} label="Status" value={franchise.status} badge statusStyle={statusStyle} />
-            <DetailItem icon={ChefHat} label="Kitchen" value={franchise.kitchen_id ? "Configured" : "Not assigned"} warn={!franchise.kitchen_id} />
+            <DetailItem icon={ChefHat} label="Group" value={franchise.group_id ? "Assigned" : "Not assigned"} warn={!franchise.group_id} />
             <DetailItem icon={User} label="Owner" value={ownerName ?? "Not assigned"} warn={!ownerName} />
           </div>
         </div>

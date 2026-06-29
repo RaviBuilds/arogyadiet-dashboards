@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
 import { applyOperationsScope, type OperationsScope } from "@/lib/franchise/scope";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 export interface FixedAssignmentRow {
   id: string;
@@ -199,6 +200,8 @@ export async function upsertFixedAssignment(
   riderId: string,
   note?: string,
 ) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   if (!customerProfileId || !riderId) {
     return { success: false, error: "Customer and rider are both required." };
   }
@@ -234,6 +237,8 @@ export async function upsertFixedAssignment(
  * assignment for this customer.
  */
 export async function removeFixedAssignment(id: string) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
 
   const { error } = await supabaseAdmin

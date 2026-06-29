@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/logger";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 import {
   adminCreateCustomerAction,
   type AdminCreateCustomerData,
@@ -125,6 +126,20 @@ export async function downloadBulkMigrationWorkbookAction() {
 export async function bulkImportCustomersAction(
   fileBase64: string,
 ): Promise<BulkImportResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) {
+    return {
+      success: false,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      validationErrors: [],
+      results: [
+        { row: 0, success: false, identifier: "access", message: gate.error },
+      ],
+    };
+  }
+
   const buffer = Buffer.from(fileBase64, "base64");
   const rawRows = parseSpreadsheetBuffer(buffer.buffer.slice(
     buffer.byteOffset,
@@ -314,6 +329,20 @@ function buildSubscriptionPayload(
 export async function bulkImportSubscriptionsAction(
   fileBase64: string,
 ): Promise<BulkImportResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) {
+    return {
+      success: false,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      validationErrors: [],
+      results: [
+        { row: 0, success: false, identifier: "access", message: gate.error },
+      ],
+    };
+  }
+
   const { planCodes, meals } = await loadReferenceData();
   const mealByCode = new Map(meals.map((m) => [m.code.toUpperCase(), m.id]));
 

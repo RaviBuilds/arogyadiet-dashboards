@@ -14,7 +14,10 @@
 -- What it does, in order, within one transaction:
 --   1. Move the service area:
 --        UPDATE rider_service_areas SET clinic_id = p_to_clinic
---        WHERE pincode = p_pincode AND clinic_id = p_from_clinic
+--        WHERE pincode = p_pincode AND clinic_id IS NOT DISTINCT FROM p_from_clinic
+--      (`IS NOT DISTINCT FROM` also matches a NULL source, so passing
+--       p_from_clinic = NULL performs the INITIAL assignment of a clinic-less
+--       pincode through this same atomic path.)
 --   2. Reassign matching customers (BEFORE addresses are re-stamped, so the
 --      address scope still matches the source clinic). Keyed on the customer's
 --      PRIMARY address (is_primary = true):
@@ -75,10 +78,13 @@ BEGIN
   END IF;
 
   -- 1. Move the service-area association from source to destination clinic.
+  --    `IS NOT DISTINCT FROM` matches a NULL source clinic too, so this same
+  --    path also performs the INITIAL assignment of a clinic-less pincode
+  --    (p_from_clinic = NULL) atomically with the customer/address re-stamp.
   UPDATE public.rider_service_areas
      SET clinic_id = p_to_clinic
    WHERE pincode = p_pincode
-     AND clinic_id = p_from_clinic;
+     AND clinic_id IS NOT DISTINCT FROM p_from_clinic;
 
   -- 2. Reassign the affected customers and capture the count. Scoped to the
   --    source clinic so only genuinely-affected customers move, and keyed on the
@@ -89,13 +95,13 @@ BEGIN
   WITH affected AS (
     UPDATE public.customer_profiles cp
        SET clinic_id = p_to_clinic
-     WHERE cp.clinic_id = p_from_clinic
+     WHERE cp.clinic_id IS NOT DISTINCT FROM p_from_clinic
        AND cp.id IN (
          SELECT a.customer_profile_id
            FROM public.addresses a
           WHERE a.is_primary = true
             AND a.pincode = p_pincode
-            AND a.clinic_id = p_from_clinic
+            AND a.clinic_id IS NOT DISTINCT FROM p_from_clinic
             AND a.customer_profile_id IS NOT NULL
        )
     RETURNING cp.id
@@ -110,7 +116,7 @@ BEGIN
      SET clinic_id = p_to_clinic
    WHERE is_primary = true
      AND pincode = p_pincode
-     AND clinic_id = p_from_clinic;
+     AND clinic_id IS NOT DISTINCT FROM p_from_clinic;
 
   -- NOTE: delivery_orders.clinic_id / delivery_batches.clinic_id are NEVER
   -- touched here — order/batch stamps are immutable creation-time history (Req 19.4).

@@ -155,7 +155,12 @@ export async function assertGroupAccess(
   group: OperationsGroup,
 ): Promise<AccessConfiguration> {
   const { roleCode, config } = await getCurrentAdminContext();
-  if (roleCode !== "ADMIN") throw new GroupAccessDeniedError(group, false);
+  // MASTER_ADMIN is the super-admin and is never constrained by the ADMIN
+  // group model (Req 13.5 — its access is unchanged). Its resolved config is
+  // full, so the group check below passes.
+  if (roleCode !== "ADMIN" && roleCode !== "MASTER_ADMIN") {
+    throw new GroupAccessDeniedError(group, false);
+  }
   if (!hasGroupAccess(config, group)) {
     throw new GroupAccessDeniedError(group, false);
   }
@@ -172,10 +177,42 @@ export async function assertGroupManage(
   group: OperationsGroup,
 ): Promise<AccessConfiguration> {
   const { roleCode, config } = await getCurrentAdminContext();
-  if (roleCode !== "ADMIN") throw new GroupAccessDeniedError(group, false);
+  // MASTER_ADMIN passes as full access (Req 13.5); its config is full so
+  // canManageGroup returns true below.
+  if (roleCode !== "ADMIN" && roleCode !== "MASTER_ADMIN") {
+    throw new GroupAccessDeniedError(group, false);
+  }
   if (canManageGroup(config, group)) return config;
   // Distinguish view-only (has access, no write) from no-access.
   throw new GroupAccessDeniedError(group, hasGroupAccess(config, group));
+}
+
+/**
+ * Result-style wrapper around {@link assertGroupManage} for server actions that
+ * return an `ActionResult`-shaped value. Returns `{ ok: true }` when the caller
+ * may write to `group`, otherwise `{ ok: false, error }` with a user-facing
+ * message (read-only vs no-access). Callers do:
+ *
+ *   const gate = await checkGroupManage("customers");
+ *   if (!gate.ok) return { success: false, error: gate.error };
+ */
+export async function checkGroupManage(
+  group: OperationsGroup,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await assertGroupManage(group);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof GroupAccessDeniedError) {
+      return {
+        ok: false,
+        error: err.readOnly
+          ? "You have read-only access to this section."
+          : "You do not have permission to perform this action.",
+      };
+    }
+    throw err;
+  }
 }
 
 /**
@@ -190,7 +227,9 @@ export async function guardAdminGroup(
   group: OperationsGroup,
 ): Promise<AccessConfiguration> {
   const { roleCode, config } = await getCurrentAdminContext();
-  if (roleCode !== "ADMIN") redirect("/unauthorized");
+  if (roleCode !== "ADMIN" && roleCode !== "MASTER_ADMIN") {
+    redirect("/unauthorized");
+  }
   if (!hasGroupAccess(config, group)) redirect(landingRouteFor(config.level));
   return config;
 }

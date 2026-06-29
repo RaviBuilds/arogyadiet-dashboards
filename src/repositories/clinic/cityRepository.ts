@@ -10,7 +10,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { City } from "@/types/clinic";
 
-const CITY_COLUMNS = "id, name, created_at, updated_at";
+const CITY_COLUMNS = "id, name, business_id, created_at, updated_at";
 
 /**
  * List all cities ordered by name (case-insensitive ascending).

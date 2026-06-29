@@ -25,7 +25,7 @@ import {
   updateKitchen,
   deleteKitchen,
 } from "@/actions/master-actions/kitchenActions";
-import type { City, Kitchen } from "@/types/clinic";
+import type { Business, City, Kitchen } from "@/types/clinic";
 
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -59,29 +59,27 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 
-// Master-specific kitchen form schema (Req 2.5, 2.6, 14.7).
+// Master-specific kitchen form schema (Req 2.4, 2.5, 2.8, 14.7): a name, a
+// required Business, and a required City — and explicitly NO geo/address fields.
 const kitchenFormSchema = z.object({
   name: z
     .string()
     .trim()
     .min(1, "Kitchen name is required")
     .max(200, "Kitchen name cannot exceed 200 characters"),
+  business_id: z.string().min(1, "A business association is required"),
   city_id: z.string().min(1, "A city association is required"),
-  address_text: z
-    .string()
-    .trim()
-    .max(255, "Address cannot exceed 255 characters")
-    .optional(),
 });
 
 type KitchenFormInput = z.infer<typeof kitchenFormSchema>;
 
 interface KitchenManagerProps {
   kitchens: Kitchen[];
+  businesses: Business[];
   cities: City[];
 }
 
-export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
+export function KitchenManager({ kitchens, businesses, cities }: KitchenManagerProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -89,28 +87,32 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
   const [editTarget, setEditTarget] = useState<Kitchen | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Kitchen | null>(null);
 
+  const businessNameById = new Map(businesses.map((b) => [b.id, b.name]));
   const cityNameById = new Map(cities.map((c) => [c.id, c.name]));
+
+  // Default the Business when exactly one exists (the common Core case).
+  const defaultBusinessId = businesses.length === 1 ? businesses[0].id : "";
 
   const createForm = useForm<KitchenFormInput>({
     resolver: zodResolver(kitchenFormSchema),
-    defaultValues: { name: "", city_id: "", address_text: "" },
+    defaultValues: { name: "", business_id: defaultBusinessId, city_id: "" },
   });
 
   const editForm = useForm<KitchenFormInput>({
     resolver: zodResolver(kitchenFormSchema),
-    defaultValues: { name: "", city_id: "", address_text: "" },
+    defaultValues: { name: "", business_id: defaultBusinessId, city_id: "" },
   });
 
   const openCreate = () => {
-    createForm.reset({ name: "", city_id: "", address_text: "" });
+    createForm.reset({ name: "", business_id: defaultBusinessId, city_id: "" });
     setCreateOpen(true);
   };
 
   const openEdit = (kitchen: Kitchen) => {
     editForm.reset({
       name: kitchen.name,
+      business_id: kitchen.business_id ?? "",
       city_id: kitchen.city_id ?? "",
-      address_text: kitchen.address_text ?? "",
     });
     setEditTarget(kitchen);
   };
@@ -120,7 +122,7 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
     field: string | undefined,
     error: string
   ) => {
-    if (field === "name" || field === "city_id" || field === "address_text") {
+    if (field === "name" || field === "business_id" || field === "city_id") {
       form.setError(field, { message: error });
     }
     toast.error(error);
@@ -130,8 +132,8 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
     startTransition(async () => {
       const result = await createKitchen({
         name: values.name,
+        business_id: values.business_id,
         city_id: values.city_id,
-        address_text: values.address_text || null,
       });
       if (result.success) {
         toast.success(`Kitchen "${values.name}" created.`);
@@ -148,8 +150,8 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
     startTransition(async () => {
       const result = await updateKitchen(editTarget.id, {
         name: values.name,
+        business_id: values.business_id,
         city_id: values.city_id,
-        address_text: values.address_text || null,
       });
       if (result.success) {
         toast.success("Kitchen updated.");
@@ -175,7 +177,14 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
     });
   };
 
+  const noBusinesses = businesses.length === 0;
   const noCities = cities.length === 0;
+  const createDisabled = noBusinesses || noCities;
+  const createDisabledReason = noBusinesses
+    ? "Add a business first"
+    : noCities
+      ? "Add a city first"
+      : undefined;
 
   return (
     <Card>
@@ -188,8 +197,8 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
           size="sm"
           className="gap-1.5"
           onClick={openCreate}
-          disabled={noCities}
-          title={noCities ? "Add a city first" : undefined}
+          disabled={createDisabled}
+          title={createDisabledReason}
         >
           <Plus className="h-4 w-4" />
           Add Kitchen
@@ -212,7 +221,11 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
                     {kitchen.name}
                   </p>
                   <p className="text-xs text-slate-500">
-                    City:{" "}
+                    Business:{" "}
+                    {kitchen.business_id
+                      ? businessNameById.get(kitchen.business_id) ?? "Unknown"
+                      : "— Unassigned"}
+                    {" · City: "}
                     {kitchen.city_id
                       ? cityNameById.get(kitchen.city_id) ?? "Unknown"
                       : "— Unassigned"}
@@ -250,7 +263,7 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
           </DialogHeader>
           <Form {...createForm}>
             <form onSubmit={onCreate} className="space-y-4">
-              <KitchenFields form={createForm} cities={cities} />
+              <KitchenFields form={createForm} businesses={businesses} cities={cities} />
               <DialogFooter>
                 <DialogClose asChild>
                   <Button type="button" variant="outline" disabled={isPending}>
@@ -277,7 +290,7 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
           </DialogHeader>
           <Form {...editForm}>
             <form onSubmit={onEdit} className="space-y-4">
-              <KitchenFields form={editForm} cities={cities} />
+              <KitchenFields form={editForm} businesses={businesses} cities={cities} />
               <DialogFooter>
                 <DialogClose asChild>
                   <Button type="button" variant="outline" disabled={isPending}>
@@ -325,9 +338,11 @@ export function KitchenManager({ kitchens, cities }: KitchenManagerProps) {
 
 function KitchenFields({
   form,
+  businesses,
   cities,
 }: {
   form: ReturnType<typeof useForm<KitchenFormInput>>;
+  businesses: Business[];
   cities: City[];
 }) {
   return (
@@ -341,6 +356,30 @@ function KitchenFields({
             <FormControl>
               <Input placeholder="e.g. Central Kitchen" {...field} />
             </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name="business_id"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Business</FormLabel>
+            <Select value={field.value} onValueChange={field.onChange}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a business" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                {businesses.map((business) => (
+                  <SelectItem key={business.id} value={business.id}>
+                    {business.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <FormMessage />
           </FormItem>
         )}
@@ -365,23 +404,6 @@ function KitchenFields({
                 ))}
               </SelectContent>
             </Select>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-      <FormField
-        control={form.control}
-        name="address_text"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Address (optional)</FormLabel>
-            <FormControl>
-              <Input
-                placeholder="Street address"
-                {...field}
-                value={field.value ?? ""}
-              />
-            </FormControl>
             <FormMessage />
           </FormItem>
         )}

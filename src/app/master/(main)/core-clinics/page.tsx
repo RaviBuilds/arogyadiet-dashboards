@@ -11,6 +11,7 @@ import { CityManager } from "@/shared/components/master/core-clinics/CityManager
 import { KitchenManager } from "@/shared/components/master/core-clinics/KitchenManager";
 import { ClinicManager } from "@/shared/components/master/core-clinics/ClinicManager";
 import {
+  listBusinesses,
   listCities,
   listKitchens,
   listClinics,
@@ -19,7 +20,8 @@ import {
 export const revalidate = 0;
 
 export default async function CoreClinicsPage() {
-  const [cities, kitchens, clinics] = await Promise.all([
+  const [businesses, cities, kitchens, clinics] = await Promise.all([
+    listBusinesses(),
     listCities(),
     listKitchens(),
     listClinics(),
@@ -34,8 +36,12 @@ export default async function CoreClinicsPage() {
       />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <CityManager cities={cities} />
-        <KitchenManager kitchens={kitchens} cities={cities} />
+        <CityManager cities={cities} businesses={businesses} />
+        <KitchenManager
+          kitchens={kitchens}
+          businesses={businesses}
+          cities={cities}
+        />
         <ClinicManager clinics={clinics} kitchens={kitchens} />
       </div>
     </div>

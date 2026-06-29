@@ -11,6 +11,7 @@ import {
 } from "@/lib/holidays";
 import { revalidatePath } from "next/cache";
 import { endOfMonth, format, startOfMonth } from "date-fns";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 const SETUP_HINT =
   "Run scripts/create-holidays-table.sql in the Supabase SQL Editor, then reload this page.";
@@ -118,6 +119,8 @@ export async function saveHolidaysForMonth(
   entries: HolidayDayEntry[],
   scope?: string | null,
 ): Promise<{ success: true } | { success: false; error: string }> {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   const franchiseId = normalizeScope(scope);
 

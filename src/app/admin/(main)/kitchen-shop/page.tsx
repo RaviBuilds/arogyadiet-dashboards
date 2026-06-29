@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import { guardAdminPage } from "@/lib/auth/adminAccess";
+import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 export default async function KitchenShopPage() {
-  await guardAdminPage("operations");
+  await guardAdminGroup("shop_products");
   redirect("/kitchen-shop/inventory");
 }

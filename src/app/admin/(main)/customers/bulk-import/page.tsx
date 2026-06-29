@@ -1,8 +1,10 @@
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { BulkMigrationClient } from "@/shared/components/admin/customers/BulkMigrationClient";
 import { getBulkMigrationReferenceAction } from "@/actions/admin-actions/bulkImportActions";
+import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 export default async function BulkImportPage() {
+  await guardAdminGroup("customers");
   const reference = await getBulkMigrationReferenceAction();
 
   return (

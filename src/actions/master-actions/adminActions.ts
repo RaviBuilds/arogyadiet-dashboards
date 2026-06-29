@@ -10,11 +10,34 @@ import {
   ACCESS_LEVEL_LABELS,
   resolveAccessLevel,
   landingRouteFor,
+  validateOperationsAccessInput,
   type AdminAccessLevel,
+  type OperationsAccess,
 } from "@/lib/auth/adminAccessCore";
 
 /** Zod schema rejecting any value outside the permitted access-level set. */
 const accessLevelSchema = z.enum(ADMIN_ACCESS_LEVELS);
+
+/**
+ * Resolve the per-group operations access to persist for a given level.
+ * Local (non-exported) helper — a `"use server"` file may only export async
+ * functions. Returns the JSONB value to store (`OperationsAccess` for the
+ * `operations` level, otherwise `null`) or a validation error.
+ */
+function resolveOperationsAccessForLevel(
+  level: AdminAccessLevel,
+  operationsAccess: unknown,
+):
+  | { ok: true; value: OperationsAccess | null }
+  | { ok: false; error: string } {
+  if (level !== "operations") {
+    // inventory / inventory_operations carry no per-group config (Req 10.3, 12.5).
+    return { ok: true, value: null };
+  }
+  const validation = validateOperationsAccessInput(operationsAccess);
+  if (!validation.ok) return { ok: false, error: validation.error };
+  return { ok: true, value: validation.value };
+}
 
 export async function getAdminUsers() {
   const supabaseAdmin = createAdminClient();
@@ -22,7 +45,7 @@ export async function getAdminUsers() {
   const { data, error } = await supabaseAdmin
     .from("users")
     .select(
-      "id, auth_user_id, full_name, email, mobile, is_active, created_at, admin_access_level, roles(code)",
+      "id, auth_user_id, full_name, email, mobile, is_active, created_at, admin_access_level, admin_operations_access, roles(code)",
     )
     .eq("roles.code", "ADMIN")
     .not("roles", "is", null)
@@ -51,6 +74,7 @@ export async function createAdminUser(formData: {
   mobile: string;
   password: string;
   accessLevel?: string;
+  operationsAccess?: OperationsAccess;
 }) {
   const supabaseAdmin = createAdminClient();
 
@@ -64,6 +88,14 @@ export async function createAdminUser(formData: {
     }
     accessLevel = parsed.data;
   }
+
+  // Resolve + validate the per-group operations config (Req 4.2, 4.3, 5.6, 10.3).
+  const opsResolved = resolveOperationsAccessForLevel(
+    accessLevel,
+    formData.operationsAccess,
+  );
+  if (!opsResolved.ok) return { success: false, error: opsResolved.error };
+  const operationsAccessValue = opsResolved.value;
 
   // Check for existing email
   const { data: existing } = await supabaseAdmin
@@ -93,6 +125,7 @@ export async function createAdminUser(formData: {
           full_name: formData.fullName,
           mobile: formData.mobile || null,
           admin_access_level: accessLevel,
+          admin_operations_access: operationsAccessValue,
           force_password_change: true,
           updated_at: new Date().toISOString(),
         })
@@ -146,6 +179,7 @@ export async function createAdminUser(formData: {
     email: formData.email,
     mobile: formData.mobile || null,
     admin_access_level: accessLevel,
+    admin_operations_access: operationsAccessValue,
     is_active: true,
     is_email_verified: true,
   });
@@ -176,6 +210,7 @@ export async function updateAdminUser(
     fullName: string;
     mobile: string;
     accessLevel?: string;
+    operationsAccess?: OperationsAccess;
   },
 ) {
   const supabaseAdmin = createAdminClient();
@@ -204,12 +239,21 @@ export async function updateAdminUser(
     nextLevel = parsed.data;
   }
 
+  // Resolve + validate the per-group operations config for the resulting level.
+  // Changing away from `operations` clears the stored per-group entries (Req 12.5).
+  const opsResolved = resolveOperationsAccessForLevel(
+    nextLevel,
+    formData.operationsAccess,
+  );
+  if (!opsResolved.ok) return { success: false, error: opsResolved.error };
+
   const { error } = await supabaseAdmin
     .from("users")
     .update({
       full_name: formData.fullName,
       mobile: formData.mobile || null,
       admin_access_level: nextLevel,
+      admin_operations_access: opsResolved.value,
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId);

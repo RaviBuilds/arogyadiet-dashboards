@@ -1,12 +1,12 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { AdminCustomersWrapper } from "./AdminCustomersWrapper";
-import { guardAdminPage } from "@/lib/auth/adminAccess";
+import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 export const revalidate = false;
 
 export default async function CustomersPage() {
-  await guardAdminPage("operations");
+  await guardAdminGroup("customers");
   const supabaseAdmin = createAdminClient();
 
   const { data: rawCustomers, error } = await supabaseAdmin.from("customer_profiles")

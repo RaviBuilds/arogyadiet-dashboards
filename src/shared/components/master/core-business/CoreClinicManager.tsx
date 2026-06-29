@@ -38,6 +38,7 @@ import {
 } from "@/validations/clinic";
 import type { Clinic, Kitchen } from "@/types/clinic";
 
+import { ClinicLocationPicker } from "./ClinicLocationPicker";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Textarea } from "@/shared/components/ui/textarea";
@@ -298,7 +299,7 @@ export function CoreClinicManager({ clinics, kitchens }: CoreClinicManagerProps)
 
       {/* Create */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Core Clinic</DialogTitle>
           </DialogHeader>
@@ -325,7 +326,7 @@ export function CoreClinicManager({ clinics, kitchens }: CoreClinicManagerProps)
         open={editTarget !== null}
         onOpenChange={(open) => !open && setEditTarget(null)}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Core Clinic</DialogTitle>
           </DialogHeader>
@@ -463,6 +464,7 @@ function CoreClinicFields({
           </FormItem>
         )}
       />
+      <ClinicLocationPicker form={form} />
       <div className="grid grid-cols-2 gap-3">
         <FormField
           control={form.control}

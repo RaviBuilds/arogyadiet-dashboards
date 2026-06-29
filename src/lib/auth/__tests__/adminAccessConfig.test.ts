@@ -17,6 +17,7 @@ import {
   type OperationsAccess,
   type AccessConfiguration,
   resolveAccessConfiguration,
+  validateOperationsAccessInput,
   classifyOperationsGroup,
   classifyAdminPath,
   hasGroupAccess,
@@ -273,5 +274,88 @@ describe("Property 7: path classification boundary-safety", () => {
       ),
       { numRuns: 200 },
     );
+  });
+});
+
+// ─── Property 8: Serialization round-trip ─────────────────────────────────────
+
+describe("Property 8: serialization round-trip", () => {
+  it("resolves a JSON-stringified operations map back to an equal map", () => {
+    fc.assert(
+      fc.property(arbOperationsAccess, (groups) => {
+        const json = JSON.stringify(groups);
+        const config = resolveAccessConfiguration("operations", json);
+        expect(config.level).toBe("operations");
+        expect(config.groups).toEqual(groups);
+      }),
+      { numRuns: 300 },
+    );
+  });
+
+  it("resolves a pre-parsed operations object back to an equal map", () => {
+    fc.assert(
+      fc.property(arbOperationsAccess, (groups) => {
+        const config = resolveAccessConfiguration("operations", groups);
+        expect(config.groups).toEqual(groups);
+      }),
+      { numRuns: 300 },
+    );
+  });
+});
+
+// ─── Property 9: Validation rejects empties/invalids ──────────────────────────
+
+describe("Property 9: validation rejects empties/invalids", () => {
+  it("accepts every non-empty well-formed map verbatim", () => {
+    fc.assert(
+      fc.property(
+        arbOperationsAccess.filter((g) => Object.keys(g).length > 0),
+        (groups) => {
+          const result = validateOperationsAccessInput(groups);
+          expect(result.ok).toBe(true);
+          if (result.ok) expect(result.value).toEqual(groups);
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+
+  it("rejects an empty selection", () => {
+    expect(validateOperationsAccessInput({}).ok).toBe(false);
+  });
+
+  it("rejects maps containing an unknown group key", () => {
+    fc.assert(
+      fc.property(
+        arbOperationsAccess,
+        fc.stringMatching(/^[a-z_]{1,15}$/).filter((k) => !(OPERATIONS_GROUPS as readonly string[]).includes(k)),
+        arbPermission,
+        (groups, badKey, perm) => {
+          const result = validateOperationsAccessInput({ ...groups, [badKey]: perm });
+          expect(result.ok).toBe(false);
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+
+  it("rejects maps containing an invalid permission value", () => {
+    fc.assert(
+      fc.property(
+        arbGroup,
+        fc.anything().filter((v) => v !== "manage" && v !== "view"),
+        (group, badPerm) => {
+          const result = validateOperationsAccessInput({ [group]: badPerm });
+          expect(result.ok).toBe(false);
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+
+  it("rejects non-object inputs", () => {
+    for (const bad of [null, undefined, [], "x", 5, true]) {
+      expect(validateOperationsAccessInput(bad as unknown).ok).toBe(false);
+    }
   });
 });

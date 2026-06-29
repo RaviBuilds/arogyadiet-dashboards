@@ -191,8 +191,7 @@ Permission rules:
 
 - `getCurrentAdminContext()` additionally selects `admin_operations_access` and returns a resolved `config: AccessConfiguration` (keeping `accessLevel` for back-compat).
 - New guards:
-  - `assertGroupAccess(group)` — throws `AccessDeniedError` when the caller is not an ADMIN or `!hasGroupAccess(config, group)`. For read-capable actions.
-  - `assertGroupManage(group)` — throws when not ADMIN, or `!canManageGroup(config, group)` (covers both "group not granted" and "view-only"). For mutating actions.
+  - `assertGroupAccess(group)` — throws `AccessDeniedError` when the caller is not an ADMIN or `!hasGroupAccess(config, group)`. For read-capable actions.  - `assertGroupManage(group)` — throws when not ADMIN, or `!canManageGroup(config, group)` (covers both "group not granted" and "view-only"). For mutating actions.
   - `guardAdminGroup(group)` — redirect-style page guard: non-ADMIN → `/unauthorized`; lacking group access → `redirect(landingRouteFor(config.level))`. Returns the config when allowed.
 - Existing `assertAdminAccess(area)` / `guardAdminPage(area)` remain for inventory-vs-operations coarse checks.
 
@@ -218,6 +217,8 @@ await assertGroupManage("customers"); // throws AccessDeniedError on view-only /
 Read-only loaders that must stay accessible to `view` admins use `assertGroupAccess(group)` (or no guard when already gated by the page). Callers translate `AccessDeniedError` into an existing `{ success: false, error }` shape or a redirect, consistent with current action error handling. A thin helper may wrap this to standardize the returned error message ("You have read-only access to this section.").
 
 > Implementation note: the set of actions to guard is enumerated per group during tasks. Page-level `guardAdminGroup` provides the reachability barrier; `assertGroupManage` provides the write barrier — both are required for `view` correctness.
+
+> MASTER_ADMIN refinement (Req 13.5): the group guards (`assertGroupAccess`, `assertGroupManage`, `guardAdminGroup`, and the `checkGroupManage` wrapper) treat `MASTER_ADMIN` as full access — the super-admin is never constrained by the ADMIN group model, so its prior access is unchanged. Concretely the role gate admits both `ADMIN` and `MASTER_ADMIN`; for a `MASTER_ADMIN` the resolved config is full (NULL admin fields → `inventory_operations`), so every group check passes. This matters for shared actions (e.g. `franchisePincodeActions`, `serviceAreaActions`) whose own auth historically allowed `ADMIN` or `MASTER_ADMIN`.
 
 ### 6. Master configuration UI (`UserManagement.tsx` + `adminActions.ts`)
 

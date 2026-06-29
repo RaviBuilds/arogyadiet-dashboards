@@ -9,6 +9,7 @@ import { buildISTDepartureISO, isFutureISO8601 } from "@/lib/dates/ist";
 import { computeOpenLoopHaversineRoute } from "@/lib/distance";
 import { computeOpenLoopRoute } from "@/lib/routing/googleRoutes";
 import { applyOperationsScope, isFranchiseScope, type OperationsScope } from "@/lib/franchise/scope";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 function getISTDateString(offsetDays = 0) {
   const date = new Date();
@@ -343,6 +344,8 @@ export async function commitRouteChanges(
   moves: { orderId: string; newRiderId: string | null }[],
   scope?: OperationsScope,
 ) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!

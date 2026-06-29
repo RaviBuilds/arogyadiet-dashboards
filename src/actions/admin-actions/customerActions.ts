@@ -29,6 +29,7 @@ import {
   buildArchivedEmail,
   isArchivedCustomerEmail,
 } from "@/lib/customers/customerArchive";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 // Initialize Admin Client
 const supabaseAdmin = createAdminClient(
@@ -40,6 +41,8 @@ export async function adminUpdateAddonOrderDeliveryDate(
   addonOrderId: string,
   newDeliveryDate: string,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split("T")[0];
@@ -80,6 +83,8 @@ export async function updateCustomerBasicInfo(
   userId: string,
   data: any,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const { error: userError } = await supabaseAdmin
     .from("users")
     .update({ full_name: data.fullName, mobile: data.mobile })
@@ -99,6 +104,8 @@ export async function updateCustomerDietaryProfile(
   profileId: string,
   data: any,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const { error } = await supabaseAdmin
     .from("customer_profiles")
     .update({
@@ -119,6 +126,8 @@ export async function updateCustomerMedicalProfile(
   profileId: string,
   data: any,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const { error } = await supabaseAdmin
     .from("customer_profiles")
     .update({
@@ -140,6 +149,8 @@ export async function deleteMedicalDocument(
   path: string,
   profileId: string,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const { error: storageError } = await supabaseAdmin.storage.from("medical_records").remove([path]);
   if (storageError) return { success: false, error: storageError.message };
   const { error: dbError } = await supabaseAdmin.from("medical_documents").delete().eq("id", docId);
@@ -154,6 +165,8 @@ export async function deleteMedicalDocument(
 }
 
 export async function uploadAdminMedicalDocument(formData: FormData) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const file = formData.get("file") as File;
   const profileId = formData.get("profileId") as string;
   const userId = formData.get("userId") as string;
@@ -217,6 +230,8 @@ export async function deactivateCustomerAccount(
   profileId: string,
   userId: string,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const guard = await assertNoActiveSubscription(profileId);
   if (!guard.ok) {
     return { success: false, error: guard.error };
@@ -296,6 +311,8 @@ export async function deactivateCustomerAccount(
 
 /** @deprecated Use deactivateCustomerAccount */
 export async function deleteCustomer(profileId: string, userId: string) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   return deactivateCustomerAccount(profileId, userId);
 }
 
@@ -319,6 +336,8 @@ export interface AdminCreateCustomerData {
 }
 
 export async function adminCreateCustomerAction(data: AdminCreateCustomerData) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   // 1. Create Supabase auth user (email_confirm: true bypasses confirmation email)
   const { data: authData, error: authError } =
     await supabaseAdmin.auth.admin.createUser({
@@ -416,6 +435,8 @@ export async function adminCreateAddressForCustomer(
   customerProfileId: string,
   data: AddressFormValues,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const pincodeCheck = await assertDeliverablePincode(data.pincode);
   if (!pincodeCheck.ok) {
     return { success: false, error: pincodeCheck.error };
@@ -473,6 +494,8 @@ export async function adminUpsertCustomerAddress(
   customerProfileId: string,
   data: AddressFormValues,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const pincodeCheck = await assertDeliverablePincode(data.pincode);
   if (!pincodeCheck.ok) {
     return { success: false, error: pincodeCheck.error };
@@ -549,6 +572,8 @@ export async function adminDeleteCustomerAddress(
   customerProfileId: string,
   addressId: string,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const result = await deleteCustomerAddress(customerProfileId, addressId);
 
   if (!result.success) {
@@ -574,6 +599,8 @@ export async function adminSetCustomerPassword(
   authUserId: string,
   newPassword: string,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const { error } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
     password: newPassword,
   });
@@ -583,6 +610,8 @@ export async function adminSetCustomerPassword(
 }
 
 export async function adminSendPasswordReset(email: string) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const { error } = await supabaseAdmin.auth.admin.generateLink({
     type: "recovery",
     email,
@@ -600,6 +629,8 @@ export async function adminToggleCustomerActive(
   authUserId: string,
   makeActive: boolean,
 ) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   if (!makeActive) {
     return deactivateCustomerAccount(profileId, userId);
   }

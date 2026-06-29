@@ -37,6 +37,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
 import { getClinicById } from "@/repositories/clinic/clinicRepository";
 import type { ActionResult } from "@/types/clinic";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 // Roles permitted to administer rider↔clinic linkage (admin portal).
 const ALLOWED_ROLES = new Set(["ADMIN", "MASTER_ADMIN"]);
@@ -132,6 +133,8 @@ export async function assignRiderToClinic(
   riderId: string,
   clinicId: string
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const auth = await assertCallerCanManageRiders();
   if (!auth.ok) return { success: false, error: auth.error };
 
@@ -275,6 +278,8 @@ export async function assignServiceAreaToRider(
   riderId: string,
   pincode: string
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const auth = await assertCallerCanManageRiders();
   if (!auth.ok) return { success: false, error: auth.error };
 

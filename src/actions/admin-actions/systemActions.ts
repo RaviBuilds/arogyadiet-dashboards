@@ -6,6 +6,7 @@ import { logAdminAction } from "@/lib/logger";
 import { generateDailyOrders } from "@/actions/system-actions/orderGeneration";
 import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
 import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 type ProductLinkingResult =
   | { success: true; count: number; targetDate: string }
@@ -65,6 +66,8 @@ async function logProductLinkingRun({
 export async function runProductLinkingAction(
   targetDate: string,
 ): Promise<ProductLinkingResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const today = getISTDateString(0);
   const tomorrow = getISTDateString(1);
 
@@ -150,6 +153,8 @@ export async function triggerSystemAutomation(
   automationName: string,
   options?: { targetDate?: string },
 ): Promise<SystemAutomationResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   try {
     // AUTOMATION 3: Routing & Batching
     // Calls the dispatch engine directly server-side. No HTTP round-trip and no

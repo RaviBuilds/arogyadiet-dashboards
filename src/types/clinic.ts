@@ -36,6 +36,12 @@ export interface Business {
 export interface City {
   id: string;
   name: string;
+  /**
+   * The owning Business, when linked. `null`/`undefined` = not yet assigned to
+   * any Business. The Business's `type` (Core | Franchise) is what classifies a
+   * city as a Core city vs a Franchise city. (multi-tenant-franchise Req 3.4)
+   */
+  business_id?: string | null;
 }
 
 /**

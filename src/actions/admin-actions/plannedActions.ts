@@ -3,9 +3,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 // Action to completely remove an order from tomorrow's dispatch
 export async function deletePlannedOrder(orderId: string) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = await createClient();
 
   const { error } = await supabase
@@ -25,6 +28,8 @@ export async function deletePlannedOrder(orderId: string) {
 
 // Action to swap the meal category for a specific order
 export async function updateOrderMeal(orderId: string, mealCategoryName: string) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = await createClient();
 
   // First, look up the ID for the requested meal category name
@@ -88,6 +93,8 @@ export async function getAddressesForOrder(orderId: string) {
 
 // Action to update the order with the newly selected address
 export async function updateOrderAddress(orderId: string, addressId: string) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = await createClient();
 
   const { error } = await supabase

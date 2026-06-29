@@ -40,6 +40,56 @@ import {
   resolveClinicForPincode,
   type ClinicResolution,
 } from "@/lib/clinic/pincode-resolver";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { FRANCHISE_FEATURES_ENABLED } from "@/lib/franchise/constants";
+
+// ─── Franchise stamping (multi-tenant-franchise, Req 14.1–14.6) ─────────────
+//
+// The customer's tenant association is DERIVED from the Clinic their
+// Primary_Address pincode resolves to: every Clinic row carries a nullable
+// `franchise_id` (NULL = Core Clinic). When a pincode resolves to a Clinic we
+// stamp BOTH `clinic_id` AND that Clinic's `franchise_id` so a franchise
+// customer lands on their franchise and a Core customer keeps `franchise_id`
+// NULL (Req 14.1, 14.2). When the pincode resolves to NO clinic the customer is
+// accepted but enters Waitlist_State, represented WITHOUT a new column as
+// `clinic_id = NULL` AND `franchise_id = NULL` — the same unstamped state that
+// already blocks ordering / shows "area not served" in the Core flow (Req 14.5,
+// 14.6). Selecting a per-day Delivery_Address never reaches this module, so it
+// can never change the stamped association (Req 14.8).
+//
+// ALL franchise behavior is gated behind FRANCHISE_FEATURES_ENABLED: when the
+// flag is off the franchise_id column is never read or written here and this
+// module behaves byte-for-byte as the Core stamper (Req 20 core coexistence).
+
+/**
+ * Resolves the `franchise_id` to stamp for a resolved (or cleared) clinic.
+ *
+ * - Flag off → always `null` (the franchise column is left out entirely by the
+ *   caller; Core behavior is preserved).
+ * - clinicId === null (cleared / Waitlist_State) → `null` (Req 14.5, 14.6).
+ * - clinicId resolved → that Clinic's `franchise_id` (NULL for a Core Clinic;
+ *   the franchise's id for a franchise Clinic) (Req 14.1, 14.2).
+ *
+ * Reads the immutable `clinics.franchise_id` via the admin client (bypassing
+ * RLS, mirroring `resolveClinicForPincode`) since this runs in signup /
+ * address-update background flows.
+ */
+async function resolveStampFranchiseId(
+  clinicId: string | null
+): Promise<string | null> {
+  if (!FRANCHISE_FEATURES_ENABLED || clinicId === null) {
+    return null;
+  }
+
+  const adminClient = createAdminClient();
+  const { data } = await adminClient
+    .from("clinics")
+    .select("franchise_id")
+    .eq("id", clinicId)
+    .maybeSingle();
+
+  return (data?.franchise_id as string | null) ?? null;
+}
 
 /**
  * Pure decision of what a customer's stamped `clinic_id` should become, given
@@ -201,6 +251,12 @@ export async function stampCustomerClinic(params: {
 /**
  * Persists `clinicId` (a resolved clinic, or `null` to clear) on both the
  * customer profile and the address row, returning the matching result.
+ *
+ * When franchise features are enabled the resolved Clinic's `franchise_id` is
+ * stamped alongside `clinic_id` (NULL for a Core Clinic or a cleared/waitlisted
+ * customer), keeping the customer's tenant association derived from their
+ * Primary_Address clinic (Req 14.1, 14.2, 14.5, 14.6). When the flag is off the
+ * `franchise_id` column is never written, preserving Core behavior exactly.
  */
 async function persistStamp(
   supabase: SupabaseClient,
@@ -208,9 +264,20 @@ async function persistStamp(
   addressId: string,
   clinicId: string | null
 ): Promise<ClinicStampResult> {
+  // Build the update payloads. The franchise_id key is added ONLY when the
+  // feature flag is on, so the Core write stays byte-for-byte identical.
+  const profileUpdate: Record<string, string | null> = { clinic_id: clinicId };
+  const addressUpdate: Record<string, string | null> = { clinic_id: clinicId };
+
+  if (FRANCHISE_FEATURES_ENABLED) {
+    const franchiseId = await resolveStampFranchiseId(clinicId);
+    profileUpdate.franchise_id = franchiseId;
+    addressUpdate.franchise_id = franchiseId;
+  }
+
   const { error: profileError } = await supabase
     .from("customer_profiles")
-    .update({ clinic_id: clinicId })
+    .update(profileUpdate)
     .eq("id", customerProfileId);
 
   if (profileError) {
@@ -219,7 +286,7 @@ async function persistStamp(
 
   const { error: addressError } = await supabase
     .from("addresses")
-    .update({ clinic_id: clinicId })
+    .update(addressUpdate)
     .eq("id", addressId);
 
   if (addressError) {

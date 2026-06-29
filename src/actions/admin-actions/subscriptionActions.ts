@@ -3,8 +3,11 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 export async function createSubscriptionPlan(data: { code: string; name: string; duration_days: number; pause_credits: number; base_price: number; tax_amount: number; is_active: boolean; }) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   try {
     const totalPrice = Number(data.base_price) + Number(data.tax_amount);
@@ -31,6 +34,8 @@ export async function createSubscriptionPlan(data: { code: string; name: string;
 }
 
 export async function updateSubscriptionPlan(planId: string, data: { name: string; duration_days: number; pause_credits: number; base_price: number; tax_amount: number; is_active: boolean }) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   try {
     const totalPrice = Number(data.base_price) + Number(data.tax_amount);
@@ -53,6 +58,8 @@ export async function updateSubscriptionPlan(planId: string, data: { name: strin
 }
 
 export async function deleteSubscriptionPlan(planId: string) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   try {
     const { data: activeSubs, error: checkError } = await supabaseAdmin.from("subscriptions").select("id").eq("plan_id", planId).in("status", ["ACTIVE", "PENDING"]).limit(1);
@@ -74,6 +81,8 @@ export async function deleteSubscriptionPlan(planId: string) {
 }
 
 export async function setRecommendedPlan(planId: string) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   try {
     await supabaseAdmin.from("subscription_plans").update({ recommended: false }).not("id", "is", null);

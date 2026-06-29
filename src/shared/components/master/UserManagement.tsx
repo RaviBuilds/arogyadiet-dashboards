@@ -32,6 +32,7 @@ import {
   TableRow,
 } from "@/shared/components/ui/table";
 import { Switch } from "@/shared/components/ui/switch";
+import { Checkbox } from "@/shared/components/ui/checkbox";
 import { Label } from "@/shared/components/ui/label";
 import {
   Select,
@@ -43,8 +44,13 @@ import {
 import {
   ADMIN_ACCESS_LEVELS,
   ACCESS_LEVEL_LABELS,
-  resolveAccessLevel,
+  OPERATIONS_GROUPS,
+  GROUP_LABELS,
+  resolveAccessConfiguration,
   type AdminAccessLevel,
+  type OperationsAccess,
+  type OperationsGroup,
+  type PermissionLevel,
 } from "@/lib/auth/adminAccessCore";
 
 interface AdminUser {
@@ -56,10 +62,75 @@ interface AdminUser {
   is_active: boolean;
   created_at: string;
   admin_access_level: string | null;
+  admin_operations_access: OperationsAccess | null;
 }
 
 interface UserManagementProps {
   initialAdmins: AdminUser[];
+}
+
+/**
+ * Per-group operations access editor. Shown only when the selected Access Level
+ * is `operations`. Each of the six groups can be selected and set to Manage
+ * (default) or View (read-only).
+ */
+function OperationsGroupConfig({
+  value,
+  onChange,
+  idPrefix,
+}: {
+  value: OperationsAccess;
+  onChange: (next: OperationsAccess) => void;
+  idPrefix: string;
+}) {
+  const toggle = (group: OperationsGroup, checked: boolean) => {
+    const next: OperationsAccess = { ...value };
+    if (checked) next[group] = next[group] ?? "manage";
+    else delete next[group];
+    onChange(next);
+  };
+  const setPermission = (group: OperationsGroup, perm: PermissionLevel) => {
+    onChange({ ...value, [group]: perm });
+  };
+
+  return (
+    <div className="space-y-2.5 rounded-md border p-3">
+      <p className="text-xs font-medium text-muted-foreground">
+        Operations access — select groups and set each to Manage or View
+      </p>
+      {OPERATIONS_GROUPS.map((group) => {
+        const selected = value[group] !== undefined;
+        return (
+          <div key={group} className="flex items-center justify-between gap-3">
+            <label
+              htmlFor={`${idPrefix}-${group}`}
+              className="flex items-center gap-2 text-sm"
+            >
+              <Checkbox
+                id={`${idPrefix}-${group}`}
+                checked={selected}
+                onCheckedChange={(c) => toggle(group, c === true)}
+              />
+              {GROUP_LABELS[group]}
+            </label>
+            <Select
+              value={selected ? value[group] : undefined}
+              onValueChange={(v) => setPermission(group, v as PermissionLevel)}
+              disabled={!selected}
+            >
+              <SelectTrigger className="h-8 w-28">
+                <SelectValue placeholder="Manage" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="manage">Manage</SelectItem>
+                <SelectItem value="view">View</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const SEARCH_OPTIONS = [
@@ -81,6 +152,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
     mobile: "",
     password: "",
     accessLevel: "inventory_operations" as AdminAccessLevel,
+    operationsAccess: {} as OperationsAccess,
   });
 
   // Edit dialog
@@ -90,6 +162,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
     fullName: "",
     mobile: "",
     accessLevel: "inventory_operations" as AdminAccessLevel,
+    operationsAccess: {} as OperationsAccess,
   });
 
   // Delete dialog
@@ -122,6 +195,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
           mobile: "",
           password: "",
           accessLevel: "inventory_operations",
+          operationsAccess: {},
         });
         // Refresh list from server would happen via revalidation; optimistic update:
         window.location.reload();
@@ -134,10 +208,15 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
   // --- Edit ---
   const openEdit = (admin: AdminUser) => {
     setEditTarget(admin);
+    const cfg = resolveAccessConfiguration(
+      admin.admin_access_level,
+      admin.admin_operations_access,
+    );
     setEditForm({
       fullName: admin.full_name,
       mobile: admin.mobile || "",
-      accessLevel: resolveAccessLevel(admin.admin_access_level),
+      accessLevel: cfg.level,
+      operationsAccess: cfg.groups,
     });
     setEditOpen(true);
   };
@@ -148,6 +227,8 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
       const result = await updateAdminUser(editTarget.id, editForm);
       if (result.success) {
         toast.success("Admin updated successfully.");
+        const persistedOps =
+          editForm.accessLevel === "operations" ? editForm.operationsAccess : null;
         setAdmins((prev) =>
           prev.map((a) =>
             a.id === editTarget.id
@@ -156,6 +237,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                   full_name: editForm.fullName,
                   mobile: editForm.mobile || null,
                   admin_access_level: editForm.accessLevel,
+                  admin_operations_access: persistedOps,
                 }
               : a,
           ),
@@ -274,7 +356,17 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                     {admin.mobile || "—"}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
-                    {ACCESS_LEVEL_LABELS[resolveAccessLevel(admin.admin_access_level)]}
+                    {(() => {
+                      const cfg = resolveAccessConfiguration(
+                        admin.admin_access_level,
+                        admin.admin_operations_access,
+                      );
+                      if (cfg.level !== "operations") {
+                        return ACCESS_LEVEL_LABELS[cfg.level];
+                      }
+                      const count = Object.keys(cfg.groups).length;
+                      return `${ACCESS_LEVEL_LABELS[cfg.level]} · ${count} group${count === 1 ? "" : "s"}`;
+                    })()}
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={admin.is_active ? "ACTIVE" : "PAUSED"} />
@@ -382,6 +474,9 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                   setCreateForm((f) => ({
                     ...f,
                     accessLevel: value as AdminAccessLevel,
+                    // Clear per-group config when leaving the operations level.
+                    operationsAccess:
+                      value === "operations" ? f.operationsAccess : {},
                   }))
                 }
               >
@@ -397,6 +492,15 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 </SelectContent>
               </Select>
             </div>
+            {createForm.accessLevel === "operations" && (
+              <OperationsGroupConfig
+                idPrefix="create-ops"
+                value={createForm.operationsAccess}
+                onChange={(next) =>
+                  setCreateForm((f) => ({ ...f, operationsAccess: next }))
+                }
+              />
+            )}
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -410,7 +514,9 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 isPending ||
                 !createForm.fullName ||
                 !createForm.email ||
-                createForm.password.length < 8
+                createForm.password.length < 8 ||
+                (createForm.accessLevel === "operations" &&
+                  Object.keys(createForm.operationsAccess).length === 0)
               }
             >
               {isPending ? "Creating..." : "Create Admin"}
@@ -454,6 +560,8 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                   setEditForm((f) => ({
                     ...f,
                     accessLevel: value as AdminAccessLevel,
+                    operationsAccess:
+                      value === "operations" ? f.operationsAccess : {},
                   }))
                 }
               >
@@ -469,6 +577,15 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 </SelectContent>
               </Select>
             </div>
+            {editForm.accessLevel === "operations" && (
+              <OperationsGroupConfig
+                idPrefix="edit-ops"
+                value={editForm.operationsAccess}
+                onChange={(next) =>
+                  setEditForm((f) => ({ ...f, operationsAccess: next }))
+                }
+              />
+            )}
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -478,7 +595,12 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
             </DialogClose>
             <Button
               onClick={handleEdit}
-              disabled={isPending || !editForm.fullName}
+              disabled={
+                isPending ||
+                !editForm.fullName ||
+                (editForm.accessLevel === "operations" &&
+                  Object.keys(editForm.operationsAccess).length === 0)
+              }
             >
               {isPending ? "Saving..." : "Save Changes"}
             </Button>

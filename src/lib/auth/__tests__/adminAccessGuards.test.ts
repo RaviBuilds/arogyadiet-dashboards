@@ -33,6 +33,7 @@ vi.mock("@/lib/supabase/server", () => ({
 import {
   assertGroupAccess,
   assertGroupManage,
+  checkGroupManage,
   guardAdminGroup,
 } from "../adminAccess";
 import type { OperationsAccess } from "../adminAccessCore";
@@ -74,11 +75,18 @@ describe("assertGroupManage", () => {
     });
   });
 
-  it("denies a non-ADMIN role", async () => {
-    setContext("MASTER_ADMIN", null, null);
+  it("denies a non-privileged role", async () => {
+    setContext("RIDER", null, null);
     await expect(assertGroupManage("customers")).rejects.toMatchObject({
       name: "GroupAccessDeniedError",
       readOnly: false,
+    });
+  });
+
+  it("permits MASTER_ADMIN as full access (Req 13.5)", async () => {
+    setContext("MASTER_ADMIN", null, null);
+    await expect(assertGroupManage("franchises")).resolves.toMatchObject({
+      level: "inventory_operations",
     });
   });
 
@@ -160,5 +168,40 @@ describe("guardAdminGroup", () => {
       level: "operations",
     });
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+});
+
+// ─── checkGroupManage (action chokepoint used by every guarded mutation) ──────
+
+describe("checkGroupManage", () => {
+  it("denies a non-privileged role with a no-permission message", async () => {
+    setContext("RIDER", null, null);
+    const r = await checkGroupManage("customers");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/permission/i);
+  });
+
+  it("denies an absent group with a no-permission message", async () => {
+    setContext("ADMIN", "operations", { riders: "manage" });
+    const r = await checkGroupManage("customers");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/permission/i);
+  });
+
+  it("denies a view group with a read-only message", async () => {
+    setContext("ADMIN", "operations", { customers: "view" });
+    const r = await checkGroupManage("customers");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/read-only/i);
+  });
+
+  it("permits a manage group", async () => {
+    setContext("ADMIN", "operations", { customers: "manage" });
+    expect(await checkGroupManage("customers")).toEqual({ ok: true });
+  });
+
+  it("permits a full-access admin", async () => {
+    setContext("ADMIN", "inventory_operations", null);
+    expect(await checkGroupManage("shop_products")).toEqual({ ok: true });
   });
 });

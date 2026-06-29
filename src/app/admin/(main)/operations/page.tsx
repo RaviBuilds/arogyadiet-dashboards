@@ -10,13 +10,13 @@ import { getISTDateString } from "@/lib/dates/ist";
 import FailedDeliveryApprovals from "@/shared/components/admin/operations/FailedDeliveryApprovals";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { AdminOperationsWrapper } from "./AdminOperationsWrapper";
-import { guardAdminPage } from "@/lib/auth/adminAccess";
+import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 // Live ops data: fetch fresh on every request (matches riders page)
 export const revalidate = 0;
 
 export default async function OperationsPage() {
-  await guardAdminPage("operations");
+  await guardAdminGroup("operations");
   const supabase = await createClient();
 
   const today = getISTDateString();

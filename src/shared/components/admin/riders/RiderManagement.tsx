@@ -38,6 +38,7 @@ import {
   Loader2,
   PhoneCall,
   UserPlus,
+  Building2,
 } from "lucide-react";
 import {
   revalidateRidersPage,
@@ -45,6 +46,7 @@ import {
   deleteRider,
   onboardRider,
 } from "@/actions/admin-actions/riderActions";
+import { assignRiderToClinic } from "@/actions/admin-actions/riderClinicActions";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -94,12 +96,21 @@ export interface RiderData {
   clinicName: string | null;
 }
 
+/** A clinic option for onboarding/assignment selectors and service-area grouping. */
+export interface ClinicOption {
+  id: string;
+  name: string;
+  franchise_id: string | null;
+}
+
 export default function RiderManagement({
   data = [],
   allAreas = [],
+  clinics = [],
 }: {
   data?: RiderData[];
   allAreas?: any[];
+  clinics?: ClinicOption[];
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Today's Activity");
@@ -113,6 +124,7 @@ export default function RiderManagement({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(false);
+  const [isAssignClinicModalOpen, setIsAssignClinicModalOpen] = useState(false);
 
   const [activeRider, setActiveRider] = useState<RiderData | null>(null);
   const [editForm, setEditForm] = useState({
@@ -122,12 +134,14 @@ export default function RiderManagement({
     joiningDate: "",
   });
   const [deleteConfirmCode, setDeleteConfirmCode] = useState("");
+  const [assignClinicId, setAssignClinicId] = useState<string>("");
   const [onboardForm, setOnboardForm] = useState({
     fullName: "",
     email: "",
     mobile: "",
     employeeCode: "",
     password: "",
+    clinicId: "",
   });
 
   const formatTime = (isoString: string) =>
@@ -254,6 +268,11 @@ export default function RiderManagement({
     setDeleteConfirmCode("");
     setIsDeleteModalOpen(true);
   };
+  const openAssignClinicModal = (rider: RiderData) => {
+    setActiveRider(rider);
+    setAssignClinicId(rider.clinic_id || "");
+    setIsAssignClinicModalOpen(true);
+  };
 
   const handleEditSubmit = () => {
     if (!activeRider) return;
@@ -297,6 +316,8 @@ export default function RiderManagement({
       !onboardForm.password
     )
       return toast.error("Please fill all fields.");
+    if (!onboardForm.clinicId)
+      return toast.error("Please select a clinic for this rider.");
     startTransition(async () => {
       const res = await onboardRider(onboardForm);
       if (res.success) {
@@ -308,8 +329,25 @@ export default function RiderManagement({
           mobile: "",
           employeeCode: "",
           password: "",
+          clinicId: "",
         });
+        revalidateRidersPage();
       } else toast.error(res.error);
+    });
+  };
+
+  const handleAssignClinicSubmit = () => {
+    if (!activeRider) return;
+    if (!assignClinicId) return toast.error("Please select a clinic.");
+    startTransition(async () => {
+      const res = await assignRiderToClinic(activeRider.id, assignClinicId);
+      if (res.success) {
+        toast.success("Rider clinic updated.");
+        setIsAssignClinicModalOpen(false);
+        revalidateRidersPage();
+      } else {
+        toast.error(res.error || "Failed to assign clinic.");
+      }
     });
   };
 
@@ -322,7 +360,7 @@ export default function RiderManagement({
       />
 
       {activeTab === "Service Areas" ? (
-        <ServiceAreaManager riders={data} allAreas={allAreas} />
+        <ServiceAreaManager riders={data} allAreas={allAreas} clinics={clinics} />
       ) : (
         <DataTableCard
           header={
@@ -610,6 +648,15 @@ export default function RiderManagement({
                                 <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
                                 Edit Details
                               </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="cursor-pointer font-medium"
+                                onClick={() => openAssignClinicModal(rider)}
+                              >
+                                <Building2 className="mr-2 h-4 w-4 text-muted-foreground" />
+                                {rider.clinic_id
+                                  ? "Reassign Clinic"
+                                  : "Assign Clinic"}
+                              </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
@@ -702,6 +749,36 @@ export default function RiderManagement({
                   }))
                 }
               />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Clinic</label>
+              <Select
+                value={onboardForm.clinicId}
+                onValueChange={(val) =>
+                  setOnboardForm((prev) => ({ ...prev, clinicId: val }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select the rider's clinic" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clinics.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No clinics available
+                    </SelectItem>
+                  ) : (
+                    clinics.map((clinic) => (
+                      <SelectItem key={clinic.id} value={clinic.id}>
+                        {clinic.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The rider picks up orders from this clinic. Service areas must
+                belong to the same clinic.
+              </p>
             </div>
             <div className="grid gap-2">
               <label className="text-sm font-medium">Temporary Password</label>
@@ -800,6 +877,66 @@ export default function RiderManagement({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- ASSIGN / REASSIGN CLINIC MODAL --- */}
+      <Dialog
+        open={isAssignClinicModalOpen}
+        onOpenChange={setIsAssignClinicModalOpen}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              {activeRider?.clinic_id ? "Reassign Clinic" : "Assign Clinic"}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="text-sm text-muted-foreground mt-1.5">
+                Set the clinic that{" "}
+                <span className="font-bold text-foreground">
+                  {activeRider?.fullName}
+                </span>{" "}
+                picks up orders from. Reassigning may leave service areas that
+                belong to the old clinic mismatched.
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-4">
+            <label className="text-sm font-medium">Clinic</label>
+            <Select value={assignClinicId} onValueChange={setAssignClinicId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a clinic" />
+              </SelectTrigger>
+              <SelectContent>
+                {clinics.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No clinics available
+                  </SelectItem>
+                ) : (
+                  clinics.map((clinic) => (
+                    <SelectItem key={clinic.id} value={clinic.id}>
+                      {clinic.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsAssignClinicModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleAssignClinicSubmit} disabled={isPending}>
+              {isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Save Clinic
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3,7 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import AdminNavbar from "./AdminNavbar";
 import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
-import { resolveAccessLevel, canAccess, landingRouteFor } from "@/lib/auth/adminAccess";
+import { resolveAccessConfiguration, canAccess, landingRouteFor } from "@/lib/auth/adminAccess";
 
 export default async function AdminLayout({
   children,
@@ -38,7 +38,7 @@ export default async function AdminLayout({
 
   const { data: userProfileData } = await supabase
     .from("users")
-    .select("id, full_name, avatar_url, admin_access_level, roles(code)")
+    .select("id, full_name, avatar_url, admin_access_level, admin_operations_access, roles(code)")
     .eq("auth_user_id", user.id)
     .single();
 
@@ -55,10 +55,14 @@ export default async function AdminLayout({
   // The (main) group includes the dashboard, classified as an OPERATIONS area.
   // Inventory-only admins are redirected away to their own landing route
   // (landingRouteFor === "/inventory"); operations / full-access admins land
-  // on /dashboard. accessLevel is passed down so the navbar can trim its items.
-  const accessLevel = resolveAccessLevel(userProfileData?.admin_access_level);
-  if (!canAccess(accessLevel, "operations")) {
-    return redirect(landingRouteFor(accessLevel));
+  // on /dashboard. The resolved configuration is passed down so the navbar can
+  // trim its items to the admin's granted operations groups.
+  const config = resolveAccessConfiguration(
+    userProfileData?.admin_access_level,
+    userProfileData?.admin_operations_access,
+  );
+  if (!canAccess(config.level, "operations")) {
+    return redirect(landingRouteFor(config.level));
   }
 
   const userProfile = {
@@ -74,7 +78,7 @@ export default async function AdminLayout({
       <AdminNavbar
         userProfile={userProfile}
         email={user.email!}
-        accessLevel={accessLevel}
+        config={config}
       />
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
         {children}

@@ -2,12 +2,12 @@ import { createClient as createAdminClient } from "@supabase/supabase-js";
 import type { RiderData } from "@/shared/components/admin/riders/RiderManagement";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { AdminRidersWrapper } from "./AdminRidersWrapper";
-import { guardAdminPage } from "@/lib/auth/adminAccess";
+import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
 export default async function RidersPage() {
-  await guardAdminPage("operations");
+  await guardAdminGroup("riders");
   // Use Service Role for Admin Dashboard to securely bypass RLS
   const supabaseAdmin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -117,7 +117,7 @@ export default async function RidersPage() {
   };
 
   // Removed foreignTable order/limit to prevent PostgREST parsing crashes.
-  const [ridersRes, areasRes] = await Promise.all([
+  const [ridersRes, areasRes, clinicsRes] = await Promise.all([
     supabaseAdmin
       .from("rider_profiles")
       .select(
@@ -128,7 +128,18 @@ export default async function RidersPage() {
       .from("rider_service_areas")
       .select("*")
       .order("created_at", { ascending: false }),
+    supabaseAdmin
+      .from("clinics")
+      .select("id, name, franchise_id")
+      .order("name", { ascending: true }),
   ]);
+
+  if (clinicsRes.error) {
+    console.error(
+      "Error fetching clinics:",
+      JSON.stringify(clinicsRes.error, null, 2),
+    );
+  }
 
   if (ridersRes.error) {
     // Stringify the error so we can actually read it if it ever happens again
@@ -216,7 +227,11 @@ export default async function RidersPage() {
         title="Operations & Riders"
         description="Manage delivery personnel, daily activity, service areas,onboarding."
       />
-      <AdminRidersWrapper data={riders} allAreas={areasRes.data || []} />
+      <AdminRidersWrapper
+        data={riders}
+        allAreas={areasRes.data || []}
+        clinics={clinicsRes.data || []}
+      />
     </div>
   );
 }

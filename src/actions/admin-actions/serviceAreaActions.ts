@@ -42,6 +42,7 @@ import {
   type RiderClinicWarning,
 } from "@/lib/clinic/rider-warnings";
 import type { ActionResult } from "@/types/clinic";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 // Roles permitted to administer Service Areas (admin portal).
 const ALLOWED_ROLES = new Set(["ADMIN", "MASTER_ADMIN"]);
@@ -158,6 +159,8 @@ export async function addPincodeToClinic(
   pincode: string,
   areaName?: string
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const auth = await assertCallerCanManageServiceAreas();
   if (!auth.ok) return { success: false, error: auth.error };
 
@@ -237,6 +240,8 @@ export async function editPincode(
   serviceAreaId: string,
   newPincode: string
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const auth = await assertCallerCanManageServiceAreas();
   if (!auth.ok) return { success: false, error: auth.error };
 
@@ -308,6 +313,8 @@ export async function editPincode(
 export async function deletePincode(
   serviceAreaId: string
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const auth = await assertCallerCanManageServiceAreas();
   if (!auth.ok) return { success: false, error: auth.error };
 
@@ -339,7 +346,104 @@ export async function deletePincode(
   }
 }
 
-// ─── Pincode move (Task 5.2) ─────────────────────────────────────────────────
+// ─── Initial clinic assignment for a clinic-less pincode ─────────────────────
+
+/**
+ * Assign a Clinic to an EXISTING clinic-less Service_Area (a row whose
+ * `clinic_id IS NULL`, e.g. legacy pincodes created before the clinic
+ * hierarchy). This reuses the atomic `move_pincode_and_reassign` RPC with a
+ * NULL source clinic, so the service-area stamp and any matching customer /
+ * primary-address re-stamp commit together (Req 4.4, 7.1, 7.2, 7.3).
+ *
+ * Rejects a pincode that already belongs to a Clinic — that case must use
+ * `movePincode` instead so the source clinic and its customers are handled
+ * correctly.
+ *
+ * Validates: Requirements 4.4, 5.7, 7.1, 7.2, 7.3, 9.4.
+ */
+export async function assignClinicToPincode(
+  serviceAreaId: string,
+  clinicId: string
+): Promise<ActionResult<{ reassignedCount: number; riderWarnings: RiderClinicWarning[] }>> {
+  const auth = await assertCallerCanManageServiceAreas();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  if (!serviceAreaId) {
+    return { success: false, error: "Service area not found" };
+  }
+
+  if (!clinicId) {
+    return { success: false, error: "A clinic is required", field: "clinicId" };
+  }
+
+  const existing = await getServiceAreaById(serviceAreaId);
+  if (!existing) {
+    return { success: false, error: "Service area not found" };
+  }
+
+  // Already owned by a clinic ⇒ this is a MOVE, not an initial assignment.
+  if (existing.clinic_id) {
+    return {
+      success: false,
+      error:
+        "This pincode already belongs to a clinic. Use \u201cMove to clinic\u201d instead.",
+    };
+  }
+
+  const toClinic = await findClinicById(clinicId);
+  if (!toClinic) {
+    return {
+      success: false,
+      error: "The selected clinic is invalid or unavailable",
+      field: "clinicId",
+    };
+  }
+
+  // Compute rider-clinic mismatch warnings from the PRE-assignment mappings (Req 9.4).
+  const mappingRiders = await fetchPincodeRiderMappings(existing.pincode);
+  const riderWarnings = buildRiderClinicWarnings(
+    clinicId,
+    existing.pincode,
+    mappingRiders
+  );
+
+  try {
+    const admin = createAdminClient();
+
+    // Atomic initial assignment via the same RPC, with a NULL source clinic.
+    const { data, error } = await admin.rpc("move_pincode_and_reassign", {
+      p_pincode: existing.pincode,
+      p_from_clinic: null,
+      p_to_clinic: clinicId,
+    });
+
+    if (error) throw error;
+
+    const reassignedCount =
+      typeof data === "number" ? data : Number(data ?? 0) || 0;
+
+    await logAdminAction("UPDATE", "service_area", serviceAreaId, {
+      action: "assign_clinic",
+      pincode: existing.pincode,
+      to_clinic_id: clinicId,
+      reassigned_count: reassignedCount,
+    });
+
+    revalidatePath(ADMIN_RIDERS_PATH);
+    return {
+      success: true,
+      data: { reassignedCount, riderWarnings },
+    };
+  } catch (error) {
+    console.error("assignClinicToPincode error:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to assign clinic to pincode";
+    return {
+      success: false,
+      error: message,
+    };
+  }
+}
 
 /**
  * Confirm a Clinic exists by id. Returns its name when found, else `null`.
@@ -440,6 +544,8 @@ export async function movePincode(
   fromClinicId: string,
   toClinicId: string
 ): Promise<ActionResult<{ reassignedCount: number; riderWarnings: RiderClinicWarning[] }>> {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const auth = await assertCallerCanManageServiceAreas();
   if (!auth.ok) return { success: false, error: auth.error };
 

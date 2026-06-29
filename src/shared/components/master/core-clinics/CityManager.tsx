@@ -21,9 +21,10 @@ import {
   deleteCity,
 } from "@/actions/master-actions/cityActions";
 import { citySchema, type CityInput } from "@/validations/clinic";
-import type { City } from "@/types/clinic";
+import type { City, Business } from "@/types/clinic";
 
 import { Button } from "@/shared/components/ui/button";
+import { Badge } from "@/shared/components/ui/badge";
 import { Input } from "@/shared/components/ui/input";
 import {
   Card,
@@ -50,11 +51,46 @@ import {
 
 interface CityManagerProps {
   cities: City[];
+  businesses?: Business[];
 }
 
-export function CityManager({ cities }: CityManagerProps) {
+/**
+ * Classify a city by the type of the Business it is linked to. A city's
+ * core/franchise nature is NOT based on creation order — it is derived from
+ * `cities.business_id` → `businesses.type`. A city with no linked business is
+ * "Unassigned" (it belongs to neither the Core nor any Franchise yet).
+ */
+function cityClassification(
+  city: City,
+  businessTypeById: Map<string, Business["type"]>
+): { label: string; className: string } {
+  const type = city.business_id
+    ? businessTypeById.get(city.business_id)
+    : undefined;
+
+  if (type === "Core") {
+    return {
+      label: "Core",
+      className: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    };
+  }
+  if (type === "Franchise") {
+    return {
+      label: "Franchise",
+      className: "bg-violet-50 text-violet-700 border-violet-200",
+    };
+  }
+  return {
+    label: "Unassigned",
+    className: "bg-amber-50 text-amber-700 border-amber-200",
+  };
+}
+
+export function CityManager({ cities, businesses = [] }: CityManagerProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+
+  const businessTypeById = new Map(businesses.map((b) => [b.id, b.type]));
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<City | null>(null);
@@ -147,34 +183,45 @@ export function CityManager({ cities }: CityManagerProps) {
           </p>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {cities.map((city) => (
-              <li
-                key={city.id}
-                className="flex items-center justify-between py-2.5"
-              >
-                <span className="text-sm font-medium text-slate-800">
-                  {city.name}
-                </span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                    onClick={() => openEdit(city)}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => setDeleteTarget(city)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </li>
-            ))}
+            {cities.map((city) => {
+              const classification = cityClassification(city, businessTypeById);
+              return (
+                <li
+                  key={city.id}
+                  className="flex items-center justify-between py-2.5"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-800">
+                      {city.name}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] font-semibold ${classification.className}`}
+                    >
+                      {classification.label}
+                    </Badge>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      onClick={() => openEdit(city)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => setDeleteTarget(city)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </CardContent>

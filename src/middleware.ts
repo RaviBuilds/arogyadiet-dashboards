@@ -1,11 +1,34 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  resolveAccessLevel,
+  resolveAccessConfiguration,
   isAdminPathAllowed,
   landingRouteFor,
-  type AdminAccessLevel,
+  type AccessConfiguration,
 } from "@/lib/auth/adminAccessCore";
+// Feature flag — gates ALL franchise-specific additions below. When false
+// (production default / unset), every new branch added for Task 12.1 is a
+// no-op and the middleware behaves exactly as it did before this change.
+import { FRANCHISE_FEATURES_ENABLED } from "@/lib/franchise/constants";
+
+/**
+ * [Req 16.5] Builds the franchise-portal root URL on the `franchies` subdomain,
+ * derived from the incoming request's host so it works across environments
+ * (e.g. `admin.arogyadiet.com` → `franchies.arogyadiet.com/`,
+ * `master.localhost:3000` → `franchies.localhost:3000/`).
+ *
+ * `currentSubdomain` is guaranteed to be the leading host label here (it was
+ * resolved via `hostname.startsWith(`${sub}.`)`), so the replacement is safe.
+ */
+function franchiseRootUrl(
+  request: NextRequest,
+  hostname: string,
+  currentSubdomain: string,
+): URL {
+  const target = new URL("/", request.url);
+  target.host = hostname.replace(`${currentSubdomain}.`, "franchies.");
+  return target;
+}
 
 export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api")) {
@@ -43,6 +66,38 @@ export async function middleware(request: NextRequest) {
 
   if (hostname.includes("vercel.app")) {
     currentSubdomain = "customer";
+  }
+
+  // [ADDITIVE — Req 16.10, flag-gated] A request to a *named* subdomain that
+  // maps to no defined portal must be routed to the unauthorized page and
+  // expose no data. Today such a host resolves `portalPath = ""` and silently
+  // falls through to the root app; this makes the denial explicit.
+  //
+  // Gated by FRANCHISE_FEATURES_ENABLED so production behavior is unchanged
+  // while the flag is off. Detection is intentionally conservative: it fires
+  // ONLY when there is a clear leading subdomain label, and it never touches
+  // the apex domain, `www`, raw IP hosts, bare `localhost`, or Vercel previews
+  // (which are already remapped to `customer` above). The `/unauthorized`
+  // guard prevents a redirect loop on the unknown host itself.
+  if (
+    FRANCHISE_FEATURES_ENABLED &&
+    !currentSubdomain &&
+    !pathname.startsWith("/unauthorized")
+  ) {
+    const bareHost = hostname.split(":")[0];
+    const labels = bareHost.split(".");
+    const firstLabel = labels[0];
+    const isIpHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(bareHost);
+    const isPreview = bareHost.endsWith("vercel.app");
+    // A named subdomain exists for `*.localhost` (>=2 labels) or any host with
+    // 3+ labels (e.g. `foo.arogyadiet.com`). The apex (`arogyadiet.com`, 2
+    // labels) and bare `localhost` are excluded by construction.
+    const hasNamedSubdomain =
+      (labels[labels.length - 1] === "localhost" && labels.length >= 2) ||
+      (labels.length >= 3 && !isPreview);
+    if (hasNamedSubdomain && firstLabel !== "www" && !isIpHost) {
+      return NextResponse.redirect(new URL("/unauthorized", request.url));
+    }
   }
 
   const portalPath = currentSubdomain ? portals[currentSubdomain] : "";
@@ -85,11 +140,14 @@ export async function middleware(request: NextRequest) {
 
   // FIX: Safely extract role code
   let roleCode = null;
-  let accessLevel: AdminAccessLevel = "inventory_operations";
+  let config: AccessConfiguration = {
+    level: "inventory_operations",
+    groups: {},
+  };
   if (user) {
     const { data: userProfile } = await supabase
       .from("users")
-      .select("admin_access_level, roles(code)")
+      .select("admin_access_level, admin_operations_access, roles(code)")
       .eq("auth_user_id", user.id)
       .single();
 
@@ -99,8 +157,33 @@ export async function middleware(request: NextRequest) {
       | null
       | undefined;
     roleCode = Array.isArray(rolesData) ? rolesData[0]?.code : rolesData?.code;
-    accessLevel = resolveAccessLevel(userProfile?.admin_access_level);
+    config = resolveAccessConfiguration(
+      userProfile?.admin_access_level,
+      userProfile?.admin_operations_access,
+    );
   }
+
+  // [Req 18.7 — DB scope binding] DECISION: do NOT bind the DB session context
+  // (`set_franchise_context`) from middleware.
+  //
+  // Rationale (edge-runtime + connection constraints):
+  //  - `bindDbScope`/`resolveFranchiseContext` build a Supabase client via
+  //    `@/lib/supabase/server` (`next/headers`), which is not usable here;
+  //    middleware uses its own `createServerClient` bound to request cookies.
+  //  - More fundamentally, `set_franchise_context` runs `set_config(..., true)`,
+  //    which is transaction-LOCAL. Over PostgREST each RPC executes in its own
+  //    short-lived transaction/connection, so a context set here would NOT
+  //    persist to the separate connections used by downstream Server
+  //    Components. Forcing a DB RPC in middleware would be both ineffective and
+  //    risky — exactly the situation Task 12.1 says to avoid.
+  //
+  // Instead we keep the existing pattern: the resolved `franchise_id` is
+  // propagated downstream via the `x-franchise-id` cookie (set in the franchies
+  // branch below and consumed by the franchise Server Components). Those
+  // components call `setFranchiseSessionContext` inside their OWN request
+  // transaction, so RLS enforces the same boundary the middleware computed.
+  // This whole path is inert unless FRANCHISE_FEATURES_ENABLED is true, because
+  // `setFranchiseSessionContext` itself short-circuits when the flag is off.
 
   // 3. Route protection, gatekeeper logic
 
@@ -119,6 +202,11 @@ export async function middleware(request: NextRequest) {
       !url.pathname.startsWith("/forgot-password") &&
       !url.pathname.startsWith("/update-password")
     ) {
+      // [Req 16.9] Building the target from `request.url` preserves the
+      // requested subdomain/host: e.g. an unauthenticated hit on
+      // `admin.arogyadiet.com/...` redirects to `admin.arogyadiet.com/login`,
+      // not the apex. No change needed beyond resolving relative to the
+      // incoming request URL (already host-qualified).
       const loginUrl = new URL("/login", request.url);
       return NextResponse.redirect(loginUrl);
     }
@@ -128,6 +216,14 @@ export async function middleware(request: NextRequest) {
       if (currentSubdomain === "admin" && roleCode !== "ADMIN") {
         // FRANCHISE_ADMIN trying to access admin portal → redirect to franchise portal
         if (roleCode === "FRANCHISE_ADMIN") {
+          // [Req 16.5, flag-gated] Bounce back to the franchise-scoped
+          // workspace at the `franchies` subdomain root. When the flag is off,
+          // the prior /unauthorized behavior is preserved exactly.
+          if (FRANCHISE_FEATURES_ENABLED) {
+            return NextResponse.redirect(
+              franchiseRootUrl(request, hostname, currentSubdomain),
+            );
+          }
           return NextResponse.redirect(new URL("/unauthorized", request.url));
         }
         return NextResponse.redirect(new URL("/unauthorized", request.url));
@@ -140,9 +236,9 @@ export async function middleware(request: NextRequest) {
         const adminPath = url.pathname.startsWith("/admin")
           ? url.pathname
           : `/admin${url.pathname}`;
-        if (!isAdminPathAllowed(accessLevel, adminPath)) {
+        if (!isAdminPathAllowed(config, adminPath)) {
           return NextResponse.redirect(
-            new URL(landingRouteFor(accessLevel), request.url),
+            new URL(landingRouteFor(config.level), request.url),
           );
         }
       }
@@ -152,6 +248,14 @@ export async function middleware(request: NextRequest) {
       if (currentSubdomain === "master" && roleCode !== "MASTER_ADMIN") {
         // FRANCHISE_ADMIN trying to access master portal → redirect
         if (roleCode === "FRANCHISE_ADMIN") {
+          // [Req 16.5, flag-gated] Bounce back to the franchise-scoped
+          // workspace at the `franchies` subdomain root. When the flag is off,
+          // the prior /unauthorized behavior is preserved exactly.
+          if (FRANCHISE_FEATURES_ENABLED) {
+            return NextResponse.redirect(
+              franchiseRootUrl(request, hostname, currentSubdomain),
+            );
+          }
           return NextResponse.redirect(new URL("/unauthorized", request.url));
         }
         return NextResponse.redirect(new URL("/unauthorized", request.url));
@@ -207,7 +311,7 @@ export async function middleware(request: NextRequest) {
       url.pathname.startsWith("/signup")) &&
     !url.pathname.startsWith("/update-password")
   ) {
-    const home = landingRouteFor(accessLevel);
+    const home = landingRouteFor(config.level);
     return NextResponse.redirect(new URL(home, request.url));
   }
 

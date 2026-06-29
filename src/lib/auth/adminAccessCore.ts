@@ -278,6 +278,39 @@ export function resolveAccessConfiguration(
   return { level, groups };
 }
 
+/** Result of strictly validating a submitted operations-access map. */
+export type OperationsAccessValidation =
+  | { ok: true; value: OperationsAccess }
+  | { ok: false; error: string };
+
+/**
+ * Strictly validate a submitted operations-access map for persistence (Req 4.3,
+ * 5.6). Unlike `resolveAccessConfiguration` (which leniently drops malformed
+ * data when reading), this REJECTS an empty selection, unknown groups, and
+ * invalid permissions so the master form cannot save a bad configuration.
+ */
+export function validateOperationsAccessInput(
+  raw: unknown,
+): OperationsAccessValidation {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: "Select at least one operations group" };
+  }
+  const value: OperationsAccess = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isOperationsGroup(key)) {
+      return { ok: false, error: `Unknown operations group: ${key}` };
+    }
+    if (!isPermissionLevel(val)) {
+      return { ok: false, error: `Invalid permission for ${key}` };
+    }
+    value[key] = val;
+  }
+  if (Object.keys(value).length === 0) {
+    return { ok: false, error: "Select at least one operations group" };
+  }
+  return { ok: true, value };
+}
+
 /**
  * Classify a rewritten admin pathname into an OperationsGroup, or null when the
  * path is not a group page. Case-sensitive, path-segment boundary matching,

@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 import { getCoreServicePincodes } from "@/lib/franchise/context";
 import { assignWaitlistedCustomers } from "@/lib/franchise/assignment-resolver";
 import {
@@ -67,6 +68,9 @@ export async function assignPincodes(
   | { success: true; assigned: number }
   | { success: false; error: string; conflicts?: FranchisePincodeConflict[] }
 > {
+  const gate = await checkGroupManage("franchises");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const authCheck = await assertCallerIsAdminOrMaster();
   if (!authCheck.success) return authCheck;
 
@@ -173,6 +177,9 @@ export async function assignPincodes(
 export async function removePincodes(
   input: RemovePincodesInput
 ): Promise<{ success: true; removed: number } | { success: false; error: string }> {
+  const gate = await checkGroupManage("franchises");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const authCheck = await assertCallerIsAdminOrMaster();
   if (!authCheck.success) return authCheck;
 
@@ -415,6 +422,9 @@ export async function approvePincodeRequest(
   | { success: true; assignedCustomers: number }
   | { success: false; error: string; conflicts?: FranchisePincodeConflict[] }
 > {
+  const gate = await checkGroupManage("franchises");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const authCheck = await assertCallerIsAdminOrMaster();
   if (!authCheck.success) return authCheck;
 
@@ -510,6 +520,9 @@ export async function approvePincodeRequest(
 export async function rejectPincodeRequest(
   input: ReviewPincodeRequestInput
 ): Promise<{ success: true } | { success: false; error: string }> {
+  const gate = await checkGroupManage("franchises");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const authCheck = await assertCallerIsAdminOrMaster();
   if (!authCheck.success) return authCheck;
 

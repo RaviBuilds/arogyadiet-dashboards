@@ -39,9 +39,9 @@ import { createClient } from "@/lib/supabase/client";
 import { NotificationBell } from "@/components/shared/NotificationBell";
 import { FranchiseRequestNavBadge } from "@/shared/components/admin/FranchiseRequestNavBadge";
 import {
-  canAccess,
-  type AccessArea,
-  type AdminAccessLevel,
+  hasGroupAccess,
+  type AccessConfiguration,
+  type OperationsGroup,
 } from "@/lib/auth/adminAccessCore";
 
 interface AdminNavbarProps {
@@ -52,40 +52,42 @@ interface AdminNavbarProps {
     roleCode: string;
   };
   email: string;
-  // Nav items are filtered by this level. When absent, only neutral items show.
-  accessLevel?: AdminAccessLevel;
+  // Nav items are filtered by this configuration. When absent, only neutral
+  // items show.
+  config?: AccessConfiguration;
 }
 
 const NAV_ITEMS: {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  // Capability area; undefined => neutral (always visible).
-  area?: AccessArea;
+  // Operations group this item belongs to; undefined => neutral (always shown
+  // to admins who reach the layout, e.g. Dashboard).
+  group?: OperationsGroup;
 }[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, area: "operations" },
-  { href: "/customers", label: "Customers", icon: Users, area: "operations" },
-  { href: "/subscriptions", label: "Subscriptions", icon: CreditCard, area: "operations" },
-  { href: "/riders", label: "Riders", icon: Truck, area: "operations" },
-  { href: "/operations", label: "Operations", icon: Settings2, area: "operations" },
-  { href: "/kitchen-shop", label: "Shop Products", icon: ShoppingBag, area: "operations" },
-  { href: "/franchises", label: "Franchises", icon: Building2, area: "operations" },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/customers", label: "Customers", icon: Users, group: "customers" },
+  { href: "/subscriptions", label: "Subscriptions", icon: CreditCard, group: "subscriptions" },
+  { href: "/riders", label: "Riders", icon: Truck, group: "riders" },
+  { href: "/operations", label: "Operations", icon: Settings2, group: "operations" },
+  { href: "/kitchen-shop", label: "Shop Products", icon: ShoppingBag, group: "shop_products" },
+  { href: "/franchises", label: "Franchises", icon: Building2, group: "franchises" },
 ];
 
 export default function AdminNavbar({
   userProfile,
   email,
-  accessLevel,
+  config,
 }: AdminNavbarProps) {
   const supabase = createClient();
   const pathname = usePathname();
 
   // UI-only gating (server guards are the real barrier): show neutral items and
-  // any area the level permits; when accessLevel is absent, show neutral only.
+  // any group the configuration permits; when config is absent, show neutral only.
   const visibleNavItems = NAV_ITEMS.filter(
     (item) =>
-      item.area == null ||
-      (accessLevel != null && canAccess(accessLevel, item.area)),
+      item.group == null ||
+      (config != null && hasGroupAccess(config, item.group)),
   );
 
   const handleLogout = async () => {

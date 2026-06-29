@@ -108,8 +108,17 @@ async function logRoutingRun(
   }
 }
 
-async function resetPendingRoutingForDate(targetDate: string) {
-  const { data: resetOrders, error: resetError } = await supabaseAdmin
+async function resetPendingRoutingForDate(
+  targetDate: string,
+  // Optional scope filter (Req 21.6). When omitted (every caller today) the
+  // reset is GLOBAL and byte-for-byte identical to the original behavior. When
+  // a Core_Admin drives routing for a single scope, the order reset is confined
+  // to that scope's records so other scopes' existing assignments are never
+  // disturbed: `{ franchiseId: null }` resets only Core records and
+  // `{ franchiseId: <id> }` resets only that franchise's records.
+  scopeFilter?: { franchiseId: string | null },
+) {
+  let resetQuery = supabaseAdmin
     .from("delivery_orders")
     .update({
       batch_id: null,
@@ -119,8 +128,15 @@ async function resetPendingRoutingForDate(targetDate: string) {
       status: "ORDER_CREATED",
     })
     .eq("delivery_date", targetDate)
-    .in("status", RE_ROUTABLE_STATUSES)
-    .select("id");
+    .in("status", RE_ROUTABLE_STATUSES);
+
+  if (scopeFilter) {
+    resetQuery = scopeFilter.franchiseId
+      ? resetQuery.eq("franchise_id", scopeFilter.franchiseId)
+      : resetQuery.is("franchise_id", null);
+  }
+
+  const { data: resetOrders, error: resetError } = await resetQuery.select("id");
 
   if (resetError) {
     return { error: resetError.message, ordersReset: 0, batchesRemoved: 0 };
@@ -331,21 +347,24 @@ async function processRiderDispatchSafe(
 
 type DispatchScope = {
   // Clinic that owns this routing scope and supplies the route origin. In the
-  // per-clinic core path (flag off) this is always a real Core Clinic id and
-  // is stamped onto every batch the scope creates (Req 19.3). It is null only
-  // for the inert franchise scopes (flag on), which are scoped by franchise_id
-  // instead (Req 18.3).
+  // per-clinic core path this is always a real Core Clinic id and is stamped
+  // onto every batch the scope creates (Req 19.3). For a franchise scope (flag
+  // on) this is the franchise's WIRED CLINIC id, which supplies the routing
+  // origin (Req 21.1) and the batch clinic stamp; the scope's records are still
+  // selected by franchise_id (Req 21.2), not by clinic_id. It is null only when
+  // no clinic can be resolved.
   clinicId: string | null;
   franchiseId: string | null;
   label: string;
   // Route origin coordinate. In the core path this is the CLINIC's stored
-  // latitude/longitude (Req 2.4, 10.1) — never the kitchen. The inert franchise
-  // path still populates it from the franchise kitchen so it compiles.
+  // latitude/longitude (Req 2.4, 10.1) — never the kitchen. The franchise path
+  // populates it from the franchise's WIRED CLINIC coordinate (Req 21.1); geo
+  // lives only on the Clinic, never the kitchen.
   originLat: number;
   originLng: number;
   // Scoping mode:
-  //   true  -> filter orders/service areas by franchise_id (inert franchise
-  //            path, retained for Req 18.3). NO clinic filter is applied.
+  //   true  -> filter orders/service areas by franchise_id (franchise scope,
+  //            Req 20.6/21.1/21.2). NO clinic filter is applied.
   //   false -> per-clinic core path: filter orders/service areas by clinicId.
   scopedByFranchise: boolean;
 };
@@ -632,8 +651,53 @@ async function dispatchScope(
   };
 }
 
-export async function executeAutomatedDispatch(targetDate: string) {
-  const resetResult = await resetPendingRoutingForDate(targetDate);
+/**
+ * Selects which scope a routing run targets (Req 21.6). A Core_Admin can drive
+ * routing for the Core_Operation or for a single Franchise from the Admin
+ * dashboard:
+ *   - `{ kind: "core" }`                       → route only Core records
+ *                                                (`franchise_id IS NULL`).
+ *   - `{ kind: "franchise", franchiseId }`     → route only that franchise's
+ *                                                records.
+ * When omitted, the run routes every scope as it does today (full network),
+ * which is the behavior every existing caller relies on.
+ */
+export type RoutingScopeSelector =
+  | { kind: "core" }
+  | { kind: "franchise"; franchiseId: string };
+
+export async function executeAutomatedDispatch(
+  targetDate: string,
+  // Optional target scope (Req 21.6). Omitted by every caller today → full run
+  // over all scopes, identical to the original behavior. See
+  // {@link RoutingScopeSelector}.
+  routingScope?: RoutingScopeSelector,
+) {
+  // Franchise-targeted routing requires the franchise feature flag; with the
+  // flag off there are no franchise scopes to run (Req 20.8). Guarded up front
+  // so the operation fails clearly rather than silently routing nothing. This
+  // never affects default (no-scope) callers.
+  if (routingScope?.kind === "franchise" && !FRANCHISE_FEATURES_ENABLED) {
+    return {
+      error:
+        "Franchise routing requires FRANCHISE_FEATURES_ENABLED to be enabled.",
+    };
+  }
+
+  // Confine the pre-routing reset to the targeted scope so a single-scope run
+  // never clears other scopes' existing assignments. Undefined (default) keeps
+  // the original GLOBAL reset, byte-for-byte unchanged.
+  const resetScopeFilter: { franchiseId: string | null } | undefined =
+    routingScope === undefined
+      ? undefined
+      : routingScope.kind === "core"
+        ? { franchiseId: null }
+        : { franchiseId: routingScope.franchiseId };
+
+  const resetResult = await resetPendingRoutingForDate(
+    targetDate,
+    resetScopeFilter,
+  );
   if (resetResult.error) {
     return { error: `Failed to reset existing routing: ${resetResult.error}` };
   }
@@ -700,9 +764,11 @@ export async function executeAutomatedDispatch(targetDate: string) {
   //   After the Madhapur seed there is exactly one Core Clinic whose coordinates
   //   were copied from the kitchen, so a single clinic scope reproduces the
   //   legacy single-kitchen result given the same inputs (Req 18.6).
-  // FLAG ON: core scope isolated to franchise_id IS NULL + one scope per active
-  //   franchise (its own kitchen, riders and orders). Retained but inert when
-  //   the flag is off (Req 18.3).
+  // FLAG ON: per-Core-Clinic scopes for `franchise_id IS NULL` (same as flag
+  //   off, Req 20.5) PLUS one scope per active franchise — each scoped by its
+  //   `franchise_id` and originating from its wired Clinic coordinate (Req 20.6,
+  //   21.1, 21.2). Optionally narrowed to a single scope via `routingScope`
+  //   (Req 21.6). Retained but inert when the flag is off (Req 18.3).
   // ---------------------------------------------------------------------------
   const scopes: DispatchScope[] = [];
   const skippedFranchises: { franchiseId: string; name: string; reason: string }[] = [];
@@ -763,68 +829,166 @@ export async function executeAutomatedDispatch(targetDate: string) {
       });
     }
   } else {
-    // Franchise features ON: resolve franchises first so we can identify which
-    // kitchens belong to franchises and exclude them from the core kitchen pick.
-    const { data: franchises } = await supabaseAdmin
-      .from("franchises")
-      .select("id, name, kitchen_id, kitchens:kitchen_id ( id, lat, lng )")
-      .eq("status", "active");
+    // ─────────────────────────────────────────────────────────────────────────
+    // Franchise features ON.
+    //
+    // CORE scope(s): the SAME per-Core-Clinic enumeration as the flag-off path —
+    //   every clinic with `franchise_id IS NULL`, each using its own clinic
+    //   coordinate as the route origin and scoped by `clinic_id` with NO
+    //   franchise filter, so Core routing runs over `franchise_id IS NULL`
+    //   exactly as today (Req 20.5).
+    // FRANCHISE scopes: one scope PER ACTIVE FRANCHISE, scoped by `franchise_id`
+    //   (its orders, rider service areas — and thus rider profiles — and the
+    //   addresses joined off those orders), using the franchise's WIRED CLINIC
+    //   coordinate as the routing origin (Req 20.6, 21.1). Core and other-
+    //   franchise records are excluded (Req 21.2). Geo lives ONLY on the Clinic;
+    //   the deprecated `franchises.kitchen_id` is never used as an origin source.
+    // ─────────────────────────────────────────────────────────────────────────
 
-    const franchiseKitchenIds = (franchises ?? [])
-      .map((f: any) => f.kitchen_id)
-      .filter((id: string | null): id is string => Boolean(id));
+    // --- Core Clinics (franchise_id IS NULL) — identical to the flag-off path --
+    const { data: coreClinics, error: coreClinicsError } = await supabaseAdmin
+      .from("clinics")
+      .select("id, name, latitude, longitude")
+      .is("franchise_id", null);
 
-    // Core kitchen = an active kitchen that is NOT a franchise kitchen.
-    const { data: activeKitchens } = await supabaseAdmin
-      .from("kitchens")
-      .select("id, lat, lng")
-      .eq("is_active", true);
+    if (coreClinicsError) {
+      return { error: `Failed to load core clinics: ${coreClinicsError.message}` };
+    }
 
-    const coreKitchen =
-      (activeKitchens ?? []).find(
-        (k: any) => !franchiseKitchenIds.includes(k.id),
-      ) ?? (activeKitchens ?? [])[0];
+    for (const clinic of coreClinics ?? []) {
+      const lat = Number(clinic.latitude);
+      const lng = Number(clinic.longitude);
 
-    if (!coreKitchen) return { error: "No active core kitchen found in database." };
+      const hasValidCoords =
+        clinic.latitude !== null &&
+        clinic.longitude !== null &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180;
 
-    scopes.push({
-      clinicId: null,
-      franchiseId: null,
-      label: "core",
-      originLat: Number(coreKitchen.lat),
-      originLng: Number(coreKitchen.lng),
-      scopedByFranchise: true,
-    });
-
-    for (const f of franchises ?? []) {
-      const kitchen = Array.isArray((f as any).kitchens)
-        ? (f as any).kitchens[0]
-        : (f as any).kitchens;
-
-      if (!kitchen?.lat || !kitchen?.lng) {
-        skippedFranchises.push({
-          franchiseId: f.id,
-          name: f.name,
-          reason: "No kitchen configured",
+      if (!hasValidCoords) {
+        skippedClinics.push({
+          clinicId: clinic.id,
+          name: clinic.name,
+          reason: "Missing or out-of-range clinic coordinates",
         });
         continue;
       }
 
       scopes.push({
-        clinicId: null,
+        clinicId: clinic.id,
+        franchiseId: null,
+        label: `clinic:${clinic.name}`,
+        originLat: lat,
+        originLng: lng,
+        scopedByFranchise: false,
+      });
+    }
+
+    // --- Franchise scopes — one per active franchise, origin = wired Clinic ----
+    const { data: franchises, error: franchisesError } = await supabaseAdmin
+      .from("franchises")
+      .select("id, name")
+      .eq("status", "active");
+
+    if (franchisesError) {
+      return { error: `Failed to load franchises: ${franchisesError.message}` };
+    }
+
+    const activeFranchiseIds = (franchises ?? []).map((f) => f.id);
+
+    // Resolve each franchise's wired Clinic — the routing origin (Req 21.1). Geo
+    // lives only on the Clinic. If a franchise has more than one wired clinic,
+    // the earliest-created one is used as the deterministic origin.
+    const franchiseClinicMap = new Map<
+      string,
+      { id: string; latitude: number | null; longitude: number | null }
+    >();
+    if (activeFranchiseIds.length > 0) {
+      const { data: franchiseClinics } = await supabaseAdmin
+        .from("clinics")
+        .select("id, latitude, longitude, franchise_id, created_at")
+        .in("franchise_id", activeFranchiseIds)
+        .order("created_at", { ascending: true });
+
+      for (const clinic of franchiseClinics ?? []) {
+        if (
+          clinic.franchise_id &&
+          !franchiseClinicMap.has(clinic.franchise_id)
+        ) {
+          franchiseClinicMap.set(clinic.franchise_id, {
+            id: clinic.id,
+            latitude: clinic.latitude,
+            longitude: clinic.longitude,
+          });
+        }
+      }
+    }
+
+    for (const f of franchises ?? []) {
+      const clinic = franchiseClinicMap.get(f.id);
+
+      if (!clinic) {
+        skippedFranchises.push({
+          franchiseId: f.id,
+          name: f.name,
+          reason: "No wired clinic configured",
+        });
+        continue;
+      }
+
+      const lat = Number(clinic.latitude);
+      const lng = Number(clinic.longitude);
+      const hasValidCoords =
+        clinic.latitude !== null &&
+        clinic.longitude !== null &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180;
+
+      if (!hasValidCoords) {
+        skippedFranchises.push({
+          franchiseId: f.id,
+          name: f.name,
+          reason: "Missing or out-of-range wired clinic coordinates",
+        });
+        continue;
+      }
+
+      scopes.push({
+        // Wired-clinic id supplies the origin (Req 21.1) and the batch clinic
+        // stamp (Req 19.3); records are still scoped by franchise_id below
+        // (Req 21.2), never by clinic_id.
+        clinicId: clinic.id,
         franchiseId: f.id,
         label: `franchise:${f.name}`,
-        originLat: Number(kitchen.lat),
-        originLng: Number(kitchen.lng),
+        originLat: lat,
+        originLng: lng,
         scopedByFranchise: true,
       });
     }
   }
 
+  // Apply the optional target-scope selector (Req 21.6). Default (no selector)
+  // leaves the scope list untouched, so a full run is identical to today.
+  const scopesToRun = routingScope
+    ? scopes.filter((s) =>
+        routingScope.kind === "core"
+          ? s.franchiseId === null
+          : s.franchiseId === routingScope.franchiseId,
+      )
+    : scopes;
+
   // Run each scope independently and sequentially. A failure or empty result in
   // one scope (e.g. a franchise with no riders) never affects the others.
   const scopeStats: ScopeStats[] = [];
-  for (const scope of scopes) {
+  for (const scope of scopesToRun) {
     scopeStats.push(await dispatchScope(scope, shared));
   }
 

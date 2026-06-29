@@ -5,6 +5,7 @@ import { mirrorLegacyDurationColumns } from "@/lib/coupons/couponPlanDiscounts";
 import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 // ─── schemas ────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,8 @@ function buildCouponInsertPayload(
 export async function createCoupon(
   formData: z.infer<typeof createCouponSchema>,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const parsed = createCouponSchema.safeParse(formData);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0].message };
@@ -144,6 +147,8 @@ export async function deleteCoupon(
   couponId: string,
   customerProfileId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   try {
@@ -176,6 +181,8 @@ export async function createGlobalCoupon(
   formData: z.infer<typeof globalCouponFieldsSchema>,
   scope?: string | null,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const parsed = globalCouponFieldsSchema.safeParse(formData);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0].message };
@@ -260,6 +267,8 @@ export async function listGlobalCoupons(scope?: string | null) {
 // ─── deleteGlobalCoupon ──────────────────────────────────────────────────────
 
 export async function deleteGlobalCoupon(couponId: string): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   try {

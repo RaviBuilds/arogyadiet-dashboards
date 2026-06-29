@@ -27,6 +27,21 @@ import {
 import { validateCityName } from "@/lib/clinic/validation";
 import type { ActionResult, City } from "@/types/clinic";
 
+// ─── Franchise City dependencies (multi-tenant-franchise — Task 5.1) ─────────
+import { FRANCHISE_FEATURES_ENABLED } from "@/lib/franchise/constants";
+import { resolveScope } from "@/lib/auth/scope-resolver";
+import { franchiseCitySchema } from "@/validations/franchise";
+import { getBusinessById } from "@/repositories/clinic/businessRepository";
+import {
+  listCitiesByBusiness,
+  getCityById as getFranchiseCityById,
+  insertCity as insertFranchiseCityRecord,
+  updateCity as updateFranchiseCityRecord,
+  deleteCity as deleteFranchiseCityRecord,
+  countGroupsForCity,
+} from "@/repositories/franchise/cityRepository";
+import type { FranchiseCity } from "@/types/franchise";
+
 // Roles permitted to manage the Core Clinic hierarchy.
 const ALLOWED_ROLES = new Set(["ADMIN", "MASTER_ADMIN"]);
 
@@ -202,6 +217,216 @@ export async function deleteCity(id: string): Promise<ActionResult> {
   }
 
   await deleteCityRecord(id);
+
+  revalidatePath(MASTER_SYSTEM_PATH);
+  return { success: true, data: undefined };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Franchise City CRUD (multi-tenant-franchise — Task 5.1)
+//
+// These actions manage Cities owned by a Franchise Business (scoped via
+// `business_id`), and are kept fully distinct from the Core City actions above.
+// Business rules enforced here:
+//   - feature-flag gated: when FRANCHISE_FEATURES_ENABLED is off, no franchise
+//     read/write/side effect occurs (Req 1.6)
+//   - full_network scope only (MASTER_ADMIN / ADMIN), resolved before any data
+//     access (Req 1.6)
+//   - the referenced Business must exist AND be type 'Franchise' (Req 1.1, 1.3)
+//   - name 1..100, unique case-insensitively WITHIN that Business (Req 1.2)
+//   - dependency-guarded deletion: rejected when Groups reference the City
+//     (Req 1.4, 1.5)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Gate every franchise-city action on the feature flag and the caller's Scope.
+ *
+ * The flag is checked FIRST so that, when franchise features are disabled, the
+ * action returns a not-enabled result with NO franchise reads, writes, or other
+ * side effects (Req 1.6). Otherwise the caller's Scope is resolved and must be
+ * `full_network` (MASTER_ADMIN / ADMIN); any other scope is rejected.
+ */
+async function assertFranchiseCityAccess(): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
+  if (!FRANCHISE_FEATURES_ENABLED) {
+    return { ok: false, error: "Franchise features are not enabled" };
+  }
+
+  const scopeResult = await resolveScope();
+  if (!scopeResult.ok || scopeResult.scope.kind !== "full_network") {
+    return {
+      ok: false,
+      error: "Only an Admin or Master Admin can manage franchise cities",
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Confirm the referenced Business exists AND is of type `Franchise`. Returns the
+ * field-specific error to surface on the `business_id` field (Req 1.1, 1.3).
+ */
+async function assertFranchiseBusiness(
+  businessId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const business = await getBusinessById(businessId);
+  if (!business) {
+    return { ok: false, error: "Business not found" };
+  }
+  if (business.type !== "Franchise") {
+    return {
+      ok: false,
+      error: "Cities can only be created under a Franchise business",
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Create a City under a Franchise Business.
+ *
+ * Validates the input shape via {@link franchiseCitySchema} (name 1..100,
+ * `business_id` a uuid), confirms the Business exists and is a Franchise, and
+ * enforces case-insensitive name uniqueness WITHIN that Business. On success
+ * returns the new record's identifier (Req 1.1, 1.2, 1.3).
+ *
+ * Validates: Requirements 1.1, 1.2, 1.3, 1.6.
+ */
+export async function createFranchiseCity(
+  input: { name: string; business_id: string }
+): Promise<ActionResult<{ id: string }>> {
+  const access = await assertFranchiseCityAccess();
+  if (!access.ok) return { success: false, error: access.error };
+
+  const parsed = franchiseCitySchema.safeParse(input);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      success: false,
+      error: issue.message,
+      field: typeof issue.path[0] === "string" ? issue.path[0] : undefined,
+    };
+  }
+  const { name, business_id } = parsed.data;
+
+  // Business must exist AND be type 'Franchise' (Req 1.1, 1.3).
+  const businessCheck = await assertFranchiseBusiness(business_id);
+  if (!businessCheck.ok) {
+    return { success: false, error: businessCheck.error, field: "business_id" };
+  }
+
+  // Case-insensitive uniqueness WITHIN the Business (Req 1.2).
+  const siblings = await listCitiesByBusiness(business_id);
+  const existingNamesLower = new Set<string>(
+    siblings.map((c) => c.name.trim().toLowerCase())
+  );
+
+  const validation = validateCityName(name, existingNamesLower);
+  if (!validation.ok) {
+    return {
+      success: false,
+      error: cityNameErrorMessage(validation.reason),
+      field: "name",
+    };
+  }
+
+  const city = await insertFranchiseCityRecord(name, business_id);
+
+  revalidatePath(MASTER_SYSTEM_PATH);
+  return { success: true, data: { id: city.id } };
+}
+
+/**
+ * Update an existing Franchise City's name. Returns a not-found error when the
+ * identifier does not exist, confirms the Business is still a Franchise, allows
+ * a self-rename, and rejects case-insensitive duplicates against OTHER cities in
+ * the same Business (Req 1.2, 1.3).
+ *
+ * Validates: Requirements 1.1, 1.2, 1.3, 1.6.
+ */
+export async function updateFranchiseCity(
+  id: string,
+  input: { name: string; business_id: string }
+): Promise<ActionResult<FranchiseCity>> {
+  const access = await assertFranchiseCityAccess();
+  if (!access.ok) return { success: false, error: access.error };
+
+  const parsed = franchiseCitySchema.safeParse(input);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      success: false,
+      error: issue.message,
+      field: typeof issue.path[0] === "string" ? issue.path[0] : undefined,
+    };
+  }
+  const { name, business_id } = parsed.data;
+
+  // Not-found handling.
+  const existing = await getFranchiseCityById(id);
+  if (!existing) {
+    return { success: false, error: "City not found" };
+  }
+
+  // Business must exist AND be type 'Franchise' (Req 1.1, 1.3).
+  const businessCheck = await assertFranchiseBusiness(business_id);
+  if (!businessCheck.ok) {
+    return { success: false, error: businessCheck.error, field: "business_id" };
+  }
+
+  // Exclude this record so it can keep its own name (self-rename, Req 1.2).
+  const siblings = await listCitiesByBusiness(business_id);
+  const existingNamesLower = new Set<string>(
+    siblings
+      .filter((c) => c.id !== id)
+      .map((c) => c.name.trim().toLowerCase())
+  );
+
+  const validation = validateCityName(
+    name,
+    existingNamesLower,
+    existing.name.trim().toLowerCase()
+  );
+  if (!validation.ok) {
+    return {
+      success: false,
+      error: cityNameErrorMessage(validation.reason),
+      field: "name",
+    };
+  }
+
+  const city = await updateFranchiseCityRecord(id, name);
+
+  revalidatePath(MASTER_SYSTEM_PATH);
+  return { success: true, data: city };
+}
+
+/**
+ * Delete a Franchise City, but only when no Group references it. When at least
+ * one Group depends on the City the deletion is rejected and the record is
+ * retained (Req 1.4, 1.5).
+ *
+ * Validates: Requirements 1.4, 1.5, 1.6.
+ */
+export async function deleteFranchiseCity(id: string): Promise<ActionResult> {
+  const access = await assertFranchiseCityAccess();
+  if (!access.ok) return { success: false, error: access.error };
+
+  // Not-found handling.
+  const existing = await getFranchiseCityById(id);
+  if (!existing) {
+    return { success: false, error: "City not found" };
+  }
+
+  // Dependency-guarded deletion (Req 1.4, 1.5).
+  const groupCount = await countGroupsForCity(id);
+  if (groupCount > 0) {
+    return { success: false, error: "City has associated groups" };
+  }
+
+  await deleteFranchiseCityRecord(id);
 
   revalidatePath(MASTER_SYSTEM_PATH);
   return { success: true, data: undefined };

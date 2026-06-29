@@ -22,6 +22,7 @@ import { getFailureReasonFromLogs } from "@/lib/delivery/failureApproval";
 import { getISTDateString } from "@/lib/dates/ist";
 import { revalidatePath } from "next/cache";
 import { applyOperationsScope, type OperationsScope } from "@/lib/franchise/scope";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -216,6 +217,8 @@ export async function revalidateOperationsPage() {
 export async function markAdminOrderOnTheWayAction(
   orderId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
   const newStatus = "REACHING_TO_LOCATION";
   const note = "Rider is reaching to location";
@@ -278,6 +281,8 @@ export async function markAdminOrderOnTheWayAction(
 export async function markAdminOrderDeliveredAction(
   orderId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
   const newStatus = "DELIVERED";
   const note = "Meal delivered";
@@ -346,6 +351,8 @@ export async function markAdminOrderDeliveredAction(
 export async function approveFailedDeliveryAction(
   orderId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
   const newStatus = "FAILED";
   const note = "Failed delivery approved by admin";
@@ -411,6 +418,8 @@ export async function approveFailedDeliveryAction(
 export async function rejectFailedDeliveryAction(
   orderId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
   const newStatus = "REACHING_TO_LOCATION";
   const note = "Failed delivery request rejected by admin";
@@ -471,6 +480,8 @@ export async function rejectFailedDeliveryAction(
 }
 
 export async function updateAdminOrderStatusAction(orderId: string) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   const { data: order, error: fetchError } = await supabase
@@ -507,6 +518,8 @@ export async function markAdminBatchPickedUpAction(
   batchId: string,
   deliveryDate: string,
 ) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   if (!batchId || batchId === "UNBATCHED") {
