@@ -289,8 +289,8 @@ export async function getTransferById(
   }
 
   return {
-    ...(transfer as FranchiseStockTransferRow),
-    lines: (lines ?? []) as FranchiseStockTransferLineRow[],
+    ...(transfer as unknown as FranchiseStockTransferRow),
+    lines: (lines as unknown as FranchiseStockTransferLineRow[]) ?? [],
   };
 }
 
