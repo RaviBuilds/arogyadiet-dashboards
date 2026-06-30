@@ -12,3 +12,4 @@ export * from "./franchiseRepository";
 export * from "./franchiseClinicRepository";
 export * from "./agreementDocRepository";
 export * from "./warehouseRepository";
+export * from "./franchiseInventoryRepository";

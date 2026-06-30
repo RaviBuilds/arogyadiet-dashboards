@@ -19,6 +19,7 @@ import type {
   InventoryCatalogProduct,
   ProductType,
 } from "@/lib/inventory/product-schema";
+import type { FranchiseDestination } from "@/lib/franchise-inventory/active-destination-filter";
 import { cn } from "@/lib/utils";
 import DownloadPurchaseOrdersModal from "@/shared/components/admin/inventory/modals/DownloadPurchaseOrdersModal";
 import ProductCard from "@/shared/components/admin/inventory/ProductCard";
@@ -32,6 +33,8 @@ interface InventoryDashboardProps {
   initialProducts: InventoryCatalogProduct[];
   productManagement?: boolean;
   basePath?: string;
+  /** Active franchise destinations for the dispatch selector. */
+  franchiseDestinations?: FranchiseDestination[];
 }
 
 function getEmptyStateMessage(
@@ -70,6 +73,7 @@ export default function InventoryDashboard({
   initialProducts,
   productManagement = false,
   basePath,
+  franchiseDestinations,
 }: InventoryDashboardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
@@ -256,7 +260,7 @@ export default function InventoryDashboard({
             </div>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
               {products.map((product) => (
-                <ProductCard key={product.id} product={product} productManagement={productManagement} />
+                <ProductCard key={product.id} product={product} productManagement={productManagement} franchiseDestinations={franchiseDestinations} />
               ))}
             </div>
           </section>

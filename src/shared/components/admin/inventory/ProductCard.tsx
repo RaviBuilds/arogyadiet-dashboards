@@ -21,6 +21,7 @@ import {
   type InventoryCatalogProduct,
   type ProductType,
 } from "@/lib/inventory/product-schema";
+import type { FranchiseDestination } from "@/lib/franchise-inventory/active-destination-filter";
 import { cn } from "@/lib/utils";
 import DispatchStockModal from "@/shared/components/admin/inventory/modals/DispatchStockModal";
 import EditProductModal from "@/shared/components/admin/inventory/modals/EditProductModal";
@@ -64,9 +65,11 @@ const BASE_UOM_SHORT_LABELS: Record<BaseUom, string> = {
 interface ProductCardProps {
   product: InventoryCatalogProduct;
   productManagement?: boolean;
+  /** Active franchise destinations for the dispatch selector. */
+  franchiseDestinations?: FranchiseDestination[];
 }
 
-export default function ProductCard({ product, productManagement = false }: ProductCardProps) {
+export default function ProductCard({ product, productManagement = false, franchiseDestinations }: ProductCardProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -212,6 +215,7 @@ export default function ProductCard({ product, productManagement = false }: Prod
             <span className="text-xs text-muted-foreground">{typeLabel}</span>
           </div>
 
+          {productManagement && (
           <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-4">
             <ReceiveStockModal
               productId={product.id}
@@ -232,6 +236,7 @@ export default function ProductCard({ product, productManagement = false }: Prod
               productId={product.id}
               productName={product.name}
               baseUom={product.baseUom}
+              franchiseDestinations={franchiseDestinations}
               trigger={
                 <Button type="button" size="sm" variant="outline" className="w-full">
                   <Minus className="mr-1 h-4 w-4" />
@@ -240,6 +245,7 @@ export default function ProductCard({ product, productManagement = false }: Prod
               }
             />
           </div>
+          )}
         </CardContent>
       </Card>
 

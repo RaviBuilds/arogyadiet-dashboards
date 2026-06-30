@@ -4,13 +4,15 @@ import {
   getInventoryMasterCatalog,
   getInventoryMetrics,
 } from "@/services/inventoryEngine";
+import { listActiveFranchiseDestinations } from "@/services/franchiseInventoryEngine";
 
 export const revalidate = 0;
 
 export default async function MasterWarehouseCatalogPage() {
-  const [initialProducts, metricsData] = await Promise.all([
+  const [initialProducts, metricsData, franchiseDestinations] = await Promise.all([
     getInventoryMasterCatalog(),
     getInventoryMetrics(),
+    listActiveFranchiseDestinations(),
   ]);
 
   return (
@@ -20,6 +22,7 @@ export default async function MasterWarehouseCatalogPage() {
         initialProducts={initialProducts}
         productManagement={true}
         basePath="/inventory/warehouse"
+        franchiseDestinations={franchiseDestinations}
       />
     </div>
   );

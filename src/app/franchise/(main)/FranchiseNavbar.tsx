@@ -19,6 +19,7 @@ import {
   CreditCard,
   Settings2,
   ShoppingBag,
+  Package,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -55,6 +56,7 @@ const NAV_ITEMS = [
   { href: "/subscriptions", label: "Subscriptions", icon: CreditCard },
   { href: "/riders", label: "Riders", icon: Truck },
   { href: "/operations", label: "Operations", icon: Settings2 },
+  { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/shop-products", label: "Shop Products", icon: ShoppingBag },
   { href: "/profile", label: "Profile", icon: User },
 ];

@@ -303,6 +303,22 @@ export async function createFranchise(
       };
     }
 
+    // Provision the franchise inventory within the creation flow (Req 1.1, 1.2, 1.5).
+    // The RPC is idempotent (INSERT ... ON CONFLICT DO NOTHING) so concurrent
+    // calls are safe (Req 1.4, 1.6). If provisioning fails, the franchise must
+    // not be considered successfully created (Req 1.5).
+    const { error: inventoryError } = await admin.rpc(
+      "provision_franchise_inventory",
+      { p_franchise_id: franchise.id }
+    );
+
+    if (inventoryError) {
+      return {
+        success: false,
+        error: `Franchise created but inventory provisioning failed: ${inventoryError.message}`,
+      };
+    }
+
     revalidatePath(MASTER_SYSTEM_PATH);
     return { success: true, data: { id: franchise.id } };
   } catch (err) {
