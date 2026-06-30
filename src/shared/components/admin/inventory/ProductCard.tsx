@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import DispatchStockModal from "@/shared/components/admin/inventory/modals/DispatchStockModal";
 import EditProductModal from "@/shared/components/admin/inventory/modals/EditProductModal";
 import ReceiveStockModal from "@/shared/components/admin/inventory/modals/ReceiveStockModal";
+import FranchiseDispatchModal from "@/app/franchise/(main)/inventory/_components/FranchiseDispatchModal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,11 +66,21 @@ const BASE_UOM_SHORT_LABELS: Record<BaseUom, string> = {
 interface ProductCardProps {
   product: InventoryCatalogProduct;
   productManagement?: boolean;
+  /** Show the central-kitchen Receive + Dispatch stock buttons. Default true. */
+  stockOperations?: boolean;
+  /** Franchise portal mode: show only a single franchise Dispatch button. */
+  franchiseMode?: boolean;
   /** Active franchise destinations for the dispatch selector. */
   franchiseDestinations?: FranchiseDestination[];
 }
 
-export default function ProductCard({ product, productManagement = false, franchiseDestinations }: ProductCardProps) {
+export default function ProductCard({
+  product,
+  productManagement = false,
+  stockOperations = true,
+  franchiseMode = false,
+  franchiseDestinations,
+}: ProductCardProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -215,7 +226,15 @@ export default function ProductCard({ product, productManagement = false, franch
             <span className="text-xs text-muted-foreground">{typeLabel}</span>
           </div>
 
-          {productManagement && (
+          {franchiseMode ? (
+          <div className="mt-4 border-t pt-4">
+            <FranchiseDispatchModal
+              productId={product.id}
+              productName={product.name}
+              availableQuantity={product.totalStock}
+            />
+          </div>
+          ) : stockOperations ? (
           <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-4">
             <ReceiveStockModal
               productId={product.id}
@@ -245,7 +264,7 @@ export default function ProductCard({ product, productManagement = false, franch
               }
             />
           </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 

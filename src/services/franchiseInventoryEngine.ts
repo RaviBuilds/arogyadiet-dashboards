@@ -75,6 +75,7 @@ interface ProductInfo {
   name: string;
   image_url: string | null;
   base_uom: string;
+  category: string;
 }
 
 /**
@@ -91,7 +92,7 @@ async function resolveProductInfo(
 
   const { data, error } = await admin
     .from("inventory_products")
-    .select("id, name, image_url, base_uom")
+    .select("id, name, image_url, base_uom, category")
     .in("id", uniqueIds);
 
   if (error) {
@@ -146,6 +147,7 @@ export async function getFranchiseInventoryCatalog(
       name: info?.name ?? "Unknown Product",
       imageUrl: resolveImageUrl(info?.image_url ?? null),
       baseUom: (info?.base_uom ?? "unit") as FranchiseCatalogProduct["baseUom"],
+      category: info?.category ?? "Uncategorized",
       onHandQuantity: onHand.onHandQuantity,
       batches: onHand.batches,
     });

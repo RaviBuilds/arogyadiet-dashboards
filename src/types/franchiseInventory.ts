@@ -50,6 +50,7 @@ export interface FranchiseCatalogProduct {
   name: string;
   imageUrl: string | null;
   baseUom: BaseUom;
+  category: string;
   onHandQuantity: number;
   batches: FranchiseBatch[];
 }

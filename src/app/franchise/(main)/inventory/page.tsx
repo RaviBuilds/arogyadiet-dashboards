@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
-import { Package, TruckIcon } from "lucide-react";
+import Link from "next/link";
+import { TruckIcon, BookOpen } from "lucide-react";
 
 import {
   getFranchiseInventoryCatalog,
@@ -8,14 +9,18 @@ import {
 import type { Scope } from "@/types/franchise";
 import type { FranchiseCatalogProduct } from "@/types/franchiseInventory";
 import type { InventoryCatalogProduct } from "@/lib/inventory/product-schema";
-import ProductCard from "@/shared/components/admin/inventory/ProductCard";
+import { Button } from "@/shared/components/ui/button";
+import InventoryDashboard from "@/shared/components/admin/inventory/InventoryDashboard";
 import IncomingTransfersPanel from "./_components/IncomingTransfersPanel";
+import FranchiseOperationsCart from "./_components/FranchiseOperationsCart";
 
 export const revalidate = 0;
 
 /**
  * Maps a FranchiseCatalogProduct (from the franchise inventory service) into
- * the InventoryCatalogProduct shape expected by the shared ProductCard component.
+ * the InventoryCatalogProduct shape expected by the shared InventoryDashboard
+ * and ProductCard components so the franchise inventory looks identical to the
+ * central kitchen warehouse.
  */
 function toInventoryCatalogProduct(
   product: FranchiseCatalogProduct,
@@ -24,7 +29,7 @@ function toInventoryCatalogProduct(
     id: product.productId,
     name: product.name,
     imageUrl: product.imageUrl,
-    category: "Finished Good",
+    category: product.category,
     type: "FINISHED_GOOD",
     baseUom: product.baseUom,
     minStockThreshold: 0,
@@ -60,53 +65,30 @@ export default async function FranchiseInventoryPage() {
     getIncomingTransfers(franchiseId, scope),
   ]);
 
+  const products = catalog.map(toInventoryCatalogProduct);
+
   return (
     <div className="space-y-8">
-      {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-          Inventory
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Product catalog and stock for your franchise.
-        </p>
+      {/* Audit Ledger CTA */}
+      <div className="flex justify-end">
+        <Button asChild variant="outline">
+          <Link href="/inventory/ledger">
+            <BookOpen className="mr-2 h-4 w-4" />
+            Audit Ledger
+          </Link>
+        </Button>
       </div>
 
-      {/* Product catalog section */}
-      {catalog.length === 0 ? (
-        <div className="flex min-h-[300px] flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8 text-center">
-          <Package className="size-12 text-muted-foreground/50 mb-4" />
-          <p className="text-lg font-medium text-slate-700">
-            No products in inventory
-          </p>
-          <p className="mt-2 text-sm text-muted-foreground max-w-md">
-            Your franchise inventory is empty. Products will appear here once stock
-            is transferred from the central kitchen and received.
-          </p>
-        </div>
-      ) : (
-        <div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {catalog.map((product) => (
-              <div key={product.productId} className="relative">
-                {product.onHandQuantity === 0 && (
-                  <div className="absolute top-2 left-2 z-10">
-                    <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-800">
-                      Out of Stock
-                    </span>
-                  </div>
-                )}
-                <ProductCard
-                  product={toInventoryCatalogProduct(product)}
-                  productManagement={false}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Reuse the shared warehouse dashboard UI (image cards, category
+          grouping, batch popover) in franchise mode — single Dispatch button. */}
+      <InventoryDashboard
+        initialProducts={products}
+        productManagement={false}
+        stockOperations={false}
+        franchiseMode
+      />
 
-      {/* Incoming transfers section */}
+      {/* Incoming transfers from the central kitchen (accept / receive). */}
       {incomingTransfers.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
@@ -121,6 +103,9 @@ export default async function FranchiseInventoryPage() {
           <IncomingTransfersPanel transfers={incomingTransfers} />
         </div>
       )}
+
+      {/* Floating outbound staging cart + batch processor. */}
+      <FranchiseOperationsCart />
     </div>
   );
 }

@@ -296,3 +296,92 @@ export async function recordStockOutAction(
 
   return { success: true, data: result };
 }
+
+// ---------------------------------------------------------------------------
+// Bulk outbound dispatch (staging cart → outbound batch)
+// ---------------------------------------------------------------------------
+
+export interface BulkFranchiseDispatchItem {
+  product_id: string;
+  name: string;
+  quantity: number;
+  reason: string;
+  comment?: string | null;
+}
+
+export interface BulkFranchiseDispatchResult {
+  success: boolean;
+  processed?: number;
+  totalDispatched?: number;
+  error?: string;
+}
+
+/**
+ * Processes a staged outbound batch: each item is validated and dispatched via
+ * the atomic record_franchise_stock_out RPC (FIFO depletion + OUT ledger entry).
+ * Stops on the first failing item and reports which item failed so the operator
+ * can correct the cart.
+ */
+export async function bulkFranchiseDispatchAction(
+  items: BulkFranchiseDispatchItem[],
+): Promise<BulkFranchiseDispatchResult> {
+  // 1. Resolve scope
+  const scopeResult = await resolveScope();
+  if (!scopeResult.ok) {
+    return {
+      success: false,
+      error:
+        scopeResult.reason === "no_franchise"
+          ? "No franchise is assigned to your account."
+          : "Unauthorized. Please log in.",
+    };
+  }
+
+  const { scope } = scopeResult;
+  if (scope.kind !== "franchise") {
+    return { success: false, error: "This action is restricted to franchise operators." };
+  }
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return { success: false, error: "The outbound cart is empty." };
+  }
+
+  let processed = 0;
+  let totalDispatched = 0;
+
+  // Process sequentially so each FIFO depletion sees the prior item's effect.
+  for (const item of items) {
+    const parsed = stockOutInputSchema.safeParse({
+      product_id: item.product_id,
+      reason: item.reason,
+      quantity: item.quantity,
+      comment: item.comment ?? null,
+    });
+
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return {
+        success: false,
+        processed,
+        error: `${item.name}: ${issue?.message ?? "Invalid item."}`,
+      };
+    }
+
+    const result = await recordStockOut(parsed.data, scope.franchise_id, scope);
+
+    if (!result.success) {
+      return {
+        success: false,
+        processed,
+        error: `${item.name}: ${result.error ?? "Dispatch failed."}`,
+      };
+    }
+
+    processed += 1;
+    totalDispatched += item.quantity;
+  }
+
+  revalidateFranchiseInventory();
+
+  return { success: true, processed, totalDispatched };
+}

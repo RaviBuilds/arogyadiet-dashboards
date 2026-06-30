@@ -35,6 +35,10 @@ interface InventoryDashboardProps {
   basePath?: string;
   /** Active franchise destinations for the dispatch selector. */
   franchiseDestinations?: FranchiseDestination[];
+  /** Show central-kitchen Receive + Dispatch buttons on each card. Default true. */
+  stockOperations?: boolean;
+  /** Franchise portal mode: franchise hero, no register/raw tabs, single Dispatch button. */
+  franchiseMode?: boolean;
 }
 
 function getEmptyStateMessage(
@@ -74,6 +78,8 @@ export default function InventoryDashboard({
   productManagement = false,
   basePath,
   franchiseDestinations,
+  stockOperations = true,
+  franchiseMode = false,
 }: InventoryDashboardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
@@ -117,12 +123,17 @@ export default function InventoryDashboard({
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 px-6 py-16 text-center">
         <PackageOpen className="mb-3 size-10 text-muted-foreground/60" />
-        <p className="font-medium text-foreground">No products registered yet</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Use &quot;Register New Product&quot; to add your first item to the
-          master catalog.
+        <p className="font-medium text-foreground">
+          {franchiseMode
+            ? "No products in inventory yet"
+            : "No products registered yet"}
         </p>
-        {productManagement && (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {franchiseMode
+            ? "Stock will appear here once it is transferred from the central kitchen and received."
+            : 'Use "Register New Product" to add your first item to the master catalog.'}
+        </p>
+        {!franchiseMode && productManagement && (
           <div className="mt-4">
             <RegisterProductSheet basePath={basePath} />
           </div>
@@ -136,16 +147,19 @@ export default function InventoryDashboard({
       <div className="relative mb-6 flex min-h-32 items-start overflow-hidden rounded-xl bg-gradient-to-r from-orange-50 to-orange-100/50 p-4 sm:items-center sm:p-6">
         <div className="relative z-10 min-w-0 max-w-full flex-1 pr-2 sm:max-w-[65%] md:max-w-[50%]">
           <h1 className="text-lg font-bold tracking-tight text-slate-900 sm:text-xl md:text-2xl">
-            Warehouse Inventory Master
+            {franchiseMode ? "Franchise Inventory" : "Warehouse Inventory Master"}
           </h1>
           <p className="mt-1 text-xs leading-snug text-slate-600 sm:text-sm">
-            Browse the master catalog and register new raw materials or finished
-            goods.
+            {franchiseMode
+              ? "Finished-product stock available at your franchise. Dispatch stock to customers, wastage, or other destinations."
+              : "Browse the master catalog and register new raw materials or finished goods."}
           </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2 sm:mt-3 [&_button]:h-8 [&_button]:px-2.5 [&_button]:text-xs sm:[&_button]:h-9 sm:[&_button]:px-3 sm:[&_button]:text-sm">
-            {productManagement && <RegisterProductSheet basePath={basePath} />}
-            <DownloadPurchaseOrdersModal products={initialProducts} />
-          </div>
+          {!franchiseMode && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 sm:mt-3 [&_button]:h-8 [&_button]:px-2.5 [&_button]:text-xs sm:[&_button]:h-9 sm:[&_button]:px-3 sm:[&_button]:text-sm">
+              {productManagement && <RegisterProductSheet basePath={basePath} />}
+              <DownloadPurchaseOrdersModal products={initialProducts} />
+            </div>
+          )}
         </div>
         <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-2/5 sm:block md:w-1/2">
           <div className="absolute inset-0 z-10 bg-gradient-to-r from-orange-50 via-orange-50/90 to-transparent sm:via-orange-50/80" />
@@ -169,6 +183,7 @@ export default function InventoryDashboard({
         />
       </div>
 
+      {!franchiseMode && (
       <Tabs
         value={activeType}
         onValueChange={(value) => {
@@ -183,6 +198,7 @@ export default function InventoryDashboard({
           <TabsTrigger value="FINISHED_GOOD">Finished Goods</TabsTrigger>
         </TabsList>
       </Tabs>
+      )}
 
       <div className="relative -mx-6 min-h-[500px] border-t bg-slate-50/50 px-6 py-8">
         <div
@@ -260,7 +276,14 @@ export default function InventoryDashboard({
             </div>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
               {products.map((product) => (
-                <ProductCard key={product.id} product={product} productManagement={productManagement} franchiseDestinations={franchiseDestinations} />
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  productManagement={productManagement}
+                  stockOperations={stockOperations}
+                  franchiseMode={franchiseMode}
+                  franchiseDestinations={franchiseDestinations}
+                />
               ))}
             </div>
           </section>
