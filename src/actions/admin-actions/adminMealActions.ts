@@ -9,6 +9,7 @@ import { logAdminAction } from "@/lib/logger";
 import { buildPushPayload, notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { getCustomerNameBySubscriptionId } from "@/lib/notifications/lookups";
 import { revalidatePath } from "next/cache";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 // Use raw admin client to match the customer portal\'s elevated transaction permissions
 const supabaseAdmin = createSupabaseAdminClient(
@@ -86,6 +87,8 @@ async function notifyAdminMealPlannerUpdated(
 }
 
 export async function adminBulkUpdateMealPreferences(subscriptionId: string, updates: { date: string; categoryId: string | null; }[]) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   try {
     for (const update of updates) {
       const payload: any = {};
@@ -112,6 +115,8 @@ export async function adminBulkUpdateMealPreferences(subscriptionId: string, upd
 }
 
 export async function adminBulkUpdatePausePreferences(subscriptionId: string, updates: { date: string; isPaused: boolean }[]) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   try {
     const result = await processPausePreferenceUpdates(
       subscriptionId,
@@ -141,6 +146,8 @@ export async function adminBulkUpdatePausePreferences(subscriptionId: string, up
 }
 
 export async function adminBulkUpdateAddressPreferences(subscriptionId: string, updates: { date: string; addressId: string }[]) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   try {
     for (const update of updates) {
       const { error } = await supabaseAdmin

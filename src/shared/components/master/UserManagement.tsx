@@ -32,7 +32,26 @@ import {
   TableRow,
 } from "@/shared/components/ui/table";
 import { Switch } from "@/shared/components/ui/switch";
+import { Checkbox } from "@/shared/components/ui/checkbox";
 import { Label } from "@/shared/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/components/ui/select";
+import {
+  ADMIN_ACCESS_LEVELS,
+  ACCESS_LEVEL_LABELS,
+  OPERATIONS_GROUPS,
+  GROUP_LABELS,
+  resolveAccessConfiguration,
+  type AdminAccessLevel,
+  type OperationsAccess,
+  type OperationsGroup,
+  type PermissionLevel,
+} from "@/lib/auth/adminAccessCore";
 
 interface AdminUser {
   id: string;
@@ -42,10 +61,76 @@ interface AdminUser {
   mobile: string | null;
   is_active: boolean;
   created_at: string;
+  admin_access_level: string | null;
+  admin_operations_access: OperationsAccess | null;
 }
 
 interface UserManagementProps {
   initialAdmins: AdminUser[];
+}
+
+/**
+ * Per-group operations access editor. Shown only when the selected Access Level
+ * is `operations`. Each of the six groups can be selected and set to Manage
+ * (default) or View (read-only).
+ */
+function OperationsGroupConfig({
+  value,
+  onChange,
+  idPrefix,
+}: {
+  value: OperationsAccess;
+  onChange: (next: OperationsAccess) => void;
+  idPrefix: string;
+}) {
+  const toggle = (group: OperationsGroup, checked: boolean) => {
+    const next: OperationsAccess = { ...value };
+    if (checked) next[group] = next[group] ?? "manage";
+    else delete next[group];
+    onChange(next);
+  };
+  const setPermission = (group: OperationsGroup, perm: PermissionLevel) => {
+    onChange({ ...value, [group]: perm });
+  };
+
+  return (
+    <div className="space-y-2.5 rounded-md border p-3">
+      <p className="text-xs font-medium text-muted-foreground">
+        Operations access — select groups and set each to Manage or View
+      </p>
+      {OPERATIONS_GROUPS.map((group) => {
+        const selected = value[group] !== undefined;
+        return (
+          <div key={group} className="flex items-center justify-between gap-3">
+            <label
+              htmlFor={`${idPrefix}-${group}`}
+              className="flex items-center gap-2 text-sm"
+            >
+              <Checkbox
+                id={`${idPrefix}-${group}`}
+                checked={selected}
+                onCheckedChange={(c) => toggle(group, c === true)}
+              />
+              {GROUP_LABELS[group]}
+            </label>
+            <Select
+              value={selected ? value[group] : undefined}
+              onValueChange={(v) => setPermission(group, v as PermissionLevel)}
+              disabled={!selected}
+            >
+              <SelectTrigger className="h-8 w-28">
+                <SelectValue placeholder="Manage" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="manage">Manage</SelectItem>
+                <SelectItem value="view">View</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const SEARCH_OPTIONS = [
@@ -66,12 +151,19 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
     email: "",
     mobile: "",
     password: "",
+    accessLevel: "inventory_operations" as AdminAccessLevel,
+    operationsAccess: {} as OperationsAccess,
   });
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
-  const [editForm, setEditForm] = useState({ fullName: "", mobile: "" });
+  const [editForm, setEditForm] = useState({
+    fullName: "",
+    mobile: "",
+    accessLevel: "inventory_operations" as AdminAccessLevel,
+    operationsAccess: {} as OperationsAccess,
+  });
 
   // Delete dialog
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -83,7 +175,10 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
   // --- Filtering ---
   const filtered = admins.filter((a) => {
     if (!searchTerm) return true;
-    const val = (a as any)[searchColumn]?.toLowerCase() ?? "";
+    const val =
+      String(
+        (a as unknown as Record<string, unknown>)[searchColumn] ?? "",
+      ).toLowerCase();
     return val.includes(searchTerm.toLowerCase());
   });
 
@@ -94,7 +189,14 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
       if (result.success) {
         toast.success("Admin user created successfully.");
         setCreateOpen(false);
-        setCreateForm({ fullName: "", email: "", mobile: "", password: "" });
+        setCreateForm({
+          fullName: "",
+          email: "",
+          mobile: "",
+          password: "",
+          accessLevel: "inventory_operations",
+          operationsAccess: {},
+        });
         // Refresh list from server would happen via revalidation; optimistic update:
         window.location.reload();
       } else {
@@ -106,7 +208,16 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
   // --- Edit ---
   const openEdit = (admin: AdminUser) => {
     setEditTarget(admin);
-    setEditForm({ fullName: admin.full_name, mobile: admin.mobile || "" });
+    const cfg = resolveAccessConfiguration(
+      admin.admin_access_level,
+      admin.admin_operations_access,
+    );
+    setEditForm({
+      fullName: admin.full_name,
+      mobile: admin.mobile || "",
+      accessLevel: cfg.level,
+      operationsAccess: cfg.groups,
+    });
     setEditOpen(true);
   };
 
@@ -116,10 +227,18 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
       const result = await updateAdminUser(editTarget.id, editForm);
       if (result.success) {
         toast.success("Admin updated successfully.");
+        const persistedOps =
+          editForm.accessLevel === "operations" ? editForm.operationsAccess : null;
         setAdmins((prev) =>
           prev.map((a) =>
             a.id === editTarget.id
-              ? { ...a, full_name: editForm.fullName, mobile: editForm.mobile || null }
+              ? {
+                  ...a,
+                  full_name: editForm.fullName,
+                  mobile: editForm.mobile || null,
+                  admin_access_level: editForm.accessLevel,
+                  admin_operations_access: persistedOps,
+                }
               : a,
           ),
         );
@@ -205,6 +324,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Mobile</TableHead>
+              <TableHead>Access Level</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Created</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -214,7 +334,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={7}
                   className="text-center py-10 text-muted-foreground"
                 >
                   No admin users found.
@@ -234,6 +354,19 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {admin.mobile || "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {(() => {
+                      const cfg = resolveAccessConfiguration(
+                        admin.admin_access_level,
+                        admin.admin_operations_access,
+                      );
+                      if (cfg.level !== "operations") {
+                        return ACCESS_LEVEL_LABELS[cfg.level];
+                      }
+                      const count = Object.keys(cfg.groups).length;
+                      return `${ACCESS_LEVEL_LABELS[cfg.level]} · ${count} group${count === 1 ? "" : "s"}`;
+                    })()}
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={admin.is_active ? "ACTIVE" : "PAUSED"} />
@@ -333,6 +466,41 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 }
               />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="create-access-level">Access Level</Label>
+              <Select
+                value={createForm.accessLevel}
+                onValueChange={(value) =>
+                  setCreateForm((f) => ({
+                    ...f,
+                    accessLevel: value as AdminAccessLevel,
+                    // Clear per-group config when leaving the operations level.
+                    operationsAccess:
+                      value === "operations" ? f.operationsAccess : {},
+                  }))
+                }
+              >
+                <SelectTrigger id="create-access-level">
+                  <SelectValue placeholder="Select access level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ADMIN_ACCESS_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {ACCESS_LEVEL_LABELS[level]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {createForm.accessLevel === "operations" && (
+              <OperationsGroupConfig
+                idPrefix="create-ops"
+                value={createForm.operationsAccess}
+                onChange={(next) =>
+                  setCreateForm((f) => ({ ...f, operationsAccess: next }))
+                }
+              />
+            )}
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -346,7 +514,9 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 isPending ||
                 !createForm.fullName ||
                 !createForm.email ||
-                createForm.password.length < 8
+                createForm.password.length < 8 ||
+                (createForm.accessLevel === "operations" &&
+                  Object.keys(createForm.operationsAccess).length === 0)
               }
             >
               {isPending ? "Creating..." : "Create Admin"}
@@ -382,6 +552,40 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 }
               />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-access-level">Access Level</Label>
+              <Select
+                value={editForm.accessLevel}
+                onValueChange={(value) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    accessLevel: value as AdminAccessLevel,
+                    operationsAccess:
+                      value === "operations" ? f.operationsAccess : {},
+                  }))
+                }
+              >
+                <SelectTrigger id="edit-access-level">
+                  <SelectValue placeholder="Select access level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ADMIN_ACCESS_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {ACCESS_LEVEL_LABELS[level]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {editForm.accessLevel === "operations" && (
+              <OperationsGroupConfig
+                idPrefix="edit-ops"
+                value={editForm.operationsAccess}
+                onChange={(next) =>
+                  setEditForm((f) => ({ ...f, operationsAccess: next }))
+                }
+              />
+            )}
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -391,7 +595,12 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
             </DialogClose>
             <Button
               onClick={handleEdit}
-              disabled={isPending || !editForm.fullName}
+              disabled={
+                isPending ||
+                !editForm.fullName ||
+                (editForm.accessLevel === "operations" &&
+                  Object.keys(editForm.operationsAccess).length === 0)
+              }
             >
               {isPending ? "Saving..." : "Save Changes"}
             </Button>

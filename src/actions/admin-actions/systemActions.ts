@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
 import { generateDailyOrders } from "@/actions/system-actions/orderGeneration";
+import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
 import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 type ProductLinkingResult =
   | { success: true; count: number; targetDate: string }
@@ -64,6 +66,8 @@ async function logProductLinkingRun({
 export async function runProductLinkingAction(
   targetDate: string,
 ): Promise<ProductLinkingResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const today = getISTDateString(0);
   const tomorrow = getISTDateString(1);
 
@@ -149,22 +153,34 @@ export async function triggerSystemAutomation(
   automationName: string,
   options?: { targetDate?: string },
 ): Promise<SystemAutomationResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   try {
-    // AUTOMATION 3: Routing & Batching (API Route)
+    // AUTOMATION 3: Routing & Batching
+    // Calls the dispatch engine directly server-side. No HTTP round-trip and no
+    // CRON_SECRET in client code — the /api/cron/dispatch route stays reserved
+    // for the scheduled cron job only.
     if (automationName === "Routing & Batching") {
-      const dateStr = getISTDateString(0);
+      const today = getISTDateString(0);
+      const tomorrow = getTomorrowISTDateString();
+      const targetDate = options?.targetDate || today;
 
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      const dispatchUrl = `${baseUrl}/api/cron/dispatch?secret=${process.env.CRON_SECRET || "arogya-demo-123"}&date=${dateStr}`;
+      if (targetDate !== today && targetDate !== tomorrow) {
+        return {
+          success: false,
+          error: `Routing can only run for today (${today}) or tomorrow (${tomorrow}).`,
+        };
+      }
 
-      const response = await fetch(dispatchUrl, { method: "GET" });
+      const result = await executeAutomatedDispatch(targetDate);
 
-      if (!response.ok) {
-        return { success: false, error: `API returned status: ${response.status}` };
+      if ("error" in result && result.error) {
+        return { success: false, error: result.error };
       }
 
       await logAdminAction("UPDATE", "system_automation", automationName, {
-        executed_url: dispatchUrl,
+        executed_action: "executeAutomatedDispatch",
+        target_date: targetDate,
       });
       return { success: true };
     }

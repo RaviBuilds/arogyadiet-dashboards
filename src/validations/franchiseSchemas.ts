@@ -94,6 +94,25 @@ export const removePincodesSchema = z.object({
 export type RemovePincodesInput = z.infer<typeof removePincodesSchema>;
 
 /**
+ * Schema for a franchise admin requesting a new service-area pincode
+ */
+export const requestPincodeSchema = z.object({
+  pincode: pincodeSchema,
+});
+
+export type RequestPincodeInput = z.infer<typeof requestPincodeSchema>;
+
+/**
+ * Schema for an admin reviewing (approving / rejecting) a pincode request
+ */
+export const reviewPincodeRequestSchema = z.object({
+  request_id: z.string().uuid("Invalid request ID"),
+  notes: z.string().max(500, "Notes cannot exceed 500 characters").optional(),
+});
+
+export type ReviewPincodeRequestInput = z.infer<typeof reviewPincodeRequestSchema>;
+
+/**
  * Schema for franchise list filters
  */
 export const franchiseListFiltersSchema = z.object({

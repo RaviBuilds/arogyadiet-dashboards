@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -87,6 +88,7 @@ export function CustomerOverview({
   stoppedSubscriptions,
   onNavigate,
 }: CustomerOverviewProps) {
+  const router = useRouter();
   const metrics = useMemo(() => {
     const totalCustomers = customers.length;
     const activeCustomers = customers.filter(
@@ -353,7 +355,7 @@ export function CustomerOverview({
                 variant="outline"
                 size="sm"
                 className="transition-all duration-200"
-                onClick={() => onNavigate("Active Subscriptions")}
+                onClick={() => router.push("/subscriptions")}
               >
                 View Active
               </Button>
@@ -415,7 +417,7 @@ export function CustomerOverview({
                   variant="ghost"
                   size="sm"
                   className="h-7 px-2 text-xs text-slate-500 hover:text-slate-900 transition-all duration-200"
-                  onClick={() => onNavigate("Pending Subscriptions")}
+                  onClick={() => router.push("/subscriptions")}
                 >
                   View Pending
                 </Button>

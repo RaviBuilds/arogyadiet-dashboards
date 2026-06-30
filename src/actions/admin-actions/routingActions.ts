@@ -8,6 +8,8 @@ import { notifyRoutingAssignmentComplete } from "@/lib/delivery/deliveryStatusNo
 import { buildISTDepartureISO, isFutureISO8601 } from "@/lib/dates/ist";
 import { computeOpenLoopHaversineRoute } from "@/lib/distance";
 import { computeOpenLoopRoute } from "@/lib/routing/googleRoutes";
+import { applyOperationsScope, isFranchiseScope, type OperationsScope } from "@/lib/franchise/scope";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 function getISTDateString(offsetDays = 0) {
   const date = new Date();
@@ -20,22 +22,26 @@ function getISTDateString(offsetDays = 0) {
   }).format(date);
 }
 
-export async function getRoutingData() {
+export async function getRoutingData(scope?: OperationsScope) {
   const supabase = await createClient();
 
   const today = getISTDateString();
   const tomorrow = getISTDateString(1);
 
-  const { data: ordersData, error: ordersError } = await supabase
+  let ordersQuery = supabase
     .from("delivery_orders")
     .select(`
-      id, status, assigned_rider_id, delivery_date, customer_profile_id,
+      id, status, assigned_rider_id, delivery_date, customer_profile_id, franchise_id,
       customer_profiles ( users ( full_name ) ),
       addresses!delivery_address_id ( pincode, lat, lng ),
       meal_categories ( name )
     `)
     .in("delivery_date", [today, tomorrow])
     .in("status", ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED", "PICKED"]);
+
+  ordersQuery = applyOperationsScope(ordersQuery, scope);
+
+  const { data: ordersData, error: ordersError } = await ordersQuery;
 
   if (ordersError) console.error("Error fetching routing orders:", ordersError);
 
@@ -65,14 +71,18 @@ export async function getRoutingData() {
     };
   });
 
-  const { data: ridersData, error: ridersError } = await supabase
+  let ridersQuery = supabase
     .from("rider_profiles")
     .select(`
-      id, employee_code,
+      id, employee_code, clinic_id,
       users!inner ( full_name ),
       rider_service_areas ( pincode )
     `)
     .eq("is_active", true);
+
+  ridersQuery = applyOperationsScope(ridersQuery, scope);
+
+  const { data: ridersData, error: ridersError } = await ridersQuery;
 
   if (ridersError) console.error("Error fetching routing riders:", ridersError);
 
@@ -80,6 +90,8 @@ export async function getRoutingData() {
     id: r.id,
     fullName: r.users?.full_name || "Unknown",
     employeeCode: r.employee_code || "N/A",
+    // Rider's linked Clinic — drives clinic-selector-first gating (Req 17).
+    clinic_id: r.clinic_id ?? null,
     assignedPincodes: r.rider_service_areas?.map((a: any) => a.pincode) || []
   }));
 
@@ -103,6 +115,7 @@ async function commitRiderRouteForDate(
   ratePerKm: number,
   apiKey: string | undefined,
   departureTime: string | undefined,
+  batchFranchiseId: string | null,
 ) {
   let batchId = existingBatches?.find((b) => b.assigned_rider_id === riderId)?.id;
 
@@ -192,6 +205,7 @@ async function commitRiderRouteForDate(
         status: "PENDING",
         total_distance_km: totalBatchDistance,
         expected_payout: totalBatchPayout,
+        franchise_id: batchFranchiseId,
       })
       .select("id")
       .single();
@@ -232,14 +246,23 @@ async function commitRouteChangesForDate(
   kitchenLng: number,
   apiKey: string | undefined,
   departureTime: string | undefined,
+  scope: OperationsScope,
 ) {
-  const { data: allCurrentOrders, error: fetchOrdersErr } = await supabaseAdmin
+  let ordersQuery = supabaseAdmin
     .from("delivery_orders")
     .select("id, assigned_rider_id, batch_id, addresses!delivery_address_id (lat, lng)")
     .eq("delivery_date", targetDate);
 
+  ordersQuery = applyOperationsScope(ordersQuery, scope);
+
+  const { data: allCurrentOrders, error: fetchOrdersErr } = await ordersQuery;
+
   if (fetchOrdersErr) throw fetchOrdersErr;
   if (!allCurrentOrders?.length) return;
+
+  // New batches inherit the franchise scope (NULL for core/all) so franchise
+  // batches stay attributed and core batches remain unchanged.
+  const batchFranchiseId = isFranchiseScope(scope) ? scope : null;
 
   const riderOrdersMap = new Map<string, string[]>();
   const unassignedOrderIds: string[] = [];
@@ -256,10 +279,14 @@ async function commitRouteChangesForDate(
     }
   });
 
-  const { data: existingBatches, error: fetchBatchesErr } = await supabaseAdmin
+  let batchesQuery = supabaseAdmin
     .from("delivery_batches")
     .select("id, assigned_rider_id")
     .eq("delivery_date", targetDate);
+
+  batchesQuery = applyOperationsScope(batchesQuery, scope);
+
+  const { data: existingBatches, error: fetchBatchesErr } = await batchesQuery;
 
   if (fetchBatchesErr) throw fetchBatchesErr;
 
@@ -277,6 +304,7 @@ async function commitRouteChangesForDate(
         ratePerKm,
         apiKey,
         departureTime,
+        batchFranchiseId,
       ),
     ),
   );
@@ -312,7 +340,12 @@ async function commitRouteChangesForDate(
   }
 }
 
-export async function commitRouteChanges(moves: { orderId: string; newRiderId: string | null }[]) {
+export async function commitRouteChanges(
+  moves: { orderId: string; newRiderId: string | null }[],
+  scope?: OperationsScope,
+) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -358,6 +391,7 @@ export async function commitRouteChanges(moves: { orderId: string; newRiderId: s
         kitchenLng,
         apiKey,
         departureTime,
+        scope,
       );
     }
 

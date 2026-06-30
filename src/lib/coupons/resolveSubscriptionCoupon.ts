@@ -80,12 +80,29 @@ export async function findSubscriptionCoupon(
     return customerCoupon as SubscriptionCouponRow;
   }
 
-  const { data: globalCoupon } = await supabase
+  // Global coupons are scoped per entity: a customer can only redeem global
+  // coupons belonging to their own franchise (or core coupons if they are a
+  // core customer). Resolve the customer's franchise first.
+  const { data: profile } = await supabase
+    .from("customer_profiles")
+    .select("franchise_id")
+    .eq("id", customerProfileId)
+    .maybeSingle();
+
+  const franchiseId = (profile as { franchise_id?: string | null } | null)
+    ?.franchise_id ?? null;
+
+  let globalQuery = supabase
     .from("coupons")
     .select("*")
     .eq("code", normalizedCode)
-    .is("customer_profile_id", null)
-    .maybeSingle();
+    .is("customer_profile_id", null);
+
+  globalQuery = franchiseId
+    ? globalQuery.eq("franchise_id", franchiseId)
+    : globalQuery.is("franchise_id", null);
+
+  const { data: globalCoupon } = await globalQuery.maybeSingle();
 
   return (globalCoupon as SubscriptionCouponRow | null) ?? null;
 }

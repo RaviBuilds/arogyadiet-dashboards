@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
+import React, { useEffect, useState, useTransition } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,6 +20,7 @@ import {
   createGlobalCoupon,
   deleteCoupon,
   deleteGlobalCoupon,
+  listGlobalCoupons,
 } from "@/actions/admin-actions/adminCouponActions";
 import { cn } from "@/lib/utils";
 
@@ -83,6 +84,18 @@ interface AdminCouponsTabProps {
   subscriptionPlans: CouponSubscriptionPlan[];
   variant?: "customer" | "global";
   customerProfileId?: string;
+  /** For the global variant: "core" | franchise UUID. Scopes coupons to an entity. */
+  franchiseScope?: string;
+  /** Injectable per-customer create action. Defaults to admin createCoupon. */
+  createCouponAction?: typeof createCoupon;
+  /** Injectable per-customer delete action. Defaults to admin deleteCoupon. */
+  deleteCouponAction?: typeof deleteCoupon;
+  /** Injectable global list action. Defaults to admin listGlobalCoupons. */
+  listGlobalCouponsAction?: typeof listGlobalCoupons;
+  /** Injectable global create action. Defaults to admin createGlobalCoupon. */
+  createGlobalCouponAction?: typeof createGlobalCoupon;
+  /** Injectable global delete action. Defaults to admin deleteGlobalCoupon. */
+  deleteGlobalCouponAction?: typeof deleteGlobalCoupon;
 }
 
 function buildDefaultFlatDiscounts(
@@ -168,6 +181,12 @@ export function AdminCouponsTab({
   initialCoupons,
   subscriptionPlans,
   variant = "customer",
+  franchiseScope = "core",
+  createCouponAction = createCoupon,
+  deleteCouponAction = deleteCoupon,
+  listGlobalCouponsAction = listGlobalCoupons,
+  createGlobalCouponAction = createGlobalCoupon,
+  deleteGlobalCouponAction = deleteGlobalCoupon,
 }: AdminCouponsTabProps) {
   const isGlobal = variant === "global";
   const activePlans = subscriptionPlans.filter((plan) => plan.is_active !== false);
@@ -179,6 +198,20 @@ export function AdminCouponsTab({
     couponId: string;
     code: string;
   }>({ isOpen: false, couponId: "", code: "" });
+
+  // Reload coupons whenever the franchise scope changes (global variant only).
+  useEffect(() => {
+    if (!isGlobal) return;
+    let cancelled = false;
+    listGlobalCouponsAction(franchiseScope).then((res) => {
+      if (!cancelled && res.success) {
+        setCoupons(res.data as CouponRow[]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [franchiseScope, isGlobal, listGlobalCouponsAction]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -209,8 +242,8 @@ export function AdminCouponsTab({
       };
 
       const res = isGlobal
-        ? await createGlobalCoupon(payload)
-        : await createCoupon({
+        ? await createGlobalCouponAction(payload, franchiseScope)
+        : await createCouponAction({
             ...payload,
             customerProfileId: customerProfileId!,
           });
@@ -228,9 +261,13 @@ export function AdminCouponsTab({
           discountValue: 0,
           maxUses: 1,
         });
-        // Optimistic: refresh will re-fetch via server component revalidation
-        // but we also need a client-side refresh trigger
-        window.location.reload();
+        if (isGlobal) {
+          // Refresh the scoped list in place (preserves the selected franchise).
+          const refreshed = await listGlobalCouponsAction(franchiseScope);
+          if (refreshed.success) setCoupons(refreshed.data as CouponRow[]);
+        } else {
+          window.location.reload();
+        }
       } else {
         toast.error(res.error ?? "Failed to create coupon.");
       }
@@ -240,8 +277,8 @@ export function AdminCouponsTab({
   const handleDelete = () => {
     startTransition(async () => {
       const res = isGlobal
-        ? await deleteGlobalCoupon(deleteState.couponId)
-        : await deleteCoupon(deleteState.couponId, customerProfileId!);
+        ? await deleteGlobalCouponAction(deleteState.couponId)
+        : await deleteCouponAction(deleteState.couponId, customerProfileId!);
       if (res.success) {
         toast.success("Coupon deleted.");
         setCoupons((prev) =>

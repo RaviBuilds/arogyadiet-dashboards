@@ -2,6 +2,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { RiderData } from "./RiderManagement";
+import { clinicDisplayName } from "@/lib/clinic/visibility";
 
 interface RiderActivityProps {
   riders: RiderData[];
@@ -100,6 +101,9 @@ export default function RiderActivity({ riders }: RiderActivityProps) {
                       <p className="font-medium">{rider.fullName}</p>
                       <p className="text-sm text-muted-foreground">
                         {rider.employee_code}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {clinicDisplayName(rider.clinicName)}
                       </p>
                     </div>
                   </div>

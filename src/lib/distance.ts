@@ -55,7 +55,9 @@ export function computeHaversineRoute(
 
   return {
     totalKm: Number(totalKm.toFixed(2)),
-    expectedPayout: Math.round(totalKm * payoutPerKm),
+    expectedPayout: Number(
+      legs.reduce((s, l) => s + l.payoutAmount, 0).toFixed(2),
+    ),
     legs,
   };
 }
@@ -110,7 +112,7 @@ export function computeOpenLoopHaversineRoute(
     const roadKm = estimateRoadDistanceKm(straightLine);
     return {
       totalKm: Number(roadKm.toFixed(2)),
-      expectedPayout: Math.round(roadKm * payoutPerKm),
+      expectedPayout: Number((roadKm * payoutPerKm).toFixed(2)),
       legs: [
         {
           orderId: orders[0].id,
@@ -185,7 +187,9 @@ export function computeOpenLoopHaversineRoute(
 
   return {
     totalKm: Number(totalKm.toFixed(2)),
-    expectedPayout: Math.round(totalKm * payoutPerKm),
+    expectedPayout: Number(
+      legs.reduce((s, l) => s + l.payoutAmount, 0).toFixed(2),
+    ),
     legs,
     optimizedWaypointIndex,
   };

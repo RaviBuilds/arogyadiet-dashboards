@@ -5,6 +5,7 @@ import { mirrorLegacyDurationColumns } from "@/lib/coupons/couponPlanDiscounts";
 import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 // ─── schemas ────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,8 @@ function buildCouponInsertPayload(
 export async function createCoupon(
   formData: z.infer<typeof createCouponSchema>,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const parsed = createCouponSchema.safeParse(formData);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0].message };
@@ -144,6 +147,8 @@ export async function deleteCoupon(
   couponId: string,
   customerProfileId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   try {
@@ -174,7 +179,10 @@ export async function deleteCoupon(
 
 export async function createGlobalCoupon(
   formData: z.infer<typeof globalCouponFieldsSchema>,
+  scope?: string | null,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const parsed = globalCouponFieldsSchema.safeParse(formData);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0].message };
@@ -182,25 +190,32 @@ export async function createGlobalCoupon(
 
   const d = parsed.data;
   const supabase = createAdminClient();
+  const franchiseId = !scope || scope === "core" ? null : scope;
 
   try {
-    const { data: existing } = await supabase
+    let existingQuery = supabase
       .from("coupons")
       .select("id")
       .eq("code", d.code)
-      .is("customer_profile_id", null)
-      .maybeSingle();
+      .is("customer_profile_id", null);
+
+    existingQuery = franchiseId
+      ? existingQuery.eq("franchise_id", franchiseId)
+      : existingQuery.is("franchise_id", null);
+
+    const { data: existing } = await existingQuery.maybeSingle();
 
     if (existing) {
       return {
         success: false,
-        error: `Global coupon code "${d.code}" already exists.`,
+        error: `Global coupon code "${d.code}" already exists for this scope.`,
       };
     }
 
     const plans = await getActivePlansForLegacyMirror(supabase);
     const { error } = await supabase.from("coupons").insert({
       customer_profile_id: null,
+      franchise_id: franchiseId,
       ...buildCouponInsertPayload(d, plans),
     });
 
@@ -208,6 +223,7 @@ export async function createGlobalCoupon(
 
     await logAdminAction("CREATE", "global_coupon", d.code, {
       discount_type: d.discountType,
+      franchise_id: franchiseId,
     });
 
     revalidatePath("/subscriptions");
@@ -221,9 +237,38 @@ export async function createGlobalCoupon(
   }
 }
 
+// ─── listGlobalCoupons (franchise-scoped) ────────────────────────────────────
+
+export async function listGlobalCoupons(scope?: string | null) {
+  const supabase = createAdminClient();
+  const franchiseId = !scope || scope === "core" ? null : scope;
+
+  let query = supabase
+    .from("coupons")
+    .select(
+      "id, code, discount_type, discount_value_30_days, discount_value_60_days, discount_value_90_days, flat_discounts_by_plan, discount_value, max_uses, times_used, expires_at, created_at",
+    )
+    .is("customer_profile_id", null);
+
+  query = franchiseId
+    ? query.eq("franchise_id", franchiseId)
+    : query.is("franchise_id", null);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("listGlobalCoupons error:", error.message);
+    return { success: false as const, error: error.message, data: [] };
+  }
+
+  return { success: true as const, data: data ?? [] };
+}
+
 // ─── deleteGlobalCoupon ──────────────────────────────────────────────────────
 
 export async function deleteGlobalCoupon(couponId: string): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   try {

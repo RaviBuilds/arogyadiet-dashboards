@@ -25,8 +25,14 @@ import { fetchRosterData } from "@/actions/admin-actions/operationsActions";
 
 export default function DailyMealRoster({
   initialRosterData = [],
+  scope,
+  onFetchRoster = fetchRosterData,
 }: {
   initialRosterData?: any[];
+  /** Operations scope ("core" | "all" | franchise uuid) for client-side filtering. */
+  scope?: string;
+  /** Injectable fetch so the franchise portal can scope to its own data. */
+  onFetchRoster?: (startDate: string, endDate: string) => Promise<any[]>;
 }) {
   const [isLoading, setIsLoading] = useState(false);
   const [rosterData, setRosterData] = useState(initialRosterData);
@@ -39,11 +45,21 @@ export default function DailyMealRoster({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-
+  // Scope-aware base rows (core = NULL franchise, uuid = that franchise, all = everything)
+  const scopedRosterData = useMemo(() => {
+    if (!scope || scope === "all") return rosterData;
+    return rosterData.filter((row: any) => {
+      const cp = Array.isArray(row?.customer_profiles)
+        ? row.customer_profiles[0]
+        : row?.customer_profiles;
+      const fid = cp?.franchise_id ?? null;
+      return scope === "core" ? fid === null : fid === scope;
+    });
+  }, [rosterData, scope]);
 
   // Filter Logic
   const filteredData = useMemo(() => {
-    let result = rosterData;
+    let result = scopedRosterData;
 
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
@@ -75,7 +91,7 @@ export default function DailyMealRoster({
     }
 
     return result;
-  }, [rosterData, searchTerm, searchColumn]);
+  }, [scopedRosterData, searchTerm, searchColumn]);
 
   const handleLoadRange = async () => {
     if (!fromDate || !toDate) {
@@ -91,7 +107,7 @@ export default function DailyMealRoster({
     setIsLoading(true);
 
     try {
-      const data = await fetchRosterData(fromDate, toDate);
+      const data = await onFetchRoster(fromDate, toDate);
       setRosterData(data);
       toast.success("Roster data refreshed.");
     } catch {

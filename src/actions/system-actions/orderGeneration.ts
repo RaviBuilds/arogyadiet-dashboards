@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveOrderClinicStamp } from "@/lib/clinic/order-stamp";
 
 type GenerateOrdersResult = {
   success: boolean;
@@ -79,7 +80,7 @@ export async function generateDailyOrders(
       meal_category_id,
       delivery_address_id,
       preference_date,
-      subscriptions!inner ( status )
+      subscriptions!inner ( status, franchise_id )
     `,
     )
     .eq("preference_date", targetDate)
@@ -125,13 +126,24 @@ export async function generateDailyOrders(
           `${pref.customer_profile_id}:${pref.meal_category_id}`,
         ),
     )
-    .map((pref) => ({
-      customer_profile_id: pref.customer_profile_id,
-      meal_category_id: pref.meal_category_id,
-      delivery_address_id: pref.delivery_address_id,
-      delivery_date: targetDate,
-      status: "ORDER_CREATED" as const,
-    }));
+    .map((pref) => {
+      // Stamp the order with the subscription's franchise_id.
+      // Core subscriptions have NULL franchise_id → core orders stay NULL
+      // (unchanged behavior). Only franchise subscriptions produce
+      // franchise-attributed orders, keeping core and franchise data isolated.
+      const sub = Array.isArray(pref.subscriptions)
+        ? pref.subscriptions[0]
+        : pref.subscriptions;
+
+      return {
+        customer_profile_id: pref.customer_profile_id,
+        meal_category_id: pref.meal_category_id,
+        delivery_address_id: pref.delivery_address_id,
+        delivery_date: targetDate,
+        status: "ORDER_CREATED" as const,
+        franchise_id: (sub as { franchise_id?: string | null })?.franchise_id ?? null,
+      };
+    });
 
   if (ordersToInsert.length === 0) {
     await logOrderGenerationRun({
@@ -149,9 +161,51 @@ export async function generateDailyOrders(
     };
   }
 
+  // Stamp each order's clinic_id at creation time (Req 19.2, 19.8). The order
+  // stamp is the clinic already resolved for the order's delivery address —
+  // persisted on `addresses.clinic_id` at signup/address-update (Task 5). Look
+  // up that stamp for every distinct delivery address in one query, then pass
+  // it through `resolveOrderClinicStamp` (null when the address resolved to no
+  // clinic). A null stamp does NOT block order creation (Req 19.8). The stamp
+  // is set exactly once here, at insert, and is immutable thereafter.
+  const distinctAddressIds = [
+    ...new Set(
+      ordersToInsert
+        .map((order) => order.delivery_address_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+
+  const addressClinicMap = new Map<string, string | null>();
+  if (distinctAddressIds.length > 0) {
+    const { data: addressRows, error: addressError } = await supabaseAdmin
+      .from("addresses")
+      .select("id, clinic_id")
+      .in("id", distinctAddressIds);
+
+    if (addressError) {
+      console.error("Error fetching address clinic stamps:", addressError);
+      return { success: false, error: addressError.message, targetDate };
+    }
+
+    for (const row of addressRows ?? []) {
+      addressClinicMap.set(
+        (row as { id: string }).id,
+        (row as { clinic_id?: string | null }).clinic_id ?? null,
+      );
+    }
+  }
+
+  const stampedOrdersToInsert = ordersToInsert.map((order) => ({
+    ...order,
+    clinic_id: resolveOrderClinicStamp(
+      addressClinicMap.get(order.delivery_address_id) ?? null,
+    ),
+  }));
+
   const { error: insertError } = await supabaseAdmin
     .from("delivery_orders")
-    .insert(ordersToInsert);
+    .insert(stampedOrdersToInsert);
 
   if (insertError) {
     console.error("Error inserting delivery orders:", insertError);

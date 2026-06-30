@@ -25,11 +25,18 @@ import {
 
 import { cn } from "@/lib/utils";
 import type { ExecutiveSummary } from "@/services/dashboardMetrics";
+import {
+  canAccess,
+  type AccessArea,
+  type AdminAccessLevel,
+} from "@/lib/auth/adminAccessCore";
 
 const BRAND_COLOR = "#e74c3c";
 
 type ExecutiveDashboardProps = {
   data: ExecutiveSummary;
+  // When absent, only neutral content shows (area-restricted items are hidden).
+  accessLevel?: AdminAccessLevel;
 };
 
 function formatINR(value: number): string {
@@ -131,13 +138,21 @@ const STATUS_STYLES = {
   info: "bg-blue-50 text-blue-700 ring-blue-200/60",
 } as const;
 
-const QUICK_ACTIONS = [
+const QUICK_ACTIONS: {
+  title: string;
+  description: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  iconClassName: string;
+  area: AccessArea;
+}[] = [
   {
     title: "Warehouse System",
     description: "Manage inventory, lots, and stock levels",
     href: "/inventory",
     icon: Warehouse,
     iconClassName: "bg-orange-50 text-orange-600",
+    area: "inventory",
   },
   {
     title: "Register Customer",
@@ -145,6 +160,7 @@ const QUICK_ACTIONS = [
     href: "/customers",
     icon: UserPlus,
     iconClassName: "bg-blue-50 text-blue-600",
+    area: "operations",
   },
   {
     title: "Add Subscription",
@@ -152,53 +168,72 @@ const QUICK_ACTIONS = [
     href: "/subscriptions",
     icon: ClipboardList,
     iconClassName: "bg-emerald-50 text-emerald-600",
+    area: "operations",
   },
-] as const;
+];
 
-export default function ExecutiveDashboard({ data }: ExecutiveDashboardProps) {
+export default function ExecutiveDashboard({
+  data,
+  accessLevel,
+}: ExecutiveDashboardProps) {
   const { kpis, revenueTrend, customerDistribution, needsAttention } = data;
   const totalDistribution = customerDistribution.reduce(
     (sum, slice) => sum + slice.value,
     0,
   );
 
+  // UI-only gating (server guards are the real barrier). Area-restricted items
+  // require explicit permission; when accessLevel is absent, they are hidden.
+  const canShow = (area: AccessArea) =>
+    accessLevel != null && canAccess(accessLevel, area);
+
+  const visibleQuickActions = QUICK_ACTIONS.filter((action) =>
+    canShow(action.area),
+  );
+
   return (
     <div className="space-y-6">
       {/* KPI Row */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          title="Active Customers"
-          value={kpis.activeCustomers.value.toLocaleString("en-IN")}
-          changePercent={kpis.activeCustomers.changePercent}
-          icon={Users}
-          iconClassName="bg-blue-50 text-blue-600"
-        />
-        <KpiCard
-          title="Active Subscriptions"
-          value={kpis.activeSubscriptions.value.toLocaleString("en-IN")}
-          changePercent={kpis.activeSubscriptions.changePercent}
-          icon={TrendingUp}
-          iconClassName="bg-emerald-50 text-emerald-600"
-        />
-        <KpiCard
-          title="Today's Pending Ops"
-          value={kpis.pendingOperations.value.toLocaleString("en-IN")}
-          changePercent={kpis.pendingOperations.changePercent}
-          icon={ClipboardList}
-          iconClassName="bg-amber-50 text-amber-600"
-        />
-        <KpiCard
-          title="Warehouse Value"
-          value={formatINR(kpis.warehouseValue.value)}
-          changePercent={kpis.warehouseValue.changePercent}
-          icon={Package}
-          iconClassName="bg-orange-50 text-orange-600"
-          footnote={
-            kpis.warehouseValue.lowStockCount > 0
-              ? `${kpis.warehouseValue.lowStockCount} low-stock alert${kpis.warehouseValue.lowStockCount === 1 ? "" : "s"}`
-              : undefined
-          }
-        />
+        {canShow("operations") && (
+          <>
+            <KpiCard
+              title="Active Customers"
+              value={kpis.activeCustomers.value.toLocaleString("en-IN")}
+              changePercent={kpis.activeCustomers.changePercent}
+              icon={Users}
+              iconClassName="bg-blue-50 text-blue-600"
+            />
+            <KpiCard
+              title="Active Subscriptions"
+              value={kpis.activeSubscriptions.value.toLocaleString("en-IN")}
+              changePercent={kpis.activeSubscriptions.changePercent}
+              icon={TrendingUp}
+              iconClassName="bg-emerald-50 text-emerald-600"
+            />
+            <KpiCard
+              title="Today's Pending Ops"
+              value={kpis.pendingOperations.value.toLocaleString("en-IN")}
+              changePercent={kpis.pendingOperations.changePercent}
+              icon={ClipboardList}
+              iconClassName="bg-amber-50 text-amber-600"
+            />
+          </>
+        )}
+        {canShow("inventory") && (
+          <KpiCard
+            title="Warehouse Value"
+            value={formatINR(kpis.warehouseValue.value)}
+            changePercent={kpis.warehouseValue.changePercent}
+            icon={Package}
+            iconClassName="bg-orange-50 text-orange-600"
+            footnote={
+              kpis.warehouseValue.lowStockCount > 0
+                ? `${kpis.warehouseValue.lowStockCount} low-stock alert${kpis.warehouseValue.lowStockCount === 1 ? "" : "s"}`
+                : undefined
+            }
+          />
+        )}
       </div>
 
       {/* Charts Row */}
@@ -393,7 +428,7 @@ export default function ExecutiveDashboard({ data }: ExecutiveDashboardProps) {
             <p className="text-sm text-slate-500">Jump to high-frequency workflows</p>
           </div>
           <div className="space-y-3">
-            {QUICK_ACTIONS.map((action) => (
+            {visibleQuickActions.map((action) => (
               <Link
                 key={action.href}
                 href={action.href}

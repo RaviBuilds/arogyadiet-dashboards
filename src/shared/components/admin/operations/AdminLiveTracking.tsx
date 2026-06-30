@@ -28,47 +28,111 @@ import {
   type LiveTrackingStop,
 } from "@/actions/admin-actions/liveTrackingActions";
 import { cn } from "@/lib/utils";
+import { ridersForSelectedClinic } from "@/lib/clinic/visibility";
+import {
+  ClinicSelectControl,
+  SelectClinicPrompt,
+  useClinicSelector,
+  type GetClinics,
+} from "./clinicSelector";
 
 const TRACKING_POLL_MS = 10_000;
 
-export default function AdminLiveTracking() {
+export default function AdminLiveTracking({
+  scope,
+  getRiders = getLiveTrackingRiders,
+  getTrackingData = getAdminLiveTrackingData,
+  getClinics,
+}: {
+  /** Operations scope ("core" | "all" | franchise uuid) passed to admin fetches. */
+  scope?: string;
+  getRiders?: (scope?: string) => Promise<LiveTrackingRiderOption[]>;
+  getTrackingData?: (
+    riderId: string,
+    scope?: string,
+  ) => Promise<LiveTrackingPayload | null>;
+  /**
+   * When provided, enables clinic-selector-first mode (Req 17): no rider or
+   * tracking data is fetched until a clinic is selected, then only that
+   * clinic's riders are shown. Omitted by the franchise portal.
+   */
+  getClinics?: GetClinics;
+} = {}) {
+  const {
+    selectorFirst,
+    clinicOptions,
+    clinicsLoading,
+    selectedClinicId,
+    setSelectedClinicId,
+  } = useClinicSelector(getClinics);
+
   const [riders, setRiders] = useState<LiveTrackingRiderOption[]>([]);
   const [selectedRiderId, setSelectedRiderId] = useState<string>("");
   const [payload, setPayload] = useState<LiveTrackingPayload | null>(null);
-  const [isLoadingRiders, setIsLoadingRiders] = useState(true);
+  const [isLoadingRiders, setIsLoadingRiders] = useState(!selectorFirst);
   const [isPending, startTransition] = useTransition();
 
   const loadRiders = useCallback(async () => {
+    // Selector-first gating: load no rider/tracking data until a clinic is
+    // selected (Req 17.1, 17.3, 17.5).
+    if (selectorFirst && !selectedClinicId) return;
     setIsLoadingRiders(true);
     try {
-      const list = await getLiveTrackingRiders();
+      const list = await getRiders(scope);
       setRiders(list);
-      setSelectedRiderId((current) => {
-        if (current && list.some((r) => r.id === current)) return current;
-        return list[0]?.id ?? "";
-      });
     } finally {
       setIsLoadingRiders(false);
     }
-  }, []);
+  }, [getRiders, scope, selectorFirst, selectedClinicId]);
+
+  // Riders actually shown: only the selected clinic's riders in selector-first
+  // mode (Req 17.2, 17.4, 17.6); empty until a clinic is chosen (Req 17.1).
+  const displayedRiders = useMemo(
+    () =>
+      selectorFirst
+        ? ridersForSelectedClinic(selectedClinicId || null, riders)
+        : riders,
+    [selectorFirst, selectedClinicId, riders],
+  );
 
   const loadTrackingData = useCallback((riderId: string) => {
     if (!riderId) return;
     startTransition(async () => {
-      const data = await getAdminLiveTrackingData(riderId);
+      const data = await getTrackingData(riderId, scope);
       setPayload(data);
     });
-  }, []);
+  }, [getTrackingData, scope]);
 
   const pollTrackingData = useCallback(async (riderId: string) => {
     if (!riderId) return;
-    const data = await getAdminLiveTrackingData(riderId);
+    const data = await getTrackingData(riderId, scope);
     setPayload(data);
-  }, []);
+  }, [getTrackingData, scope]);
+
+  // Changing the clinic discards any prior rider selection and tracking payload
+  // so nothing stale remains (Req 17.7); the recompute is immediate (< 3s).
+  const handleClinicChange = useCallback(
+    (clinicId: string) => {
+      setSelectedClinicId(clinicId);
+      setSelectedRiderId("");
+      setPayload(null);
+    },
+    [setSelectedClinicId],
+  );
 
   useEffect(() => {
     loadRiders();
   }, [loadRiders]);
+
+  // Keep the selected rider valid within the currently displayed riders.
+  useEffect(() => {
+    setSelectedRiderId((current) => {
+      if (current && displayedRiders.some((r) => r.id === current)) {
+        return current;
+      }
+      return displayedRiders[0]?.id ?? "";
+    });
+  }, [displayedRiders]);
 
   useEffect(() => {
     if (selectedRiderId) loadTrackingData(selectedRiderId);
@@ -91,10 +155,19 @@ export default function AdminLiveTracking() {
     [payload?.stops],
   );
 
-  const selectedRiderLabel = riders.find((r) => r.id === selectedRiderId);
+  const selectedRiderLabel = displayedRiders.find(
+    (r) => r.id === selectedRiderId,
+  );
+
+  // Selector-first gate: render only the selector + prompt until a clinic is
+  // selected (Req 17.1, 17.3, 17.5).
+  const gatePending = selectorFirst && !selectedClinicId;
 
   const showActionBar =
-    !isLoadingRiders && riders.length > 0 && selectedRiderId;
+    !gatePending &&
+    !isLoadingRiders &&
+    displayedRiders.length > 0 &&
+    selectedRiderId;
 
   return (
     <div className="space-y-6">
@@ -106,13 +179,28 @@ export default function AdminLiveTracking() {
         </p>
       </div>
 
+      {selectorFirst && (
+        <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:gap-4">
+          <ClinicSelectControl
+            clinicOptions={clinicOptions}
+            clinicsLoading={clinicsLoading}
+            selectedClinicId={selectedClinicId}
+            onSelect={handleClinicChange}
+          />
+        </div>
+      )}
+
+      {gatePending && (
+        <SelectClinicPrompt message="Select a clinic to track its riders in real time." />
+      )}
+
       {showActionBar && (
         <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:gap-4">
           <div className="min-w-[200px] flex-1">
             <Select
               value={selectedRiderId}
               onValueChange={setSelectedRiderId}
-              disabled={isLoadingRiders || riders.length === 0}
+              disabled={isLoadingRiders || displayedRiders.length === 0}
             >
               <SelectTrigger className="w-full border-slate-200 sm:max-w-md">
                 <SelectValue
@@ -122,7 +210,7 @@ export default function AdminLiveTracking() {
                 />
               </SelectTrigger>
               <SelectContent>
-                {riders.map((rider) => (
+                {displayedRiders.map((rider) => (
                   <SelectItem key={rider.id} value={rider.id}>
                     {rider.fullName}
                     {rider.hint ? ` — ${rider.hint}` : ""}
@@ -165,19 +253,25 @@ export default function AdminLiveTracking() {
         </div>
       )}
 
-      {isLoadingRiders && (
+      {!gatePending && isLoadingRiders && (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Loader2 className="mr-2 h-6 w-6 animate-spin" />
           Loading riders...
         </div>
       )}
 
-      {!isLoadingRiders && riders.length === 0 && (
+      {!gatePending && !isLoadingRiders && displayedRiders.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-200 p-10 text-center text-muted-foreground">
           <Truck className="mx-auto mb-3 h-10 w-10 opacity-40" />
-          <p className="font-medium">No deliveries assigned today</p>
+          <p className="font-medium">
+            {selectorFirst
+              ? "No riders for this clinic"
+              : "No deliveries assigned today"}
+          </p>
           <p className="mt-1 text-sm">
-            Riders with orders for today will appear here.
+            {selectorFirst
+              ? "This clinic has no riders with deliveries assigned today."
+              : "Riders with orders for today will appear here."}
           </p>
         </div>
       )}

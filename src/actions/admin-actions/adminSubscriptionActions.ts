@@ -12,6 +12,7 @@ import {
 } from "@/emails/SubscriptionConfirmationEmail";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { getCustomerNameByProfileId } from "@/lib/notifications/lookups";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,8 @@ export async function addSubscription(
     | z.infer<typeof customPlanSchema>,
   isCustomPlan: boolean,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   const parsed = isCustomPlan
@@ -407,6 +410,8 @@ async function sendSubscriptionEmail(
 export async function markManualPaymentCollected(
   paymentId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   try {

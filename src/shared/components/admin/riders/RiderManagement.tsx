@@ -38,6 +38,7 @@ import {
   Loader2,
   PhoneCall,
   UserPlus,
+  Building2,
 } from "lucide-react";
 import {
   revalidateRidersPage,
@@ -45,6 +46,7 @@ import {
   deleteRider,
   onboardRider,
 } from "@/actions/admin-actions/riderActions";
+import { assignRiderToClinic } from "@/actions/admin-actions/riderClinicActions";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -55,6 +57,19 @@ import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
 import { AdminSubmenuBar } from "../core/AdminSubmenuBar";
 import ServiceAreaManager from "./ServiceAreaManager";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/components/ui/select";
+import {
+  clinicDisplayName,
+  filterRowsByClinic,
+  ALL_CLINICS,
+  type ClinicFilterSelection,
+} from "@/lib/clinic/visibility";
 
 export interface RiderData {
   id: string;
@@ -77,14 +92,25 @@ export interface RiderData {
   totalEarned: number | null;
   lastPayoutAmount: number | null;
   lastPayoutDate: string | null;
+  clinic_id: string | null;
+  clinicName: string | null;
+}
+
+/** A clinic option for onboarding/assignment selectors and service-area grouping. */
+export interface ClinicOption {
+  id: string;
+  name: string;
+  franchise_id: string | null;
 }
 
 export default function RiderManagement({
   data = [],
   allAreas = [],
+  clinics = [],
 }: {
   data?: RiderData[];
   allAreas?: any[];
+  clinics?: ClinicOption[];
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Today's Activity");
@@ -92,10 +118,13 @@ export default function RiderManagement({
   const [isPending, startTransition] = useTransition();
   const [searchColumn, setSearchColumn] = useState("fullName");
   const [searchTerm, setSearchTerm] = useState("");
+  const [clinicFilter, setClinicFilter] =
+    useState<ClinicFilterSelection>(ALL_CLINICS);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(false);
+  const [isAssignClinicModalOpen, setIsAssignClinicModalOpen] = useState(false);
 
   const [activeRider, setActiveRider] = useState<RiderData | null>(null);
   const [editForm, setEditForm] = useState({
@@ -105,12 +134,14 @@ export default function RiderManagement({
     joiningDate: "",
   });
   const [deleteConfirmCode, setDeleteConfirmCode] = useState("");
+  const [assignClinicId, setAssignClinicId] = useState<string>("");
   const [onboardForm, setOnboardForm] = useState({
     fullName: "",
     email: "",
     mobile: "",
     employeeCode: "",
     password: "",
+    clinicId: "",
   });
 
   const formatTime = (isoString: string) =>
@@ -124,10 +155,25 @@ export default function RiderManagement({
     setActiveTab(tab);
     setSearchColumn("fullName");
     setSearchTerm("");
+    setClinicFilter(ALL_CLINICS);
   };
 
+  // Distinct clinics present in the loaded rows, for the clinic filter control.
+  const clinicOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    data.forEach((row) => {
+      if (row.clinic_id) {
+        map.set(row.clinic_id, clinicDisplayName(row.clinicName));
+      }
+    });
+    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [data]);
+
   const filteredData = useMemo(() => {
-    let result = data;
+    // Clinic filter (pure predicate over loaded rows) combined with search.
+    let result = filterRowsByClinic(data, clinicFilter);
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter((row) => {
@@ -147,7 +193,7 @@ export default function RiderManagement({
       });
     }
     return result;
-  }, [data, searchTerm, searchColumn]);
+  }, [data, searchTerm, searchColumn, clinicFilter]);
 
   const searchOptions = [
     { value: "fullName", label: "Name" },
@@ -176,6 +222,7 @@ export default function RiderManagement({
         Email: row.email,
         Mobile: row.mobile,
         "Emergency Contact": row.emergency_contact,
+        Clinic: clinicDisplayName(row.clinicName),
         Status: row.is_online ? "Online" : "Offline",
         "Delivery Status": row.todayDeliveryStatus,
         "Completed Deliveries": row.todayCompletedDeliveries,
@@ -188,6 +235,7 @@ export default function RiderManagement({
         Email: row.email,
         Mobile: row.mobile,
         "Employee Code": row.employee_code,
+        Clinic: clinicDisplayName(row.clinicName),
         Status: row.is_online ? "Online" : "Offline",
         "Assigned Pincodes": row.assigned_pincodes.join(", ") || "Unassigned",
       }));
@@ -219,6 +267,11 @@ export default function RiderManagement({
     setActiveRider(rider);
     setDeleteConfirmCode("");
     setIsDeleteModalOpen(true);
+  };
+  const openAssignClinicModal = (rider: RiderData) => {
+    setActiveRider(rider);
+    setAssignClinicId(rider.clinic_id || "");
+    setIsAssignClinicModalOpen(true);
   };
 
   const handleEditSubmit = () => {
@@ -263,6 +316,8 @@ export default function RiderManagement({
       !onboardForm.password
     )
       return toast.error("Please fill all fields.");
+    if (!onboardForm.clinicId)
+      return toast.error("Please select a clinic for this rider.");
     startTransition(async () => {
       const res = await onboardRider(onboardForm);
       if (res.success) {
@@ -274,8 +329,25 @@ export default function RiderManagement({
           mobile: "",
           employeeCode: "",
           password: "",
+          clinicId: "",
         });
+        revalidateRidersPage();
       } else toast.error(res.error);
+    });
+  };
+
+  const handleAssignClinicSubmit = () => {
+    if (!activeRider) return;
+    if (!assignClinicId) return toast.error("Please select a clinic.");
+    startTransition(async () => {
+      const res = await assignRiderToClinic(activeRider.id, assignClinicId);
+      if (res.success) {
+        toast.success("Rider clinic updated.");
+        setIsAssignClinicModalOpen(false);
+        revalidateRidersPage();
+      } else {
+        toast.error(res.error || "Failed to assign clinic.");
+      }
     });
   };
 
@@ -288,7 +360,7 @@ export default function RiderManagement({
       />
 
       {activeTab === "Service Areas" ? (
-        <ServiceAreaManager riders={data} allAreas={allAreas} />
+        <ServiceAreaManager riders={data} allAreas={allAreas} clinics={clinics} />
       ) : (
         <DataTableCard
           header={
@@ -298,13 +370,31 @@ export default function RiderManagement({
             />
           }
           controls={
-            <DataSearchFilter
-              searchColumn={searchColumn}
-              onColumnChange={setSearchColumn}
-              searchTerm={searchTerm}
-              onTermChange={setSearchTerm}
-              options={searchOptions}
-            />
+            <div className="flex w-full flex-col gap-3 md:flex-row md:items-center xl:w-auto">
+              <DataSearchFilter
+                searchColumn={searchColumn}
+                onColumnChange={setSearchColumn}
+                searchTerm={searchTerm}
+                onTermChange={setSearchTerm}
+                options={searchOptions}
+              />
+              <Select
+                value={clinicFilter ?? ALL_CLINICS}
+                onValueChange={(val) => setClinicFilter(val)}
+              >
+                <SelectTrigger className="w-[200px] border-slate-200 bg-white transition-all duration-200">
+                  <SelectValue placeholder="Filter by clinic..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_CLINICS}>All Clinics</SelectItem>
+                  {clinicOptions.map((clinic) => (
+                    <SelectItem key={clinic.id} value={clinic.id}>
+                      {clinic.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           }
           actions={
             <>
@@ -333,6 +423,7 @@ export default function RiderManagement({
                 <TableRow className="bg-muted/10">
                   <TableHead>Rider Name</TableHead>
                   <TableHead>Phone Number</TableHead>
+                  <TableHead>Clinic</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Delivery Status</TableHead>
                   <TableHead>Deliveries</TableHead>
@@ -342,6 +433,7 @@ export default function RiderManagement({
                 <TableRow className="bg-muted/10">
                   <TableHead>Name</TableHead>
                   <TableHead>Contacts</TableHead>
+                  <TableHead>Clinic</TableHead>
                   <TableHead>Emergency</TableHead>
                   <TableHead>Joining Date</TableHead>
                   <TableHead>Earnings</TableHead>
@@ -356,7 +448,7 @@ export default function RiderManagement({
               {filteredData.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={activeTab === "Today's Activity" ? 7 : 8}
                     className="text-center py-12 text-muted-foreground"
                   >
                     No riders match your criteria.
@@ -384,6 +476,17 @@ export default function RiderManagement({
                                 {rider.emergency_contact}
                               </div>
                             )}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={
+                              rider.clinicName
+                                ? "text-sm font-medium text-foreground"
+                                : "text-sm italic text-muted-foreground"
+                            }
+                          >
+                            {clinicDisplayName(rider.clinicName)}
+                          </span>
                         </TableCell>
                         <TableCell>
                           <StatusBadge
@@ -442,6 +545,19 @@ export default function RiderManagement({
                           <div className="text-xs text-muted-foreground">
                             {rider.email || "N/A"}
                           </div>
+                        </TableCell>
+
+                        {/* Clinic */}
+                        <TableCell>
+                          <span
+                            className={
+                              rider.clinicName
+                                ? "text-sm font-medium text-foreground"
+                                : "text-sm italic text-muted-foreground"
+                            }
+                          >
+                            {clinicDisplayName(rider.clinicName)}
+                          </span>
                         </TableCell>
 
                         {/* Emergency Contact */}
@@ -531,6 +647,15 @@ export default function RiderManagement({
                               >
                                 <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
                                 Edit Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="cursor-pointer font-medium"
+                                onClick={() => openAssignClinicModal(rider)}
+                              >
+                                <Building2 className="mr-2 h-4 w-4 text-muted-foreground" />
+                                {rider.clinic_id
+                                  ? "Reassign Clinic"
+                                  : "Assign Clinic"}
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -624,6 +749,36 @@ export default function RiderManagement({
                   }))
                 }
               />
+            </div>
+            <div className="grid gap-2">
+              <label className="text-sm font-medium">Clinic</label>
+              <Select
+                value={onboardForm.clinicId}
+                onValueChange={(val) =>
+                  setOnboardForm((prev) => ({ ...prev, clinicId: val }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select the rider's clinic" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clinics.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No clinics available
+                    </SelectItem>
+                  ) : (
+                    clinics.map((clinic) => (
+                      <SelectItem key={clinic.id} value={clinic.id}>
+                        {clinic.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The rider picks up orders from this clinic. Service areas must
+                belong to the same clinic.
+              </p>
             </div>
             <div className="grid gap-2">
               <label className="text-sm font-medium">Temporary Password</label>
@@ -722,6 +877,66 @@ export default function RiderManagement({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- ASSIGN / REASSIGN CLINIC MODAL --- */}
+      <Dialog
+        open={isAssignClinicModalOpen}
+        onOpenChange={setIsAssignClinicModalOpen}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              {activeRider?.clinic_id ? "Reassign Clinic" : "Assign Clinic"}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="text-sm text-muted-foreground mt-1.5">
+                Set the clinic that{" "}
+                <span className="font-bold text-foreground">
+                  {activeRider?.fullName}
+                </span>{" "}
+                picks up orders from. Reassigning may leave service areas that
+                belong to the old clinic mismatched.
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-4">
+            <label className="text-sm font-medium">Clinic</label>
+            <Select value={assignClinicId} onValueChange={setAssignClinicId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a clinic" />
+              </SelectTrigger>
+              <SelectContent>
+                {clinics.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    No clinics available
+                  </SelectItem>
+                ) : (
+                  clinics.map((clinic) => (
+                    <SelectItem key={clinic.id} value={clinic.id}>
+                      {clinic.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsAssignClinicModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleAssignClinicSubmit} disabled={isPending}>
+              {isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Save Clinic
             </Button>
           </DialogFooter>
         </DialogContent>

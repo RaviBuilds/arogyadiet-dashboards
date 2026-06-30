@@ -3,6 +3,11 @@ import { format, subDays } from "date-fns";
 import { getISTDateString } from "@/lib/dates/ist";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getInventoryMetrics } from "@/services/inventoryEngine";
+import {
+  resolveDashboardScope,
+  applyDashboardScope,
+} from "@/lib/auth/dashboard-scope";
+import { FRANCHISE_FEATURES_ENABLED } from "@/lib/franchise/constants";
 
 export type KpiTrend = {
   value: number;
@@ -106,9 +111,41 @@ function buildCustomerDistribution(
     }));
 }
 
+/**
+ * An empty executive summary carrying no records. Returned when the caller's
+ * dashboard Scope denies access (Req 17.6 access-denied / 17.7 no-franchise),
+ * so the shared report surface renders NO Core or Franchise data under a denied
+ * scope. The `denial` field lets a caller that has an error channel surface the
+ * appropriate indication without this module building any UI.
+ */
+function emptyExecutiveSummary(): ExecutiveSummary {
+  const zero: KpiTrend = { value: 0, changePercent: 0 };
+  return {
+    kpis: {
+      activeCustomers: zero,
+      activeSubscriptions: zero,
+      pendingOperations: zero,
+      warehouseValue: { ...zero, lowStockCount: 0 },
+    },
+    revenueTrend: [],
+    customerDistribution: [],
+    needsAttention: [],
+  };
+}
+
 export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
   const supabase = createAdminClient();
   const today = getISTDateString();
+
+  // Resolve the SHARED dashboard Scope once (Req 17.2–17.7, 21.5). Flag OFF or
+  // MASTER_ADMIN/ADMIN → full_network → every query below is left UNCHANGED, so
+  // the existing Core/Admin report is identical to today. A denied scope
+  // (no_franchise / access_denied / unresolved) renders no data at all.
+  const scopeResult = await resolveDashboardScope();
+  if (!scopeResult.ok) {
+    return emptyExecutiveSummary();
+  }
+  const { scope } = scopeResult;
 
   const [
     activeCustomersResult,
@@ -119,28 +156,41 @@ export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
     expiredSubsResult,
     pendingAddonOrdersResult,
   ] = await Promise.all([
-    supabase
-      .from("customer_profiles")
-      .select("*", { count: "exact", head: true })
-      .eq("is_active", true),
-    supabase
-      .from("subscriptions")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "ACTIVE"),
-    supabase
-      .from("delivery_orders")
-      .select("*", { count: "exact", head: true })
-      .eq("delivery_date", today)
-      .in("status", ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"]),
+    applyDashboardScope(
+      supabase
+        .from("customer_profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("is_active", true),
+      scope,
+    ),
+    applyDashboardScope(
+      supabase
+        .from("subscriptions")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "ACTIVE"),
+      scope,
+    ),
+    applyDashboardScope(
+      supabase
+        .from("delivery_orders")
+        .select("*", { count: "exact", head: true })
+        .eq("delivery_date", today)
+        .in("status", ["ORDER_CREATED", "MEAL_PREPARED", "ASSIGNED"]),
+      scope,
+    ),
     getInventoryMetrics(),
-    supabase
-      .from("subscriptions")
-      .select("subscription_plans ( name )")
-      .eq("status", "ACTIVE"),
-    supabase
-      .from("subscriptions")
-      .select(
-        `
+    applyDashboardScope(
+      supabase
+        .from("subscriptions")
+        .select("subscription_plans ( name )")
+        .eq("status", "ACTIVE"),
+      scope,
+    ),
+    applyDashboardScope(
+      supabase
+        .from("subscriptions")
+        .select(
+          `
         id,
         ends_on,
         effective_end_on,
@@ -148,25 +198,30 @@ export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
         customer_profiles ( users ( full_name ) ),
         subscription_plans ( name )
       `,
-      )
-      .eq("status", "EXPIRED")
-      .order("ends_on", { ascending: false })
-      .limit(5),
-    supabase
-      .from("addon_orders")
-      .select(
-        `
+        )
+        .eq("status", "EXPIRED")
+        .order("ends_on", { ascending: false })
+        .limit(5),
+      scope,
+    ),
+    applyDashboardScope(
+      supabase
+        .from("addon_orders")
+        .select(
+          `
         id,
         status,
         target_delivery_date,
         created_at,
         customer_profiles ( users ( full_name ) )
       `,
-      )
-      .eq("status", "PAID")
-      .is("delivery_order_id", null)
-      .order("created_at", { ascending: false })
-      .limit(5),
+        )
+        .eq("status", "PAID")
+        .is("delivery_order_id", null)
+        .order("created_at", { ascending: false })
+        .limit(5),
+      scope,
+    ),
   ]);
 
   const activeCustomers = activeCustomersResult.count ?? 0;
@@ -276,5 +331,219 @@ export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
     revenueTrend: generateRevenueTrend(activeSubscriptions),
     customerDistribution: buildCustomerDistribution(distributionSubsResult.data ?? []),
     needsAttention: needsAttention.slice(0, 5),
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Consolidated cross-franchise network reporting for the Master home
+// (multi-tenant-franchise — Task 13.7, Req 11.5/11.6/11.7/11.8/11.9).
+//
+// This is ADDITIVE to the existing executive summary. The Master home is
+// MASTER_ADMIN-gated by its layout, so the consolidated report reads with
+// FULL-NETWORK scope (Core + every Franchise) by default. A franchise drill-down
+// re-scopes every metric to a single Franchise (Req 11.6).
+//
+// Franchise-specific behavior is gated behind FRANCHISE_FEATURES_ENABLED: when
+// the flag is OFF, the drill-down filter is ignored entirely and the report
+// behaves exactly as a full-network roll-up of today's Core data (Req 20.x).
+//
+// Each metric is computed in isolation so that a single metric's load failure
+// surfaces an error indication for THAT metric only, without blocking the
+// others (Req 11.9). An empty period naturally yields zero values (Req 11.8).
+// ───────────────────────────────────────────────────────────────────────────
+
+/** Payment statuses that count as realized revenue. */
+const REVENUE_PAYMENT_STATUSES = ["PAID", "SUCCESS", "CAPTURED"] as const;
+
+/** Delivery-order statuses that count as a completed delivery. */
+const COMPLETED_DELIVERY_STATUSES = ["DELIVERED"] as const;
+
+/**
+ * The outcome of loading a single network metric. `ok:false` lets the UI render
+ * an error indication for just that metric without affecting the rest (Req
+ * 11.9). A successful load with no underlying data resolves to a zero `value`
+ * (Req 11.8).
+ */
+export type MetricResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** Completed-vs-scheduled delivery counts within the reporting period (Req 11.7). */
+export type DeliveryCounts = {
+  completed: number;
+  scheduled: number;
+};
+
+/**
+ * A consolidated franchise-network report for a reporting period. `scope` is
+ * `full_network` for the whole network (Core + all Franchises) or `franchise`
+ * when drilled into a single Franchise (Req 11.5/11.6/11.7).
+ */
+export type ConsolidatedNetworkReport = {
+  period: { from: string; to: string };
+  scope: "full_network" | "franchise";
+  franchiseId: string | null;
+  /** Consolidated realized revenue across the scope for the period (Req 11.5). */
+  revenue: MetricResult<number>;
+  /** Active subscription count across the scope (Req 11.7). */
+  activeSubscriptions: MetricResult<number>;
+  /** Completed vs scheduled deliveries within the period (Req 11.7). */
+  deliveries: MetricResult<DeliveryCounts>;
+  /** Active rider count across the scope (Req 11.7). */
+  activeRiders: MetricResult<number>;
+};
+
+export type ConsolidatedNetworkReportInput = {
+  /** Inclusive period start, `yyyy-MM-dd`. */
+  from: string;
+  /** Inclusive period end, `yyyy-MM-dd`. */
+  to: string;
+  /**
+   * When set (and the franchise feature is enabled) the report re-scopes every
+   * metric to this single Franchise (Req 11.6). When null/undefined the report
+   * rolls up the full network (Core + all Franchises).
+   */
+  franchiseId?: string | null;
+};
+
+/**
+ * Applies the franchise drill-down filter to a query, gated by the franchise
+ * feature flag. When the flag is OFF, or no `franchiseId` is supplied, the query
+ * is returned UNCHANGED so the report rolls up the full network exactly as
+ * today (Req 11.6, 20.x). The selected `franchiseId` here is an explicit Master
+ * drill-down choice, distinct from the caller's own resolved dashboard Scope.
+ *
+ * Generic over `Q` and cast through a minimal structural type (mirroring
+ * `applyScope`) so the heavy Supabase builder type is NOT used as a generic
+ * constraint — that previously triggered "excessively deep type instantiation".
+ */
+function applyFranchiseDrilldown<Q>(
+  query: Q,
+  franchiseId: string | null | undefined,
+): Q {
+  if (!FRANCHISE_FEATURES_ENABLED || !franchiseId) {
+    return query;
+  }
+  return (
+    query as unknown as { eq: (column: string, value: string) => unknown }
+  ).eq("franchise_id", franchiseId) as unknown as Q;
+}
+
+/** Runs a single metric loader, converting any thrown error into `ok:false`. */
+async function loadMetric<T>(
+  label: string,
+  loader: () => Promise<T>,
+): Promise<MetricResult<T>> {
+  try {
+    return { ok: true, value: await loader() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return { ok: false, error: `${label}: ${message}` };
+  }
+}
+
+/**
+ * Builds the consolidated franchise-network report for the Master home.
+ *
+ * Reads with FULL-NETWORK scope by default (Core + every Franchise), or
+ * re-scoped to a single Franchise when `franchiseId` is supplied and the
+ * franchise feature is enabled (Req 11.6). Every metric is loaded independently
+ * so one failing metric does not block the rest (Req 11.9); an empty period
+ * yields zero values (Req 11.8).
+ */
+export async function getConsolidatedNetworkReport(
+  input: ConsolidatedNetworkReportInput,
+): Promise<ConsolidatedNetworkReport> {
+  const supabase = createAdminClient();
+  const { from, to } = input;
+  const franchiseId =
+    FRANCHISE_FEATURES_ENABLED && input.franchiseId ? input.franchiseId : null;
+
+  const fromStart = `${from}T00:00:00`;
+  const toEnd = `${to}T23:59:59`;
+
+  const [revenue, activeSubscriptions, deliveries, activeRiders] =
+    await Promise.all([
+      // Consolidated revenue across the scope for the period (Req 11.5).
+      loadMetric<number>("revenue", async () => {
+        const { data, error } = await applyFranchiseDrilldown(
+          supabase
+            .from("payments")
+            .select("amount")
+            .in("status", [...REVENUE_PAYMENT_STATUSES])
+            .gte("created_at", fromStart)
+            .lte("created_at", toEnd),
+          franchiseId,
+        );
+        if (error) throw new Error(error.message);
+        return (data ?? []).reduce(
+          (sum: number, row: { amount: number | null }) =>
+            sum + Number(row.amount ?? 0),
+          0,
+        );
+      }),
+
+      // Active subscription count across the scope (Req 11.7).
+      loadMetric<number>("activeSubscriptions", async () => {
+        const { count, error } = await applyFranchiseDrilldown(
+          supabase
+            .from("subscriptions")
+            .select("id", { count: "exact", head: true })
+            .eq("status", "ACTIVE"),
+          franchiseId,
+        );
+        if (error) throw new Error(error.message);
+        return count ?? 0;
+      }),
+
+      // Completed vs scheduled deliveries within the period (Req 11.7).
+      loadMetric<DeliveryCounts>("deliveries", async () => {
+        const [scheduledRes, completedRes] = await Promise.all([
+          applyFranchiseDrilldown(
+            supabase
+              .from("delivery_orders")
+              .select("id", { count: "exact", head: true })
+              .gte("delivery_date", from)
+              .lte("delivery_date", to),
+            franchiseId,
+          ),
+          applyFranchiseDrilldown(
+            supabase
+              .from("delivery_orders")
+              .select("id", { count: "exact", head: true })
+              .gte("delivery_date", from)
+              .lte("delivery_date", to)
+              .in("status", [...COMPLETED_DELIVERY_STATUSES]),
+            franchiseId,
+          ),
+        ]);
+        if (scheduledRes.error) throw new Error(scheduledRes.error.message);
+        if (completedRes.error) throw new Error(completedRes.error.message);
+        return {
+          scheduled: scheduledRes.count ?? 0,
+          completed: completedRes.count ?? 0,
+        };
+      }),
+
+      // Active rider count across the scope (Req 11.7).
+      loadMetric<number>("activeRiders", async () => {
+        const { count, error } = await applyFranchiseDrilldown(
+          supabase
+            .from("rider_profiles")
+            .select("id", { count: "exact", head: true })
+            .eq("is_active", true),
+          franchiseId,
+        );
+        if (error) throw new Error(error.message);
+        return count ?? 0;
+      }),
+    ]);
+
+  return {
+    period: { from, to },
+    scope: franchiseId ? "franchise" : "full_network",
+    franchiseId,
+    revenue,
+    activeSubscriptions,
+    deliveries,
+    activeRiders,
   };
 }

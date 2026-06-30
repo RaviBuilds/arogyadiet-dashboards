@@ -50,7 +50,19 @@ function getYearOptions() {
   return Array.from({ length: YEAR_END - YEAR_START + 1 }, (_, i) => YEAR_START + i);
 }
 
-export function HolidayCalendarClient() {
+export function HolidayCalendarClient({
+  scope = "core",
+  getHolidaysAction = getHolidaysForMonth,
+  saveHolidaysAction = saveHolidaysForMonth,
+  title = "Holiday Calendar",
+  description = "Add holiday names for each day. Customers will see these in their meal planner. Holidays are informational only and do not pause deliveries.",
+}: {
+  scope?: string;
+  getHolidaysAction?: typeof getHolidaysForMonth;
+  saveHolidaysAction?: typeof saveHolidaysForMonth;
+  title?: string;
+  description?: string;
+}) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -69,7 +81,7 @@ export function HolidayCalendarClient() {
       setIsLoading(true);
       setSetupWarning(null);
 
-      const result = await getHolidaysForMonth(year, month);
+      const result = await getHolidaysAction(year, month, scope);
 
       if (cancelled || requestId !== loadRequestId.current) return;
 
@@ -93,7 +105,7 @@ export function HolidayCalendarClient() {
     return () => {
       cancelled = true;
     };
-  }, [year, month]);
+  }, [year, month, scope, getHolidaysAction]);
 
   const isDirty =
     entries.length !== savedEntries.length ||
@@ -109,13 +121,13 @@ export function HolidayCalendarClient() {
 
   const handleSave = () => {
     startTransition(async () => {
-      const result = await saveHolidaysForMonth(year, month, entries);
+      const result = await saveHolidaysAction(year, month, entries, scope);
       if (result.success) {
         toast.success("Holiday calendar saved successfully.");
         setSavedEntries(entries);
         setSetupWarning(null);
 
-        const reload = await getHolidaysForMonth(year, month);
+        const reload = await getHolidaysAction(year, month, scope);
         if (reload.success) {
           setEntries(reload.entries);
           setSavedEntries(reload.entries);
@@ -131,12 +143,8 @@ export function HolidayCalendarClient() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Holiday Calendar</CardTitle>
-          <CardDescription>
-            Add holiday names for each day. Customers will see these in their
-            meal planner. Holidays are informational only and do not pause
-            deliveries.
-          </CardDescription>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {setupWarning && (

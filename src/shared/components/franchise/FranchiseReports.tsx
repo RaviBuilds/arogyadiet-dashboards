@@ -1,16 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/shared/components/ui/card";
-import { BarChart3, Loader2, Users, Package, Truck } from "lucide-react";
+import { Loader2, Users, Package, Truck, CreditCard } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { FranchiseRole } from "@/types/franchise";
+import { StatCard } from "@/shared/components/franchise/ui/GlassCard";
 
 interface FranchiseReportsProps {
   role: FranchiseRole;
@@ -26,9 +20,9 @@ interface ReportMetrics {
 
 /**
  * Franchise-scoped reports component.
- * Shows key metrics scoped to the franchise.
+ * Shows key metrics scoped to the franchise as consistent StatCards.
  */
-export default function FranchiseReports({ role, franchiseId }: FranchiseReportsProps) {
+export default function FranchiseReports({ franchiseId }: FranchiseReportsProps) {
   const [metrics, setMetrics] = useState<ReportMetrics | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -73,55 +67,24 @@ export default function FranchiseReports({ role, franchiseId }: FranchiseReports
     load();
   }, [franchiseId]);
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <BarChart3 className="h-4 w-4" />
-          Reports
-        </CardTitle>
-        <CardDescription>
-          Key metrics for this franchise — current month.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-          </div>
-        ) : !metrics ? (
-          <p className="text-sm text-red-500">Failed to load metrics.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-3">
-            <MetricTile icon={Users} label="Active Subscriptions" value={metrics.activeSubscriptions} color="text-emerald-600" />
-            <MetricTile icon={Users} label="Total Customers" value={metrics.totalCustomers} color="text-blue-600" />
-            <MetricTile icon={Truck} label="Active Riders" value={metrics.totalRiders} color="text-purple-600" />
-            <MetricTile icon={Package} label="Deliveries (Month)" value={metrics.deliveriesThisMonth} color="text-amber-600" />
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function MetricTile({
-  icon: Icon,
-  label,
-  value,
-  color,
-}: {
-  icon: any;
-  label: string;
-  value: number;
-  color: string;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 px-3 py-3">
-      <div className="flex items-center gap-1.5 mb-1">
-        <Icon className={`h-3.5 w-3.5 ${color}`} />
-        <span className="text-[11px] text-slate-500">{label}</span>
+  if (loading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
       </div>
-      <p className={`text-lg font-bold ${color}`}>{value}</p>
+    );
+  }
+
+  if (!metrics) {
+    return <p className="text-sm text-rose-500">Failed to load metrics.</p>;
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
+      <StatCard icon={CreditCard} label="Active Subscriptions" value={metrics.activeSubscriptions} accent="text-emerald-600" accentBg="bg-emerald-50" />
+      <StatCard icon={Users} label="Total Customers" value={metrics.totalCustomers} accent="text-blue-600" accentBg="bg-blue-50" />
+      <StatCard icon={Truck} label="Active Riders" value={metrics.totalRiders} accent="text-violet-600" accentBg="bg-violet-50" />
+      <StatCard icon={Package} label="Deliveries (Month)" value={metrics.deliveriesThisMonth} accent="text-amber-600" accentBg="bg-amber-50" />
     </div>
   );
 }

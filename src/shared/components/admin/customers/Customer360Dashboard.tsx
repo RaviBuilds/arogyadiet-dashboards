@@ -173,13 +173,68 @@ export function Customer360Dashboard({
   initialCoupons,
   billingPayments = [],
   hasActiveSubscription = false,
+  actions,
+  addSubscriptionAction,
+  createCouponAction,
+  deleteCouponAction,
+  uploadMedicalAction,
+  franchiseId,
+  backHref = "/customers",
 }: {
   customer: CustomerProfile;
   initialSubscriptionData: InitialSubscriptionData;
   initialCoupons: CouponRow[];
   billingPayments?: BillingPayment[];
   hasActiveSubscription?: boolean;
+  /**
+   * Injectable server actions. Defaults to admin-scoped actions, so the admin
+   * portal works unchanged. The franchise portal passes franchise-scoped
+   * equivalents that enforce franchise_id ownership.
+   */
+  actions?: Partial<{
+    updateCustomerBasicInfo: typeof updateCustomerBasicInfo;
+    updateCustomerDietaryProfile: typeof updateCustomerDietaryProfile;
+    updateCustomerMedicalProfile: typeof updateCustomerMedicalProfile;
+    deleteMedicalDocument: typeof deleteMedicalDocument;
+    adminUpsertCustomerAddress: typeof adminUpsertCustomerAddress;
+    adminDeleteCustomerAddress: typeof adminDeleteCustomerAddress;
+    adminSetCustomerPassword: typeof adminSetCustomerPassword;
+    adminSendPasswordReset: typeof adminSendPasswordReset;
+    adminToggleCustomerActive: typeof adminToggleCustomerActive;
+    deactivateCustomerAccount: typeof deactivateCustomerAccount;
+  }>;
+  addSubscriptionAction?: (
+    payload: any,
+    isCustom: boolean,
+  ) => Promise<{ success: boolean; error?: string }>;
+  createCouponAction?: typeof import("@/actions/admin-actions/adminCouponActions").createCoupon;
+  deleteCouponAction?: typeof import("@/actions/admin-actions/adminCouponActions").deleteCoupon;
+  uploadMedicalAction?: (formData: FormData) => Promise<{ success: boolean; error?: string }>;
+  franchiseId?: string;
+  backHref?: string;
 }) {
+  const act = {
+    updateCustomerBasicInfo:
+      actions?.updateCustomerBasicInfo ?? updateCustomerBasicInfo,
+    updateCustomerDietaryProfile:
+      actions?.updateCustomerDietaryProfile ?? updateCustomerDietaryProfile,
+    updateCustomerMedicalProfile:
+      actions?.updateCustomerMedicalProfile ?? updateCustomerMedicalProfile,
+    deleteMedicalDocument:
+      actions?.deleteMedicalDocument ?? deleteMedicalDocument,
+    adminUpsertCustomerAddress:
+      actions?.adminUpsertCustomerAddress ?? adminUpsertCustomerAddress,
+    adminDeleteCustomerAddress:
+      actions?.adminDeleteCustomerAddress ?? adminDeleteCustomerAddress,
+    adminSetCustomerPassword:
+      actions?.adminSetCustomerPassword ?? adminSetCustomerPassword,
+    adminSendPasswordReset:
+      actions?.adminSendPasswordReset ?? adminSendPasswordReset,
+    adminToggleCustomerActive:
+      actions?.adminToggleCustomerActive ?? adminToggleCustomerActive,
+    deactivateCustomerAccount:
+      actions?.deactivateCustomerAccount ?? deactivateCustomerAccount,
+  };
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [activeTab, setActiveTab] = useState("Profile & Medical");
@@ -253,7 +308,7 @@ export function Customer360Dashboard({
 
   const handlePersonalSubmit = () =>
     startTransition(async () => {
-      const res = await updateCustomerBasicInfo(
+      const res = await act.updateCustomerBasicInfo(
         customer.id,
         customer.userId,
         personalForm,
@@ -267,7 +322,7 @@ export function Customer360Dashboard({
 
   const handleDietarySubmit = () =>
     startTransition(async () => {
-      const res = await updateCustomerDietaryProfile(customer.id, dietaryForm);
+      const res = await act.updateCustomerDietaryProfile(customer.id, dietaryForm);
       if (res.success) {
         toast.success("Dietary profile updated!");
         setIsDietaryModalOpen(false);
@@ -277,7 +332,7 @@ export function Customer360Dashboard({
 
   const handleMedicalSubmit = () =>
     startTransition(async () => {
-      const res = await updateCustomerMedicalProfile(customer.id, medicalForm);
+      const res = await act.updateCustomerMedicalProfile(customer.id, medicalForm);
       if (res.success) {
         toast.success("Medical assessment updated!");
         setIsMedicalModalOpen(false);
@@ -287,7 +342,7 @@ export function Customer360Dashboard({
 
   const executeDeleteDocument = () => {
     startTransition(async () => {
-      const res = await deleteMedicalDocument(
+      const res = await act.deleteMedicalDocument(
         deleteDocState.docId,
         deleteDocState.storagePath,
         customer.id,
@@ -373,7 +428,7 @@ export function Customer360Dashboard({
       }
 
       setAddressPincodeError(null);
-      const res = await adminUpsertCustomerAddress(customer.id, addressForm);
+      const res = await act.adminUpsertCustomerAddress(customer.id, addressForm);
       if (res.success) {
         toast.success(
           addressModalMode === "create"
@@ -389,7 +444,7 @@ export function Customer360Dashboard({
 
   const executeDeleteAddress = () =>
     startTransition(async () => {
-      const res = await adminDeleteCustomerAddress(
+      const res = await act.adminDeleteCustomerAddress(
         customer.id,
         deleteAddressState.addressId,
       );
@@ -546,6 +601,7 @@ export function Customer360Dashboard({
                   <AdminMedicalUploadModal
                     profileId={customer.id}
                     userId={customer.userId}
+                    uploadAction={uploadMedicalAction}
                   />
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -601,6 +657,8 @@ export function Customer360Dashboard({
           <AdminAddSubscriptionForm
             customerProfileId={customer.id}
             initialData={initialSubscriptionData}
+            submitAction={addSubscriptionAction}
+            franchiseId={franchiseId}
           />
         )}
 
@@ -922,6 +980,8 @@ export function Customer360Dashboard({
             customerProfileId={customer.id}
             initialCoupons={initialCoupons}
             subscriptionPlans={initialSubscriptionData.subscriptionPlans}
+            createCouponAction={createCouponAction}
+            deleteCouponAction={deleteCouponAction}
           />
         )}
 
@@ -976,7 +1036,7 @@ export function Customer360Dashboard({
                   onClick={() =>
                     startTransition(async () => {
                       if (!customer.authUserId) return;
-                      const res = await adminSetCustomerPassword(customer.authUserId, pwdForm.password);
+                      const res = await act.adminSetCustomerPassword(customer.authUserId, pwdForm.password);
                       if (res.success) {
                         toast.success("Password updated successfully.");
                         setPwdForm({ password: "", confirm: "", showPwd: false });
@@ -1013,7 +1073,7 @@ export function Customer360Dashboard({
                   disabled={isPending}
                   onClick={() =>
                     startTransition(async () => {
-                      const res = await adminSendPasswordReset(customer.email);
+                      const res = await act.adminSendPasswordReset(customer.email);
                       if (res.success) {
                         toast.success("Password reset link sent successfully.");
                       } else {
@@ -1085,7 +1145,7 @@ export function Customer360Dashboard({
                     startTransition(async () => {
                       if (!customer.authUserId) return;
                       const makeActive = !isAccountActive;
-                      const res = await adminToggleCustomerActive(
+                      const res = await act.adminToggleCustomerActive(
                         customer.id,
                         customer.userId,
                         customer.authUserId,
@@ -1167,13 +1227,13 @@ export function Customer360Dashboard({
                   }
                   onClick={() =>
                     startTransition(async () => {
-                      const res = await deactivateCustomerAccount(
+                      const res = await act.deactivateCustomerAccount(
                         customer.id,
                         customer.userId,
                       );
                       if (res.success) {
                         toast.success("Customer account deactivated.");
-                        router.push("/customers");
+                        router.push(backHref);
                       } else {
                         toast.error(res.error ?? "Failed to deactivate customer.");
                       }

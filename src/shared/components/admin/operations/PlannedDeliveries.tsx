@@ -162,9 +162,31 @@ function buildInitialAutomationStatus(
 export default function PlannedDeliveries({
   data = [],
   automationLogs = [],
+  showAutomationControl = true,
+  onDeleteOrder = deletePlannedOrder,
+  onUpdateMeal = updateOrderMeal,
+  onGetAddresses = getAddressesForOrder,
+  onUpdateAddress = updateOrderAddress,
+  onRevalidate = revalidateOperationsPage,
 }: {
   data?: any[];
   automationLogs?: AutomationLogRow[];
+  /** Hidden on the franchise portal — automations are managed centrally. */
+  showAutomationControl?: boolean;
+  /** Injectable actions so the franchise portal can scope to its own data. */
+  onDeleteOrder?: (orderId: string) => Promise<{ success: boolean; error?: string }>;
+  onUpdateMeal?: (
+    orderId: string,
+    mealCategoryName: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  onGetAddresses?: (
+    orderId: string,
+  ) => Promise<{ success: boolean; error?: string; addresses?: any[] }>;
+  onUpdateAddress?: (
+    orderId: string,
+    addressId: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  onRevalidate?: () => Promise<void>;
 }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -254,7 +276,7 @@ export default function PlannedDeliveries({
   // --- ACTIONS ---
   const handleRefreshISR = async () => {
     setIsLoading(true);
-    await revalidateOperationsPage(); 
+    await onRevalidate(); 
     setIsLoading(false);
     toast.success("Data refreshed successfully");
   };
@@ -268,10 +290,10 @@ export default function PlannedDeliveries({
       onConfirm: () => {
         closeConfirm();
         startTransition(async () => {
-          const result = await deletePlannedOrder(orderId);
+          const result = await onDeleteOrder(orderId);
           if (result.success) {
             toast.success("Order cancelled successfully");
-            await revalidateOperationsPage();
+            await onRevalidate();
           } else toast.error(result.error || "Failed to cancel order");
         });
       },
@@ -280,10 +302,10 @@ export default function PlannedDeliveries({
 
   const handleMealSwap = (orderId: string, newMealType: string) => {
     startTransition(async () => {
-      const result = await updateOrderMeal(orderId, newMealType);
+      const result = await onUpdateMeal(orderId, newMealType);
       if (result.success) {
         toast.success(`Meal updated to ${newMealType}`);
-        await revalidateOperationsPage();
+        await onRevalidate();
       } else toast.error(result.error || "Failed to update meal");
     });
   };
@@ -362,21 +384,14 @@ export default function PlannedDeliveries({
     setAutomationStatus(prev => ({ ...prev, [automationName]: { ...prev[automationName], loading: true } }));
 
     try {
-      const res = await fetch(
-        `/api/cron/dispatch?secret=arogya-demo-123&date=${targetDate}`,
-      );
+      const result = await triggerSystemAutomation("Routing & Batching", {
+        targetDate,
+      });
 
-      if (!res.ok) {
-        let message = "Failed to run Routing & Batching";
-
-        try {
-          const payload = await res.json();
-          message = payload?.error || payload?.message || message;
-        } catch {
-          // Keep the default message if the API does not return JSON.
-        }
-
-        throw new Error(message);
+      if (!result.success) {
+        throw new Error(
+          ("error" in result && result.error) || "Failed to run Routing & Batching",
+        );
       }
 
       toast.success(`Routing & Batching completed for ${targetDate}!`);
@@ -463,7 +478,7 @@ export default function PlannedDeliveries({
     setIsAddressModalOpen(true);
     setIsFetchingAddresses(true);
 
-    const result = await getAddressesForOrder(orderId);
+    const result = await onGetAddresses(orderId);
     if (result.success && result.addresses) {
       setCustomerAddresses(result.addresses);
       const primary = result.addresses.find((a: any) => a.is_primary);
@@ -477,11 +492,11 @@ export default function PlannedDeliveries({
   const handleSubmitAddressChange = () => {
     if (!activeOrderId || !selectedAddressId) return;
     startTransition(async () => {
-      const result = await updateOrderAddress(activeOrderId, selectedAddressId);
+      const result = await onUpdateAddress(activeOrderId, selectedAddressId);
       if (result.success) {
         toast.success("Delivery address updated for tomorrow!");
         setIsAddressModalOpen(false);
-        await revalidateOperationsPage();
+        await onRevalidate();
       } else toast.error(result.error || "Failed to update address");
     });
   };
@@ -653,6 +668,7 @@ export default function PlannedDeliveries({
       </DataTableCard>
 
       {/* --- SYSTEM AUTOMATION CONTROL --- */}
+      {showAutomationControl && (
       <div className="mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <SectionHeader 
           title="System Automation Control" 
@@ -849,6 +865,7 @@ export default function PlannedDeliveries({
           </div>
         )}
       </div>
+      )}
 
       {/* --- PREP SUMMARY MODAL --- */}
       <Dialog open={isPrepModalOpen} onOpenChange={setIsPrepModalOpen}>

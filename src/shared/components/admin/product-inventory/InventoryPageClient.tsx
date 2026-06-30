@@ -24,6 +24,7 @@ import {
 } from "@/actions/admin-actions/inventoryActions";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { ProductDescriptionEditor } from "@/shared/components/admin/product-inventory/ProductDescriptionEditor";
+import { ProductFranchiseAvailabilityDialog } from "@/shared/components/admin/product-inventory/ProductFranchiseAvailabilityDialog";
 import {
   ProductMediaGallery,
   type ProductMediaGalleryHandle,
@@ -304,6 +305,11 @@ export default function InventoryPageClient({
                   Edit
                 </Button>
               </DialogTrigger>
+
+              <ProductFranchiseAvailabilityDialog
+                productId={product.id}
+                productName={product.name}
+              />
 
               <AlertDialog>
                 <AlertDialogTrigger asChild>

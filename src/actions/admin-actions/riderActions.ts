@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 export async function revalidateRidersPage() {
   revalidatePath("/admin/riders");
@@ -15,6 +16,8 @@ export async function updateRiderDetails(
   emergencyContact: string,
   joiningDate: string,
 ) {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
 
   const { error: userError } = await supabaseAdmin
@@ -51,6 +54,8 @@ export async function updateRiderDetails(
 }
 
 export async function deleteRider(riderId: string) {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   const { data: riderData, error: fetchError } = await supabaseAdmin
     .from("rider_profiles")
@@ -121,8 +126,12 @@ export async function onboardRider(formData: {
   mobile: string;
   employeeCode: string;
   password: string;
+  clinicId?: string | null;
 }) {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
+  const clinicId = formData.clinicId || null;
   
   const { data: existingUser } = await supabaseAdmin
     .from("users")
@@ -165,7 +174,13 @@ export async function onboardRider(formData: {
               user_id: existingUser.id,
               employee_code: formData.employeeCode,
               is_online: false,
+              clinic_id: clinicId,
             });
+        } else if (clinicId) {
+          await supabaseAdmin
+            .from("rider_profiles")
+            .update({ clinic_id: clinicId })
+            .eq("id", existingProfile.id);
         }
 
         await logAdminAction("REACTIVATE", "rider", existingUser.id, {
@@ -214,6 +229,7 @@ export async function onboardRider(formData: {
       user_id: userId,
       employee_code: formData.employeeCode,
       is_online: false,
+      clinic_id: clinicId,
     });
   if (profileError) return { success: false, error: profileError.message };
 
@@ -231,6 +247,8 @@ export async function upsertServiceArea(
   areaName: string,
   pincode: string,
 ) {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   try {
     const supabaseAdmin = createAdminClient();
 
@@ -269,6 +287,8 @@ export async function upsertServiceArea(
 }
 
 export async function deleteServiceArea(id: string) {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   try {
     const supabaseAdmin = createAdminClient();
     const { error } = await supabaseAdmin
@@ -293,6 +313,8 @@ export async function updateAreaAssignment(
   areaId: string,
   riderId: string | null,
 ) {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
   try {
     const supabaseAdmin = createAdminClient();
     const { error } = await supabaseAdmin

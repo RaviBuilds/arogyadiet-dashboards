@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Customer360Dashboard } from "@/shared/components/admin/customers/Customer360Dashboard";
 import { Button } from "@/shared/components/ui/button";
 import { ChevronLeft } from "lucide-react";
+import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 export default async function Customer360Page({
   params,
@@ -12,6 +13,7 @@ export default async function Customer360Page({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  await guardAdminGroup("customers");
   const supabase = createAdminClient();
 
   // ── 1. Customer profile ───────────────────────────────────────────────────

@@ -3,11 +3,14 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 export async function bulkUpdateAdminAddressPreferencesAction(
   subscriptionId: string,
   updates: { date: string; addressId: string }[],
 ) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
 
   try {

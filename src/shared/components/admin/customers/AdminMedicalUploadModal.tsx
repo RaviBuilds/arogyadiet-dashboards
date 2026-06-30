@@ -8,15 +8,23 @@ import { UploadCloud, FileText, X, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { uploadAdminMedicalDocument } from "@/actions/admin-actions/customerActions";
 
+type UploadAction = (formData: FormData) => Promise<{ success: boolean; error?: string }>;
+
 interface AdminUploadProps {
   profileId: string;
   userId: string;
+  /** Injectable upload action. Defaults to the admin-scoped upload. */
+  uploadAction?: UploadAction;
 }
 
 const MAX_FILE_SIZE_MB = 2;
 const MAX_FILES = 10;
 
-export function AdminMedicalUploadModal({ profileId, userId }: AdminUploadProps) {
+export function AdminMedicalUploadModal({
+  profileId,
+  userId,
+  uploadAction = uploadAdminMedicalDocument,
+}: AdminUploadProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -55,7 +63,7 @@ export function AdminMedicalUploadModal({ profileId, userId }: AdminUploadProps)
         formData.append("profileId", profileId);
         formData.append("userId", userId); // Pass the CUSTOMER'S auth ID for the folder path
 
-        const res = await uploadAdminMedicalDocument(formData);
+        const res = await uploadAction(formData);
         if (res.success) successCount++;
         else toast.error(`Failed to upload ${file.name}: ${res.error}`);
       }

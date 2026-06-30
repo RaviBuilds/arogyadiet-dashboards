@@ -56,16 +56,31 @@ export function Subscription360Dashboard({
   allCustomerSubs,
   mealCategories,
   deliveryOrders,
-  
+  actions,
 }: {
   subscription: any;
   dailyPrefs: any[];
   allCustomerSubs: any[];
   mealCategories: any[];
   deliveryOrders: any[];
- 
+  actions?: {
+    managePendingSubscription?: typeof managePendingSubscription;
+    updateActiveSubscriptionDates?: typeof updateActiveSubscriptionDates;
+    stopActiveSubscription?: typeof stopActiveSubscription;
+    bulkUpdatePausePreferences?: any;
+    bulkUpdateMealPreferences?: any;
+    bulkUpdateAddressPreferences?: any;
+  };
 }) {
   const router = useRouter();
+
+  // Resolve lifecycle actions — default to admin actions, override with franchise-scoped ones when provided.
+  const managePendingAction =
+    actions?.managePendingSubscription ?? managePendingSubscription;
+  const updateActiveAction =
+    actions?.updateActiveSubscriptionDates ?? updateActiveSubscriptionDates;
+  const stopActiveAction =
+    actions?.stopActiveSubscription ?? stopActiveSubscription;
   const [activeTab, setActiveTab] = useState("Subscription Details");
   const tabs = [
     "Subscription Details",
@@ -140,7 +155,7 @@ export function Subscription360Dashboard({
     }
 
     startTransition(async () => {
-      const res = await managePendingSubscription(
+      const res = await managePendingAction(
         selectedPendingSub.id,
         pendingForm,
       );
@@ -174,7 +189,7 @@ export function Subscription360Dashboard({
     }
 
     startTransition(async () => {
-      const res = await updateActiveSubscriptionDates(
+      const res = await updateActiveAction(
         subscription.id,
         activeEditForm,
       );
@@ -191,7 +206,7 @@ export function Subscription360Dashboard({
   const handleStopSubscription = () => {
     if (stopConfirmText !== STOP_CONFIRM_PHRASE) return;
     startTransition(async () => {
-      const res = await stopActiveSubscription(subscription.id);
+      const res = await stopActiveAction(subscription.id);
       if (res.success) {
         toast.success("Subscription has been permanently stopped.");
         setIsStopModalOpen(false);
@@ -384,6 +399,7 @@ export function Subscription360Dashboard({
             initialPausedDates={initialPausedDates}
             maxPauses={subscription.pause_credits_total || 0}
             initialPausesUsed={subscription.pause_credits_used || 0}
+            pauseAction={actions?.bulkUpdatePausePreferences}
           />
         )}
 
@@ -395,6 +411,7 @@ export function Subscription360Dashboard({
             mealCategories={mealCategories}
             customerDietaryPreference={subscription.customer_profiles?.dietary_preference}
             deliveryOrders={deliveryOrders}
+            mealAction={actions?.bulkUpdateMealPreferences}
           />
         )}
 
@@ -639,6 +656,7 @@ export function Subscription360Dashboard({
             }, {}) || {}}
             availableAddresses={addresses || []}
             pausedDates={initialPausedDates}
+            addressAction={actions?.bulkUpdateAddressPreferences}
           />
         )}
       </div>

@@ -21,6 +21,8 @@ import {
 import { getFailureReasonFromLogs } from "@/lib/delivery/failureApproval";
 import { getISTDateString } from "@/lib/dates/ist";
 import { revalidatePath } from "next/cache";
+import { applyOperationsScope, type OperationsScope } from "@/lib/franchise/scope";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -58,10 +60,23 @@ function revalidateBatchPickupPaths() {
   revalidatePath("/rider/dashboard");
 }
 
-export async function fetchRosterData(startDate: string, endDate: string) {
-  const supabase = await createClient();
+export async function fetchRosterData(
+  startDate: string,
+  endDate: string,
+  scope?: OperationsScope,
+) {
+  // Use the service-role client (like the other operations reads in this file)
+  // and rely on `applyOperationsScope` for tenant isolation. The RLS-bound
+  // session client would silently return zero rows for FRANCHISE_ADMIN
+  // sessions, which don't have admin-level read access to these tables.
+  const supabase = createAdminClient();
 
-  const { data, error } = await supabase
+  const cpEmbed =
+    scope && scope !== "all"
+      ? "customer_profiles!inner ( franchise_id, users ( full_name ) )"
+      : "customer_profiles ( franchise_id, users ( full_name ) )";
+
+  let query = supabase
     .from("subscription_daily_preferences")
     .select(
       `
@@ -69,7 +84,7 @@ export async function fetchRosterData(startDate: string, endDate: string) {
       preference_date,
       is_paused,
       subscriptions ( subscription_code ),
-      customer_profiles ( users ( full_name ) ),
+      ${cpEmbed},
       meal_categories ( name ),
       addresses ( pincode )
     `,
@@ -77,6 +92,11 @@ export async function fetchRosterData(startDate: string, endDate: string) {
     .gte("preference_date", startDate)
     .lte("preference_date", endDate)
     .order("preference_date", { ascending: true });
+
+  // Scope by the customer's franchise (core = NULL).
+  query = applyOperationsScope(query, scope, "customer_profiles.franchise_id");
+
+  const { data, error } = await query;
   if (error) {
     console.error("Error fetching roster data:", error);
     return [];
@@ -107,23 +127,43 @@ export async function getAutomationLogs(
   return (data || []) as AutomationLogRow[];
 }
 
-export async function fetchPendingFailureApprovals(): Promise<
-  PendingFailureApprovalRow[]
-> {
+/**
+ * Fetch pending failed-delivery approval requests.
+ *
+ * Scope:
+ * - "core" (default) → only CORE business riders (franchise_id IS NULL).
+ *   The head-office admin must NEVER receive failure requests raised by
+ *   franchise riders — those are routed to the franchise owner instead.
+ * - <franchise uuid> → only that franchise's riders. Used by the franchise
+ *   portal so the franchise owner handles their own riders' requests.
+ */
+export async function fetchPendingFailureApprovals(
+  scope: "core" | string = "core",
+): Promise<PendingFailureApprovalRow[]> {
   const supabase = createAdminClient();
 
-  const { data: rawPendingFailures, error } = await supabase
+  let query = supabase
     .from("delivery_orders")
     .select(
       `
       id,
+      franchise_id,
       customer_profiles ( users ( full_name ) ),
       rider_profiles ( users ( full_name ) ),
       delivery_status_logs ( note, status, created_at )
     `,
     )
-    .eq("status", "PENDING_FAILURE_APPROVAL")
-    .order("created_at", { ascending: false });
+    .eq("status", "PENDING_FAILURE_APPROVAL");
+
+  // Core admin sees only core (NULL franchise) failures; a franchise sees only its own.
+  query =
+    scope === "core"
+      ? query.is("franchise_id", null)
+      : query.eq("franchise_id", scope);
+
+  const { data: rawPendingFailures, error } = await query.order("created_at", {
+    ascending: false,
+  });
 
   if (error) {
     console.error("Error fetching pending failure approvals:", error);
@@ -177,6 +217,8 @@ export async function revalidateOperationsPage() {
 export async function markAdminOrderOnTheWayAction(
   orderId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
   const newStatus = "REACHING_TO_LOCATION";
   const note = "Rider is reaching to location";
@@ -239,6 +281,8 @@ export async function markAdminOrderOnTheWayAction(
 export async function markAdminOrderDeliveredAction(
   orderId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
   const newStatus = "DELIVERED";
   const note = "Meal delivered";
@@ -307,6 +351,8 @@ export async function markAdminOrderDeliveredAction(
 export async function approveFailedDeliveryAction(
   orderId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
   const newStatus = "FAILED";
   const note = "Failed delivery approved by admin";
@@ -372,6 +418,8 @@ export async function approveFailedDeliveryAction(
 export async function rejectFailedDeliveryAction(
   orderId: string,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
   const newStatus = "REACHING_TO_LOCATION";
   const note = "Failed delivery request rejected by admin";
@@ -432,6 +480,8 @@ export async function rejectFailedDeliveryAction(
 }
 
 export async function updateAdminOrderStatusAction(orderId: string) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   const { data: order, error: fetchError } = await supabase
@@ -468,6 +518,8 @@ export async function markAdminBatchPickedUpAction(
   batchId: string,
   deliveryDate: string,
 ) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabase = createAdminClient();
 
   if (!batchId || batchId === "UNBATCHED") {

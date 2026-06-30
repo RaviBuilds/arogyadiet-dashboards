@@ -45,6 +45,13 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import { cn } from "@/lib/utils";
+import { ridersForSelectedClinic } from "@/lib/clinic/visibility";
+import {
+  ClinicSelectControl,
+  SelectClinicPrompt,
+  useClinicSelector,
+  type GetClinics,
+} from "./clinicSelector";
 
 const mapContainerStyle = {
   width: "100%",
@@ -386,7 +393,41 @@ function RouteMetrics({
   );
 }
 
-export default function RoutingSandbox() {
+export default function RoutingSandbox({
+  scope,
+  getMeta = getRoutingSandboxMeta,
+  getRiders = getRoutingSandboxRiders,
+  getRiderRoute = getRoutingSandboxRiderRoute,
+  getClinics,
+}: {
+  /** Operations scope ("core" | "all" | franchise uuid) passed to admin fetches. */
+  scope?: string;
+  getMeta?: (scope?: string) => Promise<RoutingSandboxMeta>;
+  getRiders?: (
+    targetDate: string,
+    scope?: string,
+  ) => Promise<RoutingSandboxRiderOption[]>;
+  getRiderRoute?: (
+    riderId: string,
+    targetDate: string,
+    batchId?: string,
+    scope?: string,
+  ) => Promise<RoutingSandboxRiderRoute | null>;
+  /**
+   * When provided, enables clinic-selector-first mode (Req 17): the view loads
+   * no meta/rider/route data until a clinic is selected, then shows only that
+   * clinic's riders. Omitted by the franchise portal (which scopes itself).
+   */
+  getClinics?: GetClinics;
+} = {}) {
+  const {
+    selectorFirst,
+    clinicOptions,
+    clinicsLoading,
+    selectedClinicId,
+    setSelectedClinicId,
+  } = useClinicSelector(getClinics);
+
   const [meta, setMeta] = useState<RoutingSandboxMeta | null>(null);
   const [riders, setRiders] = useState<RoutingSandboxRiderOption[]>([]);
   const [selectedRiderId, setSelectedRiderId] = useState("");
@@ -394,37 +435,44 @@ export default function RoutingSandbox() {
   const [routeData, setRouteData] = useState<RoutingSandboxRiderRoute | null>(
     null,
   );
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!selectorFirst);
   const [isPending, startTransition] = useTransition();
 
   const loadSandbox = useCallback(async () => {
+    // Selector-first gating: fetch nothing until a clinic is chosen
+    // (Req 17.1, 17.3, 17.5).
+    if (selectorFirst && !selectedClinicId) return;
     setIsLoading(true);
     try {
-      const sandboxMeta = await getRoutingSandboxMeta();
+      const sandboxMeta = await getMeta(scope);
       setMeta(sandboxMeta);
 
-      const riderList = await getRoutingSandboxRiders(sandboxMeta.targetDate);
+      const riderList = await getRiders(sandboxMeta.targetDate, scope);
       setRiders(riderList);
-
-      setSelectedRiderId((current) => {
-        if (current && riderList.some((rider) => rider.id === current)) {
-          return current;
-        }
-        return riderList[0]?.id ?? "";
-      });
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [getMeta, getRiders, scope, selectorFirst, selectedClinicId]);
+
+  // Riders actually shown: in selector-first mode, only the selected clinic's
+  // riders (Req 17.2, 17.4, 17.6); empty until a clinic is chosen (Req 17.1).
+  const displayedRiders = useMemo(
+    () =>
+      selectorFirst
+        ? ridersForSelectedClinic(selectedClinicId || null, riders)
+        : riders,
+    [selectorFirst, selectedClinicId, riders],
+  );
 
   const loadRiderRoute = useCallback(
     (riderId: string, targetDate: string, batchId?: string) => {
       if (!riderId) return;
       startTransition(async () => {
-        const data = await getRoutingSandboxRiderRoute(
+        const data = await getRiderRoute(
           riderId,
           targetDate,
           batchId,
+          scope,
         );
         setRouteData(data);
         if (data && data.batches.length > 0) {
@@ -432,12 +480,34 @@ export default function RoutingSandbox() {
         }
       });
     },
-    [],
+    [getRiderRoute, scope],
+  );
+
+  // Changing the clinic discards any prior rider/batch/route selection so no
+  // stale data remains (Req 17.7); the recompute is immediate (well within 3s).
+  const handleClinicChange = useCallback(
+    (clinicId: string) => {
+      setSelectedClinicId(clinicId);
+      setSelectedRiderId("");
+      setSelectedBatchId("");
+      setRouteData(null);
+    },
+    [setSelectedClinicId],
   );
 
   useEffect(() => {
     loadSandbox();
   }, [loadSandbox]);
+
+  // Keep the selected rider valid within the currently displayed riders.
+  useEffect(() => {
+    setSelectedRiderId((current) => {
+      if (current && displayedRiders.some((rider) => rider.id === current)) {
+        return current;
+      }
+      return displayedRiders[0]?.id ?? "";
+    });
+  }, [displayedRiders]);
 
   useEffect(() => {
     if (!meta?.targetDate || !selectedRiderId) return;
@@ -450,7 +520,10 @@ export default function RoutingSandbox() {
     [routeData?.stops],
   );
 
-  const showActionBar = !isLoading && riders.length > 0;
+  const showActionBar = !isLoading && displayedRiders.length > 0;
+  // Selector-first gate: render only the selector + prompt until a clinic is
+  // selected, so no rider/route data is shown (Req 17.1, 17.3, 17.5).
+  const gatePending = selectorFirst && !selectedClinicId;
 
   return (
     <div className="space-y-6">
@@ -463,7 +536,22 @@ export default function RoutingSandbox() {
         </p>
       </div>
 
-      {meta && (
+      {selectorFirst && (
+        <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:gap-4">
+          <ClinicSelectControl
+            clinicOptions={clinicOptions}
+            clinicsLoading={clinicsLoading}
+            selectedClinicId={selectedClinicId}
+            onSelect={handleClinicChange}
+          />
+        </div>
+      )}
+
+      {gatePending && (
+        <SelectClinicPrompt message="Select a clinic to inspect its riders and routing." />
+      )}
+
+      {!gatePending && meta && (
         <div className="flex flex-wrap gap-3">
           <MetaStatCard
             label="Routing date"
@@ -510,7 +598,7 @@ export default function RoutingSandbox() {
                 setSelectedBatchId("");
                 setSelectedRiderId(value);
               }}
-              disabled={isLoading || riders.length === 0}
+              disabled={isLoading || displayedRiders.length === 0}
             >
               <SelectTrigger className="w-full border-slate-200 sm:max-w-md">
                 <SelectValue
@@ -520,7 +608,7 @@ export default function RoutingSandbox() {
                 />
               </SelectTrigger>
               <SelectContent>
-                {riders.map((rider) => (
+                {displayedRiders.map((rider) => (
                   <SelectItem key={rider.id} value={rider.id}>
                     {rider.fullName} — {rider.stopCount} stops
                     {rider.batchCount > 1
@@ -586,12 +674,18 @@ export default function RoutingSandbox() {
         </div>
       )}
 
-      {!isLoading && riders.length === 0 && (
+      {!gatePending && !isLoading && displayedRiders.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-200 p-10 text-center text-muted-foreground">
           <Route className="mx-auto mb-3 h-10 w-10 opacity-40" />
-          <p className="font-medium">No routed deliveries for this date</p>
+          <p className="font-medium">
+            {selectorFirst
+              ? "No riders for this clinic"
+              : "No routed deliveries for this date"}
+          </p>
           <p className="mt-1 text-sm">
-            Run dispatch automation or pick a date with assigned batches.
+            {selectorFirst
+              ? "This clinic has no riders with routed deliveries for this date."
+              : "Run dispatch automation or pick a date with assigned batches."}
           </p>
         </div>
       )}

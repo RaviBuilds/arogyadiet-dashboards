@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchCatalogProducts } from "@/lib/products/catalog-queries";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -84,6 +85,9 @@ export async function adminGetProducts(): Promise<AdminInventoryProduct[]> {
 export async function adminUpsertProduct(
   formData: FormData,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("shop_products");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const idValue = getFormString(formData, "id");
 
   const parsed = upsertProductSchema.safeParse({
@@ -206,6 +210,9 @@ export async function adminUpsertProduct(
 }
 
 export async function adminDeleteProduct(id: string): Promise<ActionResult> {
+  const gate = await checkGroupManage("shop_products");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const supabaseAdmin = createAdminClient();
 
   const { error } = await supabaseAdmin
@@ -232,6 +239,9 @@ export async function adminToggleProductVisibility(
   id: string,
   currentStatus: boolean,
 ): Promise<ActionResult> {
+  const gate = await checkGroupManage("shop_products");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const supabaseAdmin = createAdminClient();
 
   const { error } = await supabaseAdmin

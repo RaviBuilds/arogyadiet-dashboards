@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
+import { applyOperationsScope, type OperationsScope } from "@/lib/franchise/scope";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 export interface FixedAssignmentRow {
   id: string;
@@ -35,10 +37,12 @@ export interface AssignableRider {
  * Fetch all permanent customer -> rider assignment overrides, enriched with
  * customer and rider display details.
  */
-export async function getFixedAssignments(): Promise<FixedAssignmentRow[]> {
+export async function getFixedAssignments(
+  scope?: OperationsScope,
+): Promise<FixedAssignmentRow[]> {
   const supabaseAdmin = createAdminClient();
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("fixed_rider_assignments")
     .select(
       `
@@ -46,11 +50,16 @@ export async function getFixedAssignments(): Promise<FixedAssignmentRow[]> {
       note,
       created_at,
       customer_profile_id,
-      customer_profiles!inner ( users ( full_name, mobile ) ),
+      customer_profiles!inner ( franchise_id, users ( full_name, mobile ) ),
       rider_profiles!inner ( id, employee_code, users ( full_name ) )
     `,
     )
     .order("created_at", { ascending: false });
+
+  // Scope by the pinned customer's franchise.
+  query = applyOperationsScope(query, scope, "customer_profiles.franchise_id");
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("Error fetching fixed assignments:", error);
@@ -86,6 +95,7 @@ export async function getFixedAssignments(): Promise<FixedAssignmentRow[]> {
  */
 export async function searchCustomersForFixedAssignment(
   query: string,
+  scope?: OperationsScope,
 ): Promise<AssignableCustomer[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
@@ -107,11 +117,16 @@ export async function searchCustomersForFixedAssignment(
 
   const userIds = users.map((u) => u.id);
 
-  const { data: profiles, error: profilesError } = await supabaseAdmin
+  let profilesQuery = supabaseAdmin
     .from("customer_profiles")
     .select("id, user_id, addresses ( pincode )")
     .in("user_id", userIds)
     .eq("is_active", true);
+
+  // Only surface customers within the active scope (franchise/core).
+  profilesQuery = applyOperationsScope(profilesQuery, scope);
+
+  const { data: profiles, error: profilesError } = await profilesQuery;
 
   if (profilesError || !profiles?.length) {
     if (profilesError) console.error("Error loading customer profiles:", profilesError);
@@ -142,10 +157,12 @@ export async function searchCustomersForFixedAssignment(
 /**
  * List active riders with their mapped service-area pincodes for the assignment UI.
  */
-export async function getAssignableRiders(): Promise<AssignableRider[]> {
+export async function getAssignableRiders(
+  scope?: OperationsScope,
+): Promise<AssignableRider[]> {
   const supabaseAdmin = createAdminClient();
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("rider_profiles")
     .select(
       `
@@ -156,6 +173,10 @@ export async function getAssignableRiders(): Promise<AssignableRider[]> {
     `,
     )
     .eq("is_active", true);
+
+  query = applyOperationsScope(query, scope);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("Error fetching assignable riders:", error);
@@ -179,6 +200,8 @@ export async function upsertFixedAssignment(
   riderId: string,
   note?: string,
 ) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   if (!customerProfileId || !riderId) {
     return { success: false, error: "Customer and rider are both required." };
   }
@@ -214,6 +237,8 @@ export async function upsertFixedAssignment(
  * assignment for this customer.
  */
 export async function removeFixedAssignment(id: string) {
+  const gate = await checkGroupManage("operations");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
 
   const { error } = await supabaseAdmin

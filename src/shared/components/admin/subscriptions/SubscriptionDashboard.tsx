@@ -38,6 +38,11 @@ import {
 import { AdminSubmenuBar } from "@/shared/components/admin/core/AdminSubmenuBar";
 import { HolidayCalendarClient } from "@/shared/components/admin/subscriptions/HolidayCalendarClient";
 import { GlobalDiscountClient } from "@/shared/components/admin/subscriptions/GlobalDiscountClient";
+import {
+  SubscriptionRecordsTabs,
+  type SubscriptionRecordsTab,
+} from "@/shared/components/admin/subscriptions/SubscriptionRecordsTabs";
+import type { ActiveSubscriptionData } from "@/shared/components/admin/customers/CustomerDashboard";
 import type {
   CouponRow,
   CouponSubscriptionPlan,
@@ -59,10 +64,18 @@ export function SubscriptionDashboard({
   plans,
   activeSubscriptions,
   initialGlobalCoupons = [],
+  scope = "core",
+  subscriptionRecordsActive = [],
+  subscriptionRecordsPending = [],
+  subscriptionRecordsStopped = [],
 }: {
   plans: any[];
   activeSubscriptions: any[];
   initialGlobalCoupons?: CouponRow[];
+  scope?: string;
+  subscriptionRecordsActive?: ActiveSubscriptionData[];
+  subscriptionRecordsPending?: ActiveSubscriptionData[];
+  subscriptionRecordsStopped?: ActiveSubscriptionData[];
 }) {
   const [activeTab, setActiveTab] = useState("Subscription Plans");
   const [isPending, startTransition] = useTransition();
@@ -201,6 +214,9 @@ export function SubscriptionDashboard({
       <AdminSubmenuBar
         tabs={[
           "Subscription Plans",
+          "Active Subscriptions",
+          "Pending Subscriptions",
+          "Expired / Stopped",
           "Subscription Modeling",
           "Holiday Calendar",
           "Global Discount",
@@ -208,6 +224,17 @@ export function SubscriptionDashboard({
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
+
+      {(activeTab === "Active Subscriptions" ||
+        activeTab === "Pending Subscriptions" ||
+        activeTab === "Expired / Stopped") && (
+        <SubscriptionRecordsTabs
+          activeTab={activeTab as SubscriptionRecordsTab}
+          activeSubscriptions={subscriptionRecordsActive}
+          pendingSubscriptions={subscriptionRecordsPending}
+          stoppedSubscriptions={subscriptionRecordsStopped}
+        />
+      )}
 
       {activeTab === "Subscription Plans" && (
         <div>
@@ -374,10 +401,11 @@ export function SubscriptionDashboard({
         </div>
       )}
 
-      {activeTab === "Holiday Calendar" && <HolidayCalendarClient />}
+      {activeTab === "Holiday Calendar" && <HolidayCalendarClient scope={scope} />}
 
       {activeTab === "Global Discount" && (
         <GlobalDiscountClient
+          scope={scope}
           initialCoupons={initialGlobalCoupons}
           subscriptionPlans={plans.map((plan) => ({
             id: plan.id,

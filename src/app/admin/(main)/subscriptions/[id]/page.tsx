@@ -5,10 +5,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Button } from "@/shared/components/ui/button";
 import { ChevronLeft } from "lucide-react";
+import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
 export default async function Subscription360Page({ params }: { params: Promise<{ id: string }> }) {
+  await guardAdminGroup("subscriptions");
   const { id } = await params;
   const supabaseAdmin = createAdminClient();
 

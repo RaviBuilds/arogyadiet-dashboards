@@ -65,8 +65,23 @@ import {
 
 export default function FixedRiderAssignments({
   onChanged,
+  getAssignments = getFixedAssignments,
+  getRiders = getAssignableRiders,
+  searchCustomers = searchCustomersForFixedAssignment,
+  upsert = upsertFixedAssignment,
+  remove = removeFixedAssignment,
 }: {
   onChanged?: () => void;
+  /** Injectable actions so the franchise portal can scope to its own data. */
+  getAssignments?: () => Promise<FixedAssignmentRow[]>;
+  getRiders?: () => Promise<AssignableRider[]>;
+  searchCustomers?: (query: string) => Promise<AssignableCustomer[]>;
+  upsert?: (
+    customerProfileId: string,
+    riderId: string,
+    note?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  remove?: (id: string) => Promise<{ success: boolean; error?: string }>;
 } = {}) {
   const [rows, setRows] = useState<FixedAssignmentRow[]>([]);
   const [riders, setRiders] = useState<AssignableRider[]>([]);
@@ -91,13 +106,13 @@ export default function FixedRiderAssignments({
   const loadData = useCallback(async () => {
     setIsLoading(true);
     const [assignments, riderList] = await Promise.all([
-      getFixedAssignments(),
-      getAssignableRiders(),
+      getAssignments(),
+      getRiders(),
     ]);
     setRows(assignments);
     setRiders(riderList);
     setIsLoading(false);
-  }, []);
+  }, [getAssignments, getRiders]);
 
   useEffect(() => {
     loadData();
@@ -113,7 +128,7 @@ export default function FixedRiderAssignments({
     }
     setIsSearching(true);
     const timer = setTimeout(async () => {
-      const results = await searchCustomersForFixedAssignment(q);
+      const results = await searchCustomers(q);
       // Hide customers that are already pinned (unless it's the one being edited)
       const pinnedIds = new Set(
         rows
@@ -161,7 +176,7 @@ export default function FixedRiderAssignments({
     }
 
     startTransition(async () => {
-      const res = await upsertFixedAssignment(
+      const res = await upsert(
         selectedCustomer.customerProfileId,
         selectedRiderId,
         note,
@@ -183,7 +198,7 @@ export default function FixedRiderAssignments({
     if (!pendingDelete) return;
     const target = pendingDelete;
     startTransition(async () => {
-      const res = await removeFixedAssignment(target.id);
+      const res = await remove(target.id);
       if (res.success) {
         toast.success(
           `Removed fixed assignment for ${target.customerName}. Future routing reverts to pincode rules.`,

@@ -9,11 +9,14 @@ import {
   rebuildPendingSubscriptionPreferences,
 } from "@/actions/manageMealActions";
 import { notifySubscriptionStopped } from "@/lib/subscription/subscriptionNotifications";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 export async function managePendingSubscription(
   subscriptionId: string,
   payload: { starts_on?: string; status: string },
 ) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   try {
     const { data: existing, error: fetchError } = await supabaseAdmin
@@ -130,6 +133,8 @@ export async function updateActiveSubscriptionDates(
   subscriptionId: string,
   payload: { starts_on: string; pause_credits_total: number },
 ) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   try {
     const { error } = await supabaseAdmin
@@ -152,6 +157,8 @@ export async function updateActiveSubscriptionDates(
  * return to ACTIVE status after being stopped.
  */
 export async function stopActiveSubscription(subscriptionId: string) {
+  const gate = await checkGroupManage("subscriptions");
+  if (!gate.ok) return { success: false, error: gate.error };
   const supabaseAdmin = createAdminClient();
   try {
     const { data: existing, error: fetchError } = await supabaseAdmin

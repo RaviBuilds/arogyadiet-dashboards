@@ -11,7 +11,16 @@ import {
 } from "@/shared/components/ui/sheet";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
-import { Menu } from "lucide-react";
+import {
+  Menu,
+  LayoutDashboard,
+  Users,
+  CreditCard,
+  Truck,
+  Settings2,
+  ShoppingBag,
+  Building2,
+} from "lucide-react";
 import Image from "next/image";
 import {
   DropdownMenu,
@@ -28,6 +37,12 @@ import {
 } from "@/shared/components/ui/avatar";
 import { createClient } from "@/lib/supabase/client";
 import { NotificationBell } from "@/components/shared/NotificationBell";
+import { FranchiseRequestNavBadge } from "@/shared/components/admin/FranchiseRequestNavBadge";
+import {
+  hasGroupAccess,
+  type AccessConfiguration,
+  type OperationsGroup,
+} from "@/lib/auth/adminAccessCore";
 
 interface AdminNavbarProps {
   userProfile: {
@@ -37,142 +52,138 @@ interface AdminNavbarProps {
     roleCode: string;
   };
   email: string;
+  // Nav items are filtered by this configuration. When absent, only neutral
+  // items show.
+  config?: AccessConfiguration;
 }
 
-export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
+const NAV_ITEMS: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  // Operations group this item belongs to; undefined => neutral (always shown
+  // to admins who reach the layout, e.g. Dashboard).
+  group?: OperationsGroup;
+}[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/customers", label: "Customers", icon: Users, group: "customers" },
+  { href: "/subscriptions", label: "Subscriptions", icon: CreditCard, group: "subscriptions" },
+  { href: "/riders", label: "Riders", icon: Truck, group: "riders" },
+  { href: "/operations", label: "Operations", icon: Settings2, group: "operations" },
+  { href: "/kitchen-shop", label: "Shop Products", icon: ShoppingBag, group: "shop_products" },
+  { href: "/franchises", label: "Franchises", icon: Building2, group: "franchises" },
+];
+
+export default function AdminNavbar({
+  userProfile,
+  email,
+  config,
+}: AdminNavbarProps) {
   const supabase = createClient();
   const pathname = usePathname();
+
+  // UI-only gating (server guards are the real barrier): show neutral items and
+  // any group the configuration permits; when config is absent, show neutral only.
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) =>
+      item.group == null ||
+      (config != null && hasGroupAccess(config, item.group)),
+  );
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/";
   };
 
-  // Helper to check if a path is active
   const isActive = (path: string) => pathname.startsWith(path);
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-slate-200/80 bg-white/95 shadow-sm backdrop-blur-md supports-backdrop-filter:bg-white/80">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
-        {/* Left: Brand Logo */}
-        <Link
-          href="/dashboard"
-          className="flex items-center gap-3 transition-all duration-200 hover:opacity-90"
-        >
+    <header className="sticky top-0 z-40 w-full border-b border-slate-200 bg-white/95 backdrop-blur-sm shadow-sm">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+        {/* Left: Brand + Admin Badge */}
+        <Link href="/dashboard" className="flex items-center gap-2.5">
           <Image
             src="/logo.png"
             alt="ArogyaDiet"
-            width={100}
-            height={28}
+            width={90}
+            height={24}
             className="h-auto w-auto"
           />
-          <span className="hidden text-sm font-semibold tracking-tight text-slate-900 sm:inline-block">
+          <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-widest text-primary bg-primary/5 px-2 py-0.5 rounded-full border border-primary/20">
             Admin
           </span>
         </Link>
 
         {/* Center: Desktop Navigation */}
-        <nav className="hidden items-center gap-1 rounded-xl border border-slate-200/60 bg-slate-50/50 p-1 md:flex">
-          <Link
-            href="/dashboard"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${isActive("/dashboard") ? "bg-white font-semibold tracking-tight text-primary shadow-sm ring-1 ring-slate-200/80" : "text-slate-500 hover:bg-white/70 hover:text-slate-900"}`}
-          >
-            Dashboard
-          </Link>
-          <Link
-            href="/customers"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${isActive("/customers") ? "bg-white font-semibold tracking-tight text-primary shadow-sm ring-1 ring-slate-200/80" : "text-slate-500 hover:bg-white/70 hover:text-slate-900"}`}
-          >
-            Customers
-          </Link>
-          <Link
-            href="/subscriptions"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${isActive("/subscriptions") ? "bg-white font-semibold tracking-tight text-primary shadow-sm ring-1 ring-slate-200/80" : "text-slate-500 hover:bg-white/70 hover:text-slate-900"}`}
-          >
-            Subscriptions
-          </Link>
-          <Link
-            href="/riders"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${isActive("/riders") ? "bg-white font-semibold tracking-tight text-primary shadow-sm ring-1 ring-slate-200/80" : "text-slate-500 hover:bg-white/70 hover:text-slate-900"}`}
-          >
-            Riders
-          </Link>
-          <Link
-            href="/operations"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${isActive("/operations") ? "bg-white font-semibold tracking-tight text-primary shadow-sm ring-1 ring-slate-200/80" : "text-slate-500 hover:bg-white/70 hover:text-slate-900"}`}
-          >
-            Operations
-          </Link>
-          <Link
-            href="/kitchen-shop"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${isActive("/kitchen-shop") ? "bg-white font-semibold tracking-tight text-primary shadow-sm ring-1 ring-slate-200/80" : "text-slate-500 hover:bg-white/70 hover:text-slate-900"}`}
-          >
-            Shop Products
-          </Link>
-          <Link
-            href="/franchises"
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${isActive("/franchises") ? "bg-white font-semibold tracking-tight text-primary shadow-sm ring-1 ring-slate-200/80" : "text-slate-500 hover:bg-white/70 hover:text-slate-900"}`}
-          >
-            Franchises
-          </Link>
+        <nav className="hidden items-center gap-1 text-sm lg:flex">
+          {visibleNavItems.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all duration-200 ${
+                  active
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="font-medium text-xs">{item.label}</span>
+                {item.href === "/franchises" && (
+                  <FranchiseRequestNavBadge className="ml-0.5" />
+                )}
+              </Link>
+            );
+          })}
         </nav>
 
-        {/* Right: Mobile Menu & Avatar */}
-        <div className="flex items-center gap-4">
+        {/* Right: Notification Bell, Avatar & Mobile Menu */}
+        <div className="flex items-center space-x-3">
           {userProfile.id ? (
             <NotificationBell userId={userProfile.id} />
           ) : null}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="relative h-10 w-10 rounded-full border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md"
+                className="relative h-9 w-9 rounded-full ring-1 ring-slate-200"
               >
                 <Avatar className="h-9 w-9">
                   <AvatarImage src={userProfile.avatarUrl || ""} />
-                  <AvatarFallback className="bg-primary/10 font-medium text-primary">
+                  <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
                     {userProfile.fullName?.charAt(0) || "A"}
                   </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className="w-64 rounded-xl border border-slate-200 bg-white p-1 shadow-lg"
-              align="end"
-              forceMount
-            >
-              <DropdownMenuLabel className="px-3 py-3 font-normal">
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm font-semibold leading-none tracking-tight text-slate-900">
+            <DropdownMenuContent className="w-56" align="end" forceMount>
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium leading-none">
                     {userProfile.fullName}
                   </p>
-                  <p className="text-sm leading-none text-slate-500">
+                  <p className="text-xs leading-none text-muted-foreground">
                     {email}
                   </p>
                   {userProfile.roleCode ? (
-                    <Badge
-                      variant="outline"
-                      className="w-fit border-emerald-200 bg-emerald-50 text-emerald-700"
-                    >
+                    <Badge variant="outline" className="w-fit mt-1 text-[10px]">
                       {userProfile.roleCode}
                     </Badge>
                   ) : null}
                 </div>
               </DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-slate-200/60" />
+              <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link
-                  href="/profile"
-                  className="cursor-pointer rounded-lg px-3 py-2 transition-all duration-200"
-                >
-                  Profile
-                </Link>
+                <Link href="/profile">Profile & Settings</Link>
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-slate-200/60" />
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={handleLogout}
-                className="cursor-pointer rounded-lg px-3 py-2 font-medium text-red-600 transition-all duration-200 hover:bg-red-50 hover:text-red-700"
+                className="text-red-600 font-medium"
               >
                 Log out
               </DropdownMenuItem>
@@ -181,67 +192,37 @@ export default function AdminNavbar({ userProfile, email }: AdminNavbarProps) {
 
           <Sheet>
             <SheetTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                className="shrink-0 border-slate-200 bg-white shadow-sm transition-all duration-200 hover:bg-slate-50 md:hidden"
-              >
-                <Menu className="h-5 w-5 text-slate-700" />
+              <Button variant="outline" size="icon" className="shrink-0 lg:hidden">
+                <Menu className="h-5 w-5" />
                 <span className="sr-only">Toggle navigation menu</span>
               </Button>
             </SheetTrigger>
-            <SheetContent
-              side="right"
-              className="flex w-[300px] flex-col border-l border-slate-200 bg-white p-0"
-            >
-              <SheetHeader className="border-b border-slate-200 bg-slate-50/50 px-6 py-5 text-left">
-                <SheetTitle className="font-semibold tracking-tight text-slate-900">
-                  Menu
-                </SheetTitle>
+            <SheetContent side="right" className="flex flex-col w-[280px]">
+              <SheetHeader className="text-left pb-4 border-b">
+                <SheetTitle>Admin Menu</SheetTitle>
               </SheetHeader>
-              <nav className="grid gap-2 p-6">
-                <Link
-                  href="/dashboard"
-                  className={`flex items-center rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${isActive("/dashboard") ? "bg-primary/5 font-semibold tracking-tight text-primary ring-1 ring-primary/20" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
-                >
-                  Dashboard
-                </Link>
-                <Link
-                  href="/customers"
-                  className={`flex items-center rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${isActive("/customers") ? "bg-primary/5 font-semibold tracking-tight text-primary ring-1 ring-primary/20" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
-                >
-                  Customers
-                </Link>
-                <Link
-                  href="/subscriptions"
-                  className={`flex items-center rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${isActive("/subscriptions") ? "bg-primary/5 font-semibold tracking-tight text-primary ring-1 ring-primary/20" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
-                >
-                  Subscriptions
-                </Link>
-                <Link
-                  href="/riders"
-                  className={`flex items-center rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${isActive("/riders") ? "bg-primary/5 font-semibold tracking-tight text-primary ring-1 ring-primary/20" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
-                >
-                  Riders
-                </Link>
-                <Link
-                  href="/operations"
-                  className={`flex items-center rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${isActive("/operations") ? "bg-primary/5 font-semibold tracking-tight text-primary ring-1 ring-primary/20" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
-                >
-                  Operations
-                </Link>
-                <Link
-                  href="/kitchen-shop"
-                  className={`flex items-center rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${isActive("/kitchen-shop") ? "bg-primary/5 font-semibold tracking-tight text-primary ring-1 ring-primary/20" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
-                >
-                  Shop Products
-                </Link>
-                <Link
-                  href="/franchises"
-                  className={`flex items-center rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${isActive("/franchises") ? "bg-primary/5 font-semibold tracking-tight text-primary ring-1 ring-primary/20" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}
-                >
-                  Franchises
-                </Link>
+              <nav className="grid gap-1 text-sm mt-4">
+                {visibleNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+                        active
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                      {item.href === "/franchises" && (
+                        <FranchiseRequestNavBadge className="ml-auto" />
+                      )}
+                    </Link>
+                  );
+                })}
               </nav>
             </SheetContent>
           </Sheet>

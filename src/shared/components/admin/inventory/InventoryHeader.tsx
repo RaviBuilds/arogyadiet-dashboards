@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/shared/components/ui/button";
+import { NotificationBell } from "@/components/shared/NotificationBell";
 
 const NAV_ITEMS = [
   { label: "Master Catalog", href: "/admin/inventory" },
@@ -14,7 +15,12 @@ const NAV_ITEMS = [
   { label: "Audit Ledger", href: "/admin/inventory/ledger" },
 ] as const;
 
-export default function InventoryHeader() {
+interface InventoryHeaderProps {
+  /** Signed-in admin's user id. When present, a NotificationBell is rendered. */
+  userId?: string;
+}
+
+export default function InventoryHeader({ userId }: InventoryHeaderProps = {}) {
   const pathname = usePathname();
 
   function isActive(href: string) {
@@ -64,9 +70,12 @@ export default function InventoryHeader() {
         ))}
       </nav>
 
-      <Button variant="outline" size="sm" asChild>
-        <Link href="/admin/dashboard">Admin Dashboard</Link>
-      </Button>
+      <div className="flex items-center gap-2">
+        {userId ? <NotificationBell userId={userId} /> : null}
+        <Button variant="outline" size="sm" asChild>
+          <Link href="/admin/dashboard">Admin Dashboard</Link>
+        </Button>
+      </div>
     </header>
   );
 }

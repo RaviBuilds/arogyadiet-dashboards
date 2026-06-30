@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/delivery/orderStatuses";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
+import { applyOperationsScope, type OperationsScope } from "@/lib/franchise/scope";
 
 function getISTDateString(offsetDays = 0) {
   const date = new Date();
@@ -52,6 +53,8 @@ export type LiveTrackingRiderOption = {
   id: string;
   fullName: string;
   hint: string;
+  /** Rider's linked Clinic — drives clinic-selector-first gating (Req 17). */
+  clinic_id: string | null;
 };
 
 export type RiderLiveLocation = {
@@ -110,11 +113,13 @@ export async function getRiderLiveLocation(
   };
 }
 
-export async function getLiveTrackingRiders(): Promise<LiveTrackingRiderOption[]> {
+export async function getLiveTrackingRiders(
+  scope?: OperationsScope,
+): Promise<LiveTrackingRiderOption[]> {
   const supabase = createAdminClient();
   const today = getISTDateString();
 
-  const { data: orders, error } = await supabase
+  let ordersQuery = supabase
     .from("delivery_orders")
     .select(
       `
@@ -122,12 +127,17 @@ export async function getLiveTrackingRiders(): Promise<LiveTrackingRiderOption[]
       status,
       rider_profiles (
         id,
+        clinic_id,
         users ( full_name )
       )
     `,
     )
     .eq("delivery_date", today)
     .not("assigned_rider_id", "is", null);
+
+  ordersQuery = applyOperationsScope(ordersQuery, scope);
+
+  const { data: orders, error } = await ordersQuery;
 
   if (error) {
     console.error("[getLiveTrackingRiders]", error);
@@ -146,6 +156,8 @@ export async function getLiveTrackingRiders(): Promise<LiveTrackingRiderOption[]
     const users = riderProfile?.users;
     const user = Array.isArray(users) ? users[0] : users;
     const fullName = user?.full_name || "Unknown Rider";
+    const clinicId =
+      (riderProfile as { clinic_id?: string | null } | null)?.clinic_id ?? null;
 
     const existing = riderMap.get(riderId);
     const status = order.status as string;
@@ -159,6 +171,7 @@ export async function getLiveTrackingRiders(): Promise<LiveTrackingRiderOption[]
         id: riderId,
         fullName,
         hint: isOut ? "Out for delivery" : "",
+        clinic_id: clinicId,
       });
     } else if (isOut && !existing.hint) {
       existing.hint = "Out for delivery";
@@ -172,6 +185,7 @@ export async function getLiveTrackingRiders(): Promise<LiveTrackingRiderOption[]
 
 export async function getAdminLiveTrackingData(
   riderId: string,
+  scope?: OperationsScope,
 ): Promise<LiveTrackingPayload | null> {
   const supabase = createAdminClient();
   const today = getISTDateString();
@@ -180,26 +194,30 @@ export async function getAdminLiveTrackingData(
     process.env.GOOGLE_MAPS_API_KEY ||
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-  const [riderRes, ordersRes] = await Promise.all([
-    supabase
-      .from("rider_profiles")
-      .select("id, is_online, users ( full_name )")
-      .eq("id", riderId)
-      .single(),
-    supabase
-      .from("delivery_orders")
-      .select(
-        `
+  let ordersQuery = supabase
+    .from("delivery_orders")
+    .select(
+      `
         id,
         status,
         route_sequence,
         customer_profiles ( users ( full_name ) ),
         addresses!delivery_address_id ( lat, lng, pincode, city, state )
       `,
-      )
-      .eq("assigned_rider_id", riderId)
-      .eq("delivery_date", today)
-      .order("route_sequence", { ascending: true, nullsFirst: false }),
+    )
+    .eq("assigned_rider_id", riderId)
+    .eq("delivery_date", today)
+    .order("route_sequence", { ascending: true, nullsFirst: false });
+
+  ordersQuery = applyOperationsScope(ordersQuery, scope);
+
+  const [riderRes, ordersRes] = await Promise.all([
+    supabase
+      .from("rider_profiles")
+      .select("id, is_online, users ( full_name )")
+      .eq("id", riderId)
+      .single(),
+    ordersQuery,
   ]);
 
   if (riderRes.error || !riderRes.data) {

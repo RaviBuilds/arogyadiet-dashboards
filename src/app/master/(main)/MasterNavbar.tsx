@@ -18,7 +18,7 @@ import {
   ChefHat,
   Boxes,
   Settings,
-  Building2,
+  Network,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -52,7 +52,11 @@ const NAV_ITEMS = [
   { href: "/logistics", label: "Logistics", icon: Truck },
   { href: "/kitchen-ops", label: "Kitchen Ops", icon: ChefHat },
   { href: "/inventory", label: "Inventory BI", icon: Boxes },
-  { href: "/franchises", label: "Franchises", icon: Building2 },
+  // Replaces the legacy flat "Franchises" (/franchises) list with the new
+  // Master Hierarchy tree (multi-tenant-franchise — Task 13.1, Req 12.1).
+  // NOTE: the legacy /franchises route files are intentionally retained for now;
+  // they are simply no longer linked from navigation.
+  { href: "/hierarchy", label: "Franchise Hierarchy", icon: Network },
   { href: "/system", label: "System", icon: Settings },
 ];
 

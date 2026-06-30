@@ -54,7 +54,33 @@ const DISPATCH_STATUS_ORDER = [
   "CANCELLED",
 ];
 
-export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
+type OrderActionResult = { success: boolean; error?: string };
+type BatchActionResult = {
+  success: boolean;
+  error?: string;
+  ordersUpdated?: number;
+};
+
+interface TodaysDeliveriesProps {
+  data?: any[];
+  /**
+   * Injectable actions so this board can be reused by the franchise portal.
+   * Defaults to the core admin actions — admin behavior is unchanged.
+   */
+  onUpdateStatus?: (orderId: string) => Promise<OrderActionResult>;
+  onMarkBatchPickup?: (
+    batchId: string,
+    deliveryDate: string,
+  ) => Promise<BatchActionResult>;
+  onRevalidate?: () => Promise<void>;
+}
+
+export default function TodaysDeliveries({
+  data = [],
+  onUpdateStatus = updateAdminOrderStatusAction,
+  onMarkBatchPickup = markAdminBatchPickedUpAction,
+  onRevalidate = revalidateOperationsPage,
+}: TodaysDeliveriesProps) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -237,7 +263,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
   // --- ACTIONS ---
   const handleRefreshISR = async () => {
     setIsLoading(true);
-    await revalidateOperationsPage();
+    await onRevalidate();
     router.refresh();
     setIsLoading(false);
     toast.success("Data refreshed successfully");
@@ -297,7 +323,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
     setPendingOrderId(orderId);
 
     startTransition(async () => {
-      const result = await updateAdminOrderStatusAction(orderId);
+      const result = await onUpdateStatus(orderId);
       setPendingOrderId(null);
       setStatusConfirmOrder(null);
 
@@ -320,7 +346,7 @@ export default function TodaysDeliveries({ data = [] }: { data?: any[] }) {
     setPendingBatchKey(batchKey);
 
     startTransition(async () => {
-      const result = await markAdminBatchPickedUpAction(
+      const result = await onMarkBatchPickup(
         batchPickupConfirm.batchId,
         batchPickupConfirm.deliveryDate,
       );

@@ -57,8 +57,10 @@ export function AdminDeliveryRoutingClient({
   initialAddressMap,
   availableAddresses,
   pausedDates = [],
+  addressAction,
 }: any) {
   const router = useRouter();
+  const saveAddresses = addressAction ?? bulkUpdateAdminAddressPreferencesAction;
   const [addressMap, setAddressMap] =
     useState<Record<string, string>>(initialAddressMap);
   const [selectedAddressId, setSelectedAddressId] = useState(
@@ -103,7 +105,7 @@ export function AdminDeliveryRoutingClient({
       return;
     }
 
-    const result = await bulkUpdateAdminAddressPreferencesAction(
+    const result = await saveAddresses(
       subscriptionId,
       updates,
     );

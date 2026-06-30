@@ -15,6 +15,7 @@ import {
   notifyAddressDeleted,
   notifyAddressSaved,
 } from "@/lib/customer/customerProfileNotifications";
+import { stampCustomerByPrimaryAddress } from "@/lib/clinic/stamping";
 
 // 2. The Server Action
 
@@ -102,6 +103,20 @@ export async function saveAddressAction(data: AddressFormValues) {
   } else {
     await supabase.from("addresses").insert(addressData);
   }
+
+  // Stamp the customer with their resolved clinic, anchored to the PRIMARY
+  // address pincode, within this same operation before reporting completion
+  // (Req 6.1–6.5). Saving or editing any address re-anchors the stamp to
+  // whichever address is currently primary (is_primary = true): resolved → set
+  // clinic_id; no-resolution → clear to unset; ambiguous → leave unchanged.
+  // Selecting a per-day Delivery_Address is a separate flow that never reaches
+  // this stamper, so it can never change customer_profiles.clinic_id (Req 6.7).
+  // Only the stamp is added; the accepted inputs, outputs, return shape and
+  // completion behavior of saveAddressAction are otherwise unchanged (Req 6.8).
+  await stampCustomerByPrimaryAddress({
+    supabase,
+    customerProfileId: profile.id,
+  });
 
   await notifyAddressSaved(dbUser.id, {
     isEdit,

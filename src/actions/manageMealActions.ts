@@ -14,6 +14,32 @@ import {
 import { buildPushPayload, notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { notifyDeliveryAddressesUpdated } from "@/lib/customer/customerProfileNotifications";
 import { getCustomerNameBySubscriptionId } from "@/lib/notifications/lookups";
+import { isPastNextDayCutoff } from "@/lib/dates/ist";
+
+/**
+ * 5:00 PM IST next-day cutoff guard (core-clinic-architecture, Requirement 11.2).
+ *
+ * Given the delivery dates a customer is attempting to edit (meal-planner edit,
+ * pause, or address change), returns the first date that is LOCKED by the cutoff
+ * — i.e. the attempt occurs at or after the 5:00 PM IST cutoff for that delivery
+ * day (per the pure predicate `isPastNextDayCutoff`). Returns `null` when every
+ * targeted date is still editable. Callers MUST invoke this BEFORE any mutation
+ * so that a locked attempt leaves the affected data unchanged (Req 11.2).
+ */
+function findCutoffLockedDate(dates: string[]): string | null {
+  const now = new Date();
+  for (const date of dates) {
+    if (isPastNextDayCutoff(now, date)) {
+      return date;
+    }
+  }
+  return null;
+}
+
+/** Error message returned when a customer edit is past the 5:00 PM IST cutoff. */
+function cutoffPassedError(date: string): string {
+  return `The 5:00 PM cutoff has passed for ${date}. This delivery day can no longer be changed.`;
+}
 
 const supabaseAdmin = createSupabaseAdminClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -318,6 +344,14 @@ export async function bulkUpdateMealPreferencesAction(
   try {
     await assertOwnsSubscription(subscriptionId);
 
+    // Enforce the 5:00 PM IST next-day cutoff (Req 11.2): reject the whole
+    // operation before any write when any targeted delivery day is locked, so
+    // the affected data is left unchanged.
+    const lockedDate = findCutoffLockedDate(updates.map((u) => u.date));
+    if (lockedDate) {
+      return { success: false, error: cutoffPassedError(lockedDate) };
+    }
+
     for (const update of updates) {
       const payload: PreferenceUpdatePayload = {};
       if (update.categoryId !== undefined)
@@ -595,6 +629,13 @@ export async function bulkUpdatePausePreferencesAction(
   try {
     await assertOwnsSubscription(subscriptionId);
 
+    // Enforce the 5:00 PM IST next-day cutoff (Req 11.2): reject the pause
+    // operation before any write when any targeted delivery day is locked.
+    const lockedDate = findCutoffLockedDate(updates.map((u) => u.date));
+    if (lockedDate) {
+      return { success: false, error: cutoffPassedError(lockedDate) };
+    }
+
     const result = await processPausePreferenceUpdates(
       subscriptionId,
       updates,
@@ -630,6 +671,13 @@ export async function bulkUpdateAddressPreferencesAction(
 ) {
   try {
     await assertOwnsSubscription(subscriptionId);
+
+    // Enforce the 5:00 PM IST next-day cutoff (Req 11.2): reject the address
+    // change before any write when any targeted delivery day is locked.
+    const lockedDate = findCutoffLockedDate(updates.map((u) => u.date));
+    if (lockedDate) {
+      return { success: false, error: cutoffPassedError(lockedDate) };
+    }
 
     for (const update of updates) {
       const { error } = await supabaseAdmin

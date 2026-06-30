@@ -1,12 +1,13 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import RiderManagement, {
-  RiderData,
-} from "@/shared/components/admin/riders/RiderManagement";
+import type { RiderData } from "@/shared/components/admin/riders/RiderManagement";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { AdminRidersWrapper } from "./AdminRidersWrapper";
+import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
 export default async function RidersPage() {
+  await guardAdminGroup("riders");
   // Use Service Role for Admin Dashboard to securely bypass RLS
   const supabaseAdmin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -116,18 +117,29 @@ export default async function RidersPage() {
   };
 
   // Removed foreignTable order/limit to prevent PostgREST parsing crashes.
-  const [ridersRes, areasRes] = await Promise.all([
+  const [ridersRes, areasRes, clinicsRes] = await Promise.all([
     supabaseAdmin
       .from("rider_profiles")
       .select(
-        `id, employee_code, is_active, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
+        `id, employee_code, is_active, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, franchise_id, clinic_id, clinics (name), users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
       )
       .eq("is_active", true),
     supabaseAdmin
       .from("rider_service_areas")
       .select("*")
       .order("created_at", { ascending: false }),
+    supabaseAdmin
+      .from("clinics")
+      .select("id, name, franchise_id")
+      .order("name", { ascending: true }),
   ]);
+
+  if (clinicsRes.error) {
+    console.error(
+      "Error fetching clinics:",
+      JSON.stringify(clinicsRes.error, null, 2),
+    );
+  }
 
   if (ridersRes.error) {
     // Stringify the error so we can actually read it if it ever happens again
@@ -137,7 +149,7 @@ export default async function RidersPage() {
     );
   }
 
-  const riders: RiderData[] = (ridersRes.data || []).map((rider: any) => {
+  const riders: (RiderData & { franchiseId: string | null })[] = (ridersRes.data || []).map((rider: any) => {
     const serviceAreas =
       rider.rider_service_areas?.map((area: any) => area.pincode) || [];
     const todaysBatches = (rider.delivery_batches || []).filter(
@@ -203,6 +215,9 @@ export default async function RidersPage() {
       totalEarned: totalEarned,
       lastPayoutAmount: lastPayoutAmount,
       lastPayoutDate: lastPayoutDate,
+      clinic_id: rider.clinic_id || null,
+      clinicName: rider.clinics?.name || null,
+      franchiseId: rider.franchise_id || null,
     };
   });
 
@@ -212,7 +227,11 @@ export default async function RidersPage() {
         title="Operations & Riders"
         description="Manage delivery personnel, daily activity, service areas,onboarding."
       />
-      <RiderManagement data={riders} allAreas={areasRes.data || []} />
+      <AdminRidersWrapper
+        data={riders}
+        allAreas={areasRes.data || []}
+        clinics={clinicsRes.data || []}
+      />
     </div>
   );
 }

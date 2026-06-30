@@ -297,7 +297,6 @@ function buildRouteFromGoogleResponse(
     0,
   );
   const totalKm = Number((totalMeters / 1000).toFixed(2));
-  const expectedPayout = Math.round(totalKm * payoutPerKm);
 
   const legs = optimizedWaypointIndex.map((stopIndex, visitIndex) => {
     const stop = stops[stopIndex];
@@ -309,6 +308,10 @@ function buildRouteFromGoogleResponse(
       payoutAmount: Number((legDistanceKm * payoutPerKm).toFixed(2)),
     };
   });
+
+  const expectedPayout = Number(
+    legs.reduce((s, l) => s + l.payoutAmount, 0).toFixed(2),
+  );
 
   return {
     totalKm,
