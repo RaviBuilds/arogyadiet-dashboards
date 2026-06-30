@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -8,27 +9,54 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/shared/components/ui/button";
 import { NotificationBell } from "@/components/shared/NotificationBell";
 
-const NAV_ITEMS = [
-  { label: "Master Catalog", href: "/admin/inventory" },
-  { label: "Manufacturing Hub", href: "/admin/inventory/manufacturing" },
-  { label: "Product Mapping", href: "/admin/inventory/mappings" },
-  { label: "Audit Ledger", href: "/admin/inventory/ledger" },
-] as const;
+/**
+ * Builds the navigation items by resolving sub-routes from the given base path.
+ * The "Master Catalog" link points to the base path itself; others are sub-paths.
+ */
+function buildNavItems(basePath: string) {
+  return [
+    { label: "Master Catalog", href: basePath },
+    { label: "Manufacturing Hub", href: `${basePath}/manufacturing` },
+    { label: "Product Mapping", href: `${basePath}/mappings` },
+    { label: "Audit Ledger", href: `${basePath}/ledger` },
+  ];
+}
 
 interface InventoryHeaderProps {
   /** Signed-in admin's user id. When present, a NotificationBell is rendered. */
   userId?: string;
+  /**
+   * Base path for all warehouse navigation links.
+   * Defaults to `/admin/inventory` for backward compatibility with Admin portal.
+   */
+  basePath?: string;
+  /**
+   * Href for the logo link (home of the warehouse section).
+   * Defaults to the resolved `basePath`.
+   */
+  homeHref?: string;
+  /**
+   * Optional ReactNode rendered on the right side of the header.
+   * When provided, replaces the default "Admin Dashboard" button.
+   * Use this to supply portal-specific controls (e.g. "Back to Inventory BI").
+   */
+  endSlot?: ReactNode;
 }
 
-export default function InventoryHeader({ userId }: InventoryHeaderProps = {}) {
+export default function InventoryHeader({
+  userId,
+  basePath = "/admin/inventory",
+  homeHref,
+  endSlot,
+}: InventoryHeaderProps) {
   const pathname = usePathname();
+  const navItems = buildNavItems(basePath);
+  const resolvedHomeHref = homeHref ?? basePath;
 
   function isActive(href: string) {
-    if (
-      href === "/admin/inventory/manufacturing" ||
-      href === "/admin/inventory/ledger" ||
-      href === "/admin/inventory/mappings"
-    ) {
+    // For sub-routes (manufacturing, mappings, ledger), match with startsWith.
+    // For the base path (Master Catalog), exact match only.
+    if (href !== basePath) {
       return pathname.startsWith(href);
     }
     return pathname === href;
@@ -37,7 +65,7 @@ export default function InventoryHeader({ userId }: InventoryHeaderProps = {}) {
   return (
     <header className="sticky top-0 z-50 flex h-16 w-full items-center justify-between border-b bg-white/95 px-6 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60">
       <div className="flex items-center">
-        <Link href="/admin/inventory" className="flex items-center">
+        <Link href={resolvedHomeHref} className="flex items-center">
           <Image
             src="/logo.png"
             alt="ArogyaDiet Logo"
@@ -54,7 +82,7 @@ export default function InventoryHeader({ userId }: InventoryHeaderProps = {}) {
       </div>
 
       <nav className="hidden items-center space-x-1 md:flex">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
@@ -72,9 +100,11 @@ export default function InventoryHeader({ userId }: InventoryHeaderProps = {}) {
 
       <div className="flex items-center gap-2">
         {userId ? <NotificationBell userId={userId} /> : null}
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/admin/dashboard">Admin Dashboard</Link>
-        </Button>
+        {endSlot ?? (
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/admin/dashboard">Admin Dashboard</Link>
+          </Button>
+        )}
       </div>
     </header>
   );

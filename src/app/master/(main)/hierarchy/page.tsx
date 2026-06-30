@@ -25,6 +25,7 @@ import { listGroupsByCity } from "@/repositories/franchise/groupRepository";
 import { listFranchises } from "@/repositories/franchise/franchiseRepository";
 import { listClinicsByFranchise } from "@/repositories/franchise/franchiseClinicRepository";
 import { listBusinesses, getKitchenById } from "@/repositories/clinic";
+import { listServiceAreasByClinic } from "@/repositories/clinic/serviceAreaRepository";
 import HierarchyTree, {
   type HierarchyBusinessNode,
 } from "./_components/HierarchyTree";
@@ -86,6 +87,19 @@ async function loadHierarchy(): Promise<HierarchyBusinessNode[]> {
               const franchiseNodes = await Promise.all(
                 franchises.map(async (franchise) => {
                   const clinics = await listClinicsByFranchise(franchise.id);
+                  const clinicNodes = await Promise.all(
+                    clinics.map(async (c) => {
+                      const serviceAreas = await listServiceAreasByClinic(c.id);
+                      return {
+                        id: c.id,
+                        name: c.name,
+                        address: c.address,
+                        latitude: c.latitude,
+                        longitude: c.longitude,
+                        pincodes: serviceAreas.map((sa) => sa.pincode),
+                      };
+                    })
+                  );
                   return {
                     id: franchise.id,
                     name: franchise.name,
@@ -94,13 +108,7 @@ async function loadHierarchy(): Promise<HierarchyBusinessNode[]> {
                     // FranchiseFormTarget needs the owning Group + owner.
                     groupId: group.id,
                     ownerUserId: franchise.owner_user_id,
-                    clinics: clinics.map((c) => ({
-                      id: c.id,
-                      name: c.name,
-                      address: c.address,
-                      latitude: c.latitude,
-                      longitude: c.longitude,
-                    })),
+                    clinics: clinicNodes,
                   };
                 })
               );

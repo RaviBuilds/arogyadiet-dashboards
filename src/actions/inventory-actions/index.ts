@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 
 import { parseISO, startOfDay } from "date-fns";
 
@@ -44,10 +45,25 @@ import {
   uploadInventoryProductImage,
   uploadPurchaseOrderFile,
 } from "@/services/inventoryEngine";
+import { checkWarehouseAccess } from "@/lib/auth/adminAccess";
+import {
+  resolvePortalFromHost,
+  resolveRevalidationTargets,
+  type PortalContext,
+} from "@/lib/inventory/warehouse-access";
 
-const INVENTORY_PATH = "/admin/inventory";
-const MANUFACTURING_PATH = "/admin/inventory/manufacturing";
-const MAPPINGS_PATH = "/admin/inventory/mappings";
+// ─── Portal context helper (server-only) ──────────────────────────────────────
+
+/**
+ * Reads the request `host` header and resolves which portal initiated the
+ * action. Used by context-aware revalidation (task 6.2) and available for
+ * any action-level portal logic.
+ */
+async function currentPortalContext(): Promise<PortalContext> {
+  const headerList = await headers();
+  const host = headerList.get("host");
+  return resolvePortalFromHost(host);
+}
 
 type AddProductResult =
   | { success: true; productId: string }
@@ -92,6 +108,9 @@ type BulkDispatchResult =
 export async function addProductAction(
   formData: FormData,
 ): Promise<AddProductResult> {
+  const gate = await checkWarehouseAccess("product_management");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const file = formData.get("image");
 
   if (!(file instanceof File)) {
@@ -117,7 +136,11 @@ export async function addProductAction(
       ...parsed.data,
       imageUrl: imagePath,
     });
-    revalidatePath(INVENTORY_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, productId: product.id };
   } catch (err: unknown) {
     const message =
@@ -129,6 +152,9 @@ export async function addProductAction(
 export async function editProductAction(
   formData: FormData,
 ): Promise<EditProductResult> {
+  const gate = await checkWarehouseAccess("product_management");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = parseEditProductFormData(formData);
   if (!parsed.success) {
     return {
@@ -167,7 +193,11 @@ export async function editProductAction(
       defaultDurabilityDays: fields.defaultDurabilityDays,
       ...(imageUrl ? { imageUrl } : {}),
     });
-    revalidatePath(INVENTORY_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, productId: product.id };
   } catch (err: unknown) {
     const message =
@@ -179,6 +209,9 @@ export async function editProductAction(
 export async function deleteProductAction(
   productId: string,
 ): Promise<DeleteProductResult> {
+  const gate = await checkWarehouseAccess("product_management");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = deleteProductSchema.safeParse({ productId });
   if (!parsed.success) {
     return {
@@ -189,7 +222,11 @@ export async function deleteProductAction(
 
   try {
     await deleteInventoryProduct(parsed.data.productId);
-    revalidatePath(INVENTORY_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true };
   } catch (err: unknown) {
     const message =
@@ -201,6 +238,9 @@ export async function deleteProductAction(
 export async function receiveStockAction(
   formData: FormData,
 ): Promise<ReceiveStockResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = parseReceiveStockFormData(formData);
   if (!parsed.success) {
     return {
@@ -244,7 +284,11 @@ export async function receiveStockAction(
         purchaseOrderPath,
       },
     );
-    revalidatePath(INVENTORY_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, lotId: lot.id, batchNumber: lot.batchNumber };
   } catch (err: unknown) {
     const message =
@@ -256,6 +300,9 @@ export async function receiveStockAction(
 export async function dispatchToManufacturingAction(
   formData: FormData,
 ): Promise<DispatchToManufacturingResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = parseDispatchToManufacturingFormData(formData);
   if (!parsed.success) {
     return {
@@ -270,7 +317,11 @@ export async function dispatchToManufacturingAction(
       parsed.data.lotId,
       parsed.data.quantityToSend,
     );
-    revalidatePath(MANUFACTURING_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["manufacturing"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, orderId: order.id };
   } catch (err: unknown) {
     const message =
@@ -282,6 +333,9 @@ export async function dispatchToManufacturingAction(
 export async function processOutputAction(
   formData: FormData,
 ): Promise<ProcessOutputResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = parseProcessOutputFormData(formData);
   if (!parsed.success) {
     return {
@@ -300,8 +354,11 @@ export async function processOutputAction(
       parsed.data.packageCount,
       expiryDate,
     );
-    revalidatePath(INVENTORY_PATH);
-    revalidatePath(MANUFACTURING_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog", "manufacturing"]);
+    for (const path of targets) revalidatePath(path);
+
     return {
       success: true,
       lotId: result.lotId,
@@ -317,6 +374,9 @@ export async function processOutputAction(
 export async function revertPendingMfgAction(
   mfgOrderId: string,
 ): Promise<RevertPendingMfgResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = revertPendingMfgSchema.safeParse({ mfgOrderId });
   if (!parsed.success) {
     return {
@@ -327,8 +387,11 @@ export async function revertPendingMfgAction(
 
   try {
     const result = await revertPendingManufacturing(parsed.data.mfgOrderId);
-    revalidatePath(INVENTORY_PATH);
-    revalidatePath(MANUFACTURING_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog", "manufacturing"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, refundedQuantity: result.refundedQuantity };
   } catch (err: unknown) {
     const message =
@@ -342,6 +405,9 @@ export async function revertPendingMfgAction(
 export async function bulkReceiveAction(
   formData: FormData,
 ): Promise<BulkReceiveResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const rawItems = formData.get("items");
   if (typeof rawItems !== "string") {
     return { success: false, error: "Invalid inbound batch data." };
@@ -391,7 +457,11 @@ export async function bulkReceiveAction(
 
   try {
     const result = await processBulkInbound(items);
-    revalidatePath(INVENTORY_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog"]);
+    for (const path of targets) revalidatePath(path);
+
     return {
       success: true,
       processed: result.processed,
@@ -414,6 +484,9 @@ export async function bulkReceiveAction(
 export async function bulkDispatchAction(
   items: BulkOutboundItem[],
 ): Promise<BulkDispatchResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = bulkOutboundSchema.safeParse(items);
   if (!parsed.success) {
     return {
@@ -424,7 +497,11 @@ export async function bulkDispatchAction(
 
   try {
     const result = await processBulkOutbound(parsed.data);
-    revalidatePath(INVENTORY_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog"]);
+    for (const path of targets) revalidatePath(path);
+
     return {
       success: true,
       processed: result.processed,
@@ -447,6 +524,9 @@ export async function bulkDispatchAction(
 export async function dispatchStockAction(
   formData: FormData,
 ): Promise<DispatchStockResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = parseDispatchStockFormData(formData);
   if (!parsed.success) {
     return {
@@ -461,7 +541,11 @@ export async function dispatchStockAction(
       parsed.data.quantity,
       parsed.data.reason,
     );
-    revalidatePath(INVENTORY_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, totalDispatched: result.totalDispatched };
   } catch (err: unknown) {
     const message =
@@ -487,6 +571,9 @@ type DeleteMappingResult =
 export async function createMappingAction(
   input: { name: string; rawProductIds: string[]; finishedProductIds: string[] },
 ): Promise<CreateMappingResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = createMappingFormSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -497,8 +584,11 @@ export async function createMappingAction(
 
   try {
     const mapping = await createManufacturingMapping(parsed.data);
-    revalidatePath(MAPPINGS_PATH);
-    revalidatePath(MANUFACTURING_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["mappings", "manufacturing"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, mappingId: mapping.id };
   } catch (err: unknown) {
     const message =
@@ -510,6 +600,9 @@ export async function createMappingAction(
 export async function updateMappingAction(
   input: { mappingId: string; name: string; rawProductIds: string[]; finishedProductIds: string[] },
 ): Promise<UpdateMappingResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = updateMappingFormSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -527,8 +620,11 @@ export async function updateMappingAction(
         finishedProductIds: parsed.data.finishedProductIds,
       },
     );
-    revalidatePath(MAPPINGS_PATH);
-    revalidatePath(MANUFACTURING_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["mappings", "manufacturing"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, mappingId: mapping.id };
   } catch (err: unknown) {
     const message =
@@ -540,6 +636,9 @@ export async function updateMappingAction(
 export async function deleteMappingAction(
   mappingId: string,
 ): Promise<DeleteMappingResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = deleteMappingSchema.safeParse({ mappingId });
   if (!parsed.success) {
     return {
@@ -550,8 +649,11 @@ export async function deleteMappingAction(
 
   try {
     await deleteManufacturingMapping(parsed.data.mappingId);
-    revalidatePath(MAPPINGS_PATH);
-    revalidatePath(MANUFACTURING_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["mappings", "manufacturing"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true };
   } catch (err: unknown) {
     const message =
@@ -574,6 +676,9 @@ type ProcessBatchOutputResult =
 export async function multiDispatchToManufacturingAction(
   input: { mappingId: string; items: { lotId: string; quantityToSend: number }[] },
 ): Promise<MultiDispatchResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   const parsed = multiDispatchFormSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -584,8 +689,11 @@ export async function multiDispatchToManufacturingAction(
 
   try {
     const result = await sendMultiToManufacturing(parsed.data);
-    revalidatePath(MANUFACTURING_PATH);
-    revalidatePath(INVENTORY_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["manufacturing", "catalog"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, batchId: result.batchId };
   } catch (err: unknown) {
     const message =
@@ -603,6 +711,9 @@ export async function processBatchOutputAction(
     expiryDate: string;
   },
 ): Promise<ProcessBatchOutputResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
   if (!input.batchId || !input.finishedProductId || !input.packageSize || !input.packageCount || !input.expiryDate) {
     return { success: false, error: "All fields are required." };
   }
@@ -617,8 +728,11 @@ export async function processBatchOutputAction(
       input.packageCount,
       expiryDate,
     );
-    revalidatePath(INVENTORY_PATH);
-    revalidatePath(MANUFACTURING_PATH);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog", "manufacturing"]);
+    for (const path of targets) revalidatePath(path);
+
     return { success: true, lotId: result.lotId, batchNumber: result.batchNumber };
   } catch (err: unknown) {
     const message =

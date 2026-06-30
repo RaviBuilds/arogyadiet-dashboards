@@ -30,6 +30,8 @@ type ActiveProductType = "ALL" | ProductType;
 
 interface InventoryDashboardProps {
   initialProducts: InventoryCatalogProduct[];
+  productManagement?: boolean;
+  basePath?: string;
 }
 
 function getEmptyStateMessage(
@@ -66,6 +68,8 @@ function getCategoryIcon(category: string): LucideIcon {
 
 export default function InventoryDashboard({
   initialProducts,
+  productManagement = false,
+  basePath,
 }: InventoryDashboardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
@@ -114,9 +118,11 @@ export default function InventoryDashboard({
           Use &quot;Register New Product&quot; to add your first item to the
           master catalog.
         </p>
-        <div className="mt-4">
-          <RegisterProductSheet />
-        </div>
+        {productManagement && (
+          <div className="mt-4">
+            <RegisterProductSheet basePath={basePath} />
+          </div>
+        )}
       </div>
     );
   }
@@ -133,7 +139,7 @@ export default function InventoryDashboard({
             goods.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 sm:mt-3 [&_button]:h-8 [&_button]:px-2.5 [&_button]:text-xs sm:[&_button]:h-9 sm:[&_button]:px-3 sm:[&_button]:text-sm">
-            <RegisterProductSheet />
+            {productManagement && <RegisterProductSheet basePath={basePath} />}
             <DownloadPurchaseOrdersModal products={initialProducts} />
           </div>
         </div>
@@ -231,9 +237,9 @@ export default function InventoryDashboard({
           <p className="mt-1 text-sm text-muted-foreground">
             {getEmptyStateMessage(activeType, searchQuery, activeCategory)}
           </p>
-          {(activeType === "RAW_MATERIAL" || activeType === "FINISHED_GOOD") && (
+          {productManagement && (activeType === "RAW_MATERIAL" || activeType === "FINISHED_GOOD") && (
             <div className="mt-4">
-              <RegisterProductSheet />
+              <RegisterProductSheet basePath={basePath} />
             </div>
           )}
         </div>
@@ -250,7 +256,7 @@ export default function InventoryDashboard({
             </div>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
               {products.map((product) => (
-                <ProductCard key={product.id} product={product} />
+                <ProductCard key={product.id} product={product} productManagement={productManagement} />
               ))}
             </div>
           </section>

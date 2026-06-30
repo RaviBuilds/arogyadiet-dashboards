@@ -63,9 +63,10 @@ const BASE_UOM_SHORT_LABELS: Record<BaseUom, string> = {
 
 interface ProductCardProps {
   product: InventoryCatalogProduct;
+  productManagement?: boolean;
 }
 
-export default function ProductCard({ product }: ProductCardProps) {
+export default function ProductCard({ product, productManagement = false }: ProductCardProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -106,7 +107,8 @@ export default function ProductCard({ product }: ProductCardProps) {
             </div>
           )}
 
-          <div className="absolute top-2 right-2 z-10">
+          {productManagement && (
+            <div className="absolute top-2 right-2 z-10">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -142,6 +144,7 @@ export default function ProductCard({ product }: ProductCardProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+          )}
         </div>
 
         <CardContent className="flex flex-1 flex-col p-4">
@@ -240,43 +243,47 @@ export default function ProductCard({ product }: ProductCardProps) {
         </CardContent>
       </Card>
 
-      <EditProductModal
-        product={product}
-        open={editOpen}
-        onOpenChange={setEditOpen}
-      />
+      {productManagement && (
+        <EditProductModal
+          product={product}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+        />
+      )}
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {product.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete {product.name}? This action cannot
-              be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(event) => {
-                event.preventDefault();
-                handleDelete();
-              }}
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                "Delete Product"
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {productManagement && (
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {product.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete {product.name}? This action cannot
+                be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isDeleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={(event) => {
+                  event.preventDefault();
+                  handleDelete();
+                }}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete Product"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }

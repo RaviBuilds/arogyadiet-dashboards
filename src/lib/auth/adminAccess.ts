@@ -28,6 +28,10 @@ import {
   type OperationsGroup,
   DEFAULT_ACCESS_LEVEL,
 } from "./adminAccessCore";
+import {
+  resolveWarehouseAuthorization,
+  type WarehouseCapability,
+} from "@/lib/inventory/warehouse-access";
 
 // Re-export the full pure API so existing import sites keep working.
 export * from "./adminAccessCore";
@@ -251,4 +255,68 @@ export async function guardAdminPage(
   if (roleCode !== "ADMIN") redirect("/unauthorized");
   if (!canAccess(accessLevel, area)) redirect(landingRouteFor(accessLevel));
   return accessLevel;
+}
+
+// ─── Warehouse access guards ──────────────────────────────────────────────────
+
+/**
+ * Thrown by `assertWarehouseAccess` when the caller lacks the requested
+ * warehouse capability. Carries the denied capability for error handling.
+ */
+export class WarehouseAccessDeniedError extends Error {
+  readonly capability: WarehouseCapability;
+  constructor(capability: WarehouseCapability) {
+    super(`Warehouse access denied for capability: ${capability}`);
+    this.name = "WarehouseAccessDeniedError";
+    this.capability = capability;
+  }
+}
+
+/**
+ * Throw-style guard for warehouse actions. Resolves the current user's role and
+ * access level, then delegates to the pure `resolveWarehouseAuthorization`
+ * decision function.
+ *
+ * Throws `WarehouseAccessDeniedError` when the caller may not perform the
+ * requested capability — no mutation, no revalidation should follow.
+ */
+export async function assertWarehouseAccess(
+  capability: WarehouseCapability,
+): Promise<void> {
+  const { roleCode, accessLevel } = await getCurrentAdminContext();
+  const authorized = resolveWarehouseAuthorization(
+    roleCode,
+    accessLevel,
+    capability,
+  );
+  if (!authorized) {
+    throw new WarehouseAccessDeniedError(capability);
+  }
+}
+
+/**
+ * Result-style guard for warehouse server actions that return an
+ * `ActionResult`-shaped value. Returns `{ ok: true }` when the caller is
+ * authorized, otherwise `{ ok: false, error }` with a stable, user-facing
+ * denial message.
+ *
+ * Usage:
+ *   const gate = await checkWarehouseAccess("product_management");
+ *   if (!gate.ok) return { success: false, error: gate.error };
+ */
+export async function checkWarehouseAccess(
+  capability: WarehouseCapability,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await assertWarehouseAccess(capability);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof WarehouseAccessDeniedError) {
+      return {
+        ok: false,
+        error: "You do not have permission to perform this action.",
+      };
+    }
+    throw err;
+  }
 }
