@@ -103,6 +103,26 @@ export async function createInventoryProduct(
 ): Promise<InventoryProduct> {
   const supabase = createAdminClient();
 
+  // Pre-insert uniqueness check: case-insensitive, trimmed name among non-deleted products
+  const normalizedName = data.name.trim().toLowerCase();
+
+  const { data: dupeCheck, error: dupeCheckError } = await supabase
+    .from("inventory_products")
+    .select("id, name")
+    .is("deleted_at", null);
+
+  if (dupeCheckError) {
+    throw new Error(dupeCheckError.message);
+  }
+
+  const hasDuplicate = (dupeCheck ?? []).some(
+    (row) => row.name.trim().toLowerCase() === normalizedName,
+  );
+
+  if (hasDuplicate) {
+    throw new Error("A product with this name already exists.");
+  }
+
   const { data: row, error } = await supabase
     .from("inventory_products")
     .insert({
@@ -132,13 +152,33 @@ export async function updateInventoryProduct(
 ): Promise<InventoryProduct> {
   const supabase = createAdminClient();
 
+  // Fetch the current product to retain the existing image when no new image is provided
+  const { data: currentProduct, error: fetchError } = await supabase
+    .from("inventory_products")
+    .select("id, image_url")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .single();
+
+  if (fetchError || !currentProduct) {
+    throw new Error(fetchError?.message ?? "Product not found.");
+  }
+
   const payload: Record<string, string | number> = {
     updated_at: new Date().toISOString(),
   };
 
   if (data.name !== undefined) payload.name = data.name.trim();
   if (data.category !== undefined) payload.category = data.category.trim();
-  if (data.imageUrl !== undefined) payload.image_url = data.imageUrl.trim();
+
+  // Replace image only when a new (non-null, non-empty) image is supplied;
+  // otherwise retain the existing image_url from the database
+  if (data.imageUrl !== undefined && data.imageUrl !== null && data.imageUrl.trim() !== "") {
+    payload.image_url = data.imageUrl.trim();
+  }
+  // If no new image provided, we simply don't include image_url in the payload,
+  // which means the existing value is retained.
+
   if (data.type !== undefined) payload.type = data.type;
   if (data.baseUom !== undefined) payload.base_uom = data.baseUom;
   if (data.minStockThreshold !== undefined) {
@@ -167,24 +207,27 @@ export async function updateInventoryProduct(
 export async function deleteInventoryProduct(id: string): Promise<void> {
   const supabase = createAdminClient();
 
-  const { count, error: lotsError } = await supabase
-    .from("inventory_lots")
-    .select("id", { count: "exact", head: true })
-    .eq("product_id", id);
+  // Check if the product exists and whether it's already soft-deleted
+  const { data: existing, error: fetchError } = await supabase
+    .from("inventory_products")
+    .select("id, deleted_at")
+    .eq("id", id)
+    .single();
 
-  if (lotsError) {
-    throw new Error(lotsError.message);
+  if (fetchError || !existing) {
+    throw new Error("Product not found. It may have already been removed.");
   }
 
-  if (count && count > 0) {
+  if (existing.deleted_at !== null) {
     throw new Error(
-      "Cannot delete a product with existing stock history. Please archive it instead.",
+      "This product has already been deleted.",
     );
   }
 
+  // Soft-delete: set deleted_at timestamp instead of removing the row
   const { error } = await supabase
     .from("inventory_products")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("id", id);
 
   if (error) {
@@ -215,6 +258,7 @@ export async function getInventoryMasterCatalog(): Promise<
       .select(
         "id, name, image_url, category, type, base_uom, min_stock_threshold, default_durability_days, created_at, updated_at",
       )
+      .is("deleted_at", null)
       .order("created_at", { ascending: false }),
     supabase
       .from("inventory_lots")
@@ -272,7 +316,8 @@ export async function getInventoryMetrics(): Promise<InventoryMetrics> {
   const [productsResult, lotsResult] = await Promise.all([
     supabase
       .from("inventory_products")
-      .select("id, name, base_uom, min_stock_threshold"),
+      .select("id, name, base_uom, min_stock_threshold")
+      .is("deleted_at", null),
     supabase
       .from("inventory_lots")
       .select(
@@ -736,10 +781,11 @@ export async function getActiveRawMaterialLots(): Promise<ActiveRawMaterialLot[]
   const { data, error } = await supabase
     .from("inventory_lots")
     .select(
-      "id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status, created_at, inventory_products!inner(name, base_uom, type)",
+      "id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status, created_at, inventory_products!inner(name, base_uom, type, deleted_at)",
     )
     .eq("status", "ACTIVE")
     .eq("inventory_products.type", "RAW_MATERIAL")
+    .is("inventory_products.deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -865,6 +911,7 @@ export async function getFinishedGoodProducts(): Promise<FinishedGoodOption[]> {
     .from("inventory_products")
     .select("id, name, base_uom")
     .eq("type", "FINISHED_GOOD")
+    .is("deleted_at", null)
     .order("name", { ascending: true });
 
   if (error) {
@@ -1355,6 +1402,7 @@ export async function getFinishedGoodsForRawProduct(
     .from("inventory_products")
     .select("id, name, base_uom")
     .eq("type", "FINISHED_GOOD")
+    .is("deleted_at", null)
     .in("id", Array.from(finishedProductIds))
     .order("name", { ascending: true });
 
@@ -1377,6 +1425,7 @@ export async function getRawMaterialProducts(): Promise<
     .from("inventory_products")
     .select("id, name, base_uom")
     .eq("type", "RAW_MATERIAL")
+    .is("deleted_at", null)
     .order("name", { ascending: true });
 
   if (error) {

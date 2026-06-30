@@ -15,7 +15,11 @@ import {
   SheetTrigger,
 } from "@/shared/components/ui/sheet";
 
-export default function RegisterProductSheet() {
+interface RegisterProductSheetProps {
+  basePath?: string;
+}
+
+export default function RegisterProductSheet({}: RegisterProductSheetProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
 

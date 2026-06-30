@@ -70,6 +70,7 @@ export interface HierarchyClinicNode {
   address: string;
   latitude: number;
   longitude: number;
+  pincodes: string[];
 }
 
 export interface HierarchyFranchiseNode {
@@ -588,8 +589,11 @@ function FranchiseRow({
             </Button>
           }
         />
-        {/* Task 13.5: Wire a new Clinic to this franchise (controlled dialog). */}
-        <WireClinicButton franchiseId={franchise.id} />
+        {/* Task 13.5: Wire a new Clinic to this franchise (controlled dialog).
+            Franchise business allows max 1 clinic per franchise — hide when one exists. */}
+        {franchise.clinics.length === 0 && (
+          <WireClinicButton franchiseId={franchise.id} />
+        )}
       </div>
     </div>
   );
@@ -626,6 +630,19 @@ function ClinicList({ franchise }: { franchise: HierarchyFranchiseNode }) {
                 <Navigation className="h-3 w-3" />
                 {clinic.latitude.toFixed(5)}, {clinic.longitude.toFixed(5)}
               </p>
+              {/* Served pincodes display */}
+              {clinic.pincodes.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {clinic.pincodes.map((pin) => (
+                    <span
+                      key={pin}
+                      className="inline-flex items-center rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"
+                    >
+                      {pin}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           {/* Task 13.5: Edit clinic geo + served pincodes (controlled dialog). */}

@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useTransition, useRef, useMemo } from "react";
 import {
-  AreaChart,
   Area,
   BarChart,
   Bar,
@@ -33,6 +32,7 @@ import {
   Warehouse,
   Store,
 } from "lucide-react";
+import Link from "next/link";
 import {
   getInventoryAnalyticsSnapshot,
   getInventoryMovementSeries,
@@ -161,7 +161,6 @@ export default function InventoryIntelligenceShell() {
       const shop = await getShopProductsAnalytics();
       setShopAnalytics(shop);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -222,7 +221,16 @@ export default function InventoryIntelligenceShell() {
   if (!snapshot) {
     return (
       <div className="space-y-6">
-        {tabBar}
+        <div className="flex items-center justify-between gap-4">
+          {tabBar}
+          <Link
+            href="/inventory/warehouse"
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-slate-800"
+          >
+            <Warehouse className="h-3.5 w-3.5" />
+            Access Warehouse
+          </Link>
+        </div>
         <div className="space-y-6 animate-pulse">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
@@ -242,7 +250,16 @@ export default function InventoryIntelligenceShell() {
 
   return (
     <div className="space-y-6">
-      {tabBar}
+      <div className="flex items-center justify-between gap-4">
+        {tabBar}
+        <Link
+          href="/inventory/warehouse"
+          className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-slate-800"
+        >
+          <Warehouse className="h-3.5 w-3.5" />
+          Access Warehouse
+        </Link>
+      </div>
       {/* KPI Ribbon */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard

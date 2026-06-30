@@ -21,10 +21,12 @@ import {
   type InventoryCatalogProduct,
   type ProductType,
 } from "@/lib/inventory/product-schema";
+import type { FranchiseDestination } from "@/lib/franchise-inventory/active-destination-filter";
 import { cn } from "@/lib/utils";
 import DispatchStockModal from "@/shared/components/admin/inventory/modals/DispatchStockModal";
 import EditProductModal from "@/shared/components/admin/inventory/modals/EditProductModal";
 import ReceiveStockModal from "@/shared/components/admin/inventory/modals/ReceiveStockModal";
+import FranchiseDispatchModal from "@/app/franchise/(main)/inventory/_components/FranchiseDispatchModal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,9 +65,22 @@ const BASE_UOM_SHORT_LABELS: Record<BaseUom, string> = {
 
 interface ProductCardProps {
   product: InventoryCatalogProduct;
+  productManagement?: boolean;
+  /** Show the central-kitchen Receive + Dispatch stock buttons. Default true. */
+  stockOperations?: boolean;
+  /** Franchise portal mode: show only a single franchise Dispatch button. */
+  franchiseMode?: boolean;
+  /** Active franchise destinations for the dispatch selector. */
+  franchiseDestinations?: FranchiseDestination[];
 }
 
-export default function ProductCard({ product }: ProductCardProps) {
+export default function ProductCard({
+  product,
+  productManagement = false,
+  stockOperations = true,
+  franchiseMode = false,
+  franchiseDestinations,
+}: ProductCardProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -106,7 +121,8 @@ export default function ProductCard({ product }: ProductCardProps) {
             </div>
           )}
 
-          <div className="absolute top-2 right-2 z-10">
+          {productManagement && (
+            <div className="absolute top-2 right-2 z-10">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -142,6 +158,7 @@ export default function ProductCard({ product }: ProductCardProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+          )}
         </div>
 
         <CardContent className="flex flex-1 flex-col p-4">
@@ -209,6 +226,15 @@ export default function ProductCard({ product }: ProductCardProps) {
             <span className="text-xs text-muted-foreground">{typeLabel}</span>
           </div>
 
+          {franchiseMode ? (
+          <div className="mt-4 border-t pt-4">
+            <FranchiseDispatchModal
+              productId={product.id}
+              productName={product.name}
+              availableQuantity={product.totalStock}
+            />
+          </div>
+          ) : stockOperations ? (
           <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-4">
             <ReceiveStockModal
               productId={product.id}
@@ -229,6 +255,7 @@ export default function ProductCard({ product }: ProductCardProps) {
               productId={product.id}
               productName={product.name}
               baseUom={product.baseUom}
+              franchiseDestinations={franchiseDestinations}
               trigger={
                 <Button type="button" size="sm" variant="outline" className="w-full">
                   <Minus className="mr-1 h-4 w-4" />
@@ -237,46 +264,51 @@ export default function ProductCard({ product }: ProductCardProps) {
               }
             />
           </div>
+          ) : null}
         </CardContent>
       </Card>
 
-      <EditProductModal
-        product={product}
-        open={editOpen}
-        onOpenChange={setEditOpen}
-      />
+      {productManagement && (
+        <EditProductModal
+          product={product}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+        />
+      )}
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {product.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete {product.name}? This action cannot
-              be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(event) => {
-                event.preventDefault();
-                handleDelete();
-              }}
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                "Delete Product"
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {productManagement && (
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {product.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete {product.name}? This action cannot
+                be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isDeleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={(event) => {
+                  event.preventDefault();
+                  handleDelete();
+                }}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete Product"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }
