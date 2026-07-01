@@ -1,0 +1,42 @@
+-- ============================================================================
+-- ADD is_test_email FLAG TO USERS TABLE — (SAFE: additive, idempotent)
+-- ============================================================================
+-- Feature: customer-mobile-onboarding (Task 1.3)
+-- Requirements: 10.1, 10.3, 14.4
+--
+-- Mobile-first identity for admin-initiated onboarding. Some customers arrive
+-- at the clinic without an email address, but public.users.email is
+-- NOT NULL + UNIQUE and many downstream flows / RLS policies depend on that.
+--
+-- DECISION (per design.md "Migration 3"): rather than DROP the NOT NULL /
+-- UNIQUE constraint on users.email — a hard-to-reverse, high-blast-radius
+-- change — we KEEP email NOT NULL + UNIQUE and satisfy mobile-first identity by
+-- writing a deterministic placeholder email when the admin supplies none:
+--
+--   placeholder = 'm<normalizedMobile>@placeholder.arogyadiet.internal'
+--
+-- and flagging that row with is_test_email = true. Because the placeholder is
+-- derived from the (unique) mobile it is itself unique, never collides with a
+-- real email (reserved internal domain), is hidden from the customer
+-- (Req 10.4), and is replaceable later by a real email that clears the flag
+-- (Req 10.6). This migration therefore adds ONLY the flag column and performs
+-- NO constraint drops.
+--
+--   - is_test_email = true  -> email is an admin-entered placeholder (Test_Email)
+--   - is_test_email = false -> email is a real, customer-facing address (default)
+--
+-- Existing users default cleanly to false (their emails are real). Idempotent:
+-- re-running yields the same column and default.
+--
+-- Rollback:
+--   ALTER TABLE public.users DROP COLUMN IF EXISTS is_test_email;
+-- ============================================================================
+
+-- Additive flag column (Req 10.1, 10.3, 14.4) ---------------------------------
+-- email stays NOT NULL + UNIQUE (no constraint drop).
+ALTER TABLE public.users
+  ADD COLUMN IF NOT EXISTS is_test_email BOOLEAN NOT NULL DEFAULT false;
+
+-- ============================================================================
+-- DONE. Additive, idempotent flag only; users.email remains NOT NULL + UNIQUE.
+-- ============================================================================

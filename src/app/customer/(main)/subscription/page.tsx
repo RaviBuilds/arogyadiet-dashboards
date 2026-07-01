@@ -1,7 +1,16 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { AlertCircle, ArrowRight, Check } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import {
+  AlertCircle,
+  ArrowRight,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  Clock,
+  PackageX,
+} from "lucide-react";
 
 import {
   Card,
@@ -12,11 +21,45 @@ import {
   CardFooter,
 } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
+import { Badge } from "@/shared/components/ui/badge";
 import {
   Alert,
   AlertDescription,
   AlertTitle,
 } from "@/shared/components/ui/alert";
+import { cn } from "@/lib/utils";
+
+// Prefer showing the live subscription first, then an upcoming one, then any
+// terminal record, so the account view surfaces the most relevant subscription
+// attached during onboarding (Req 11.1).
+const SUBSCRIPTION_STATUS_PRIORITY: Record<string, number> = {
+  ACTIVE: 0,
+  PENDING: 1,
+  STOPPED: 2,
+  EXPIRED: 3,
+  CANCELLED: 4,
+};
+
+type AccountSubscription = {
+  id: string;
+  status: string | null;
+  starts_on: string | null;
+  effective_end_on: string | null;
+  subscription_code: string | null;
+  subscription_plans:
+    | { name: string | null; duration_days: number | null }
+    | { name: string | null; duration_days: number | null }[]
+    | null;
+};
+
+function formatDate(value: string | null): string {
+  if (!value) return "N/A";
+  try {
+    return format(parseISO(value), "MMM do, yyyy");
+  } catch {
+    return "N/A";
+  }
+}
 
 export default async function StorefrontPage() {
   const supabase = await createClient();
@@ -40,6 +83,39 @@ export default async function StorefrontPage() {
     .select("*")
     .eq("user_id", appUser.id)
     .maybeSingle();
+
+  // 2b. Fetch the subscription attached during onboarding (or any existing one).
+  //     Access is NOT gated on email presence, so onboarded customers see this
+  //     exactly like legacy customers (Req 11.1/11.5).
+  const { data: subscriptions } = profile
+    ? await supabase
+        .from("subscriptions")
+        .select(
+          "id, status, starts_on, effective_end_on, subscription_code, subscription_plans ( name, duration_days )",
+        )
+        .eq("customer_profile_id", profile.id)
+        .order("created_at", { ascending: false })
+    : { data: null as AccountSubscription[] | null };
+
+  // Pick the most relevant subscription to display (Req 11.1).
+  const currentSubscription =
+    (subscriptions as AccountSubscription[] | null)
+      ?.slice()
+      .sort(
+        (a, b) =>
+          (SUBSCRIPTION_STATUS_PRIORITY[a.status ?? ""] ?? 9) -
+          (SUBSCRIPTION_STATUS_PRIORITY[b.status ?? ""] ?? 9),
+      )[0] ?? null;
+
+  const currentPlan = currentSubscription
+    ? Array.isArray(currentSubscription.subscription_plans)
+      ? currentSubscription.subscription_plans[0]
+      : currentSubscription.subscription_plans
+    : null;
+  const currentPlanName = currentPlan?.name || "Custom Plan";
+  const currentStatus = currentSubscription?.status ?? "";
+  const isActiveStatus = currentStatus === "ACTIVE";
+  const isPendingStatus = currentStatus === "PENDING";
 
   // 3. Fetch Plans
   const { data: plans } = await supabase
@@ -70,6 +146,88 @@ export default async function StorefrontPage() {
           meals delivered daily.
         </p>
       </div>
+
+      {/* CURRENT SUBSCRIPTION SUMMARY (Req 11.1) or NO-SUBSCRIPTION STATE (Req 11.2) */}
+      {currentSubscription ? (
+        <Card className="border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-6 py-4 flex flex-row items-center justify-between gap-4">
+            <CardTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-primary" />
+              Your Subscription
+            </CardTitle>
+            <Badge
+              variant="outline"
+              className={cn(
+                "shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider",
+                isActiveStatus
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : isPendingStatus
+                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                    : "border-slate-200 bg-slate-50 text-slate-600",
+              )}
+            >
+              {isActiveStatus ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <Clock className="h-3.5 w-3.5" />
+              )}
+              {currentStatus || "UNKNOWN"}
+            </Badge>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
+              <div className="min-w-0">
+                <h3 className="text-xl font-semibold text-slate-900 mb-1 truncate">
+                  {currentPlanName}
+                </h3>
+                {currentSubscription.subscription_code && (
+                  <p className="text-sm text-slate-500 font-mono">
+                    {currentSubscription.subscription_code}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-6 sm:gap-8 text-sm">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                    Start Date
+                  </p>
+                  <p className="font-semibold text-slate-900">
+                    {formatDate(currentSubscription.starts_on)}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                    Est. End Date
+                  </p>
+                  <p className="font-semibold text-slate-900">
+                    {formatDate(currentSubscription.effective_end_on)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter className="px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/dashboard">
+                View Subscription Details{" "}
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
+          </CardFooter>
+        </Card>
+      ) : (
+        <Alert className="bg-slate-50 border-slate-200 text-slate-800 shadow-sm">
+          <PackageX className="h-5 w-5 stroke-slate-500" />
+          <AlertTitle className="font-semibold text-slate-900">
+            No subscription found
+          </AlertTitle>
+          <AlertDescription className="mt-1 text-sm text-slate-600 leading-relaxed">
+            We couldn&apos;t find a subscription attached to your account. Choose
+            a plan below to get started, or contact the clinic if you believe
+            this is a mistake.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* THE PROFILE GATE WARNING */}
       {!isProfileComplete && (

@@ -85,7 +85,7 @@ export function isFutureISO8601(iso: string): boolean {
 // existing exported behavior; they only add reusable, testable primitives.
 
 /** Returns hour 0–23 in Asia/Kolkata (IST) for a SPECIFIC instant. Pure. */
-function istHourOf(instant: Date): number {
+export function istHourOf(instant: Date): number {
   const hourStr = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata",
     hour: "numeric",
@@ -96,7 +96,7 @@ function istHourOf(instant: Date): number {
 }
 
 /** Returns YYYY-MM-DD in Asia/Kolkata (IST) for a SPECIFIC instant. Pure. */
-function istDateStringOf(instant: Date): string {
+export function istDateStringOf(instant: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
     year: "numeric",
@@ -106,7 +106,7 @@ function istDateStringOf(instant: Date): string {
 }
 
 /** Adds whole calendar days to a YYYY-MM-DD string via UTC arithmetic. Pure. */
-function addDaysToISODate(dateStr: string, days: number): string {
+export function addDaysToISODate(dateStr: string, days: number): string {
   const [year, month, day] = dateStr.split("-").map(Number);
   const dt = new Date(Date.UTC(year, month - 1, day));
   dt.setUTCDate(dt.getUTCDate() + days);

@@ -1,46 +1,19 @@
 "use server";
 
-import { registerCustomer } from "@/services/signupService";
-import {
-  buildPushPayload,
-  notifyAdmins,
-  sendNotificationToUser,
-} from "@/lib/notifications";
 import { redirect } from "next/navigation";
 
-export async function customerSignupAction(prevState:any, formData:FormData){
-    const email = formData.get('email') as string;
-    const password = formData.get("password") as string;
-    const fullName = formData.get("fullName") as string;
-    const mobile = formData.get("mobile") as string;
-
-    try {
-        const newUserId = await registerCustomer({email, password, fullName, mobile});
-
-        const welcomeTitle = "Welcome to ArogyaDiet!";
-        const welcomeMessage = "Welcome to ArogyaDiet!";
-
-        await sendNotificationToUser(newUserId, {
-            title: welcomeTitle,
-            message: welcomeMessage,
-            actionUrl: "/customer/profile",
-            sendEmail: true,
-            ...buildPushPayload(welcomeTitle, welcomeMessage, `welcome-${newUserId}`),
-        });
-
-        const adminTitle = "New Customer Signup";
-        const adminMessage = `Hi Admin, please check the new customer has signed up, customer name - ${fullName}`;
-
-        await notifyAdmins({
-            title: adminTitle,
-            message: adminMessage,
-            actionUrl: "/admin/customers",
-            sendEmail: true,
-            emailStrategy: "shared",
-            ...buildPushPayload(adminTitle, adminMessage, `signup-admin-${newUserId}`),
-        });
-    } catch (error:any) {
-        return {error: error.message}
-    }
-    redirect(`/signup/success`);
+// Customer self-service signup is disabled (Req 1.4, 1.5).
+//
+// This action no longer creates any account record. Even if invoked directly
+// (bypassing the UI), it neither creates nor authenticates an account and
+// simply redirects the caller to the mobile login screen. Account creation is
+// admin-initiated only; the legacy 3-step admin customer-creation flow remains
+// available and untouched (Req 4.8).
+export async function customerSignupAction(
+  _prevState: unknown,
+  _formData: FormData,
+) {
+  void _prevState;
+  void _formData;
+  redirect("/login");
 }

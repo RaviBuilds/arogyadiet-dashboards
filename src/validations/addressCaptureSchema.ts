@@ -1,0 +1,72 @@
+// src/validations/addressCaptureSchema.ts
+//
+// Zod schema for the map-based Address_Capture component used by the admin
+// Quick_Onboarding_Form. This is distinct from the legacy `addressSchema`:
+// it adds a Home/Office tag, separate flat/floor inputs, and auto-filled
+// locality fields resolved from the selected map location, and gates the
+// pincode against the franchise's serviceable pincodes.
+//
+// Validates: Requirements 5.1, 5.2, 5.4, 5.6
+
+import { z } from "zod";
+import {
+  isServiceable,
+  notServiceableMessage,
+} from "@/lib/address/serviceablePincode";
+
+/**
+ * Build an Address_Capture schema bound to a specific franchise's serviceable
+ * pincodes. When `serviceAreaPincodes` is empty every pincode is treated as
+ * not serviceable, so callers should pass the resolved service area.
+ *
+ * @param serviceAreaPincodes the serviceable pincodes for the admin's franchise
+ */
+export function createAddressCaptureSchema(
+  serviceAreaPincodes: string[] = [],
+) {
+  return z.object({
+    // Req 5.1: address-tag selector offering exactly Home/Office, Home default.
+    tag: z.enum(["Home", "Office"]).default("Home"),
+
+    // Req 5.2: location search box accepting 1-255 chars of locality text.
+    searchText: z.string().min(1).max(255).optional(),
+
+    // Req 5.4: flat number is required (1-50 chars); floor number optional (<=20 chars).
+    flatNumber: z
+      .string()
+      .min(1, "Flat number is required.")
+      .max(50, "Flat number must be at most 50 characters."),
+    floorNumber: z
+      .string()
+      .max(20, "Floor number must be at most 20 characters.")
+      .optional(),
+
+    // Req 5.3: auto-filled from the selected map location.
+    area: z.string().min(1, "Area could not be resolved from the location."),
+    city: z.string().min(1, "City could not be resolved from the location."),
+    state: z.string().min(1, "State could not be resolved from the location."),
+
+    // Req 5.6: pincode must be within the franchise's serviceable pincodes.
+    pincode: z.string().superRefine((value, ctx) => {
+      if (!isServiceable(value, serviceAreaPincodes)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: notServiceableMessage(value),
+        });
+      }
+    }),
+
+    // Req 5.3: latitude/longitude recorded into addresses.lat / addresses.lng.
+    lat: z.number(),
+    lng: z.number(),
+  });
+}
+
+/**
+ * Default Address_Capture schema with no serviceable pincodes bound. Used for
+ * shape/type inference; the action layer rebuilds it with the resolved service
+ * area so the serviceability check is meaningful.
+ */
+export const addressCaptureSchema = createAddressCaptureSchema();
+
+export type AddressCaptureValues = z.infer<typeof addressCaptureSchema>;

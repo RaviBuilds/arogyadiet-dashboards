@@ -64,7 +64,8 @@ import {
 } from "@/actions/admin-actions/customerActions";
 import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
 import { CustomerOverview } from "./CustomerOverview";
-import { Plus, Upload } from "lucide-react";
+import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
+import { Plus, Upload, UserPlus } from "lucide-react";
 import {
   clinicDisplayName,
   filterRowsByClinic,
@@ -434,7 +435,12 @@ export default function CustomerDashboard({
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <AdminSubmenuBar
-        tabs={["Overview", "Customer Directory"]}
+        tabs={[
+          "Overview",
+          "Customer Directory",
+          "Onboarded",
+          "Onboarding Completed",
+        ]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         actions={
@@ -443,6 +449,14 @@ export default function CustomerDashboard({
               <Link href="/customers/bulk-import">
                 <Upload className="h-4 w-4 mr-1.5" />
                 Bulk import
+              </Link>
+            </Button>
+            {/* Req 4.8: Quick onboarding entry point, added alongside — never
+                replacing — the legacy three-step "Create Customer" flow. */}
+            <Button variant="outline" size="sm" className="transition-all duration-200" asChild>
+              <Link href="/customers/quick-onboard">
+                <UserPlus className="h-4 w-4 mr-1.5" />
+                Quick Onboard
               </Link>
             </Button>
             <Button onClick={() => setIsCreateModalOpen(true)} size="sm" className="transition-all duration-200">
@@ -886,6 +900,10 @@ export default function CustomerDashboard({
             </TableBody>
           </Table>
         </DataTableCard>
+      ) : activeTab === "Onboarded" ? (
+        <OnboardingCustomersSection status="IN_PROGRESS" />
+      ) : activeTab === "Onboarding Completed" ? (
+        <OnboardingCustomersSection status="COMPLETED" />
       ) : null}
 
       {/* --- EDIT CUSTOMER MODAL --- */}

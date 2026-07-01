@@ -144,10 +144,19 @@ export async function middleware(request: NextRequest) {
     level: "inventory_operations",
     groups: {},
   };
+  // [Req 12.1–12.4] Onboarding statuses of the Customer_Record(s) the current
+  // session maps to. Resolved from the SAME single `users` query below (an
+  // additive `customer_profiles` embed) so the customer-portal gate costs no
+  // extra round-trip. `customer_profiles.user_id` is UNIQUE, so for a normal
+  // session this holds 0 or 1 entries; it stays an array so the exactly-one
+  // rule (and the ambiguous case) can be evaluated uniformly.
+  let customerOnboardingStatuses: (string | null)[] = [];
   if (user) {
     const { data: userProfile } = await supabase
       .from("users")
-      .select("admin_access_level, admin_operations_access, roles(code)")
+      .select(
+        "admin_access_level, admin_operations_access, roles(code), customer_profiles(onboarding_status)",
+      )
       .eq("auth_user_id", user.id)
       .single();
 
@@ -161,6 +170,21 @@ export async function middleware(request: NextRequest) {
       userProfile?.admin_access_level,
       userProfile?.admin_operations_access,
     );
+
+    // Normalize the `customer_profiles` embed (supabase-js may return a to-one
+    // relation as an object, a single-element array, or null) into a flat list
+    // of onboarding statuses for the customer-portal gate below.
+    const profilesData = userProfile?.customer_profiles as
+      | { onboarding_status: string | null }[]
+      | { onboarding_status: string | null }
+      | null
+      | undefined;
+    const profileList = Array.isArray(profilesData)
+      ? profilesData
+      : profilesData
+        ? [profilesData]
+        : [];
+    customerOnboardingStatuses = profileList.map((p) => p.onboarding_status);
   }
 
   // [Req 18.7 — DB scope binding] DECISION: do NOT bind the DB session context
@@ -213,6 +237,30 @@ export async function middleware(request: NextRequest) {
 
     // --- NEW STRICT GATEKEEPER LOGIC ---
     if (user && !url.pathname.startsWith("/unauthorized")) {
+      // [Req 12.1/12.2/12.3/12.4 — customer portal only] Grant access to the
+      // customer portal ONLY when the authenticated session maps to a role
+      // CUSTOMER that has exactly one Customer_Record whose onboarding_status
+      // is IN_PROGRESS or COMPLETED. This mirrors the pre-login eligibility
+      // semantics of `src/services/EligibilityChecker.ts`, but is evaluated
+      // here against the current session using the SSR Supabase client (no
+      // admin client, no extra query — the statuses were resolved above).
+      //
+      // Denials (redirect to /unauthorized per the existing convention used by
+      // the other portals):
+      //   - role is not CUSTOMER                     → not a customer
+      //   - zero allowed Customer_Records            → not registered / bad status (Req 12.1/12.3)
+      //   - more than one allowed Customer_Record    → ambiguous (Req 12.4)
+      // Only the exactly-one-allowed case is granted (Req 12.2).
+      if (currentSubdomain === "customer") {
+        const ALLOWED_ONBOARDING_STATUSES = ["IN_PROGRESS", "COMPLETED"];
+        const allowedRecords = customerOnboardingStatuses.filter(
+          (status): status is string =>
+            status !== null && ALLOWED_ONBOARDING_STATUSES.includes(status),
+        );
+        if (roleCode !== "CUSTOMER" || allowedRecords.length !== 1) {
+          return NextResponse.redirect(new URL("/unauthorized", request.url));
+        }
+      }
       if (currentSubdomain === "admin" && roleCode !== "ADMIN") {
         // FRANCHISE_ADMIN trying to access admin portal → redirect to franchise portal
         if (roleCode === "FRANCHISE_ADMIN") {

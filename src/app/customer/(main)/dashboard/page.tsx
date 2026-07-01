@@ -30,11 +30,38 @@ import {
 } from "@/shared/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { repairOverLimitPauseCredits } from "@/actions/manageMealActions";
+import { shouldShowProfileCompletionDialog } from "@/services/OnboardingService";
+import {
+  ProfileCompletionDialog,
+  type CompletableField,
+} from "@/shared/components/customer/ProfileCompletionDialog";
 
 export const revalidate = 0;
 
 // --- DYNAMIC MEAL THEMES ---
-const MEAL_THEMES: Record<string, any> = {
+type MealTheme = {
+  bg: string;
+  border: string;
+  text: string;
+  label: string;
+};
+
+/** Shape of a row from the upcoming `subscription_daily_preferences` query.
+ *  Supabase returns embedded relations as either an object or an array. */
+type UpcomingMealAddress = {
+  tag: string | null;
+  street_1: string | null;
+  city: string | null;
+};
+type UpcomingMealCategory = { code: string | null };
+type UpcomingMeal = {
+  preference_date: string;
+  is_paused: boolean;
+  meal_categories: UpcomingMealCategory | UpcomingMealCategory[] | null;
+  addresses: UpcomingMealAddress | UpcomingMealAddress[] | null;
+};
+
+const MEAL_THEMES: Record<string, MealTheme> = {
   VEG: {
     bg: "bg-green-50",
     border: "border-green-200",
@@ -69,7 +96,9 @@ export default async function CustomerDashboard() {
 
   const { data: profile, error: profileError } = await supabase
     .from("customer_profiles")
-    .select("id, dietary_preference")
+    .select(
+      "id, dietary_preference, onboarding_status, date_of_birth, gender, allergies, medical_history_notes",
+    )
     .eq("user_id", appUser.id)
     .maybeSingle();
 
@@ -86,6 +115,38 @@ export default async function CustomerDashboard() {
   }
 
   const customerProfileId = profile.id;
+
+  // --- Profile-completion dialog gating (Req 9.1/9.5, 10.5) ---
+  // The dialog is presented only while onboarding is IN_PROGRESS; once
+  // COMPLETED it must never reappear. The set of inputs offered is exactly the
+  // Customer_Record fields that are still empty, plus a real-email input when
+  // the current email is an admin-entered Test_Email.
+  const showProfileDialog = shouldShowProfileCompletionDialog(
+    profile.onboarding_status,
+  );
+
+  const profileDialogEmptyFields: CompletableField[] = [];
+  let profileDialogIsTestEmail = false;
+
+  if (showProfileDialog) {
+    const isEmpty = (v: unknown) =>
+      v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+
+    if (isEmpty(profile.date_of_birth)) profileDialogEmptyFields.push("dateOfBirth");
+    if (isEmpty(profile.gender)) profileDialogEmptyFields.push("gender");
+    if (isEmpty(profile.dietary_preference))
+      profileDialogEmptyFields.push("dietaryPreference");
+    if (isEmpty(profile.allergies)) profileDialogEmptyFields.push("allergies");
+    if (isEmpty(profile.medical_history_notes))
+      profileDialogEmptyFields.push("medicalHistoryNotes");
+
+    const { data: userEmailRow } = await supabase
+      .from("users")
+      .select("is_test_email")
+      .eq("id", appUser.id)
+      .maybeSingle();
+    profileDialogIsTestEmail = userEmailRow?.is_test_email === true;
+  }
 
   const [
     { data: addonOrders },
@@ -147,9 +208,19 @@ export default async function CustomerDashboard() {
 
   const activeSub = subscriptions?.find((s) => s.status === "ACTIVE");
 
+  // Rendered wherever the dashboard exits, so an IN_PROGRESS customer always
+  // gets the completion popup regardless of subscription state (Req 9.1).
+  const profileDialog = showProfileDialog ? (
+    <ProfileCompletionDialog
+      emptyFields={profileDialogEmptyFields}
+      isTestEmail={profileDialogIsTestEmail}
+    />
+  ) : null;
+
   if (!activeSub) {
     return (
       <div className="relative z-10 max-w-4xl mx-auto mt-1 animate-in fade-in slide-in-from-bottom-4">
+        {profileDialog}
         <Card className="border border-dashed border-slate-200 bg-white shadow-sm text-center py-16">
           <CardContent className="flex flex-col items-center space-y-4">
             <div className="h-20 w-20 bg-slate-100 rounded-full flex items-center justify-center mb-4">
@@ -228,6 +299,7 @@ export default async function CustomerDashboard() {
 
   return (
     <div className="relative z-10 max-w-5xl mx-auto space-y-10">
+      {profileDialog}
       <div className="relative w-full h-40 sm:h-48 md:h-56 rounded-xl overflow-hidden border border-slate-200 shadow-sm">
         <Image
           src="/banner.jpg"
@@ -466,7 +538,7 @@ export default async function CustomerDashboard() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
-            {upcomingMeals?.map((meal: any, idx: number) => {
+            {upcomingMeals?.map((meal: UpcomingMeal, idx: number) => {
               const date = parseISO(meal.preference_date);
               const isPaused = meal.is_paused;
 
