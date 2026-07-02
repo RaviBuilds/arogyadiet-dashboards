@@ -55,6 +55,10 @@ export interface OnboardUserInput {
   is_test_email?: boolean;
   franchise_id?: string | null;
   created_by?: string | null;
+  /** Bcrypt hash of the temporary PIN set by the admin at onboarding (Req 6.4). */
+  pin_hash?: string | null;
+  /** Whether the PIN is a temporary admin-set PIN (Req 6.6). */
+  is_temp_pin?: boolean;
 }
 
 /** The `profile` block of the RPC payload. */

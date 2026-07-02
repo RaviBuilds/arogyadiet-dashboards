@@ -1,15 +1,18 @@
 // src/app/customer/(auth)/login/page.tsx
-// Customer-portal login (customer-mobile-onboarding, Task 10.1).
+// Customer-portal login (customer-pin-auth, Task 6.5).
 //
-// RSC shell for the mobile-first OTP login. The interactive flow lives in the
-// `MobileOtpLoginForm` client leaf. This screen deliberately does NOT use the
-// shared `login-form.tsx` (still used by admin/rider/master/franchise), so it
-// exposes no signup link, no "Login with Google" button, and no email/password
-// fields (Req 1.1/1.2/1.3). Mobile-first single-column ~360px layout
-// (Req 15.1/15.4/15.5).
+// RSC shell for the mobile-first PIN login. The interactive flow lives in the
+// `CustomerLoginView` client leaf which manages toggling between the PIN login
+// form and the "Set New PIN" form (for temp-PIN first-login flow).
+// This screen deliberately does NOT use the shared `login-form.tsx` (still used
+// by admin/rider/master/franchise), so it exposes no signup link, no "Login
+// with Google" button, and no email/password fields (Req 1.1/1.2/1.3).
+// Mobile-first single-column ~360px layout (Req 15.1/15.4/15.5).
+//
+// Requirements: 2.3, 2.7, 2.8, 2.9, 3.2
 
 import Image from "next/image";
-import { MobileOtpLoginForm } from "@/shared/components/customer/MobileOtpLoginForm";
+import { CustomerLoginView } from "./CustomerLoginView";
 
 export default function CustomerLogin() {
   return (
@@ -25,7 +28,7 @@ export default function CustomerLogin() {
             className="h-auto w-auto"
           />
         </span>
-        <MobileOtpLoginForm redirectPath="/dashboard" />
+        <CustomerLoginView redirectPath="/dashboard" />
       </div>
     </div>
   );

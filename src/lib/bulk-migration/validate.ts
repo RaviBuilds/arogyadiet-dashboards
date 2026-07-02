@@ -6,6 +6,15 @@ export type RowValidationError = { row: number; field: string; message: string }
 const EMAIL_RE = /\S+@\S+\.\S+/;
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Normalize date strings: accept YYYY/MM/DD, YYYY-MM-DD, or DD-MM-YYYY and return YYYY-MM-DD. */
+function normalizeDate(value: string): string | null {
+  if (!value) return null;
+  // Replace slashes with dashes
+  const normalized = value.replace(/\//g, "-");
+  if (DATE_RE.test(normalized)) return normalized;
+  return null;
+}
 const GENDERS = new Set(["MALE", "FEMALE", "OTHER"]);
 const DIETARY = new Set(["Veg", "Non-Veg"]);
 const ADDRESS_TAGS = new Set(["Home", "Work", "Other"]);
@@ -251,9 +260,10 @@ export function validateSubscriptionRows(
     }
     const mode = modeRaw as "EXISTING" | "CUSTOM";
 
-    const startDate = row.start_date?.trim();
-    if (!startDate || !DATE_RE.test(startDate)) {
-      errors.push({ row: rowNum, field: "start_date", message: "Use YYYY-MM-DD." });
+    const startDateRaw = row.start_date?.trim();
+    const startDate = startDateRaw ? normalizeDate(startDateRaw) : null;
+    if (!startDate) {
+      errors.push({ row: rowNum, field: "start_date", message: "Use YYYY-MM-DD or YYYY/MM/DD." });
     }
 
     const planCode = row.plan_code?.trim();
@@ -269,14 +279,15 @@ export function validateSubscriptionRows(
       }
     }
 
-    const endDate = row.end_date?.trim();
+    const endDateRaw = row.end_date?.trim();
+    const endDate = endDateRaw ? normalizeDate(endDateRaw) : null;
     const basePrice = parseOptionalNumber(row.base_price ?? "");
     const taxPercent = parseOptionalNumber(row.tax_percent ?? "");
     const pauseCredits = parseOptionalNumber(row.pause_credits ?? "");
 
     if (mode === "CUSTOM") {
-      if (!endDate || !DATE_RE.test(endDate)) {
-        errors.push({ row: rowNum, field: "end_date", message: "Required for CUSTOM mode (YYYY-MM-DD)." });
+      if (!endDate) {
+        errors.push({ row: rowNum, field: "end_date", message: "Required for CUSTOM mode (YYYY-MM-DD or YYYY/MM/DD)." });
       }
       if (basePrice === null || basePrice <= 0) {
         errors.push({ row: rowNum, field: "base_price", message: "Positive number required for CUSTOM." });

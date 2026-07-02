@@ -151,11 +151,17 @@ export async function middleware(request: NextRequest) {
   // session this holds 0 or 1 entries; it stays an array so the exactly-one
   // rule (and the ambiguous case) can be evaluated uniformly.
   let customerOnboardingStatuses: (string | null)[] = [];
+  // [Req 2.8] Track whether the user still has a temporary PIN. Used as a
+  // defense-in-depth guard: the session should NOT be established while
+  // is_temp_pin is true (pinAuthActions only calls signInWithPassword after
+  // setPermanentPin), but if a session somehow exists with the flag still set,
+  // the middleware blocks access to protected routes.
+  let isTempPin: boolean | null = null;
   if (user) {
     const { data: userProfile } = await supabase
       .from("users")
       .select(
-        "admin_access_level, admin_operations_access, roles(code), customer_profiles(onboarding_status)",
+        "admin_access_level, admin_operations_access, is_temp_pin, roles(code), customer_profiles(onboarding_status)",
       )
       .eq("auth_user_id", user.id)
       .single();
@@ -170,6 +176,7 @@ export async function middleware(request: NextRequest) {
       userProfile?.admin_access_level,
       userProfile?.admin_operations_access,
     );
+    isTempPin = userProfile?.is_temp_pin ?? null;
 
     // Normalize the `customer_profiles` embed (supabase-js may return a to-one
     // relation as an object, a single-element array, or null) into a flat list
@@ -259,6 +266,23 @@ export async function middleware(request: NextRequest) {
         );
         if (roleCode !== "CUSTOMER" || allowedRecords.length !== 1) {
           return NextResponse.redirect(new URL("/unauthorized", request.url));
+        }
+
+        // [Req 2.8, 2.9] Block access to protected routes while is_temp_pin
+        // is true — customer must set a permanent PIN before accessing
+        // dashboard, profile, subscription, billing, or any other protected
+        // route. The session should NOT be established while is_temp_pin is
+        // true (pinAuthActions only calls signInWithPassword after
+        // setPermanentPin), but this is a defense-in-depth guard against
+        // session-establishment bugs or race conditions.
+        //
+        // If the customer navigates away from the set-new-pin flow without
+        // completing it, they have no valid session (by design). If somehow
+        // they DO have a session with is_temp_pin still true, redirect to
+        // login so they re-enter the set-new-pin flow after PIN verification.
+        if (isTempPin === true) {
+          const loginUrl = new URL("/login", request.url);
+          return NextResponse.redirect(loginUrl);
         }
       }
       if (currentSubdomain === "admin" && roleCode !== "ADMIN") {

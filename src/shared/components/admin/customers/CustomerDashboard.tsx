@@ -668,7 +668,7 @@ export default function CustomerDashboard({
                         <>
                           <DropdownMenuSeparator />
                           <DropdownMenuLabel>Filter by Plan</DropdownMenuLabel>
-                          {uniquePlans.map((plan: any) => (
+                          {uniquePlans.map((plan: string) => (
                             <DropdownMenuItem
                               key={plan}
                               onClick={() => setFilterStatus(plan)}

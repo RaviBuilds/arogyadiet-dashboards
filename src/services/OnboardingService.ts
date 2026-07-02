@@ -165,6 +165,17 @@ export interface SubscriptionServiceLike {
   ): Promise<ActivateAddOnResult>;
 }
 
+/**
+ * Optional PIN context passed by the server action when an admin sets a
+ * temporary PIN during onboarding (Req 6.4, 6.5, 6.6, 14.1, 14.2).
+ */
+export interface PinContext {
+  /** The bcrypt hash of the temporary PIN (already hashed by the action). */
+  pinHash: string;
+  /** Whether this is a temporary PIN (always true at onboarding). */
+  isTempPin: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // onboard — the atomic quick-onboarding write
 // ---------------------------------------------------------------------------
@@ -192,10 +203,12 @@ export interface SubscriptionServiceLike {
  *
  * @param payload the Zod-validated Quick_Onboarding_Form input
  * @param admin   the resolved admin context (audit `created_by`)
+ * @param pin     optional PIN context for setting a temp PIN at onboarding
  */
 export async function onboard(
   payload: QuickOnboardingInput,
-  admin: AdminContext = {}
+  admin: AdminContext = {},
+  pin?: PinContext,
 ): Promise<OnboardOutcome> {
   // (1) PAID precondition (Req 8.1/8.2). No customer record is persisted while
   //     Payment_Status is anything other than PAID.
@@ -295,6 +308,7 @@ export async function onboard(
   const { data: authData, error: authError } =
     await admin_client.auth.admin.createUser({
       email,
+      password: process.env.CUSTOMER_SERVER_PASSWORD!,
       phone: `+91${mobile}`,
       email_confirm: true,
       phone_confirm: true,
@@ -321,6 +335,9 @@ export async function onboard(
       is_test_email: isTestEmail,
       franchise_id: franchiseId,
       created_by: admin.adminUserId ?? null,
+      // PIN auth columns (Req 6.4, 6.5, 6.6, 14.1, 14.2) — included when
+      // the admin sets a temporary PIN during onboarding.
+      ...(pin ? { pin_hash: pin.pinHash, is_temp_pin: pin.isTempPin } : {}),
     },
     profile: {
       customer_code: customerCode,

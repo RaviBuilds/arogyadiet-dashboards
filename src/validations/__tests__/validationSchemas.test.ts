@@ -16,7 +16,6 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  quickOnboardingSchema,
   createQuickOnboardingSchema,
   CUSTOMER_CATEGORIES,
   PAYMENT_STATUSES,

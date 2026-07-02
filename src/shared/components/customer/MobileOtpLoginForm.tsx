@@ -1,3 +1,7 @@
+// @deprecated — This component is superseded by `MobilePinLoginForm.tsx` for
+// the customer login flow. Retained for backward compatibility with existing
+// tests until OTP login is fully removed.
+
 "use client";
 
 // src/shared/components/customer/MobileOtpLoginForm.tsx

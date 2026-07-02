@@ -49,6 +49,7 @@ import {
 } from "@/shared/components/ui/dialog";
 import { ConfirmDeleteModal } from "../core/ConfirmDeleteModal";
 import { AdminMedicalUploadModal } from "./AdminMedicalUploadModal";
+import { ResetPinDialog } from "@/shared/components/admin/ResetPinDialog";
 
 import {
   BadgeIndianRupee,
@@ -60,6 +61,7 @@ import {
   EyeOff,
   FileText,
   Home,
+  KeyRound,
   Loader2,
   MapPin,
   Plus,
@@ -243,6 +245,7 @@ export function Customer360Dashboard({
   const [pwdForm, setPwdForm] = useState({ password: "", confirm: "", showPwd: false });
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [isAccountActive, setIsAccountActive] = useState(customer.isActive ?? true);
+  const [resetPinOpen, setResetPinOpen] = useState(false);
   const isArchivedAccount = isArchivedCustomerEmail(customer.email);
 
   // Modals State
@@ -1088,6 +1091,32 @@ export function Customer360Dashboard({
               </CardContent>
             </Card>
 
+            {/* ── Reset PIN ── */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <KeyRound className="h-4 w-4 text-primary" />
+                  Reset PIN
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Reset the customer&apos;s login PIN. They will be required to set a
+                  new permanent PIN on their next login.
+                </p>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => setResetPinOpen(true)}
+                >
+                  <KeyRound className="h-3.5 w-3.5 mr-2" />
+                  Reset PIN
+                </Button>
+              </CardContent>
+            </Card>
+
             {/* ── Account Status ── */}
             <Card>
               <CardHeader>
@@ -1662,6 +1691,14 @@ export function Customer360Dashboard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* --- RESET PIN DIALOG --- */}
+      <ResetPinDialog
+        userId={customer.userId}
+        customerName={customer.full_name}
+        open={resetPinOpen}
+        onOpenChange={setResetPinOpen}
+      />
     </div>
   );
 }

@@ -38,6 +38,9 @@ import {
   Loader2,
 } from "lucide-react";
 
+import { TempPinField } from "@/shared/components/admin/TempPinField";
+import { isValidPinFormat } from "@/lib/pin/pinUtils";
+
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
@@ -168,6 +171,11 @@ export function QuickOnboardingForm({
   );
   const [addressTouched, setAddressTouched] = useState(false);
 
+  // Temporary PIN state — managed outside the Zod schema because the raw PIN
+  // is passed to the server action which handles hashing (Req 6.4, 6.5, 6.6).
+  const [tempPin, setTempPin] = useState("");
+  const [tempPinError, setTempPinError] = useState<string | null>(null);
+
   const {
     register,
     control,
@@ -228,10 +236,16 @@ export function QuickOnboardingForm({
   const applyServerFieldErrors = (fieldErrors?: Record<string, string>) => {
     if (!fieldErrors) return;
     let jumpToAddress = false;
+    let jumpToDetails = false;
     for (const [key, message] of Object.entries(fieldErrors)) {
       if (key.startsWith("address")) {
         setAddressServerError(message);
         jumpToAddress = true;
+        continue;
+      }
+      if (key === "tempPin") {
+        setTempPinError(message);
+        jumpToDetails = true;
         continue;
       }
       setError(key as keyof DetailsFormValues, {
@@ -240,15 +254,25 @@ export function QuickOnboardingForm({
       });
     }
     if (jumpToAddress) setStep(2);
+    else if (jumpToDetails) setStep(0);
   };
 
   const onSubmit = (values: DetailsFormValues) => {
     setAddressServerError(null);
+    setTempPinError(null);
 
     if (!addressResolved) {
       setAddressTouched(true);
       setStep(2);
       toast.error("Complete the address before onboarding.");
+      return;
+    }
+
+    // Validate the temporary PIN before submitting (Req 6.3, 6.5).
+    if (!isValidPinFormat(tempPin)) {
+      setTempPinError("Temporary PIN must be exactly 6 digits.");
+      setStep(0);
+      toast.error("Enter a valid 6-digit temporary PIN.");
       return;
     }
 
@@ -272,6 +296,7 @@ export function QuickOnboardingForm({
         lat: address.lat,
         lng: address.lng,
       },
+      tempPin,
     };
 
     startTransition(async () => {
@@ -379,6 +404,16 @@ export function QuickOnboardingForm({
                   {...register("allergies")}
                 />
               </Field>
+
+              <TempPinField
+                value={tempPin}
+                onChange={(val) => {
+                  setTempPin(val);
+                  if (tempPinError) setTempPinError(null);
+                }}
+                error={tempPinError ?? undefined}
+                disabled={isSubmitting}
+              />
             </div>
           )}
 
@@ -606,6 +641,10 @@ export function QuickOnboardingForm({
                         ? `${address.flatNumber}, ${address.area}, ${address.city} - ${address.pincode}`
                         : "Incomplete"
                     }
+                  />
+                  <ReviewRow
+                    label="Temp PIN"
+                    value={tempPin ? "••••••" : "Not set"}
                   />
                 </dl>
               </div>

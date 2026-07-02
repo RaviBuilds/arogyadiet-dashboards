@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/services/__tests__/onboardingService.property.test.ts
 // Feature: customer-mobile-onboarding — OnboardingService property tests.
 //

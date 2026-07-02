@@ -1,3 +1,9 @@
+// @deprecated — This module is superseded by `pinAuthActions.ts` for the
+// customer login flow. The OTP-based actions (`requestOtpAction`,
+// `verifyOtpAction`, `resendOtpAction`) are no longer used in the customer
+// portal login path. Retained for backward compatibility with existing tests
+// until the OtpLoginService is fully removed.
+
 "use server";
 
 // src/actions/mobileAuthActions.ts

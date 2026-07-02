@@ -387,7 +387,13 @@ export async function bulkImportSubscriptionsAction(
   let succeeded = 0;
   let failed = 0;
 
-  for (const row of valid) {
+  // Sort by start_date ascending so earlier subscriptions get inserted first (ACTIVE)
+  // and later ones for the same customer become PENDING naturally.
+  const sorted = [...valid].sort((a, b) =>
+    a.startDate.localeCompare(b.startDate),
+  );
+
+  for (const row of sorted) {
     const identifier = row.customerEmail || row.customerMobile;
 
     const customerProfileId = await resolveCustomerProfileId(
@@ -456,7 +462,10 @@ export async function bulkImportSubscriptionsAction(
       (built.payload as { planId: string }).planId = planId;
     }
 
-    const res = await addSubscription(built.payload, built.isCustom);
+    const res = await addSubscription(built.payload, built.isCustom, {
+      skipStartDateCheck: true,
+      skipOverlapCheck: true,
+    });
 
     if (res.success) {
       succeeded++;

@@ -54,6 +54,8 @@ import {
   type ActivateAddOnResult,
   type AddOnActivationPayment,
 } from "@/services/OnboardingService";
+import { isValidPinFormat } from "@/lib/pin/pinUtils";
+import { hashPin } from "@/services/PinService";
 
 // ---------------------------------------------------------------------------
 // Action result types
@@ -134,6 +136,31 @@ export async function onboardCustomerAction(
   }
   const input = parsed.data;
 
+  // (3b) Extract and validate the temporary PIN (Req 6.4, 6.5, 6.6).
+  // The tempPin is not part of the Zod schema — it's passed alongside the form
+  // data and hashed server-side before being sent to the onboard_customer RPC.
+  const rawPayload = payload as Record<string, unknown>;
+  const tempPin = typeof rawPayload.tempPin === "string" ? rawPayload.tempPin : "";
+  if (!isValidPinFormat(tempPin)) {
+    return {
+      success: false,
+      error: "Temporary PIN must be exactly 6 digits.",
+      fieldErrors: { tempPin: "Enter a valid 6-digit temporary PIN." },
+    };
+  }
+
+  // Hash the temp PIN server-side (bcryptjs cost 10) — never send plaintext
+  // PIN to the database. The hash + is_temp_pin flag are passed to the service.
+  let pinHash: string;
+  try {
+    pinHash = await hashPin(tempPin);
+  } catch {
+    return {
+      success: false,
+      error: "Failed to process the temporary PIN. Please try again.",
+    };
+  }
+
   // (4) PAID precondition (Req 8.1/8.2) — no record is persisted otherwise.
   if (input.paymentStatus !== "PAID") {
     return {
@@ -155,7 +182,7 @@ export async function onboardCustomerAction(
   }
 
   // (6) Delegate the atomic write to the service (Req 6.1-6.6).
-  const outcome = await serviceOnboard(input, { adminUserId });
+  const outcome = await serviceOnboard(input, { adminUserId }, { pinHash, isTempPin: true });
   if (!outcome.ok) {
     return {
       success: false,

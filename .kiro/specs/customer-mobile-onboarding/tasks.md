@@ -194,7 +194,7 @@ Implementation language is **TypeScript** on **Next.js 16 (App Router)**, per th
     - **Validates: Requirements 9.4, 9.5, 14.1, 14.3**
     - Location: `src/services/__tests__/profileCompletion.property.test.ts`
 
-- [ ] 7. Checkpoint - ensure services and property tests pass
+- [x] 7. Checkpoint - ensure services and property tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 - [x] 8. Server actions (orchestration layer)
@@ -245,19 +245,19 @@ Implementation language is **TypeScript** on **Next.js 16 (App Router)**, per th
     - Update `src/middleware.ts` customer-portal checks: grant only when role is CUSTOMER with exactly one record in `IN_PROGRESS`/`COMPLETED`; deny otherwise (not registered, bad status, ambiguous) and redirect to `/unauthorized` or login
     - _Requirements: 12.1, 12.2, 12.3, 12.4_
 
-  - [ ]* 11.2 Write integration tests for external-service wiring
+  - [x]* 11.2 Write integration tests for external-service wiring
     - Supabase phone OTP send/verify and session establishment (2.2/2.4/3.3), OAuth/signup callback rejection (1.5), Google reverse-geocode auto-fill (5.3), and access parity for onboarded customers (11.5)
     - _Requirements: 1.5, 2.2, 2.4, 3.3, 5.3, 11.5_
 
-  - [ ]* 11.3 Write component/snapshot tests for UI behavior
+  - [x]* 11.3 Write component/snapshot tests for UI behavior
     - Login omits signup/Google/email-password (1.1–1.3), signup route redirects (1.4), Home/Office default (5.1), test-email checkbox present (10.2), account/billing display + empty states (11), cutoff-warning enable/disable toggle (7.1–7.4), and portal styling/360px layout/loading/disabled/empty/success states (15.1–15.11)
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 5.1, 7.1, 7.2, 7.3, 7.4, 10.2, 11.1, 11.3, 15.1, 15.5, 15.7, 15.8, 15.10, 15.11_
 
-  - [ ]* 11.4 Run automated accessibility checks on new screens
+  - [x]* 11.4 Run automated accessibility checks on new screens
     - Run axe against the login, OTP entry, profile dialog, quick-onboarding form, and address capture for the mechanical subset (labels, focus trap, contrast tokens); note that full WCAG 2.1 AA conformance requires manual assistive-technology review
     - _Requirements: 15.12_
 
-- [ ] 12. Final checkpoint - ensure all tests pass
+- [x] 12. Final checkpoint - ensure all tests pass
   - Run `npm run lint` and `npm run test`; fix any failures. Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
