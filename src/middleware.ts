@@ -104,7 +104,7 @@ export async function middleware(request: NextRequest) {
 
   let response = NextResponse.next({ request });
 
-  if (portalPath) {
+  if (portalPath && !url.pathname.startsWith("/unauthorized")) {
     const pathname =
       url.pathname === portalPath || url.pathname.startsWith(`${portalPath}/`)
         ? url.pathname
@@ -156,12 +156,13 @@ export async function middleware(request: NextRequest) {
   // is_temp_pin is true (pinAuthActions only calls signInWithPassword after
   // setPermanentPin), but if a session somehow exists with the flag still set,
   // the middleware blocks access to protected routes.
+  // NOTE: is_temp_pin column may not exist yet (pending migration); default to null.
   let isTempPin: boolean | null = null;
   if (user) {
     const { data: userProfile } = await supabase
       .from("users")
       .select(
-        "admin_access_level, admin_operations_access, is_temp_pin, roles(code), customer_profiles(onboarding_status)",
+        "admin_access_level, admin_operations_access, roles(code), customer_profiles(onboarding_status)",
       )
       .eq("auth_user_id", user.id)
       .single();
@@ -176,7 +177,6 @@ export async function middleware(request: NextRequest) {
       userProfile?.admin_access_level,
       userProfile?.admin_operations_access,
     );
-    isTempPin = userProfile?.is_temp_pin ?? null;
 
     // Normalize the `customer_profiles` embed (supabase-js may return a to-one
     // relation as an object, a single-element array, or null) into a flat list

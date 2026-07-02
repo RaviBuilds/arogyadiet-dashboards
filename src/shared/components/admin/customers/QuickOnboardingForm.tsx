@@ -114,15 +114,15 @@ const detailsSchema = z.object({
     .string()
     .max(500, "Allergies must be at most 500 characters.")
     .optional(),
-  email: z.preprocess(
-    (value) =>
-      typeof value === "string" && value.trim() === "" ? undefined : value,
-    z
-      .string()
-      .max(254, "Email must be at most 254 characters.")
-      .email("Enter a valid email address.")
-      .optional(),
-  ),
+  email: z
+    .string()
+    .max(254, "Email must be at most 254 characters.")
+    .refine(
+      (v) => v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+      "Enter a valid email address.",
+    )
+    .optional()
+    .or(z.literal("")),
   isTestEmail: z.boolean().default(false),
   primaryCategory: z.enum(CUSTOMER_CATEGORIES),
   planId: z.string().uuid("Select a subscription plan."),
@@ -280,6 +280,8 @@ export function QuickOnboardingForm({
     // because addressResolved implies the AddressCaptureMap reported canSave.
     const payload = {
       ...values,
+      email:
+        values.email && values.email.trim() !== "" ? values.email : undefined,
       allergies:
         values.allergies && values.allergies.trim() !== ""
           ? values.allergies

@@ -160,7 +160,7 @@ export default function CustomerDashboard({
 
   // Dynamically extract unique active plans for the filter dropdown
   const uniquePlans = useMemo(() => {
-    const plans = new Set(customers.map(c => c.activePlanName).filter(Boolean));
+    const plans = new Set(customers.map(c => c.activePlanName).filter((p): p is string => Boolean(p)));
     return Array.from(plans);
   }, [customers]);
 

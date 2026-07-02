@@ -100,7 +100,6 @@ export function ResetPinDialog({
             error={error}
             disabled={isPending}
             label="New Temporary PIN"
-            id="reset-pin"
           />
         </div>
 

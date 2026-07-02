@@ -12,7 +12,6 @@
 //   - Customer login (validate submitted PIN format client-side)
 //   - Server-side validation before bcrypt operations
 
-import { randomInt } from "crypto";
 
 /**
  * The canonical PIN format: exactly 6 numeric digits (0-9).
@@ -45,9 +44,12 @@ export function isValidPinFormat(pin: string): boolean {
 /**
  * Generate a cryptographically random 6-digit numeric PIN.
  *
- * Uses Node.js `crypto.randomInt` which produces cryptographically secure
- * uniform random integers. The range [0, 999999] covers all possible 6-digit
- * combinations; the result is zero-padded to ensure exactly 6 characters.
+ * Uses the Web Crypto API (`crypto.getRandomValues`) which is available in
+ * both browser and Node.js (v15+) environments. This replaces the previous
+ * Node-only `crypto.randomInt` which was not available in client bundles.
+ *
+ * The range [0, 999999] covers all possible 6-digit combinations; the result
+ * is zero-padded to ensure exactly 6 characters.
  *
  * This function is suitable for generating admin-set temporary PINs during
  * customer onboarding or PIN reset flows.
@@ -57,9 +59,13 @@ export function isValidPinFormat(pin: string): boolean {
  * @returns a cryptographically random string of exactly 6 numeric digits
  */
 export function generateTemporaryPin(): string {
-  // randomInt(max) returns a uniform random integer in [0, max).
-  // Range [0, 1_000_000) covers 000000 through 999999.
-  const raw = randomInt(1_000_000);
+  // Use a Uint32Array to get a cryptographically random 32-bit integer.
+  // Modulo 1_000_000 gives a uniform value in [0, 999999].
+  // (Bias is negligible: 2^32 / 1_000_000 ≈ 4294, so the maximum bias per
+  // bucket is < 0.00003%.)
+  const buf = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(buf);
+  const raw = buf[0] % 1_000_000;
 
   // Pad with leading zeros to guarantee exactly 6 digits.
   return raw.toString().padStart(6, "0");

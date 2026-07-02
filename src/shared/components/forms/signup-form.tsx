@@ -27,10 +27,13 @@ export function SignupForm({
   ...props
 }: React.ComponentProps<"div">) {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false); // Fixed typo here
-  const [state, formAction, isPending] = useActionState(
+  const [_state, formAction, isPending] = useActionState(
     customerSignupAction,
     null,
   );
+  // customerSignupAction always redirects (never returns), so state is typed
+  // as never by TS — cast to a safe type for the error display guard below.
+  const state = _state as { error?: string } | null;
 
   const handleGoogleLogin = async () => {
     setIsGoogleLoading(true);
