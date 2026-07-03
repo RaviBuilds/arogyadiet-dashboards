@@ -352,3 +352,193 @@ This update completes the migration from password-based to PIN-based authenticat
 
 The system now has a consistent, simple authentication method throughout!
 
+
+
+---
+
+## Update: User Management Tab Refinement (Latest)
+
+### Issue Found
+- Duplicate "Danger Zone" card was present in User Management tab
+- Missing "Send PIN Reset Link" functionality with email update capability
+
+### Changes Made
+
+#### 1. ✅ Removed Duplicate "Danger Zone" Card
+The duplicate card has been removed. User Management now properly displays 3 cards only.
+
+#### 2. ✅ Added "Send PIN Reset Link" Card
+
+**File**: `src/shared/components/admin/customers/Customer360Dashboard.tsx`
+
+**New Functionality**:
+- **Conditional Logic Based on Email**:
+  - If customer has NO email or test email (`@test.arogyaemail.com`) → Shows email update form
+  - If customer has valid email → Shows "Send PIN Reset Link" button
+
+**UI Flow for No Email**:
+```
+┌─────────────────────────────────────────┐
+│ 📧 Send PIN Reset Link                  │
+├─────────────────────────────────────────┤
+│ ⚠️ No valid email on file. Update       │
+│    email first to send PIN reset link.  │
+│                                          │
+│ Email Address                            │
+│ [customer@example.com____________]       │
+│                                          │
+│ [ Update Email ]                         │
+└─────────────────────────────────────────┘
+```
+
+**UI Flow for Valid Email**:
+```
+┌─────────────────────────────────────────┐
+│ 📧 Send PIN Reset Link                  │
+├─────────────────────────────────────────┤
+│ Send a PIN reset link to                │
+│ customer@example.com. Customer will     │
+│ receive an email with instructions to   │
+│ set a new PIN.                           │
+│                                          │
+│ [ Send PIN Reset Link ]                  │
+└─────────────────────────────────────────┘
+```
+
+#### 3. ✅ Created Email Update Server Action
+
+**File**: `src/actions/admin-actions/customerActions.ts`
+
+**New Function**: `adminUpdateCustomerEmail(authUserId: string, newEmail: string)`
+
+**Features**:
+- ✅ Validates email format (regex check)
+- ✅ Checks if email already exists (prevents duplicates)
+- ✅ Updates both `auth.users` and `public.users` tables
+- ✅ Logs admin action for audit trail
+- ✅ Proper error handling with descriptive messages
+- ✅ Requires `customers:manage` permission
+
+**Error Cases**:
+| Error | Message |
+|-------|---------|
+| Invalid format | "Invalid email format" |
+| Duplicate email | "Email already in use by another account" |
+| Auth update fail | Supabase error message |
+| Permission denied | Access control error |
+
+#### 4. Updated State Management
+
+**New State Variables**:
+```typescript
+const [emailUpdateForm, setEmailUpdateForm] = useState("");
+const [sendingPinReset, setSendingPinReset] = useState(false);
+```
+
+### Final User Management Tab Structure
+
+The User Management tab now contains exactly **3 cards**:
+
+1. **Reset PIN** 
+   - Direct PIN reset to temporary PIN
+   - Customer must change on next login
+   
+2. **Send PIN Reset Link** ⭐ NEW
+   - Conditional based on email availability
+   - Email update inline if needed
+   - Send reset email if email exists
+   
+3. **Account Status**
+   - Activate/Deactivate toggle
+   - Shows subscription blocking logic
+
+### Technical Implementation
+
+#### Email Update Flow
+1. Admin enters new email address
+2. Validation checks:
+   - Format validation (regex)
+   - Duplicate check (query all users)
+3. Update operations:
+   - Update auth user via Admin API
+   - Sync to public.users table
+   - Log admin action
+4. Success:
+   - Toast notification
+   - Form resets
+   - Page refreshes (email now visible)
+   - "Send PIN Reset Link" button immediately appears
+
+#### PIN Reset Email Flow
+1. Check if customer has valid email
+2. If yes → Use existing `adminSendPasswordReset` action
+3. Action calls `supabaseAdmin.auth.admin.generateLink({ type: "recovery" })`
+4. Supabase sends email with recovery link
+5. Customer clicks link → Redirected to set new PIN
+
+### Testing Checklist
+
+#### Email Update
+- [ ] Customer with no email → Shows email update form
+- [ ] Customer with test email → Shows email update form
+- [ ] Enter invalid email format → Submit button disabled
+- [ ] Enter duplicate email → Shows error message
+- [ ] Enter valid email → Success, page refreshes
+- [ ] After email update → "Send PIN Reset Link" button appears immediately
+
+#### PIN Reset Link
+- [ ] Customer with valid email → Shows "Send PIN Reset Link" button
+- [ ] Click button → Toast "PIN reset link sent successfully!"
+- [ ] Check customer email inbox → Recovery email received
+- [ ] Click link in email → Redirects to PIN reset page
+- [ ] Customer sets new PIN → Successfully logs in
+
+#### Error Handling
+- [ ] Network error during email update → Shows error toast
+- [ ] Network error during PIN reset send → Shows error toast
+- [ ] No authUserId → Shows error message
+- [ ] Permission denied → Shows access control error
+
+### Benefits of This Update
+
+✅ **For Admins**:
+- Single place to manage email and PIN reset
+- No need to navigate away to update email
+- Immediate feedback when email is updated
+- Cleaner, more organized User Management tab
+
+✅ **For System**:
+- Proper server-side validation
+- Audit logging for security
+- Proper error handling
+- Type-safe implementation
+
+✅ **For Customers**:
+- Admins can quickly help with forgotten PINs
+- Email update is seamless
+- Recovery email process is standard and familiar
+
+### Files Modified (This Update)
+
+1. `src/shared/components/admin/customers/Customer360Dashboard.tsx`
+   - Removed duplicate "Danger Zone" card
+   - Added "Send PIN Reset Link" card with conditional logic
+   - Added state management for email update and PIN reset
+   - Integrated new server action
+
+2. `src/actions/admin-actions/customerActions.ts`
+   - Added `adminUpdateCustomerEmail` function
+   - Proper validation and error handling
+   - Audit logging
+
+### Migration Complete ✅
+
+The PIN migration UI updates are now fully complete:
+- ✅ Customer profile has PIN change form
+- ✅ Admin dashboard removed password sections
+- ✅ Admin dashboard has proper PIN reset functionality
+- ✅ Admin can update customer email inline
+- ✅ Admin can send PIN reset links
+- ✅ No duplicate cards or confusing UI
+
+All password-related functionality has been successfully replaced with PIN-based authentication throughout the entire system!

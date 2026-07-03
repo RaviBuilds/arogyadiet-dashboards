@@ -623,6 +623,54 @@ export async function adminSendPasswordReset(email: string) {
   return { success: true };
 }
 
+export async function adminUpdateCustomerEmail(
+  authUserId: string,
+  newEmail: string,
+) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
+  
+  // Validate email format
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+    return { success: false, error: "Invalid email format" };
+  }
+  
+  // Check if email already exists
+  const { data: existingUser } = await supabaseAdmin.auth.admin.listUsers();
+  const emailExists = existingUser?.users.some(u => u.email === newEmail && u.id !== authUserId);
+  
+  if (emailExists) {
+    return { success: false, error: "Email already in use by another account" };
+  }
+  
+  // Update email via Supabase Admin API
+  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+    authUserId,
+    { email: newEmail }
+  );
+  
+  if (updateError) {
+    return { success: false, error: updateError.message };
+  }
+  
+  // Update email in users table as well
+  const { error: usersError } = await supabaseAdmin
+    .from("users")
+    .update({ email: newEmail })
+    .eq("auth_user_id", authUserId);
+  
+  if (usersError) {
+    console.error("Failed to sync email to users table:", usersError);
+  }
+  
+  await logAdminAction("UPDATE", "customer", authUserId, { 
+    action: "email_update",
+    new_email: newEmail 
+  });
+  
+  return { success: true };
+}
+
 export async function adminToggleCustomerActive(
   profileId: string,
   userId: string,

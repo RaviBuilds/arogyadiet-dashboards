@@ -15,6 +15,7 @@ import {
   adminDeleteCustomerAddress,
   adminSetCustomerPassword,
   adminSendPasswordReset,
+  adminUpdateCustomerEmail,
   adminToggleCustomerActive,
   deactivateCustomerAccount,
 } from "@/actions/admin-actions/customerActions";
@@ -202,6 +203,7 @@ export function Customer360Dashboard({
     adminDeleteCustomerAddress: typeof adminDeleteCustomerAddress;
     adminSetCustomerPassword: typeof adminSetCustomerPassword;
     adminSendPasswordReset: typeof adminSendPasswordReset;
+    adminUpdateCustomerEmail: typeof adminUpdateCustomerEmail;
     adminToggleCustomerActive: typeof adminToggleCustomerActive;
     deactivateCustomerAccount: typeof deactivateCustomerAccount;
   }>;
@@ -232,6 +234,8 @@ export function Customer360Dashboard({
       actions?.adminSetCustomerPassword ?? adminSetCustomerPassword,
     adminSendPasswordReset:
       actions?.adminSendPasswordReset ?? adminSendPasswordReset,
+    adminUpdateCustomerEmail:
+      actions?.adminUpdateCustomerEmail ?? adminUpdateCustomerEmail,
     adminToggleCustomerActive:
       actions?.adminToggleCustomerActive ?? adminToggleCustomerActive,
     deactivateCustomerAccount:
@@ -245,6 +249,8 @@ export function Customer360Dashboard({
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [isAccountActive, setIsAccountActive] = useState(customer.isActive ?? true);
   const [resetPinOpen, setResetPinOpen] = useState(false);
+  const [emailUpdateForm, setEmailUpdateForm] = useState("");
+  const [sendingPinReset, setSendingPinReset] = useState(false);
   const isArchivedAccount = isArchivedCustomerEmail(customer.email);
 
   // Modals State
@@ -1016,6 +1022,107 @@ export function Customer360Dashboard({
               </CardContent>
             </Card>
 
+            {/* ── Send PIN Reset Link ── */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Send className="h-4 w-4 text-primary" />
+                  Send PIN Reset Link
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {!customer.email || customer.email.includes('@test.arogyaemail.com') ? (
+                  <>
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
+                      <p className="text-xs text-amber-800 font-medium">
+                        ⚠️ No valid email on file. Update email first to send PIN reset link.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email-update" className="text-xs text-muted-foreground">
+                        Email Address
+                      </Label>
+                      <Input
+                        id="email-update"
+                        type="email"
+                        placeholder="customer@example.com"
+                        value={emailUpdateForm}
+                        onChange={(e) => setEmailUpdateForm(e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      size="sm"
+                      disabled={isPending || !emailUpdateForm || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailUpdateForm)}
+                      onClick={() =>
+                        startTransition(async () => {
+                          if (!customer.authUserId) {
+                            toast.error("Customer auth user ID not found");
+                            return;
+                          }
+                          
+                          const res = await act.adminUpdateCustomerEmail(
+                            customer.authUserId,
+                            emailUpdateForm
+                          );
+                          
+                          if (res.success) {
+                            toast.success("Email updated successfully!");
+                            setEmailUpdateForm("");
+                            router.refresh();
+                          } else {
+                            toast.error(res.error ?? "Failed to update email");
+                          }
+                        })
+                      }
+                    >
+                      {isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
+                      ) : (
+                        <Send className="h-3.5 w-3.5 mr-2" />
+                      )}
+                      Update Email
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Send a PIN reset link to <strong>{customer.email}</strong>. Customer will receive an email with instructions to set a new PIN.
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      size="sm"
+                      disabled={sendingPinReset}
+                      onClick={() => {
+                        setSendingPinReset(true);
+                        startTransition(async () => {
+                          try {
+                            const res = await act.adminSendPasswordReset(customer.email);
+                            if (res.success) {
+                              toast.success("PIN reset link sent successfully!");
+                            } else {
+                              toast.error(res.error ?? "Failed to send PIN reset link");
+                            }
+                          } finally {
+                            setSendingPinReset(false);
+                          }
+                        });
+                      }}
+                    >
+                      {sendingPinReset ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
+                      ) : (
+                        <Send className="h-3.5 w-3.5 mr-2" />
+                      )}
+                      Send PIN Reset Link
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
             {/* ── Account Status ── */}
             <Card>
               <CardHeader>
@@ -1103,73 +1210,6 @@ export function Customer360Dashboard({
                     : isAccountActive
                       ? "Deactivate Account"
                       : "Reactivate Account"}
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* ── Danger Zone: Delete ── */}
-            <Card className="border-destructive/40">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base text-destructive">
-                  <Trash2 className="h-4 w-4" />
-                  Danger Zone
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Deactivate and archive this customer account. Login will be
-                  blocked, but billing history is preserved. The same email can
-                  be used later to create a new customer.
-                </p>
-                {hasActiveSubscription && (
-                  <p className="text-xs text-destructive font-medium">
-                    Cannot deactivate — customer has an active subscription. Cancel the subscription first.
-                  </p>
-                )}
-                {isArchivedAccount && (
-                  <p className="text-xs text-muted-foreground font-medium">
-                    This account is already archived.
-                  </p>
-                )}
-                <div className="grid gap-1.5">
-                  <label className="text-xs text-muted-foreground">
-                    Type <span className="font-mono font-semibold text-foreground">{customer.full_name}</span> to confirm
-                  </label>
-                  <Input
-                    placeholder={customer.full_name}
-                    value={deleteConfirmName}
-                    onChange={(e) => setDeleteConfirmName(e.target.value)}
-                    className="border-destructive/40 focus-visible:ring-destructive/30"
-                  />
-                </div>
-                <Button
-                  variant="destructive"
-                  className="w-full"
-                  size="sm"
-                  disabled={
-                    isPending ||
-                    deleteConfirmName !== customer.full_name ||
-                    hasActiveSubscription ||
-                    isArchivedAccount ||
-                    !isAccountActive
-                  }
-                  onClick={() =>
-                    startTransition(async () => {
-                      const res = await act.deactivateCustomerAccount(
-                        customer.id,
-                        customer.userId,
-                      );
-                      if (res.success) {
-                        toast.success("Customer account deactivated.");
-                        router.push(backHref);
-                      } else {
-                        toast.error(res.error ?? "Failed to deactivate customer.");
-                      }
-                    })
-                  }
-                >
-                  {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-3.5 w-3.5 mr-2" />}
-                  Deactivate Account
                 </Button>
               </CardContent>
             </Card>
