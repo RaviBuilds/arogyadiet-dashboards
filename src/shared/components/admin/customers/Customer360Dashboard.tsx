@@ -242,7 +242,6 @@ export function Customer360Dashboard({
   const [activeTab, setActiveTab] = useState("Profile & Medical");
 
   // User Management State
-  const [pwdForm, setPwdForm] = useState({ password: "", confirm: "", showPwd: false });
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [isAccountActive, setIsAccountActive] = useState(customer.isActive ?? true);
   const [resetPinOpen, setResetPinOpen] = useState(false);
@@ -990,106 +989,6 @@ export function Customer360Dashboard({
 
         {activeTab === "User Management" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-            {/* ── Set New Password ── */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShieldAlert className="h-4 w-4 text-primary" />
-                  Set New Password
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-1.5">
-                  <label className="text-sm font-medium">New Password</label>
-                  <div className="relative">
-                    <Input
-                      type={pwdForm.showPwd ? "text" : "password"}
-                      placeholder="Min 8 characters"
-                      value={pwdForm.password}
-                      onChange={(e) => setPwdForm((p) => ({ ...p, password: e.target.value }))}
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setPwdForm((p) => ({ ...p, showPwd: !p.showPwd }))}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      {pwdForm.showPwd ? <EyeOff className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-                <div className="grid gap-1.5">
-                  <label className="text-sm font-medium">Confirm Password</label>
-                  <Input
-                    type="password"
-                    placeholder="Repeat password"
-                    value={pwdForm.confirm}
-                    onChange={(e) => setPwdForm((p) => ({ ...p, confirm: e.target.value }))}
-                  />
-                </div>
-                <Button
-                  className="w-full"
-                  size="sm"
-                  disabled={
-                    isPending ||
-                    pwdForm.password.length < 8 ||
-                    pwdForm.password !== pwdForm.confirm
-                  }
-                  onClick={() =>
-                    startTransition(async () => {
-                      if (!customer.authUserId) return;
-                      const res = await act.adminSetCustomerPassword(customer.authUserId, pwdForm.password);
-                      if (res.success) {
-                        toast.success("Password updated successfully.");
-                        setPwdForm({ password: "", confirm: "", showPwd: false });
-                      } else {
-                        toast.error(res.error ?? "Failed to update password.");
-                      }
-                    })
-                  }
-                >
-                  {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                  Update Password
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* ── Send Password Reset ── */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Send className="h-4 w-4 text-primary" />
-                  Send Password Reset Link
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Send a secure password reset link to{" "}
-                  <span className="font-semibold text-foreground">{customer.email}</span>.
-                  The customer can use it to set a new password.
-                </p>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  size="sm"
-                  disabled={isPending}
-                  onClick={() =>
-                    startTransition(async () => {
-                      const res = await act.adminSendPasswordReset(customer.email);
-                      if (res.success) {
-                        toast.success("Password reset link sent successfully.");
-                      } else {
-                        toast.error(res.error ?? "Failed to send reset link.");
-                      }
-                    })
-                  }
-                >
-                  {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-3.5 w-3.5 mr-2" />}
-                  Send Reset Link
-                </Button>
-              </CardContent>
-            </Card>
 
             {/* ── Reset PIN ── */}
             <Card>
