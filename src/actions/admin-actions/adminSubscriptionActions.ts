@@ -59,6 +59,15 @@ const customPlanSchema = baseSchema.extend({
 
 type ActionResult = { success: boolean; error?: string; paymentId?: string };
 
+// ─── options ──────────────────────────────────────────────────────────────────
+
+export type AddSubscriptionOptions = {
+  /** Skip the "start date must be tomorrow or later" check (used for bulk migration). */
+  skipStartDateCheck?: boolean;
+  /** Skip the overlap check against active subscriptions (used for bulk migration). */
+  skipOverlapCheck?: boolean;
+};
+
 // ─── main action ─────────────────────────────────────────────────────────────
 
 export async function addSubscription(
@@ -66,6 +75,7 @@ export async function addSubscription(
     | z.infer<typeof existingPlanSchema>
     | z.infer<typeof customPlanSchema>,
   isCustomPlan: boolean,
+  options?: AddSubscriptionOptions,
 ): Promise<ActionResult> {
   const gate = await checkGroupManage("customers");
   if (!gate.ok) return { success: false, error: gate.error };
@@ -93,12 +103,14 @@ export async function addSubscription(
   try {
     const start = startOfDay(new Date(startDate));
 
-    const earliest = getEarliestAllowedStartDate();
-    if (start < earliest) {
-      return {
-        success: false,
-        error: "Start date cannot be today or in the past.",
-      };
+    if (!options?.skipStartDateCheck) {
+      const earliest = getEarliestAllowedStartDate();
+      if (start < earliest) {
+        return {
+          success: false,
+          error: "Start date cannot be today or in the past.",
+        };
+      }
     }
 
     // Check for existing ACTIVE subscription
@@ -115,17 +127,19 @@ export async function addSubscription(
     if (activeSubscriptions && activeSubscriptions.length > 0) {
       subscriptionStatus = "PENDING";
 
-      const latestEnd = activeSubscriptions.reduce((latest, s) => {
-        const endRef = startOfDay(new Date(s.effective_end_on ?? s.ends_on!));
-        return endRef > latest ? endRef : latest;
-      }, new Date(0));
+      if (!options?.skipOverlapCheck) {
+        const latestEnd = activeSubscriptions.reduce((latest, s) => {
+          const endRef = startOfDay(new Date(s.effective_end_on ?? s.ends_on!));
+          return endRef > latest ? endRef : latest;
+        }, new Date(0));
 
-      const requiredStart = addDays(latestEnd, 1);
-      if (start < requiredStart) {
-        return {
-          success: false,
-          error: "Start date must be after the active subscription's end date.",
-        };
+        const requiredStart = addDays(latestEnd, 1);
+        if (start < requiredStart) {
+          return {
+            success: false,
+            error: "Start date must be after the active subscription's end date.",
+          };
+        }
       }
     }
 

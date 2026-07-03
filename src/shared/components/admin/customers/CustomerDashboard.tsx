@@ -64,7 +64,8 @@ import {
 } from "@/actions/admin-actions/customerActions";
 import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
 import { CustomerOverview } from "./CustomerOverview";
-import { Plus, Upload } from "lucide-react";
+import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
+import { Plus, Upload, UserPlus } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
 import {
   clinicDisplayName,
   filterRowsByClinic,
@@ -123,11 +124,13 @@ export default function CustomerDashboard({
   activeSubscriptions = [],
   pendingSubscriptions = [],
   stoppedSubscriptions = [],
+  autoOpenCreate = false,
 }: {
   customers?: CustomerData[];
   activeSubscriptions?: ActiveSubscriptionData[];
   pendingSubscriptions?: ActiveSubscriptionData[];
   stoppedSubscriptions?: ActiveSubscriptionData[];
+  autoOpenCreate?: boolean;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Customer Directory");
@@ -159,11 +162,11 @@ export default function CustomerDashboard({
 
   // Dynamically extract unique active plans for the filter dropdown
   const uniquePlans = useMemo(() => {
-    const plans = new Set(customers.map(c => c.activePlanName).filter(Boolean));
+    const plans = new Set(customers.map(c => c.activePlanName).filter((p): p is string => Boolean(p)));
     return Array.from(plans);
   }, [customers]);
 
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(autoOpenCreate);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
@@ -434,22 +437,21 @@ export default function CustomerDashboard({
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <AdminSubmenuBar
-        tabs={["Overview", "Customer Directory"]}
+        tabs={[
+          "Overview",
+          "Customer Directory",
+          "Onboarded",
+          "Onboarding Completed",
+        ]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         actions={
-          <>
-            <Button variant="outline" size="sm" className="transition-all duration-200" asChild>
-              <Link href="/customers/bulk-import">
-                <Upload className="h-4 w-4 mr-1.5" />
-                Bulk import
-              </Link>
-            </Button>
-            <Button onClick={() => setIsCreateModalOpen(true)} size="sm" className="transition-all duration-200">
-              <Plus className="h-4 w-4 mr-1.5" />
-              Create Customer
-            </Button>
-          </>
+          <Button size="sm" className="transition-all duration-200" asChild>
+            <Link href="/customers/onboarding">
+              <UserPlus className="h-4 w-4 mr-1.5" />
+              Onboarding
+            </Link>
+          </Button>
         }
       />
 
@@ -654,7 +656,7 @@ export default function CustomerDashboard({
                         <>
                           <DropdownMenuSeparator />
                           <DropdownMenuLabel>Filter by Plan</DropdownMenuLabel>
-                          {uniquePlans.map((plan: any) => (
+                          {uniquePlans.map((plan: string) => (
                             <DropdownMenuItem
                               key={plan}
                               onClick={() => setFilterStatus(plan)}
@@ -886,6 +888,10 @@ export default function CustomerDashboard({
             </TableBody>
           </Table>
         </DataTableCard>
+      ) : activeTab === "Onboarded" ? (
+        <OnboardingCustomersSection status="IN_PROGRESS" />
+      ) : activeTab === "Onboarding Completed" ? (
+        <OnboardingCustomersSection status="COMPLETED" />
       ) : null}
 
       {/* --- EDIT CUSTOMER MODAL --- */}

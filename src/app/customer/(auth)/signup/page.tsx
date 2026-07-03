@@ -1,23 +1,11 @@
-import Image from "next/image";
+import { redirect } from "next/navigation";
 
-import { SignupForm } from "@/shared/components/forms/signup-form";
-
+// Customer self-service signup is disabled (Req 1.4).
+//
+// In the mobile-first, admin-initiated onboarding model, customer accounts are
+// created ONLY by an admin (quick onboarding or the retained legacy 3-step
+// admin flow — Req 4.8). Any HTTP request to the customer signup route is
+// redirected to the mobile login screen WITHOUT creating any account record.
 export default function SignupPage() {
-  return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted p-6 md:p-10">
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <a href="#" className="flex items-center gap-2 self-center font-medium">
-                  <Image
-                    src="/logo.png"
-                    alt="Arogyadiet"
-                    width={180}
-                    height={60}
-                    priority
-                    className="h-auto w-auto"
-                  />
-                </a>
-        <SignupForm />
-      </div>
-    </div>
-  );
+  redirect("/login");
 }
