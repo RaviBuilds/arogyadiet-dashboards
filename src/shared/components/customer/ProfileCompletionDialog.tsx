@@ -26,7 +26,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
-import { Loader2 } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { Loader2, Utensils, Calendar } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -110,6 +111,15 @@ interface ProfileCompletionDialogProps {
   isTestEmail?: boolean;
   /** Controls the initial open state; defaults to open (mounted only when IN_PROGRESS). */
   defaultOpen?: boolean;
+  /**
+   * Optional subscription details to display at the top of the dialog.
+   */
+  subscription?: {
+    category: string | null;
+    planName: string | null;
+    startDate: string | null;
+    endDate: string | null;
+  } | null;
 }
 
 /**
@@ -136,6 +146,7 @@ export function ProfileCompletionDialog({
   emptyFields = ALL_COMPLETABLE_FIELDS,
   isTestEmail = false,
   defaultOpen = true,
+  subscription = null,
 }: ProfileCompletionDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(defaultOpen);
@@ -210,7 +221,12 @@ export function ProfileCompletionDialog({
         intent === "complete"
           ? await markOnboardingCompletedAction(payload)
           : await saveProfileCompletionAction(payload);
-      applyResult(result, intent);
+      const success = applyResult(result, intent);
+      
+      // Redirect to profile page medical documents section after completion
+      if (success && intent === "complete") {
+        router.push("/profile#medical-documents");
+      }
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -219,6 +235,25 @@ export function ProfileCompletionDialog({
   }
 
   const isBusy = submitting !== null;
+
+  const formatSubscriptionDate = (dateStr: string | null): string => {
+    if (!dateStr) return "N/A";
+    try {
+      return format(parseISO(dateStr), "MMM dd, yyyy");
+    } catch {
+      return "N/A";
+    }
+  };
+
+  const getCategoryLabel = (category: string | null): string => {
+    if (!category) return "N/A";
+    const labels: Record<string, string> = {
+      MEAL: "Meal Subscription",
+      KIT: "Kit Subscription",
+      ACCOMMODATION: "Accommodation Subscription",
+    };
+    return labels[category] || category;
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -230,6 +265,45 @@ export function ProfileCompletionDialog({
             is optional — you can fill them in now or later.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Subscription Details Section */}
+        {subscription && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <div className="rounded-full bg-emerald-100 p-1.5">
+                <Utensils className="h-4 w-4 text-emerald-600" />
+              </div>
+              <h4 className="text-sm font-semibold text-slate-900">
+                Your Subscription
+              </h4>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Service:</span>
+                <span className="font-medium text-slate-900">
+                  {getCategoryLabel(subscription.category)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Plan:</span>
+                <span className="font-medium text-slate-900">
+                  {subscription.planName || "N/A"}
+                </span>
+              </div>
+              <div className="flex items-start justify-between">
+                <span className="text-slate-500">Duration:</span>
+                <div className="flex items-center gap-1.5 text-right">
+                  <Calendar className="h-3.5 w-3.5 text-slate-400" />
+                  <span className="font-medium text-slate-900">
+                    {formatSubscriptionDate(subscription.startDate)}
+                    {" → "}
+                    {formatSubscriptionDate(subscription.endDate)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* handleSubmit gates on RHF's own state; our buttons call runSubmit
             directly with an explicit intent so "Save" and "Mark completed"

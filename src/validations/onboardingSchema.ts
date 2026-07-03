@@ -69,6 +69,12 @@ export function createQuickOnboardingSchema(
     startDate: z.string().min(1, "Start date is required."), // ISO date; cutoff refine at action time
     paymentStatus: z.enum(PAYMENT_STATUSES),
 
+    // Initial meal preference for daily preferences (VEG, EGG, or CHICKEN).
+    // This sets the default meal type for entire subscription period.
+    initialMealPreference: z.enum(["VEG", "EGG", "CHICKEN"], {
+      message: "Select an initial meal preference.",
+    }),
+
     // Req 7.2/7.3: cutoff acknowledgment (gating enforced in the UI/action).
     cutoffAcknowledged: z.boolean().default(false),
 
@@ -106,6 +112,9 @@ export const quickOnboardingSchema = z.object({
   planId: z.string().uuid("Select a valid subscription plan."),
   startDate: z.string().min(1, "Start date is required."),
   paymentStatus: z.enum(PAYMENT_STATUSES),
+  initialMealPreference: z.enum(["VEG", "EGG", "CHICKEN"], {
+    message: "Select an initial meal preference.",
+  }),
   cutoffAcknowledged: z.boolean().default(false),
   address: addressCaptureSchema,
 });

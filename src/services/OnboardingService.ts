@@ -302,6 +302,17 @@ export async function onboard(
       : null;
   const nowIso = new Date().toISOString();
 
+  // (6a) Resolve meal category ID for initial meal preference
+  const mealCategoryId = await resolveMealCategoryId(payload.initialMealPreference);
+  if (!mealCategoryId) {
+    return {
+      ok: false,
+      reason: "ERROR",
+      message: "System configuration error: Meal category not found.",
+      fieldErrors: { initialMealPreference: "Invalid meal preference." },
+    };
+  }
+
   // (7) Create the Supabase Auth phone identity FIRST — the only step outside
   //     the DB transaction (compensated by deletion on RPC failure below).
   const admin_client = createAdminClient();
@@ -358,6 +369,7 @@ export async function onboard(
       total_days: plan.totalDays,
       pause_credits_total: plan.pauseCredits,
       franchise_id: franchiseId,
+      initial_meal_category_id: mealCategoryId,  // NEW: For daily preferences generation
     },
     payment: {
       amount: plan.totalAmount,
@@ -680,6 +692,21 @@ async function resolveCustomerRoleId(): Promise<string | null> {
     .from("roles")
     .select("id")
     .eq("code", "CUSTOMER")
+    .maybeSingle();
+
+  return (data?.id as string | null) ?? null;
+}
+
+/**
+ * Resolve the meal_category_id for a meal preference code (VEG, EGG, CHICKEN).
+ * Returns null if the category doesn't exist.
+ */
+async function resolveMealCategoryId(code: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("meal_categories")
+    .select("id")
+    .eq("code", code)
     .maybeSingle();
 
   return (data?.id as string | null) ?? null;

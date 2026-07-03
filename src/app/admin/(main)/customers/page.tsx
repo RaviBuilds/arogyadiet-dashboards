@@ -5,8 +5,14 @@ import { guardAdminGroup } from "@/lib/auth/adminAccess";
 
 export const revalidate = false;
 
-export default async function CustomersPage() {
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ action?: string }>;
+}) {
   await guardAdminGroup("customers");
+  const params = await searchParams;
+  const autoOpenCreate = params?.action === "create";
   const supabaseAdmin = createAdminClient();
 
   const { data: rawCustomers, error } = await supabaseAdmin.from("customer_profiles")
@@ -160,6 +166,7 @@ export default async function CustomersPage() {
         activeSubscriptions={activeSubs}
         pendingSubscriptions={pendingSubs}
         stoppedSubscriptions={stoppedSubs}
+        autoOpenCreate={autoOpenCreate}
       />
     </div>
   );

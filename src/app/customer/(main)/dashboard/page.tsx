@@ -127,6 +127,12 @@ export default async function CustomerDashboard() {
 
   const profileDialogEmptyFields: CompletableField[] = [];
   let profileDialogIsTestEmail = false;
+  let profileDialogSubscription: {
+    category: string | null;
+    planName: string | null;
+    startDate: string | null;
+    endDate: string | null;
+  } | null = null;
 
   if (showProfileDialog) {
     const isEmpty = (v: unknown) =>
@@ -146,6 +152,27 @@ export default async function CustomerDashboard() {
       .eq("id", appUser.id)
       .maybeSingle();
     profileDialogIsTestEmail = userEmailRow?.is_test_email === true;
+
+    // Query active subscription details for the dialog
+    const { data: dialogSub } = await supabase
+      .from("subscriptions")
+      .select("customer_category, starts_on, effective_end_on, subscription_plans(name)")
+      .eq("customer_profile_id", profile.id)
+      .eq("status", "ACTIVE")
+      .maybeSingle();
+
+    if (dialogSub) {
+      const plan = Array.isArray(dialogSub.subscription_plans)
+        ? dialogSub.subscription_plans[0]
+        : dialogSub.subscription_plans;
+      
+      profileDialogSubscription = {
+        category: dialogSub.customer_category,
+        planName: plan?.name ?? null,
+        startDate: dialogSub.starts_on,
+        endDate: dialogSub.effective_end_on,
+      };
+    }
   }
 
   const [
@@ -214,6 +241,7 @@ export default async function CustomerDashboard() {
     <ProfileCompletionDialog
       emptyFields={profileDialogEmptyFields}
       isTestEmail={profileDialogIsTestEmail}
+      subscription={profileDialogSubscription}
     />
   ) : null;
 

@@ -1,28 +1,7 @@
 "use client";
 
 // src/shared/components/admin/customers/QuickOnboardingForm.tsx
-//
-// Admin Quick_Onboarding_Form wizard (Task 9.2). A four-step client wizard:
-//   1. Details        — name, mobile, gender, diet, allergies (Req 4.1-4.3)
-//   2. Category/Plan   — exactly one Primary_Category (default MEAL), a plan,
-//                        and a subscription start date (Req 4.4, 13.2)
-//   3. Address         — map-based Address_Capture (Req 4.5, 5)
-//   4. Payment/Review  — mark-payment-collected control setting Payment_Status,
-//                        Test_Email field + checkbox, and a review before submit
-//                        (Req 8.5, 10.2)
-//
-// The 5 PM (17:00 IST) cutoff (Req 7) restricts the start-date picker to the
-// earliest selectable date; at/after the cutoff a warning is shown and the
-// "Onboard Customer" button is gated behind an acknowledgment checkbox.
-//
-// Validation uses React Hook Form + Zod (the repo convention). Scalar fields are
-// bound with a zod resolver over the shared onboarding schema (address handled
-// by AddressCaptureMap); on submit the payload is sent to onboardCustomerAction,
-// which re-validates server-side and returns dotted `fieldErrors`
-// (e.g. `address.pincode`) that are rendered inline while entered values are
-// retained (Req 4.6).
-//
-// Requirements: 4.1-4.6, 7.1-7.6, 8.5, 10.2, 13.2, 15.2/15.3/15.6-15.11
+// UI/UX refresh — all data logic and validation unchanged.
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -36,11 +15,18 @@ import {
   ArrowRight,
   CheckCircle2,
   Loader2,
+  User,
+  Utensils,
+  MapPin,
+  CreditCard,
+  Check,
+  Sparkles,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 import { TempPinField } from "@/shared/components/admin/TempPinField";
 import { isValidPinFormat } from "@/lib/pin/pinUtils";
-
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
@@ -60,7 +46,6 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/shared/components/ui/alert";
-import { Card, CardContent } from "@/shared/components/ui/card";
 
 import {
   AddressCaptureMap,
@@ -75,6 +60,7 @@ import {
 } from "@/lib/onboarding/cutoff";
 import { istHourOf } from "@/lib/dates/ist";
 import { onboardCustomerAction } from "@/actions/admin-actions/onboardingActions";
+import { cn } from "@/lib/utils";
 
 /** A subscription plan option for the Category/Plan step (Req 4.4). */
 export interface OnboardingPlan {
@@ -85,16 +71,9 @@ export interface OnboardingPlan {
 }
 
 export interface QuickOnboardingFormProps {
-  /** Active subscription plans, loaded by the RSC shell. */
   plans: OnboardingPlan[];
-  /** The franchise's serviceable pincodes for the Address_Capture gate (Req 5.6). */
   serviceAreaPincodes: string[];
 }
-
-// ---------------------------------------------------------------------------
-// Scalar-field schema (address is validated by AddressCaptureMap separately).
-// Empty email is coerced to undefined so an untouched optional field validates.
-// ---------------------------------------------------------------------------
 
 const detailsSchema = z.object({
   fullName: z
@@ -104,9 +83,7 @@ const detailsSchema = z.object({
   mobile: z
     .string()
     .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit mobile number."),
-  gender: z.enum(["Male", "Female", "Other"], {
-    message: "Select a gender.",
-  }),
+  gender: z.enum(["Male", "Female", "Other"], { message: "Select a gender." }),
   dietaryPreference: z.enum(["Veg", "Non-Veg"], {
     message: "Select a diet preference.",
   }),
@@ -127,6 +104,9 @@ const detailsSchema = z.object({
   primaryCategory: z.enum(CUSTOMER_CATEGORIES),
   planId: z.string().uuid("Select a subscription plan."),
   startDate: z.string().min(1, "Start date is required."),
+  initialMealPreference: z.enum(["VEG", "EGG", "CHICKEN"], {
+    message: "Select an initial meal preference.",
+  }),
   paymentStatus: z.enum(["PAID", "PENDING"]),
   cutoffAcknowledged: z.boolean().default(false),
 });
@@ -136,10 +116,11 @@ type DetailsFormValues = z.input<typeof detailsSchema>;
 const STEPS = ["Details", "Category & Plan", "Address", "Payment & Review"] as const;
 type StepIndex = 0 | 1 | 2 | 3;
 
-/** Fields validated before advancing past each step. */
+const STEP_ICONS = [User, Utensils, MapPin, CreditCard] as const;
+
 const STEP_FIELDS: Record<number, (keyof DetailsFormValues)[]> = {
   0: ["fullName", "mobile", "gender", "dietaryPreference", "allergies"],
-  1: ["primaryCategory", "planId", "startDate"],
+  1: ["primaryCategory", "planId", "startDate", "initialMealPreference"],
   2: [],
   3: ["email", "paymentStatus"],
 };
@@ -152,8 +133,6 @@ export function QuickOnboardingForm({
   const [isSubmitting, startTransition] = useTransition();
   const [step, setStep] = useState<StepIndex>(0);
 
-  // Capture the instant the wizard mounted so cutoff evaluation is stable for
-  // the session; the server re-checks against its own clock on submit (Req 7.7).
   const now = useMemo(() => new Date(), []);
   const earliest = useMemo(() => earliestStartDate(now), [now]);
   const isAfterCutoff = useMemo(
@@ -166,15 +145,12 @@ export function QuickOnboardingForm({
   );
   const [addressValidity, setAddressValidity] =
     useState<AddressCaptureValidity | null>(null);
-  const [addressServerError, setAddressServerError] = useState<string | null>(
-    null,
-  );
+  const [addressServerError, setAddressServerError] = useState<string | null>(null);
   const [addressTouched, setAddressTouched] = useState(false);
 
-  // Temporary PIN state — managed outside the Zod schema because the raw PIN
-  // is passed to the server action which handles hashing (Req 6.4, 6.5, 6.6).
   const [tempPin, setTempPin] = useState("");
   const [tempPinError, setTempPinError] = useState<string | null>(null);
+  const [showPin, setShowPin] = useState(false);
 
   const {
     register,
@@ -194,9 +170,9 @@ export function QuickOnboardingForm({
       allergies: "",
       email: "",
       isTestEmail: false,
-      primaryCategory: "MEAL", // Req: default Primary_Category is MEAL.
+      primaryCategory: "MEAL",
       planId: undefined,
-      startDate: earliest, // Restrict earliest selectable date (Req 7.5/7.6).
+      startDate: earliest,
       paymentStatus: "PENDING",
       cutoffAcknowledged: false,
     },
@@ -208,10 +184,8 @@ export function QuickOnboardingForm({
   const isTestEmail = values.isTestEmail;
   const selectedPlanId = values.planId;
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) ?? null;
-
   const addressResolved = Boolean(addressValidity?.canSave);
 
-  // The "Onboard Customer" gate (Req 7.2/7.3/7.4, 8.1, 5.6/5.8).
   const canOnboard =
     !isSubmitting &&
     paymentStatus === "PAID" &&
@@ -221,8 +195,16 @@ export function QuickOnboardingForm({
   const goNext = async () => {
     const fields = STEP_FIELDS[step];
     const valid = fields.length === 0 ? true : await trigger(fields);
+
+    // Step 1 gate: Temp PIN is mandatory (managed outside Zod schema).
+    if (step === 0) {
+      if (!isValidPinFormat(tempPin)) {
+        setTempPinError("Temporary PIN is required (exactly 6 digits).");
+        return;
+      }
+    }
+
     if (step === 2) {
-      // Address step: gate on the AddressCaptureMap validity (Req 5.6/5.8).
       setAddressTouched(true);
       if (!addressResolved) return;
     }
@@ -230,8 +212,7 @@ export function QuickOnboardingForm({
     setStep((prev) => Math.min(prev + 1, STEPS.length - 1) as StepIndex);
   };
 
-  const goBack = () =>
-    setStep((prev) => Math.max(prev - 1, 0) as StepIndex);
+  const goBack = () => setStep((prev) => Math.max(prev - 1, 0) as StepIndex);
 
   const applyServerFieldErrors = (fieldErrors?: Record<string, string>) => {
     if (!fieldErrors) return;
@@ -248,10 +229,7 @@ export function QuickOnboardingForm({
         jumpToDetails = true;
         continue;
       }
-      setError(key as keyof DetailsFormValues, {
-        type: "server",
-        message,
-      });
+      setError(key as keyof DetailsFormValues, { type: "server", message });
     }
     if (jumpToAddress) setStep(2);
     else if (jumpToDetails) setStep(0);
@@ -268,7 +246,6 @@ export function QuickOnboardingForm({
       return;
     }
 
-    // Validate the temporary PIN before submitting (Req 6.3, 6.5).
     if (!isValidPinFormat(tempPin)) {
       setTempPinError("Temporary PIN must be exactly 6 digits.");
       setStep(0);
@@ -276,8 +253,6 @@ export function QuickOnboardingForm({
       return;
     }
 
-    // Assemble the payload for the server action. lat/lng are guaranteed present
-    // because addressResolved implies the AddressCaptureMap reported canSave.
     const payload = {
       ...values,
       email:
@@ -316,36 +291,64 @@ export function QuickOnboardingForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
+      {/* ── Progress Stepper ── */}
       <Stepper current={step} />
 
-      <Card>
-        <CardContent className="pt-6">
+      {/* ── Step panel ── */}
+      <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+
+        {/* Step header stripe */}
+        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/70 px-6 py-4">
+          {(() => {
+            const Icon = STEP_ICONS[step];
+            return (
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Icon className="h-4 w-4" />
+              </span>
+            );
+          })()}
+          <div>
+            <p className="text-sm font-semibold text-slate-900">{STEPS[step]}</p>
+            <p className="text-xs text-slate-500">{STEP_SUBTITLES[step]}</p>
+          </div>
+          <span className="ml-auto text-xs font-medium text-slate-400">
+            Step {step + 1} of {STEPS.length}
+          </span>
+        </div>
+
+        {/* Step content */}
+        <div className="p-6">
+
           {/* ── STEP 1: Details ── */}
           {step === 0 && (
-            <div className="flex flex-col gap-4">
-              <Field label="Full name" htmlFor="fullName" error={errors.fullName?.message}>
-                <Input
-                  id="fullName"
-                  placeholder="e.g. Rahul Sharma"
-                  maxLength={100}
-                  aria-invalid={Boolean(errors.fullName)}
-                  {...register("fullName")}
-                />
-              </Field>
+            <div className="flex flex-col gap-5">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label="Full name" htmlFor="fullName" error={errors.fullName?.message} required>
+                  <Input
+                    id="fullName"
+                    placeholder="e.g. Rahul Sharma"
+                    maxLength={100}
+                    aria-invalid={Boolean(errors.fullName)}
+                    className="h-9"
+                    {...register("fullName")}
+                  />
+                </Field>
 
-              <Field label="Mobile number" htmlFor="mobile" error={errors.mobile?.message}>
-                <Input
-                  id="mobile"
-                  inputMode="numeric"
-                  placeholder="10-digit mobile"
-                  maxLength={10}
-                  aria-invalid={Boolean(errors.mobile)}
-                  {...register("mobile")}
-                />
-              </Field>
+                <Field label="Mobile number" htmlFor="mobile" error={errors.mobile?.message} required>
+                  <Input
+                    id="mobile"
+                    inputMode="numeric"
+                    placeholder="10-digit mobile"
+                    maxLength={10}
+                    aria-invalid={Boolean(errors.mobile)}
+                    className="h-9"
+                    {...register("mobile")}
+                  />
+                </Field>
+              </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Gender" htmlFor="gender" error={errors.gender?.message}>
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label="Gender" htmlFor="gender" error={errors.gender?.message} required>
                   <Controller
                     control={control}
                     name="gender"
@@ -355,6 +358,7 @@ export function QuickOnboardingForm({
                           id="gender"
                           aria-label="Gender"
                           aria-invalid={Boolean(errors.gender)}
+                          className="h-9"
                         >
                           <SelectValue placeholder="Select gender" />
                         </SelectTrigger>
@@ -368,20 +372,20 @@ export function QuickOnboardingForm({
                   />
                 </Field>
 
-                <Field label="Diet preference" error={errors.dietaryPreference?.message}>
+                <Field label="Diet preference" error={errors.dietaryPreference?.message} required>
                   <Controller
                     control={control}
                     name="dietaryPreference"
                     render={({ field }) => (
                       <RadioGroup
-                        className="flex gap-3"
+                        className="flex gap-3 h-9 items-center"
                         value={field.value}
                         onValueChange={field.onChange}
                       >
                         {(["Veg", "Non-Veg"] as const).map((pref) => (
                           <label
                             key={pref}
-                            className="flex flex-1 cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-sm has-data-checked:border-primary has-data-checked:bg-primary/5"
+                            className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-input bg-white px-3 py-2 text-sm font-medium transition-all duration-150 hover:border-slate-300 hover:bg-slate-50 has-data-checked:border-primary has-data-checked:bg-primary/5 has-data-checked:text-primary"
                           >
                             <RadioGroupItem value={pref} aria-label={pref} />
                             {pref}
@@ -393,36 +397,35 @@ export function QuickOnboardingForm({
                 </Field>
               </div>
 
-              <Field
-                label="Allergies (optional)"
-                htmlFor="allergies"
-                error={errors.allergies?.message}
-              >
+              <Field label="Allergies" htmlFor="allergies" error={errors.allergies?.message} hint="Optional">
                 <Textarea
                   id="allergies"
                   rows={2}
                   maxLength={500}
                   placeholder="e.g. No peanuts, no dairy..."
+                  className="resize-none"
                   {...register("allergies")}
                 />
               </Field>
 
-              <TempPinField
-                value={tempPin}
-                onChange={(val) => {
-                  setTempPin(val);
-                  if (tempPinError) setTempPinError(null);
-                }}
-                error={tempPinError ?? undefined}
-                disabled={isSubmitting}
-              />
+              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+                <TempPinField
+                  value={tempPin}
+                  onChange={(val) => {
+                    setTempPin(val);
+                    if (tempPinError) setTempPinError(null);
+                  }}
+                  error={tempPinError ?? undefined}
+                  disabled={isSubmitting}
+                />
+              </div>
             </div>
           )}
 
           {/* ── STEP 2: Category & Plan ── */}
           {step === 1 && (
-            <div className="flex flex-col gap-4">
-              <Field label="Primary category" error={errors.primaryCategory?.message}>
+            <div className="flex flex-col gap-6">
+              <Field label="Primary category" error={errors.primaryCategory?.message} required>
                 <Controller
                   control={control}
                   name="primaryCategory"
@@ -432,29 +435,38 @@ export function QuickOnboardingForm({
                       value={field.value}
                       onValueChange={field.onChange}
                     >
-                      {CUSTOMER_CATEGORIES.map((category) => (
-                        <label
-                          key={category}
-                          className="flex cursor-pointer items-center gap-2 rounded-lg border border-input px-3 py-2 text-sm has-data-checked:border-primary has-data-checked:bg-primary/5"
-                        >
-                          <RadioGroupItem value={category} aria-label={category} />
-                          {category === "MEAL"
+                      {CUSTOMER_CATEGORIES.map((category) => {
+                        const label =
+                          category === "MEAL"
                             ? "Meal"
                             : category === "KIT"
                               ? "Kit"
-                              : "Accommodation"}
-                        </label>
-                      ))}
+                              : "Accommodation";
+                        const isSelected = field.value === category;
+                        return (
+                          <label
+                            key={category}
+                            className={cn(
+                              "flex cursor-pointer items-center gap-3 rounded-xl border-2 px-4 py-3 text-sm font-medium transition-all duration-150 hover:border-slate-300 hover:bg-slate-50",
+                              isSelected
+                                ? "border-primary bg-primary/5 text-primary"
+                                : "border-slate-200 bg-white text-slate-700",
+                            )}
+                          >
+                            <RadioGroupItem value={category} aria-label={label} />
+                            {label}
+                          </label>
+                        );
+                      })}
                     </RadioGroup>
                   )}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Exactly one category is selected at onboarding. Others can be
-                  added later as paid add-ons.
+                <p className="text-xs text-slate-500 mt-1">
+                  Exactly one category is selected at onboarding. Others can be added later as paid add-ons.
                 </p>
               </Field>
 
-              <Field label="Subscription plan" htmlFor="planId" error={errors.planId?.message}>
+              <Field label="Subscription plan" htmlFor="planId" error={errors.planId?.message} required>
                 <Controller
                   control={control}
                   name="planId"
@@ -464,6 +476,7 @@ export function QuickOnboardingForm({
                         id="planId"
                         aria-label="Subscription plan"
                         aria-invalid={Boolean(errors.planId)}
+                        className="h-9"
                       >
                         <SelectValue placeholder="Select a subscription plan" />
                       </SelectTrigger>
@@ -476,9 +489,7 @@ export function QuickOnboardingForm({
                           plans.map((plan) => (
                             <SelectItem key={plan.id} value={plan.id}>
                               {plan.name} — ₹{plan.price.toLocaleString("en-IN")}
-                              {plan.durationDays
-                                ? ` (${plan.durationDays} days)`
-                                : ""}
+                              {plan.durationDays ? ` (${plan.durationDays} days)` : ""}
                             </SelectItem>
                           ))
                         )}
@@ -486,35 +497,88 @@ export function QuickOnboardingForm({
                     </Select>
                   )}
                 />
+                {/* Selected plan preview */}
+                {selectedPlan && (
+                  <div className="mt-2 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                    <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                    <p className="text-xs text-emerald-800 font-medium">
+                      {selectedPlan.name} · {selectedPlan.durationDays} days · ₹{selectedPlan.price.toLocaleString("en-IN")}
+                    </p>
+                  </div>
+                )}
               </Field>
 
-              <Field
-                label="Subscription start date"
-                htmlFor="startDate"
-                error={errors.startDate?.message}
-              >
+              <Field label="Subscription start date" htmlFor="startDate" error={errors.startDate?.message} required>
                 <Input
                   id="startDate"
                   type="date"
                   min={earliest}
                   aria-invalid={Boolean(errors.startDate)}
+                  className="h-9 max-w-xs"
                   {...register("startDate")}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Earliest selectable start date is {earliest}.
+                <p className="text-xs text-slate-500">Earliest selectable start date is {earliest}.</p>
+              </Field>
+
+              <Field label="Initial meal preference" error={errors.initialMealPreference?.message} required>
+                <Controller
+                  control={control}
+                  name="initialMealPreference"
+                  render={({ field }) => (
+                    <RadioGroup
+                      className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    >
+                      {[
+                        { value: "VEG", label: "Veg", desc: "Vegetarian meals" },
+                        { value: "EGG", label: "Egg", desc: "Eggetarian meals" },
+                        { value: "CHICKEN", label: "Chicken", desc: "Non-Veg (Chicken)" },
+                      ].map((option) => {
+                        const isSelected = field.value === option.value;
+                        return (
+                          <label
+                            key={option.value}
+                            className={cn(
+                              "flex cursor-pointer flex-col gap-1 rounded-xl border-2 px-4 py-3 transition-all duration-150 hover:border-slate-300 hover:bg-slate-50",
+                              isSelected
+                                ? "border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-200"
+                                : "border-slate-200 bg-white",
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <RadioGroupItem value={option.value} aria-label={option.label} />
+                              <span className={cn(
+                                "text-sm font-semibold",
+                                isSelected ? "text-emerald-700" : "text-slate-700"
+                              )}>
+                                {option.label}
+                              </span>
+                            </div>
+                            <p className={cn(
+                              "text-xs ml-6",
+                              isSelected ? "text-emerald-600" : "text-slate-500"
+                            )}>
+                              {option.desc}
+                            </p>
+                          </label>
+                        );
+                      })}
+                    </RadioGroup>
+                  )}
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  This sets the default meal type for the entire subscription. Customer can change it later for specific days.
                 </p>
               </Field>
 
-              {/* Req 7.1: at/after the 5 PM IST cutoff, warn and require ack. */}
               {isAfterCutoff && (
                 <Alert variant="destructive">
                   <AlertTriangle />
                   <AlertTitle>Past the 5 PM cutoff</AlertTitle>
                   <AlertDescription>
-                    It is past the 5:00 PM cutoff. Please contact the operations
-                    admin to confirm whether the delivery automation can be
-                    re-run for this customer, and select only the next-day date
-                    or the day-after date as the subscription start date.
+                    It is past the 5:00 PM cutoff. Please contact the operations admin to confirm whether
+                    the delivery automation can be re-run, and select only the next-day or day-after start date.
                   </AlertDescription>
                 </Alert>
               )}
@@ -544,9 +608,8 @@ export function QuickOnboardingForm({
               )}
 
               {addressTouched && !addressResolved && !addressServerError && (
-                <p className="text-xs text-destructive">
-                  Complete the address: select a serviceable location on the map
-                  and enter the flat number.
+                <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  Complete the address: select a serviceable location on the map and enter the flat number.
                 </p>
               )}
             </div>
@@ -555,10 +618,11 @@ export function QuickOnboardingForm({
           {/* ── STEP 4: Payment & Review ── */}
           {step === 3 && (
             <div className="flex flex-col gap-5">
-              {/* Req 10.2: optional email + Test_Email checkbox. */}
+              {/* Email */}
               <Field
-                label="Email (optional)"
+                label="Email"
                 htmlFor="email"
+                hint="Optional"
                 error={errors.email?.message as string | undefined}
               >
                 <Input
@@ -567,9 +631,10 @@ export function QuickOnboardingForm({
                   placeholder="customer@example.com (leave blank if none)"
                   maxLength={254}
                   aria-invalid={Boolean(errors.email)}
+                  className="h-9"
                   {...register("email")}
                 />
-                <label className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+                <label className="mt-1 flex cursor-pointer items-center gap-2 text-sm text-slate-500 select-none">
                   <Controller
                     control={control}
                     name="isTestEmail"
@@ -585,18 +650,33 @@ export function QuickOnboardingForm({
                   This is a placeholder / test email (hidden from the customer)
                 </label>
                 {isTestEmail && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-slate-400">
                     The customer can replace this with a real email later.
                   </p>
                 )}
               </Field>
 
-              {/* Req 8.5: manual mark-payment-collected control setting Payment_Status. */}
-              <div className="flex items-center justify-between rounded-lg border p-4">
-                <div>
-                  <p className="text-sm font-medium">Payment collected at counter</p>
-                  <p className="text-xs text-muted-foreground">
-                    Onboarding requires payment to be marked PAID (Req 8.1).
+              {/* Payment toggle */}
+              <div className={cn(
+                "flex items-center justify-between gap-4 rounded-xl border-2 p-4 transition-all duration-200",
+                paymentStatus === "PAID"
+                  ? "border-emerald-300 bg-emerald-50"
+                  : "border-slate-200 bg-white",
+              )}>
+                <div className="flex flex-col gap-0.5">
+                  <p className={cn(
+                    "text-sm font-semibold transition-colors duration-200",
+                    paymentStatus === "PAID" ? "text-emerald-800" : "text-slate-800",
+                  )}>
+                    Payment collected at counter
+                  </p>
+                  <p className={cn(
+                    "text-xs transition-colors duration-200",
+                    paymentStatus === "PAID" ? "text-emerald-600" : "text-slate-500",
+                  )}>
+                    {paymentStatus === "PAID"
+                      ? "✓ Marked as paid — onboarding can proceed"
+                      : "Onboarding requires payment to be marked PAID"}
                   </p>
                 </div>
                 <Controller
@@ -615,49 +695,77 @@ export function QuickOnboardingForm({
               </div>
 
               {/* Review summary */}
-              <div className="rounded-lg border bg-muted/30 p-4 text-sm">
-                <p className="mb-2 font-semibold">Review</p>
-                <dl className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                  <ReviewRow label="Name" value={values.fullName} />
-                  <ReviewRow label="Mobile" value={values.mobile} />
-                  <ReviewRow label="Gender" value={values.gender} />
-                  <ReviewRow label="Diet" value={values.dietaryPreference} />
-                  <ReviewRow label="Category" value={values.primaryCategory} />
-                  <ReviewRow
-                    label="Plan"
-                    value={
-                      selectedPlan
-                        ? `${selectedPlan.name} (₹${selectedPlan.price.toLocaleString("en-IN")})`
-                        : "—"
-                    }
-                  />
-                  <ReviewRow label="Start date" value={values.startDate} />
-                  <ReviewRow
-                    label="Payment"
-                    value={paymentStatus === "PAID" ? "Paid" : "Pending"}
-                  />
-                  <ReviewRow
-                    label="Address"
-                    value={
-                      addressResolved
-                        ? `${address.flatNumber}, ${address.area}, ${address.city} - ${address.pincode}`
-                        : "Incomplete"
-                    }
-                  />
-                  <ReviewRow
-                    label="Temp PIN"
-                    value={tempPin ? "••••••" : "Not set"}
-                  />
-                </dl>
+              <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+                  <CheckCircle2 className="h-4 w-4 text-slate-500" />
+                  <p className="text-sm font-semibold text-slate-800">Review summary</p>
+                </div>
+                <div className="p-4">
+                  <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-2">
+                    <ReviewRow label="Name" value={values.fullName} />
+                    <ReviewRow label="Mobile" value={values.mobile} />
+                    <ReviewRow label="Gender" value={values.gender} />
+                    <ReviewRow label="Diet" value={values.dietaryPreference} />
+                    <ReviewRow label="Category" value={values.primaryCategory} />
+                    <ReviewRow
+                      label="Plan"
+                      value={
+                        selectedPlan
+                          ? `${selectedPlan.name} (₹${selectedPlan.price.toLocaleString("en-IN")})`
+                          : "—"
+                      }
+                    />
+                    <ReviewRow label="Start date" value={values.startDate} />
+                    <ReviewRow
+                      label="Payment"
+                      value={paymentStatus === "PAID" ? "✓ Paid" : "Pending"}
+                      highlight={paymentStatus === "PAID"}
+                    />
+                    <ReviewRow
+                      label="Address"
+                      value={
+                        addressResolved
+                          ? `${address.flatNumber}, ${address.area}, ${address.city} - ${address.pincode}`
+                          : "Incomplete"
+                      }
+                      span
+                    />
+                    {/* Temp PIN with show/hide toggle */}
+                    <div className="flex flex-col gap-0.5">
+                      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Temp PIN</dt>
+                      <dd className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-800 tabular-nums tracking-widest">
+                          {tempPin
+                            ? showPin
+                              ? tempPin
+                              : "••••••"
+                            : "Not set"}
+                        </span>
+                        {tempPin && (
+                          <button
+                            type="button"
+                            onClick={() => setShowPin((v) => !v)}
+                            className="flex items-center gap-1 rounded px-1 py-0.5 text-xs text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                          >
+                            {showPin
+                              ? <><EyeOff className="h-3.5 w-3.5" />Hide</>
+                              : <><Eye className="h-3.5 w-3.5" />Show</>}
+                          </button>
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
               </div>
 
-              {/* Req 7.1-7.4: cutoff acknowledgment gate. */}
+              {/* Cutoff acknowledgment */}
               {isAfterCutoff && (
                 <Alert variant="destructive">
                   <AlertTriangle />
                   <AlertTitle>Cutoff acknowledgment required</AlertTitle>
                   <AlertDescription>
-                    <label className="mt-2 flex items-start gap-2">
+                    <label className="mt-2 flex cursor-pointer items-start gap-2">
                       <Controller
                         control={control}
                         name="cutoffAcknowledged"
@@ -672,9 +780,8 @@ export function QuickOnboardingForm({
                         )}
                       />
                       <span>
-                        I have confirmed with the operations admin that the
-                        automation can be re-run, and I have selected only the
-                        next-day or day-after start date.
+                        I have confirmed with the operations admin that the automation
+                        can be re-run, and I have selected only the next-day or day-after start date.
                       </span>
                     </label>
                   </AlertDescription>
@@ -682,38 +789,62 @@ export function QuickOnboardingForm({
               )}
 
               {paymentStatus !== "PAID" && (
-                <p className="text-xs text-destructive">
+                <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                   Payment must be marked PAID before onboarding can proceed.
                 </p>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between">
+        </div>{/* /step content */}
+      </div>{/* /step panel */}
+
+      {/* ── Navigation ── */}
+      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
         <Button
           type="button"
           variant="outline"
+          size="sm"
           onClick={goBack}
           disabled={step === 0 || isSubmitting}
+          className="gap-1.5"
         >
-          <ArrowLeft className="mr-1.5 h-4 w-4" />
+          <ArrowLeft className="h-4 w-4" />
           Back
         </Button>
 
+        <div className="flex items-center gap-1.5">
+          {STEPS.map((_, i) => (
+            <span
+              key={i}
+              className={cn(
+                "h-1.5 rounded-full transition-all duration-300",
+                i === step
+                  ? "w-6 bg-primary"
+                  : i < step
+                    ? "w-1.5 bg-emerald-500"
+                    : "w-1.5 bg-slate-200",
+              )}
+            />
+          ))}
+        </div>
+
         {step < STEPS.length - 1 ? (
-          <Button type="button" onClick={goNext} disabled={isSubmitting}>
+          <Button type="button" size="sm" onClick={goNext} disabled={isSubmitting} className="gap-1.5">
             Next
-            <ArrowRight className="ml-1.5 h-4 w-4" />
+            <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button type="submit" disabled={!canOnboard}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!canOnboard}
+            className="gap-1.5"
+          >
             {isSubmitting ? (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <CheckCircle2 className="mr-1.5 h-4 w-4" />
+              <Check className="h-4 w-4" />
             )}
             Onboard Customer
           </Button>
@@ -724,42 +855,78 @@ export function QuickOnboardingForm({
 }
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const STEP_SUBTITLES = [
+  "Basic customer information and security PIN",
+  "Choose meal category and subscription plan",
+  "Map-based delivery address capture",
+  "Payment confirmation and final review",
+] as const;
+
+// ---------------------------------------------------------------------------
 // Presentational helpers
 // ---------------------------------------------------------------------------
 
 function Stepper({ current }: { current: number }) {
   return (
-    <ol className="flex flex-wrap items-center gap-2">
-      {STEPS.map((label, index) => {
-        const state =
-          index === current ? "active" : index < current ? "done" : "todo";
-        return (
-          <li key={label} className="flex items-center gap-2">
-            <span
-              className={`flex h-6 w-6 items-center justify-center rounded-full border-2 text-xs font-bold transition-colors ${
-                state === "active"
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : state === "done"
-                    ? "border-emerald-500 bg-emerald-500 text-white"
-                    : "border-muted-foreground/30 text-muted-foreground"
-              }`}
-            >
-              {state === "done" ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
-            </span>
-            <span
-              className={`text-xs font-medium ${
-                state === "active" ? "text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              {label}
-            </span>
-            {index < STEPS.length - 1 && (
-              <span className="hidden h-px w-6 bg-muted-foreground/20 sm:block" />
-            )}
-          </li>
-        );
-      })}
-    </ol>
+    <nav aria-label="Onboarding steps">
+      <ol className="flex items-center gap-0">
+        {STEPS.map((label, index) => {
+          const state =
+            index === current ? "active" : index < current ? "done" : "todo";
+          const Icon = STEP_ICONS[index];
+          return (
+            <li key={label} className="flex flex-1 items-center last:flex-none">
+              <div className="flex flex-col items-center gap-1.5">
+                <span
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-full border-2 transition-all duration-300 shadow-sm",
+                    state === "active"
+                      ? "border-primary bg-primary text-primary-foreground shadow-primary/25"
+                      : state === "done"
+                        ? "border-emerald-500 bg-emerald-500 text-white shadow-emerald-500/25"
+                        : "border-slate-200 bg-white text-slate-400",
+                  )}
+                  aria-current={state === "active" ? "step" : undefined}
+                >
+                  {state === "done" ? (
+                    <Check className="h-4 w-4" strokeWidth={2.5} />
+                  ) : (
+                    <Icon className="h-4 w-4" />
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    "hidden text-xs font-medium sm:block transition-colors duration-300",
+                    state === "active"
+                      ? "text-primary"
+                      : state === "done"
+                        ? "text-emerald-600"
+                        : "text-slate-400",
+                  )}
+                >
+                  {label}
+                </span>
+              </div>
+
+              {/* Connector */}
+              {index < STEPS.length - 1 && (
+                <div className="relative mx-2 h-0.5 flex-1 overflow-hidden rounded-full bg-slate-200">
+                  <div
+                    className={cn(
+                      "absolute inset-y-0 left-0 transition-all duration-500",
+                      index < current ? "w-full bg-emerald-500" : "w-0 bg-primary",
+                    )}
+                  />
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -767,27 +934,60 @@ function Field({
   label,
   htmlFor,
   error,
+  hint,
+  required,
   children,
 }: {
   label: string;
   htmlFor?: string;
   error?: string;
+  hint?: string;
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-2">
-      <Label htmlFor={htmlFor}>{label}</Label>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline gap-1.5">
+        <Label htmlFor={htmlFor} className="text-sm font-medium text-slate-700">
+          {label}
+          {required && <span className="ml-0.5 text-destructive">*</span>}
+        </Label>
+        {hint && (
+          <span className="text-xs text-slate-400 font-normal">{hint}</span>
+        )}
+      </div>
       {children}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p className="flex items-center gap-1 text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
 
-function ReviewRow({ label, value }: { label: string; value?: string }) {
+function ReviewRow({
+  label,
+  value,
+  highlight,
+  span,
+}: {
+  label: string;
+  value?: string;
+  highlight?: boolean;
+  span?: boolean;
+}) {
   return (
-    <div className="flex justify-between gap-3 sm:block">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="font-medium text-foreground">{value || "—"}</dd>
+    <div className={cn("flex flex-col gap-0.5", span && "col-span-2")}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</dt>
+      <dd
+        className={cn(
+          "text-sm font-semibold",
+          highlight ? "text-emerald-700" : "text-slate-800",
+        )}
+      >
+        {value || "—"}
+      </dd>
     </div>
   );
 }

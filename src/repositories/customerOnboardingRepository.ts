@@ -87,6 +87,7 @@ export interface OnboardSubscriptionInput {
   total_days?: number | null;
   pause_credits_total?: number | null;
   franchise_id?: string | null;
+  initial_meal_category_id?: string | null;  // NEW: For daily preferences generation
 }
 
 /** The `payment` block of the RPC payload. */

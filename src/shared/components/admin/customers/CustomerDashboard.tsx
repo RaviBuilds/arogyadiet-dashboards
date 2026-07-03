@@ -65,7 +65,7 @@ import {
 import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
 import { CustomerOverview } from "./CustomerOverview";
 import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
-import { Plus, Upload, UserPlus } from "lucide-react";
+import { Plus, Upload, UserPlus } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
 import {
   clinicDisplayName,
   filterRowsByClinic,
@@ -124,11 +124,13 @@ export default function CustomerDashboard({
   activeSubscriptions = [],
   pendingSubscriptions = [],
   stoppedSubscriptions = [],
+  autoOpenCreate = false,
 }: {
   customers?: CustomerData[];
   activeSubscriptions?: ActiveSubscriptionData[];
   pendingSubscriptions?: ActiveSubscriptionData[];
   stoppedSubscriptions?: ActiveSubscriptionData[];
+  autoOpenCreate?: boolean;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Customer Directory");
@@ -164,7 +166,7 @@ export default function CustomerDashboard({
     return Array.from(plans);
   }, [customers]);
 
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(autoOpenCreate);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
@@ -444,26 +446,12 @@ export default function CustomerDashboard({
         activeTab={activeTab}
         onTabChange={handleTabChange}
         actions={
-          <>
-            <Button variant="outline" size="sm" className="transition-all duration-200" asChild>
-              <Link href="/customers/bulk-import">
-                <Upload className="h-4 w-4 mr-1.5" />
-                Bulk import
-              </Link>
-            </Button>
-            {/* Req 4.8: Quick onboarding entry point, added alongside — never
-                replacing — the legacy three-step "Create Customer" flow. */}
-            <Button variant="outline" size="sm" className="transition-all duration-200" asChild>
-              <Link href="/customers/quick-onboard">
-                <UserPlus className="h-4 w-4 mr-1.5" />
-                Quick Onboard
-              </Link>
-            </Button>
-            <Button onClick={() => setIsCreateModalOpen(true)} size="sm" className="transition-all duration-200">
-              <Plus className="h-4 w-4 mr-1.5" />
-              Create Customer
-            </Button>
-          </>
+          <Button size="sm" className="transition-all duration-200" asChild>
+            <Link href="/customers/onboarding">
+              <UserPlus className="h-4 w-4 mr-1.5" />
+              Onboarding
+            </Link>
+          </Button>
         }
       />
 

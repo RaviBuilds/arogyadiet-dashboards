@@ -10,6 +10,7 @@ interface Props {
   activeSubscriptions: ActiveSubscriptionData[];
   pendingSubscriptions: ActiveSubscriptionData[];
   stoppedSubscriptions: ActiveSubscriptionData[];
+  autoOpenCreate?: boolean;
 }
 
 /**
@@ -21,6 +22,7 @@ export function AdminCustomersWrapper({
   activeSubscriptions,
   pendingSubscriptions,
   stoppedSubscriptions,
+  autoOpenCreate = false,
 }: Props) {
   const [scope, setScope] = useState("core");
 
@@ -62,6 +64,7 @@ export function AdminCustomersWrapper({
         activeSubscriptions={filteredActiveSubs}
         pendingSubscriptions={filteredPendingSubs}
         stoppedSubscriptions={filteredStoppedSubs}
+        autoOpenCreate={autoOpenCreate}
       />
     </div>
   );
