@@ -61,6 +61,13 @@ import {
 import { istHourOf } from "@/lib/dates/ist";
 import { onboardCustomerAction } from "@/actions/admin-actions/onboardingActions";
 import { cn } from "@/lib/utils";
+import type { KitProduct } from "@/types/kitProduct";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/shared/components/ui/tooltip";
 
 /** A subscription plan option for the Category/Plan step (Req 4.4). */
 export interface OnboardingPlan {
@@ -72,6 +79,7 @@ export interface OnboardingPlan {
 
 export interface QuickOnboardingFormProps {
   plans: OnboardingPlan[];
+  kitProducts: KitProduct[];
   serviceAreaPincodes: string[];
 }
 
@@ -102,7 +110,9 @@ const detailsSchema = z.object({
     .or(z.literal("")),
   isTestEmail: z.boolean().default(false),
   primaryCategory: z.enum(CUSTOMER_CATEGORIES),
-  planId: z.string().uuid("Select a subscription plan."),
+  planId: z.string().uuid("Select a subscription plan.").optional(),
+  kitProductId: z.string().uuid("Select a KIT product.").optional(),
+  kitDurationDays: z.coerce.number().int("Kit duration must be a whole number.").positive("Kit duration must be at least 1 day.").optional(),
   startDate: z.string().min(1, "Start date is required."),
   initialMealPreference: z.enum(["VEG", "EGG", "CHICKEN"], {
     message: "Select an initial meal preference.",
@@ -120,13 +130,14 @@ const STEP_ICONS = [User, Utensils, MapPin, CreditCard] as const;
 
 const STEP_FIELDS: Record<number, (keyof DetailsFormValues)[]> = {
   0: ["fullName", "mobile", "gender", "dietaryPreference", "allergies"],
-  1: ["primaryCategory", "planId", "startDate", "initialMealPreference"],
+  1: ["primaryCategory", "planId", "kitProductId", "kitDurationDays", "startDate", "initialMealPreference"],
   2: [],
   3: ["email", "paymentStatus"],
 };
 
 export function QuickOnboardingForm({
   plans,
+  kitProducts,
   serviceAreaPincodes,
 }: QuickOnboardingFormProps) {
   const router = useRouter();
@@ -172,6 +183,8 @@ export function QuickOnboardingForm({
       isTestEmail: false,
       primaryCategory: "MEAL",
       planId: undefined,
+      kitProductId: undefined,
+      kitDurationDays: undefined,
       startDate: earliest,
       paymentStatus: "PENDING",
       cutoffAcknowledged: false,
@@ -182,8 +195,11 @@ export function QuickOnboardingForm({
   const paymentStatus = values.paymentStatus;
   const cutoffAcknowledged = values.cutoffAcknowledged;
   const isTestEmail = values.isTestEmail;
+  const primaryCategory = values.primaryCategory;
   const selectedPlanId = values.planId;
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) ?? null;
+  const selectedKitProductId = values.kitProductId;
+  const selectedKitProduct = kitProducts.find((k) => k.id === selectedKitProductId) ?? null;
   const addressResolved = Boolean(addressValidity?.canSave);
 
   const canOnboard =
@@ -194,7 +210,21 @@ export function QuickOnboardingForm({
 
   const goNext = async () => {
     const fields = STEP_FIELDS[step];
-    const valid = fields.length === 0 ? true : await trigger(fields);
+    
+    // For step 1, filter fields based on category selection
+    let fieldsToValidate = fields;
+    if (step === 1) {
+      const category = values.primaryCategory;
+      if (category === "KIT") {
+        // KIT category: validate kitProductId and kitDurationDays, skip planId
+        fieldsToValidate = ["primaryCategory", "kitProductId", "kitDurationDays", "startDate", "initialMealPreference"];
+      } else if (category === "MEAL") {
+        // MEAL category: validate planId, skip KIT fields
+        fieldsToValidate = ["primaryCategory", "planId", "startDate", "initialMealPreference"];
+      }
+    }
+    
+    const valid = fieldsToValidate.length === 0 ? true : await trigger(fieldsToValidate);
 
     // Step 1 gate: Temp PIN is mandatory (managed outside Zod schema).
     if (step === 0) {
@@ -261,6 +291,9 @@ export function QuickOnboardingForm({
         values.allergies && values.allergies.trim() !== ""
           ? values.allergies
           : undefined,
+      kitProductId: values.primaryCategory === "KIT" ? values.kitProductId : undefined,
+      kitDurationDays: values.primaryCategory === "KIT" ? values.kitDurationDays : undefined,
+      planId: values.primaryCategory === "MEAL" ? values.planId : undefined,
       address: {
         tag: address.tag,
         searchText: address.searchText,
@@ -466,47 +499,114 @@ export function QuickOnboardingForm({
                 </p>
               </Field>
 
-              <Field label="Subscription plan" htmlFor="planId" error={errors.planId?.message} required>
-                <Controller
-                  control={control}
-                  name="planId"
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger
-                        id="planId"
-                        aria-label="Subscription plan"
-                        aria-invalid={Boolean(errors.planId)}
-                        className="h-9"
-                      >
-                        <SelectValue placeholder="Select a subscription plan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {plans.length === 0 ? (
-                          <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                            No active plans available.
-                          </div>
-                        ) : (
-                          plans.map((plan) => (
-                            <SelectItem key={plan.id} value={plan.id}>
-                              {plan.name} — ₹{plan.price.toLocaleString("en-IN")}
-                              {plan.durationDays ? ` (${plan.durationDays} days)` : ""}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                {/* Selected plan preview */}
-                {selectedPlan && (
-                  <div className="mt-2 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                    <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                    <p className="text-xs text-emerald-800 font-medium">
-                      {selectedPlan.name} · {selectedPlan.durationDays} days · ₹{selectedPlan.price.toLocaleString("en-IN")}
+              {/* Conditional rendering based on primaryCategory */}
+              {primaryCategory === "KIT" ? (
+                <>
+                  {/* KIT Product dropdown */}
+                  <Field label="KIT Product" htmlFor="kitProductId" error={errors.kitProductId?.message} required>
+                    <Controller
+                      control={control}
+                      name="kitProductId"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger
+                            id="kitProductId"
+                            aria-label="KIT Product"
+                            aria-invalid={Boolean(errors.kitProductId)}
+                            className="h-9"
+                          >
+                            <SelectValue placeholder="Select a KIT product" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {kitProducts.length === 0 ? (
+                              <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                No active KIT products available.
+                              </div>
+                            ) : (
+                              kitProducts.map((product) => (
+                                <SelectItem key={product.id} value={product.id}>
+                                  {product.name} - ₹{product.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    {/* Selected KIT product preview */}
+                    {selectedKitProduct && (
+                      <div className="mt-2 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                        <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                        <p className="text-xs text-emerald-800 font-medium">
+                          {selectedKitProduct.name} · Base: ₹{selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · Tax: 5%
+                        </p>
+                      </div>
+                    )}
+                  </Field>
+
+                  {/* Kit Duration (Days) field */}
+                  <Field label="Kit Duration (Days)" htmlFor="kitDurationDays" error={errors.kitDurationDays?.message} required>
+                    <Input
+                      id="kitDurationDays"
+                      type="number"
+                      inputMode="numeric"
+                      min="1"
+                      placeholder="e.g. 30"
+                      aria-invalid={Boolean(errors.kitDurationDays)}
+                      className="h-9 max-w-xs"
+                      {...register("kitDurationDays", { valueAsNumber: true })}
+                    />
+                    <p className="text-xs text-slate-500">
+                      Enter the number of days this KIT package will last.
                     </p>
-                  </div>
-                )}
-              </Field>
+                  </Field>
+                </>
+              ) : (
+                <>
+                  {/* Subscription Plan dropdown for MEAL category */}
+                  <Field label="Subscription plan" htmlFor="planId" error={errors.planId?.message} required>
+                    <Controller
+                      control={control}
+                      name="planId"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger
+                            id="planId"
+                            aria-label="Subscription plan"
+                            aria-invalid={Boolean(errors.planId)}
+                            className="h-9"
+                          >
+                            <SelectValue placeholder="Select a subscription plan" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {plans.length === 0 ? (
+                              <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                No active plans available.
+                              </div>
+                            ) : (
+                              plans.map((plan) => (
+                                <SelectItem key={plan.id} value={plan.id}>
+                                  {plan.name} — ₹{plan.price.toLocaleString("en-IN")}
+                                  {plan.durationDays ? ` (${plan.durationDays} days)` : ""}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    {/* Selected plan preview */}
+                    {selectedPlan && (
+                      <div className="mt-2 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                        <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                        <p className="text-xs text-emerald-800 font-medium">
+                          {selectedPlan.name} · {selectedPlan.durationDays} days · ₹{selectedPlan.price.toLocaleString("en-IN")}
+                        </p>
+                      </div>
+                    )}
+                  </Field>
+                </>
+              )}
 
               <Field label="Subscription start date" htmlFor="startDate" error={errors.startDate?.message} required>
                 <Input
@@ -595,6 +695,7 @@ export function QuickOnboardingForm({
                   setAddressServerError(null);
                 }}
                 serviceAreaPincodes={serviceAreaPincodes}
+                customerCategory={primaryCategory}
                 onValidityChange={setAddressValidity}
                 disabled={isSubmitting}
               />
@@ -609,7 +710,10 @@ export function QuickOnboardingForm({
 
               {addressTouched && !addressResolved && !addressServerError && (
                 <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                  Complete the address: select a serviceable location on the map and enter the flat number.
+                  {primaryCategory === "KIT" 
+                    ? "Complete the address: select a location on the map and enter the flat number."
+                    : "Complete the address: select a serviceable location on the map and enter the flat number."
+                  }
                 </p>
               )}
             </div>
@@ -707,14 +811,56 @@ export function QuickOnboardingForm({
                     <ReviewRow label="Gender" value={values.gender} />
                     <ReviewRow label="Diet" value={values.dietaryPreference} />
                     <ReviewRow label="Category" value={values.primaryCategory} />
-                    <ReviewRow
-                      label="Plan"
-                      value={
-                        selectedPlan
-                          ? `${selectedPlan.name} (₹${selectedPlan.price.toLocaleString("en-IN")})`
-                          : "—"
-                      }
-                    />
+                    
+                    {/* Conditional rendering based on category */}
+                    {primaryCategory === "KIT" ? (
+                      <>
+                        {/* KIT Product Information */}
+                        <ReviewRow
+                          label="KIT Product"
+                          value={
+                            selectedKitProduct
+                              ? selectedKitProduct.name
+                              : "—"
+                          }
+                          span
+                        />
+                        {selectedKitProduct && (
+                          <>
+                            <ReviewRow
+                              label="Base Price"
+                              value={`₹${selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            />
+                            <ReviewRow
+                              label="Tax (5%)"
+                              value={`₹${(selectedKitProduct.base_price * 0.05).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            />
+                            <ReviewRow
+                              label="Total Price"
+                              value={`₹${(selectedKitProduct.base_price * 1.05).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              highlight
+                            />
+                            <ReviewRow
+                              label="Duration"
+                              value={values.kitDurationDays ? `${values.kitDurationDays} days` : "—"}
+                            />
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {/* MEAL Plan Information */}
+                        <ReviewRow
+                          label="Plan"
+                          value={
+                            selectedPlan
+                              ? `${selectedPlan.name} (₹${selectedPlan.price.toLocaleString("en-IN")})`
+                              : "—"
+                          }
+                        />
+                      </>
+                    )}
+                    
                     <ReviewRow label="Start date" value={values.startDate} />
                     <ReviewRow
                       label="Payment"
@@ -835,19 +981,32 @@ export function QuickOnboardingForm({
             <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button
-            type="submit"
-            size="sm"
-            disabled={!canOnboard}
-            className="gap-1.5"
-          >
-            {isSubmitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Check className="h-4 w-4" />
-            )}
-            Onboard Customer
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={!canOnboard}
+                    className="gap-1.5"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    Onboard Customer
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {paymentStatus !== "PAID" && (
+                <TooltipContent>
+                  <p>Payment must be marked as PAID before completing onboarding</p>
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
         )}
       </div>
     </form>

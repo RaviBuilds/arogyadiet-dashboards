@@ -77,7 +77,9 @@ export interface OnboardProfileInput {
 
 /** The `subscription` block of the RPC payload. */
 export interface OnboardSubscriptionInput {
-  plan_id: string;
+  plan_id?: string | null;
+  kit_product_id?: string | null;
+  kit_duration_days?: number | null;
   subscription_code?: string | null;
   customer_category: string;
   starts_on: string;

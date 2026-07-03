@@ -35,6 +35,8 @@ import {
   ProfileCompletionDialog,
   type CompletableField,
 } from "@/shared/components/customer/ProfileCompletionDialog";
+import { KitDashboard } from "./KitDashboard";
+import { getShippingInfoAction } from "@/actions/admin-actions/shippingActions";
 
 export const revalidate = 0;
 
@@ -244,6 +246,60 @@ export default async function CustomerDashboard() {
       subscription={profileDialogSubscription}
     />
   ) : null;
+
+  // Category-based view selection (Req 8.1, 8.4)
+  // If customer has a KIT subscription, show KIT-specific dashboard
+  if (activeSub && activeSub.customer_category === "KIT") {
+    // Fetch KIT-specific data
+    const { data: kitSubscription } = await supabase
+      .from("subscriptions")
+      .select(
+        `
+        id,
+        subscription_code,
+        starts_on,
+        kit_duration_days,
+        customer_category,
+        status,
+        kit_products (
+          name,
+          base_price,
+          tax_rate
+        )
+      `
+      )
+      .eq("id", activeSub.id)
+      .single();
+
+    if (!kitSubscription) {
+      return (
+        <div className="p-6">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Subscription Error</AlertTitle>
+            <AlertDescription>
+              Failed to load KIT subscription details.
+            </AlertDescription>
+          </Alert>
+        </div>
+      );
+    }
+
+    // Fetch shipping information
+    const shippingResult = await getShippingInfoAction(customerProfileId);
+    const shippingInfo = shippingResult.success ? (shippingResult.data ?? null) : null;
+
+    // Render KIT-specific dashboard (Req 8.1, 8.3)
+    return (
+      <>
+        {profileDialog}
+        <KitDashboard
+          subscription={kitSubscription}
+          shippingInfo={shippingInfo}
+        />
+      </>
+    );
+  }
 
   if (!activeSub) {
     return (

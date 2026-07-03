@@ -90,7 +90,7 @@ export default async function SubscriptionsPage() {
     <div className="flex flex-col gap-6">
       <AdminPageHeader
         title="Subscription Management"
-        description="Manage master plans and view subscription analytics."
+        description="Manage subscription plans, KIT products, and view analytics."
       />
       <AdminSubscriptionsWrapper
         plans={plans || []}

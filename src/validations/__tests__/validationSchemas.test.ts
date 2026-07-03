@@ -62,6 +62,7 @@ function validOnboarding(overrides: Record<string, unknown> = {}) {
     planId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f",
     startDate: "2026-07-01",
     paymentStatus: "PAID",
+    initialMealPreference: "VEG",
     cutoffAcknowledged: true,
     address: validAddress(),
     ...overrides,
@@ -111,9 +112,17 @@ describe("quickOnboardingSchema enum rejection", () => {
 
   it("accepts every declared customer category", () => {
     for (const category of CUSTOMER_CATEGORIES) {
-      const result = onboardingSchema.safeParse(
-        validOnboarding({ primaryCategory: category }),
-      );
+      // Build category-appropriate payload
+      const payload = validOnboarding({ primaryCategory: category });
+      
+      // Add KIT-specific fields for KIT category
+      if (category === "KIT") {
+        payload.kitProductId = "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f";
+        payload.kitDurationDays = 30;
+        delete (payload as Record<string, unknown>).planId;
+      }
+      
+      const result = onboardingSchema.safeParse(payload);
       expect(result.success).toBe(true);
     }
   });
@@ -445,5 +454,151 @@ describe("profileCompletionSchema all-optional behavior (Req 9.2)", () => {
     expect(
       profileCompletionSchema.safeParse({ email: email255 }).success,
     ).toBe(false);
+  });
+});
+
+// ─── onboardingSchema: KIT category conditional validation (Req 2.1, 2.2, 2.3) ───
+
+describe("quickOnboardingSchema KIT category conditional validation", () => {
+  it("accepts a valid KIT category payload with kitProductId and kitDurationDays", () => {
+    const kitPayload = validOnboarding({
+      primaryCategory: "KIT",
+      kitProductId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f",
+      kitDurationDays: 30,
+      planId: undefined,
+    });
+    const result = onboardingSchema.safeParse(kitPayload);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects KIT category when kitProductId is missing", () => {
+    const kitPayload = validOnboarding({
+      primaryCategory: "KIT",
+      kitDurationDays: 30,
+      planId: undefined,
+      kitProductId: undefined,
+    });
+    const result = onboardingSchema.safeParse(kitPayload);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain(
+        "KIT product selection is required for KIT category.",
+      );
+    }
+  });
+
+  it("rejects KIT category when kitDurationDays is missing", () => {
+    const kitPayload = validOnboarding({
+      primaryCategory: "KIT",
+      kitProductId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f",
+      planId: undefined,
+      kitDurationDays: undefined,
+    });
+    const result = onboardingSchema.safeParse(kitPayload);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain(
+        "Kit duration (days) is required for KIT category.",
+      );
+    }
+  });
+
+  it("rejects KIT category when kitProductId is not a valid UUID", () => {
+    const kitPayload = validOnboarding({
+      primaryCategory: "KIT",
+      kitProductId: "invalid-uuid",
+      kitDurationDays: 30,
+      planId: undefined,
+    });
+    const result = onboardingSchema.safeParse(kitPayload);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain("Select a valid KIT product.");
+    }
+  });
+
+  it("rejects KIT category when kitDurationDays is not a positive integer", () => {
+    const kitPayload = validOnboarding({
+      primaryCategory: "KIT",
+      kitProductId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f",
+      kitDurationDays: 0,
+      planId: undefined,
+    });
+    const result = onboardingSchema.safeParse(kitPayload);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain("Kit duration must be at least 1 day.");
+    }
+  });
+
+  it("rejects KIT category when kitDurationDays is a decimal", () => {
+    const kitPayload = validOnboarding({
+      primaryCategory: "KIT",
+      kitProductId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f",
+      kitDurationDays: 30.5,
+      planId: undefined,
+    });
+    const result = onboardingSchema.safeParse(kitPayload);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain("Kit duration must be a whole number.");
+    }
+  });
+
+  it("accepts MEAL category with planId and without KIT fields", () => {
+    const mealPayload = validOnboarding({
+      primaryCategory: "MEAL",
+      planId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f",
+      kitProductId: undefined,
+      kitDurationDays: undefined,
+    });
+    const result = onboardingSchema.safeParse(mealPayload);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects MEAL category when planId is missing", () => {
+    const mealPayload = validOnboarding({
+      primaryCategory: "MEAL",
+      planId: undefined,
+      kitProductId: undefined,
+      kitDurationDays: undefined,
+    });
+    const result = onboardingSchema.safeParse(mealPayload);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain(
+        "Subscription plan is required for MEAL category.",
+      );
+    }
+  });
+
+  it("accepts KIT category with planId present but ignores it", () => {
+    // KIT category doesn't require planId to be absent, just kitProductId and kitDurationDays to be present
+    const kitPayload = validOnboarding({
+      primaryCategory: "KIT",
+      kitProductId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f",
+      kitDurationDays: 30,
+      planId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f", // Even if present
+    });
+    const result = onboardingSchema.safeParse(kitPayload);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts MEAL category with KIT fields present but ignores them", () => {
+    // MEAL category doesn't require KIT fields to be absent, just planId to be present
+    const mealPayload = validOnboarding({
+      primaryCategory: "MEAL",
+      planId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f",
+      kitProductId: "3f1e9c6a-2b7d-4c8e-9f10-1a2b3c4d5e6f", // Even if present
+      kitDurationDays: 30,
+    });
+    const result = onboardingSchema.safeParse(mealPayload);
+    expect(result.success).toBe(true);
   });
 });

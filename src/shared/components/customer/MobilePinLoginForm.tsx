@@ -14,7 +14,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft, Smartphone, Lock, ShieldCheck } from "lucide-react";
 
 import {
   checkEligibilityAction,
@@ -35,6 +35,8 @@ import {
 } from "@/shared/components/ui/field";
 import { Input } from "@/shared/components/ui/input";
 import { PinInput } from "@/shared/components/customer/PinInput";
+import { MobileNumberInput } from "@/shared/components/customer/MobileNumberInput";
+import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -157,92 +159,155 @@ export function MobilePinLoginForm({
       : "text-sm text-muted-foreground text-center";
 
   return (
-    <div className="flex w-full max-w-[360px] flex-col gap-6">
-      <Card>
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl">
-            {step === "MOBILE" ? "Sign in" : "Enter your PIN"}
-          </CardTitle>
-          <CardDescription>
-            {step === "MOBILE"
-              ? "Enter your registered mobile number to continue."
-              : `Enter the 6-digit PIN for ${mobile || "your mobile number"}.`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {step === "MOBILE" ? (
-            <form onSubmit={handleCheckEligibility}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="mobile">Mobile number</FieldLabel>
-                  <Input
+    <div className="flex w-full max-w-[400px] flex-col gap-6">
+      <Card className="shadow-lg">
+        {step === "MOBILE" ? (
+          <>
+            {/* Mobile Number Entry - Hero Section */}
+            <div className="relative overflow-hidden border-b bg-slate-50 px-6 py-10 dark:bg-slate-900">
+              <div className="relative flex flex-col items-center gap-4 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-md ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+                  <Smartphone className="h-8 w-8 text-slate-700 dark:text-slate-300" />
+                </div>
+                <div className="space-y-1.5">
+                  <CardTitle className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                    Welcome back
+                  </CardTitle>
+                  <CardDescription className="text-base text-slate-600 dark:text-slate-400">
+                    Enter your mobile number to sign in
+                  </CardDescription>
+                </div>
+              </div>
+            </div>
+
+            <CardContent className="p-6">
+              <form onSubmit={handleCheckEligibility} className="space-y-6">
+                <div className="space-y-3">
+                  <div className="text-center text-sm font-semibold text-slate-700 dark:text-slate-300">
+                    Mobile Number
+                  </div>
+                  <MobileNumberInput
                     id="mobile"
-                    name="mobile"
-                    type="tel"
-                    inputMode="numeric"
-                    autoComplete="tel"
-                    autoFocus
-                    placeholder="10-digit mobile number"
                     value={mobile}
-                    onChange={(e) => setMobile(e.target.value)}
+                    onChange={setMobile}
                     disabled={isPending}
-                    required
+                    autoFocus
+                    placeholder="0000000000"
                   />
-                </Field>
+                </div>
 
                 {message && (
-                  <div className={messageClassName}>{message.text}</div>
-                )}
-
-                <Field>
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isPending || mobile.trim() === ""}
-                  >
-                    {isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Checking...
-                      </>
-                    ) : (
-                      "Next"
+                  <div
+                    className={cn(
+                      "rounded-lg border p-3 text-center text-sm font-medium",
+                      message.tone === "error"
+                        ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-400"
+                        : "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/50 dark:text-blue-400"
                     )}
-                  </Button>
-                </Field>
-              </FieldGroup>
-            </form>
-          ) : (
-            <form onSubmit={handleVerifyPin}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="pin">PIN</FieldLabel>
-                  <PinInput
-                    value={pin}
-                    onChange={setPin}
-                    disabled={isPending || locked}
-                  />
-                </Field>
-
-                {message && (
-                  <div className={messageClassName}>{message.text}</div>
-                )}
-
-                {showForgotPinInfo && (
-                  <div className="text-sm text-muted-foreground text-center">
-                    Please contact admin to reset your PIN.
+                  >
+                    {message.text}
                   </div>
                 )}
 
-                <Field>
+                <Button
+                  type="submit"
+                  size="lg"
+                  className={cn(
+                    "h-12 w-full text-base font-semibold shadow-md transition-all duration-200",
+                    "bg-primary hover:bg-primary/90 active:scale-[0.98]",
+                    "disabled:opacity-50 disabled:cursor-not-allowed"
+                  )}
+                  disabled={isPending || mobile.length < 10}
+                >
+                  {isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    "Continue"
+                  )}
+                </Button>
+
+                <div className="flex items-center justify-center gap-2 pt-2 text-xs text-slate-500 dark:text-slate-400">
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>Secure & encrypted login</span>
+                </div>
+              </form>
+            </CardContent>
+          </>
+        ) : (
+          <>
+            {/* PIN Entry - Hero Section */}
+            <div className="relative overflow-hidden border-b bg-slate-50 px-6 py-10 dark:bg-slate-900">
+              <div className="relative flex flex-col items-center gap-4 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-md ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+                  <Lock className="h-8 w-8 text-slate-700 dark:text-slate-300" />
+                </div>
+                <div className="space-y-1.5">
+                  <CardTitle className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                    Enter your PIN
+                  </CardTitle>
+                  <CardDescription className="text-base text-slate-600 dark:text-slate-400">
+                    {mobile}
+                  </CardDescription>
+                </div>
+              </div>
+            </div>
+
+            <CardContent className="p-6">
+              <form onSubmit={handleVerifyPin} className="space-y-6">
+                <div className="space-y-4">
+                  <div className="text-center text-sm font-semibold text-slate-700 dark:text-slate-300">
+                    6-Digit PIN
+                  </div>
+                  <div className="flex justify-center py-2">
+                    <PinInput
+                      value={pin}
+                      onChange={setPin}
+                      disabled={isPending || locked}
+                    />
+                  </div>
+                  {pin.length > 0 && pin.length < 6 && (
+                    <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+                      {6 - pin.length} digit{pin.length !== 5 ? 's' : ''} remaining
+                    </p>
+                  )}
+                </div>
+
+                {message && (
+                  <div
+                    className={cn(
+                      "rounded-lg border p-3 text-center text-sm font-medium",
+                      message.tone === "error"
+                        ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-400"
+                        : "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/50 dark:text-blue-400"
+                    )}
+                  >
+                    {message.text}
+                  </div>
+                )}
+
+                {showForgotPinInfo && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/50 dark:text-amber-400">
+                    Please contact admin to reset your PIN
+                  </div>
+                )}
+
+                <div className="space-y-3">
                   <Button
                     type="submit"
-                    className="w-full"
+                    size="lg"
+                    className={cn(
+                      "h-12 w-full text-base font-semibold shadow-md transition-all duration-200",
+                      "bg-primary hover:bg-primary/90 active:scale-[0.98]",
+                      "disabled:opacity-50 disabled:cursor-not-allowed"
+                    )}
                     disabled={isPending || locked || pin.length !== 6}
                   >
                     {isPending ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                         Signing in...
                       </>
                     ) : (
@@ -253,28 +318,31 @@ export function MobilePinLoginForm({
                   <Button
                     type="button"
                     variant="ghost"
-                    className="w-full"
+                    size="lg"
+                    className="h-11 w-full text-sm font-medium"
                     onClick={handleForgotPin}
                     disabled={isPending}
                   >
                     Forgot PIN?
                   </Button>
+                </div>
 
+                <div className="flex items-center justify-center border-t pt-4">
                   <Button
                     type="button"
                     variant="link"
-                    className="w-full text-muted-foreground"
+                    className="text-sm font-medium text-slate-600 dark:text-slate-400"
                     onClick={handleBack}
                     disabled={isPending}
                   >
-                    <ArrowLeft className="mr-1 h-4 w-4" />
-                    Back
+                    <ArrowLeft className="mr-1.5 h-4 w-4" />
+                    Change number
                   </Button>
-                </Field>
-              </FieldGroup>
-            </form>
-          )}
-        </CardContent>
+                </div>
+              </form>
+            </CardContent>
+          </>
+        )}
       </Card>
     </div>
   );

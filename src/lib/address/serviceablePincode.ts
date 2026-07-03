@@ -7,9 +7,13 @@
  *    and the address must not be saveable until a serviceable pincode is selected.
  *  - Requirement 5.8: an address with an empty flat number must not be saveable, and
  *    the save must be rejected with a flat-number-required error.
+ *  - Requirements 3.1, 3.2, 3.3: KIT category customers bypass serviceability validation,
+ *    while MEAL category customers enforce serviceability checks.
  *
- * Validates: Requirements 5.6, 5.8
+ * Validates: Requirements 5.6, 5.8, 3.1, 3.2, 3.3
  */
+
+import type { CustomerCategory } from "@/lib/onboarding/category";
 
 const PINCODE_FORMAT_REGEX = /^\d{6}$/;
 
@@ -24,6 +28,8 @@ export interface AddressSaveInput {
   flatNumber: string;
   /** The serviceable pincodes for the admin's franchise. */
   serviceAreaPincodes: Set<string> | readonly string[];
+  /** The customer category (KIT bypasses serviceability check). */
+  customerCategory?: CustomerCategory;
 }
 
 /** Outcome of the save gate, carrying every blocking reason. */
@@ -76,15 +82,24 @@ export function hasFlatNumber(flatNumber: string): boolean {
 /**
  * Decide whether a captured address can be saved.
  *
- * The address is saveable if and only if its pincode is serviceable (Req 5.6)
- * AND its flat number is non-empty (Req 5.8). When it is not saveable, every
- * blocking reason is reported so the UI can keep the relevant warnings visible.
+ * The address is saveable if and only if its flat number is non-empty (Req 5.8)
+ * AND (for MEAL/ACCOMMODATION) its pincode is serviceable (Req 5.6, 3.3).
+ * 
+ * For KIT category (Req 3.1, 3.2), serviceability check is bypassed - any valid
+ * 6-digit PIN is accepted.
+ *
+ * When the address is not saveable, every blocking reason is reported so the UI
+ * can keep the relevant warnings visible.
  */
 export function canSaveAddress(input: AddressSaveInput): AddressSaveDecision {
   const errors: AddressSaveError[] = [];
 
-  if (!isServiceable(input.pincode, input.serviceAreaPincodes)) {
-    errors.push("PINCODE_NOT_SERVICEABLE");
+  // Requirement 3.1, 3.2: KIT category bypasses serviceability check
+  // Requirement 3.3: MEAL category enforces serviceability check
+  if (input.customerCategory !== "KIT") {
+    if (!isServiceable(input.pincode, input.serviceAreaPincodes)) {
+      errors.push("PINCODE_NOT_SERVICEABLE");
+    }
   }
 
   if (!hasFlatNumber(input.flatNumber)) {

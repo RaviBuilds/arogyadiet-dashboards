@@ -1,7 +1,7 @@
 import { createClient as createServerClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
+import { generateInvoiceData } from "@/lib/invoices";
 
 export const revalidate = 0;
 
@@ -20,35 +20,62 @@ export default async function InvoicePage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Admin client to bypass RLS for invoice generation
-  const supabaseAdmin = createAdminClient();
+  // Generate invoice data using the unified invoice library
+  const invoiceData = await generateInvoiceData(paymentId);
 
-  // Fetch core payment + subscription + profile
-  const { data: payment, error } = await supabaseAdmin
-    .from("payments")
-    .select(
+  if (!invoiceData) {
+    // Check if this is due to unpaid KIT order (Requirement 10.4)
+    const { data: paymentCheck } = await supabase
+      .from("payments")
+      .select(
+        `
+        status,
+        subscriptions (
+          customer_category
+        )
       `
-      *,
-      subscriptions (
-        subscription_code,
-        total_days,
-        subscription_plans ( price, base_price )
-      ),
-      customer_profiles (
-        user_id,
-        users ( full_name, email, mobile ),
-        addresses ( street_1, street_2, landmark, city, state, pincode, is_primary )
       )
-    `,
-    )
-    .eq("id", paymentId)
-    .single();
+      .eq("id", paymentId)
+      .single();
 
-  if (error) {
-    console.error("SERVER ERROR FETCHING INVOICE:", error);
-  }
+    const isUnpaidKit =
+      paymentCheck?.subscriptions?.customer_category === "KIT" &&
+      paymentCheck?.status !== "PAID";
 
-  if (error || !payment) {
+    if (isUnpaidKit) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-10 text-center bg-zinc-50">
+          <div className="max-w-md bg-white p-8 rounded-lg shadow-lg border border-amber-200">
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg
+                className="w-8 h-8 text-amber-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-black text-amber-900 mb-2">
+              Payment Pending
+            </h2>
+            <p className="text-zinc-600 font-medium">
+              Invoice cannot be generated for unpaid KIT orders. Please complete
+              payment to access your invoice.
+            </p>
+            <p className="text-sm text-zinc-500 mt-4">
+              Contact support if you believe payment has been completed.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-10 text-center bg-zinc-50">
         <h2 className="text-2xl font-black text-red-600">
@@ -67,7 +94,19 @@ export default async function InvoicePage({
     .select("id")
     .eq("auth_user_id", user.id)
     .single();
-  if (payment.customer_profiles?.user_id !== internalUser?.id) {
+
+  // Check if user has access (via admin client query in generateInvoiceData)
+  // Re-fetch minimal payment data to verify ownership
+  const { data: paymentCheck } = await supabase
+    .from("payments")
+    .select("customer_profiles(user_id)")
+    .eq("id", paymentId)
+    .single();
+
+  if (
+    !paymentCheck?.customer_profiles ||
+    paymentCheck.customer_profiles.user_id !== internalUser?.id
+  ) {
     return (
       <div className="p-10 text-center font-bold text-red-600">
         Unauthorized to view this invoice.
@@ -75,62 +114,26 @@ export default async function InvoicePage({
     );
   }
 
-  // Fetch add-on order separately
-  const { data: addonOrder } = await supabaseAdmin
-    .from("addon_orders")
-    .select("id, total_amount, target_delivery_date, status")
-    .eq("payment_id", paymentId)
-    .maybeSingle();
+  // Extract data from invoice
+  const {
+    invoiceNumber,
+    date,
+    isPending,
+    customerName,
+    customerEmail,
+    customerMobile,
+    address,
+    subscriptionCode,
+    lineItems,
+    pricing,
+    paymentMethod,
+    paymentReference,
+    paymentNotes,
+  } = invoiceData;
 
-  const profile = payment.customer_profiles;
-  const sub = payment.subscriptions;
-  const customerUser = profile?.users;
-
-  const primaryAddress =
-    profile?.addresses?.find((a: any) => a.is_primary) ||
-    profile?.addresses?.[0];
-
-  // ─── Pricing math ─────────────────────────────────────────────────────────
-  // Priority: use stored breakdown columns → fallback to 5% reverse-calc for
-  // older Razorpay rows that don't have them.
-
-  const totalAmount = Number(payment.amount);
-
-  let baseAmount: number;
-  let taxAmountCalc: number;
-  let taxPercentCalc: number;
-  let discountAmount: number;
-
-  if (payment.base_amount != null && payment.tax_amount != null) {
-    // New rows with stored breakdown
-    baseAmount = Number(payment.base_amount);
-    taxAmountCalc = Number(payment.tax_amount);
-    taxPercentCalc = Number(payment.tax_percent ?? 5);
-    discountAmount = Number(payment.discount_amount ?? 0);
-  } else {
-    // Legacy fallback — reverse-calculate 5% GST
-    const priceBeforeTax = totalAmount / 1.05;
-    taxAmountCalc = totalAmount - priceBeforeTax;
-    taxPercentCalc = 5;
-    discountAmount = 0;
-
-    const planPrice = sub?.subscription_plans?.price
-      ? Number(sub.subscription_plans.price)
-      : priceBeforeTax;
-    discountAmount = Math.max(0, planPrice - priceBeforeTax);
-    baseAmount = planPrice;
-  }
-
-  const finalPrice = baseAmount - discountAmount;
-
-  // Payment method label
-  const isManual = payment.payment_method === "MANUAL";
-  const methodLabel = isManual ? "Manual" : payment.payment_method;
-
-  // Status-driven labels
-  const isPending = payment.status === "PENDING";
-  const statusLabel = isPending ? "PAYMENT PENDING" : payment.status;
+  const statusLabel = isPending ? "PAYMENT PENDING" : invoiceData.status;
   const totalLabel = isPending ? "Amount Due" : "Total Paid";
+  const isManual = paymentMethod === "Manual";
 
   return (
     <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
@@ -166,11 +169,9 @@ export default async function InvoicePage({
             <h2 className="text-4xl font-black text-zinc-200 uppercase tracking-widest mb-2">
               {isPending ? "Proforma" : "Invoice"}
             </h2>
-            <p className="font-bold text-zinc-800">
-              INV-{payment.id.split("-")[0].toUpperCase()}
-            </p>
+            <p className="font-bold text-zinc-800">{invoiceNumber}</p>
             <p className="text-sm text-zinc-500">
-              Date: {format(new Date(payment.created_at), "dd MMM, yyyy")}
+              Date: {format(new Date(date), "dd MMM, yyyy")}
             </p>
             <div
               className={`mt-4 inline-block px-3 py-1 font-bold text-xs rounded-full uppercase tracking-wider border ${
@@ -190,73 +191,50 @@ export default async function InvoicePage({
             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">
               Billed To
             </p>
-            <p className="font-bold text-zinc-900 text-lg">
-              {customerUser?.full_name}
-            </p>
-            <p className="text-sm text-zinc-600">{customerUser?.email}</p>
-            <p className="text-sm text-zinc-600">+91 {customerUser?.mobile}</p>
+            <p className="font-bold text-zinc-900 text-lg">{customerName}</p>
+            <p className="text-sm text-zinc-600">{customerEmail}</p>
+            <p className="text-sm text-zinc-600">+91 {customerMobile}</p>
 
-            {primaryAddress && (
+            {address && (
               <div className="text-sm text-zinc-600 mt-3">
                 <p>
-                  {primaryAddress.street_1}
-                  {primaryAddress.street_2
-                    ? `, ${primaryAddress.street_2}`
-                    : ""}
+                  {address.street_1}
+                  {address.street_2 ? `, ${address.street_2}` : ""}
                 </p>
                 <p>
-                  {primaryAddress.landmark
-                    ? `${primaryAddress.landmark}, `
-                    : ""}
-                  {primaryAddress.city}
+                  {address.landmark ? `${address.landmark}, ` : ""}
+                  {address.city}
                 </p>
                 <p>
-                  {primaryAddress.state}, {primaryAddress.pincode}
+                  {address.state}, {address.pincode}
                 </p>
               </div>
             )}
           </div>
           <div>
             <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">
-              {addonOrder ? "Order Details" : "Subscription Details"}
+              {lineItems[0]?.description.includes("Add-on")
+                ? "Order Details"
+                : "Subscription Details"}
             </p>
-            {addonOrder ? (
-              <>
-                <p className="font-bold text-zinc-900">Add-on Order</p>
-                {addonOrder.target_delivery_date ? (
-                  <p className="text-sm text-zinc-600">
-                    Target delivery:{" "}
-                    {format(
-                      new Date(addonOrder.target_delivery_date),
-                      "dd MMM, yyyy",
-                    )}
-                  </p>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <p className="font-bold text-zinc-900">
-                  Subscription ID — {sub?.subscription_code}
-                </p>
-                <p className="text-sm text-zinc-600">
-                  {sub?.total_days} Days Meal Plan
-                </p>
-              </>
-            )}
-            <p className="text-sm text-zinc-500 mt-4">
-              Payment Method:{" "}
-              <span className="uppercase font-medium">{methodLabel}</span>
-            </p>
-            {isManual && payment.payment_reference && (
-              <p className="text-sm text-zinc-500 mt-1">
-                Reference:{" "}
-                <span className="font-medium">{payment.payment_reference}</span>
+            {subscriptionCode && (
+              <p className="font-bold text-zinc-900">
+                Subscription ID — {subscriptionCode}
               </p>
             )}
-            {isManual && payment.payment_notes && (
+            <p className="text-sm text-zinc-600">{lineItems[0]?.description}</p>
+            <p className="text-sm text-zinc-500 mt-4">
+              Payment Method:{" "}
+              <span className="uppercase font-medium">{paymentMethod}</span>
+            </p>
+            {isManual && paymentReference && (
               <p className="text-sm text-zinc-500 mt-1">
-                Notes:{" "}
-                <span className="font-medium">{payment.payment_notes}</span>
+                Reference: <span className="font-medium">{paymentReference}</span>
+              </p>
+            )}
+            {isManual && paymentNotes && (
+              <p className="text-sm text-zinc-500 mt-1">
+                Notes: <span className="font-medium">{paymentNotes}</span>
               </p>
             )}
           </div>
@@ -288,23 +266,17 @@ export default async function InvoicePage({
             </tr>
           </thead>
           <tbody className="divide-y border-b-2 border-zinc-100">
-            <tr>
-              <td className="py-5">
-                <p className="font-bold text-zinc-900">
-                  {addonOrder
-                    ? "ArogyaDiet Add-on Purchase"
-                    : `ArogyaDiet ${sub?.total_days} Days Standard Plan`}
-                </p>
-                <p className="text-sm text-zinc-500 mt-1">
-                  {addonOrder
-                    ? "Includes add-on items purchased from the shop."
-                    : "Includes daily meal delivery, pause credits, and dynamic address routing."}
-                </p>
-              </td>
-              <td className="py-5 text-right font-medium text-zinc-900">
-                ₹{baseAmount.toFixed(2)}
-              </td>
-            </tr>
+            {lineItems.map((item, index) => (
+              <tr key={index}>
+                <td className="py-5">
+                  <p className="font-bold text-zinc-900">{item.description}</p>
+                  <p className="text-sm text-zinc-500 mt-1">{item.subtitle}</p>
+                </td>
+                <td className="py-5 text-right font-medium text-zinc-900">
+                  ₹{item.amount.toFixed(2)}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
 
@@ -313,29 +285,29 @@ export default async function InvoicePage({
           <div className="w-[60%] sm:w-1/2">
             <div className="flex justify-between py-2 text-sm text-zinc-600">
               <span>Base Price</span>
-              <span>₹{baseAmount.toFixed(2)}</span>
+              <span>₹{pricing.baseAmount.toFixed(2)}</span>
             </div>
-            {discountAmount > 0 && (
+            {pricing.discountAmount > 0 && (
               <div className="flex justify-between py-2 text-sm text-zinc-600">
                 <span>Discount Applied</span>
                 <span className="text-green-600">
-                  -₹{discountAmount.toFixed(2)}
+                  -₹{pricing.discountAmount.toFixed(2)}
                 </span>
               </div>
             )}
-            {discountAmount > 0 && (
+            {pricing.discountAmount > 0 && (
               <div className="flex justify-between py-2 text-sm text-zinc-800 font-bold border-t mt-2 pt-2">
                 <span>Price After Discount</span>
-                <span>₹{finalPrice.toFixed(2)}</span>
+                <span>₹{pricing.finalPrice.toFixed(2)}</span>
               </div>
             )}
             <div className="flex justify-between py-2 text-sm text-zinc-600 border-b pb-4 mb-2">
-              <span>GST ({taxPercentCalc.toFixed(0)}%)</span>
-              <span>₹{taxAmountCalc.toFixed(2)}</span>
+              <span>GST ({pricing.taxPercent.toFixed(0)}%)</span>
+              <span>₹{pricing.taxAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between py-2 text-xl font-black text-zinc-900">
               <span>{totalLabel}</span>
-              <span>₹{totalAmount.toFixed(2)}</span>
+              <span>₹{pricing.totalAmount.toFixed(2)}</span>
             </div>
           </div>
         </div>

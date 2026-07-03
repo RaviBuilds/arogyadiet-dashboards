@@ -130,7 +130,14 @@ export function PinInput({
       role="group"
       aria-label={label}
       id={id}
-      className="flex items-center justify-center gap-2"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "12px",
+        padding: "20px 0",
+        width: "100%",
+      }}
     >
       {Array.from({ length: PIN_LENGTH }, (_, index) => (
         <input
@@ -151,7 +158,40 @@ export function PinInput({
           onFocus={() => handleFocus(index)}
           disabled={disabled}
           autoComplete="off"
-          className="h-12 w-10 rounded-md border border-input bg-background text-center text-lg font-medium shadow-sm transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            minWidth: "48px",
+            maxWidth: "48px",
+            width: "48px",
+            minHeight: "56px",
+            maxHeight: "56px",
+            height: "56px",
+            fontSize: "26px",
+            fontWeight: "700",
+            lineHeight: "56px",
+            textAlign: "center",
+            verticalAlign: "middle",
+            border: "2px solid #cbd5e1",
+            borderRadius: "12px",
+            backgroundColor: "#ffffff",
+            color: "#0f172a",
+            outline: "none",
+            transition: "all 0.2s ease",
+            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.08)",
+            boxSizing: "border-box",
+            margin: "0",
+            padding: "0",
+            display: "block",
+          }}
+          onFocusCapture={(e) => {
+            e.currentTarget.style.borderColor = "#6366f1";
+            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99, 102, 241, 0.2), 0 2px 4px rgba(0, 0, 0, 0.08)";
+            e.currentTarget.style.transform = "scale(1.05)";
+          }}
+          onBlurCapture={(e) => {
+            e.currentTarget.style.borderColor = "#cbd5e1";
+            e.currentTarget.style.boxShadow = "0 2px 4px rgba(0, 0, 0, 0.08)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
         />
       ))}
     </div>

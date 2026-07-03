@@ -46,6 +46,7 @@ import {
   AlertTriangle,
   Loader2,
   Filter,
+  Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -88,6 +89,7 @@ export interface CustomerData {
   allergies: string | null;
   hasMedicalHistory: boolean;
   activePlanName: string | null;
+  customerCategory: string | null;
   isActive: boolean;
   clinic_id: string | null;
   clinicName: string | null;
@@ -862,6 +864,17 @@ export default function CustomerDashboard({
                               View 360 Dashboard
                             </Link>
                           </DropdownMenuItem>
+                          {customer.customerCategory === "KIT" && (
+                            <DropdownMenuItem asChild>
+                              <Link
+                                href={`/customers/${customer.id}/shipping`}
+                                className="cursor-pointer font-medium flex items-center"
+                              >
+                                <Truck className="mr-2 h-4 w-4 text-primary" />
+                                Shipping
+                              </Link>
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="cursor-pointer font-medium"

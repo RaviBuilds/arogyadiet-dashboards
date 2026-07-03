@@ -20,9 +20,11 @@ import {
  * not serviceable, so callers should pass the resolved service area.
  *
  * @param serviceAreaPincodes the serviceable pincodes for the admin's franchise
+ * @param skipServiceabilityCheck if true, skips the serviceability validation (for KIT category)
  */
 export function createAddressCaptureSchema(
   serviceAreaPincodes: string[] = [],
+  skipServiceabilityCheck: boolean = false,
 ) {
   return z.object({
     // Req 5.1: address-tag selector offering exactly Home/Office, Home default.
@@ -46,8 +48,24 @@ export function createAddressCaptureSchema(
     city: z.string().min(1, "City could not be resolved from the location."),
     state: z.string().min(1, "State could not be resolved from the location."),
 
-    // Req 5.6: pincode must be within the franchise's serviceable pincodes.
+    // Req 5.6: pincode must be within the franchise's serviceable pincodes (unless skipped for KIT).
+    // Req 3.1, 3.2: KIT category bypasses serviceability check, only validates format.
     pincode: z.string().superRefine((value, ctx) => {
+      // Basic format validation (6 digits)
+      if (!/^\d{6}$/.test(value.trim())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Pincode must be exactly 6 digits.",
+        });
+        return;
+      }
+      
+      // Skip serviceability check for KIT category (Req 3.1, 3.2)
+      if (skipServiceabilityCheck) {
+        return;
+      }
+      
+      // Enforce serviceability for MEAL/ACCOMMODATION (Req 5.6, 3.3)
       if (!isServiceable(value, serviceAreaPincodes)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

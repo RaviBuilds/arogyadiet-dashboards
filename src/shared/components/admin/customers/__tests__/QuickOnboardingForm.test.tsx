@@ -137,6 +137,18 @@ const PLANS = [
   },
 ];
 
+const KIT_PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
+const KIT_PRODUCTS = [
+  {
+    id: KIT_PRODUCT_ID,
+    name: "Weightloss Platinum",
+    base_price: 28080.00,
+    tax_rate: 0.05,
+    is_active: true,
+    created_at: new Date("2024-01-01"),
+  },
+];
+
 /** Advance the wizard from Details → Payment & Review. */
 async function goToReviewStep(user: ReturnType<typeof userEvent.setup>) {
   // Step 1 — Details
@@ -145,13 +157,17 @@ async function goToReviewStep(user: ReturnType<typeof userEvent.setup>) {
   // Gender is the only Select on this step (native <select> via mock).
   await user.selectOptions(screen.getByRole("combobox"), "Male");
   await user.click(screen.getByRole("radio", { name: "Veg" }));
+  // Enter temp PIN
+  await user.type(screen.getByLabelText(/temporary pin/i), "123456");
   await user.click(screen.getByRole("button", { name: /next/i }));
 
   // Step 2 — Category & Plan (MEAL is the default category)
-  await user.selectOptions(
-    screen.getByRole("combobox"), // the Plan select
-    PLAN_ID,
-  );
+  // Now there are potentially multiple comboboxes, get the plan select
+  const comboboxes = screen.getAllByRole("combobox");
+  // For MEAL category (default), the first combobox is the plan selector
+  await user.selectOptions(comboboxes[0], PLAN_ID);
+  // Select initial meal preference
+  await user.click(screen.getByRole("radio", { name: "Veg" }));
   await user.click(screen.getByRole("button", { name: /next/i }));
 
   // Step 3 — Address (mock already reported a valid address)
@@ -170,12 +186,12 @@ describe("QuickOnboardingForm — test-email control (Req 10.2)", () => {
   it("shows an optional email field with an adjacent test-email checkbox", async () => {
     const user = userEvent.setup();
     render(
-      <QuickOnboardingForm plans={PLANS} serviceAreaPincodes={["500081"]} />,
+      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} />,
     );
 
     await goToReviewStep(user);
 
-    expect(screen.getByLabelText(/email \(optional\)/i)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /email/i })).toBeInTheDocument();
     // The Test_Email checkbox next to the email field (Req 10.2).
     expect(
       screen.getByText(/placeholder \/ test email/i),
@@ -190,7 +206,7 @@ describe("QuickOnboardingForm — 5 PM cutoff acknowledgment gate (Req 7.1–7.4
   it("warns past the cutoff and gates Onboard behind the acknowledgment", async () => {
     const user = userEvent.setup();
     render(
-      <QuickOnboardingForm plans={PLANS} serviceAreaPincodes={["500081"]} />,
+      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} />,
     );
 
     await goToReviewStep(user);
@@ -216,5 +232,70 @@ describe("QuickOnboardingForm — 5 PM cutoff acknowledgment gate (Req 7.1–7.4
     // Req 7.4: clearing the acknowledgment disables it again.
     await user.click(ack);
     expect(onboard).toBeDisabled();
+  });
+});
+
+describe("QuickOnboardingForm — KIT product payment review (Req 4.1)", () => {
+  it("displays KIT product name, base price, tax amount (5%), and total price", async () => {
+    const user = userEvent.setup();
+    render(
+      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} />,
+    );
+
+    // Step 1 — Details
+    await user.type(screen.getByLabelText(/full name/i), "Rahul Sharma");
+    await user.type(screen.getByLabelText(/mobile number/i), "9876543210");
+    await user.selectOptions(screen.getByRole("combobox"), "Male");
+    await user.click(screen.getByRole("radio", { name: "Veg" }));
+    // Enter temp PIN
+    await user.type(screen.getByLabelText(/temporary pin/i), "123456");
+    await user.click(screen.getByRole("button", { name: /next/i }));
+
+    // Step 2 — Category & Plan (select KIT category)
+    await user.click(screen.getByRole("radio", { name: "Meal" }));
+    await user.click(screen.getByRole("radio", { name: "Kit" }));
+    
+    // Wait for KIT fields to appear, then select KIT product
+    const kitSelects = screen.getAllByRole("combobox");
+    // The KIT product dropdown should now be visible
+    await user.selectOptions(kitSelects[0], KIT_PRODUCT_ID);
+    
+    // Enter kit duration
+    await user.type(screen.getByLabelText(/kit duration \(days\)/i), "30");
+    
+    // Select initial meal preference
+    await user.click(screen.getByRole("radio", { name: "Veg" }));
+    
+    await user.click(screen.getByRole("button", { name: /next/i }));
+
+    // Step 3 — Address (mock already reported a valid address)
+    expect(await screen.findByTestId("address-capture-mock")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /next/i }));
+
+    // Step 4 — Payment & Review
+    await screen.findByRole("button", { name: /onboard customer/i });
+
+    // Verify KIT-specific information is displayed
+    expect(screen.getByText("KIT Product")).toBeInTheDocument();
+    expect(screen.getByText("Weightloss Platinum")).toBeInTheDocument();
+    
+    // Verify base price is displayed
+    expect(screen.getByText("Base Price")).toBeInTheDocument();
+    expect(screen.getByText("₹28,080.00")).toBeInTheDocument();
+    
+    // Verify tax amount (5%) is displayed
+    expect(screen.getByText("Tax (5%)")).toBeInTheDocument();
+    expect(screen.getByText("₹1,404.00")).toBeInTheDocument();
+    
+    // Verify total price is displayed
+    expect(screen.getByText("Total Price")).toBeInTheDocument();
+    expect(screen.getByText("₹29,484.00")).toBeInTheDocument();
+    
+    // Verify duration is displayed
+    expect(screen.getByText("Duration")).toBeInTheDocument();
+    expect(screen.getByText("30 days")).toBeInTheDocument();
+    
+    // Verify MEAL plan information is NOT displayed
+    expect(screen.queryByText("Monthly Meal Plan")).not.toBeInTheDocument();
   });
 });

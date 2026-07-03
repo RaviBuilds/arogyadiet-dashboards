@@ -122,10 +122,20 @@ export async function onboardCustomerAction(
   // (2) Resolve admin identity + franchise scope.
   const { userId: adminUserId } = await getCurrentAdminContext();
   const franchiseId = await resolveScopedFranchiseId();
-  const serviceAreaPincodes = await resolveServiceablePincodes(franchiseId);
+  
+  // (2b) Pre-parse to determine category for conditional serviceability validation
+  const rawInput = payload as Record<string, unknown>;
+  const primaryCategory = rawInput.primaryCategory as string | undefined;
+  
+  // (2c) For KIT category, skip PIN serviceability check (Req 3.1, 3.2)
+  // For MEAL category, enforce serviceability (Req 3.3)
+  const skipServiceabilityCheck = primaryCategory === "KIT";
+  const serviceAreaPincodes = skipServiceabilityCheck 
+    ? [] // Empty array when skipping serviceability
+    : await resolveServiceablePincodes(franchiseId);
 
   // (3) Zod re-validate against the franchise-bound schema (Req 4.6).
-  const schema = createQuickOnboardingSchema(serviceAreaPincodes);
+  const schema = createQuickOnboardingSchema(serviceAreaPincodes, skipServiceabilityCheck);
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
     return {

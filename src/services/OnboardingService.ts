@@ -284,22 +284,70 @@ export async function onboard(
     };
   }
 
-  const plan = await resolvePlanPricing(payload.planId);
-  if (!plan) {
-    return {
-      ok: false,
-      reason: "PLAN_NOT_FOUND",
-      message: "The selected subscription plan could not be found.",
-      fieldErrors: { planId: "Select a valid subscription plan." },
-    };
+  // Category-based subscription field validation and pricing resolution
+  let plan: PlanPricing | null = null;
+  let kitProduct: KitProductPricing | null = null;
+
+  if (category === "KIT") {
+    // KIT category: requires kitProductId and kitDurationDays (Req 2.1, 2.2, 2.3)
+    if (!payload.kitProductId || !payload.kitDurationDays) {
+      const fieldErrors: Record<string, string> = {};
+      if (!payload.kitProductId) {
+        fieldErrors.kitProductId = "Select a KIT product.";
+      }
+      if (!payload.kitDurationDays) {
+        fieldErrors.kitDurationDays = "Enter kit duration in days.";
+      }
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: "KIT category requires a product selection and duration.",
+        fieldErrors,
+      };
+    }
+    kitProduct = await resolveKitProductPricing(payload.kitProductId);
+    if (!kitProduct) {
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: "The selected KIT product could not be found.",
+        fieldErrors: { kitProductId: "Select a valid KIT product." },
+      };
+    }
+  } else if (category === "MEAL") {
+    // MEAL category: requires planId (Req 4.4)
+    if (!payload.planId) {
+      return {
+        ok: false,
+        reason: "PLAN_NOT_FOUND",
+        message: "MEAL category requires a subscription plan selection.",
+        fieldErrors: { planId: "Select a subscription plan." },
+      };
+    }
+    plan = await resolvePlanPricing(payload.planId);
+    if (!plan) {
+      return {
+        ok: false,
+        reason: "PLAN_NOT_FOUND",
+        message: "The selected subscription plan could not be found.",
+        fieldErrors: { planId: "Select a valid subscription plan." },
+      };
+    }
   }
 
   const start = startOfDay(new Date(payload.startDate));
   const startsOn = format(start, "yyyy-MM-dd");
-  const endsOn =
-    plan.totalDays > 0
+  
+  // Calculate end date based on category
+  let endsOn: string | null = null;
+  if (category === "KIT" && kitProduct && payload.kitDurationDays) {
+    endsOn = format(addDays(start, payload.kitDurationDays - 1), "yyyy-MM-dd");
+  } else if (category === "MEAL" && plan) {
+    endsOn = plan.totalDays > 0
       ? format(addDays(start, plan.totalDays - 1), "yyyy-MM-dd")
       : null;
+  }
+  
   const nowIso = new Date().toISOString();
 
   // (6a) Resolve meal category ID for initial meal preference
@@ -360,22 +408,25 @@ export async function onboard(
       clinic_id: clinicId,
     },
     subscription: {
-      plan_id: payload.planId,
+      // Category-specific fields (Req 2.1, 2.2, 2.3, 4.4, 7.1)
+      plan_id: category === "MEAL" ? (payload.planId ?? null) : null,
+      kit_product_id: category === "KIT" ? (payload.kitProductId ?? null) : null,
+      kit_duration_days: category === "KIT" ? (payload.kitDurationDays ?? null) : null,
       customer_category: category,
       starts_on: startsOn,
       ends_on: endsOn,
       effective_end_on: endsOn,
       status: "ACTIVE",
-      total_days: plan.totalDays,
-      pause_credits_total: plan.pauseCredits,
+      total_days: category === "MEAL" && plan ? plan.totalDays : (payload.kitDurationDays ?? 0),
+      pause_credits_total: category === "MEAL" && plan ? plan.pauseCredits : 0,
       franchise_id: franchiseId,
-      initial_meal_category_id: mealCategoryId,  // NEW: For daily preferences generation
+      initial_meal_category_id: mealCategoryId,  // For daily preferences generation
     },
     payment: {
-      amount: plan.totalAmount,
-      base_amount: plan.baseAmount,
-      tax_percent: plan.taxPercent,
-      tax_amount: plan.taxAmount,
+      amount: category === "MEAL" && plan ? plan.totalAmount : (kitProduct?.totalAmount ?? 0),
+      base_amount: category === "MEAL" && plan ? plan.baseAmount : (kitProduct?.baseAmount ?? 0),
+      tax_percent: category === "MEAL" && plan ? plan.taxPercent : (kitProduct?.taxPercent ?? 5),
+      tax_amount: category === "MEAL" && plan ? plan.taxAmount : (kitProduct?.taxAmount ?? 0),
       paid_at: nowIso,
       payment_method: "COUNTER",
       franchise_id: franchiseId,
@@ -619,6 +670,19 @@ interface ResolvedPlanPricing {
   pauseCredits: number;
 }
 
+/** KIT product pricing resolved for the onboarding invoice + subscription. */
+interface ResolvedKitProductPricing {
+  totalAmount: number;
+  baseAmount: number;
+  taxAmount: number;
+  taxPercent: number;
+  productName: string;
+}
+
+// Type aliases for clarity in the onboard function
+type PlanPricing = ResolvedPlanPricing;
+type KitProductPricing = ResolvedKitProductPricing;
+
 /**
  * Resolve the invoice amount, tax breakdown, duration, and pause credits for a
  * subscription plan, mirroring the existing admin subscription logic: prefer
@@ -663,6 +727,40 @@ async function resolvePlanPricing(
     taxPercent,
     totalDays: Number(plan.duration_days ?? 0),
     pauseCredits: Number(plan.pause_credits ?? 0),
+  };
+}
+
+/**
+ * Resolve the invoice amount and tax breakdown for a KIT product, using
+ * the stored base_price and fixed 5% tax rate (Req 1.5, 10.1). Returns
+ * `null` when the product does not exist or is inactive.
+ */
+async function resolveKitProductPricing(
+  kitProductId: string
+): Promise<ResolvedKitProductPricing | null> {
+  const admin = createAdminClient();
+  const { data: product, error } = await admin
+    .from("kit_products")
+    .select("name, base_price, tax_rate, is_active")
+    .eq("id", kitProductId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !product) {
+    return null;
+  }
+
+  const baseAmount = Number(product.base_price ?? 0);
+  const taxPercent = Number(product.tax_rate ?? 0.05) * 100; // Convert to percentage
+  const taxAmount = baseAmount * Number(product.tax_rate ?? 0.05);
+  const totalAmount = baseAmount + taxAmount;
+
+  return {
+    totalAmount,
+    baseAmount,
+    taxAmount,
+    taxPercent,
+    productName: product.name as string,
   };
 }
 

@@ -29,7 +29,7 @@ export default async function CustomersPage({
       clinics ( name ),
       users!inner ( id, full_name, email, mobile, is_active ),
       addresses ( pincode, is_primary ),
-      subscriptions ( status, subscription_plans ( name ) )
+      subscriptions ( status, customer_category, subscription_plans ( name ) )
     `);
 
   if (error) console.error("Error fetching customers:", error);
@@ -59,17 +59,22 @@ export default async function CustomersPage({
 
     let displayStatus: string;
     let activePlanName: string | null = null;
+    let customerCategory: string | null = null;
 
     if (activeSub) {
       displayStatus = "Active";
       activePlanName = activeSub.subscription_plans?.name || "Custom Plan";
+      customerCategory = activeSub.customer_category;
     } else if (pendingSub) {
       displayStatus = "Pending";
       activePlanName = pendingSub.subscription_plans?.name || "Custom Plan";
+      customerCategory = pendingSub.customer_category;
     } else if (stoppedSub) {
       displayStatus = "Stopped";
+      customerCategory = stoppedSub.customer_category;
     } else if (expiredSub) {
       displayStatus = "Expired";
+      customerCategory = expiredSub.customer_category;
     } else {
       displayStatus = "No Plan";
     }
@@ -91,6 +96,7 @@ export default async function CustomersPage({
       allergies: customer.allergies || null,
       hasMedicalHistory: customer.has_medical_history || false,
       activePlanName: activePlanName,
+      customerCategory: customerCategory,
       clinic_id: customer.clinic_id || null,
       clinicName: customer.clinics?.name || null,
       franchiseId: customer.franchise_id || null,

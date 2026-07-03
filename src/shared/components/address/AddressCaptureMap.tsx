@@ -43,6 +43,7 @@ import {
   notServiceableMessage,
   type AddressSaveError,
 } from "@/lib/address/serviceablePincode";
+import type { CustomerCategory } from "@/lib/onboarding/category";
 
 const HYDERABAD_CENTER = { lat: 17.385, lng: 78.4867 };
 
@@ -121,6 +122,8 @@ export interface AddressCaptureMapProps {
   disabled?: boolean;
   /** Show the "locate me" button (defaults to true). */
   showLocateButton?: boolean;
+  /** Customer category for category-aware validation (Req 3.1, 3.2, 3.3). */
+  customerCategory?: CustomerCategory;
 }
 
 /** A blank value convenient for initialising the parent form. */
@@ -230,6 +233,7 @@ export function AddressCaptureMap({
   onValidityChange,
   disabled = false,
   showLocateButton = true,
+  customerCategory,
 }: AddressCaptureMapProps) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
@@ -277,6 +281,7 @@ export function AddressCaptureMap({
       pincode: value.pincode,
       flatNumber: value.flatNumber,
       serviceAreaPincodes,
+      customerCategory,
     });
     const resolved =
       isFullyResolved({
@@ -304,6 +309,7 @@ export function AddressCaptureMap({
     value.lat,
     value.lng,
     serviceKey,
+    customerCategory,
   ]);
 
   const patchValue = useCallback((patch: Partial<AddressCaptureValue>) => {
@@ -430,6 +436,7 @@ export function AddressCaptureMap({
   }, [patchValue, reverseGeocode]);
 
   const showServiceableWarning =
+    customerCategory !== "KIT" && // Req 3.1, 3.2: KIT bypasses serviceability
     value.pincode.trim().length > 0 &&
     !isServiceable(value.pincode, serviceAreaPincodes);
   const showFlatError = flatTouched && !hasFlatNumber(value.flatNumber);
@@ -572,8 +579,8 @@ export function AddressCaptureMap({
         </Alert>
       )}
 
-      {/* Req 5.6: not-serviceable warning naming the pincode; stays visible
-          until a serviceable pincode is selected. */}
+      {/* Req 5.6, 3.3: not-serviceable warning naming the pincode; stays visible
+          until a serviceable pincode is selected. Hidden for KIT category (Req 3.1, 3.2). */}
       {showServiceableWarning && (
         <Alert variant="destructive">
           <AlertTriangle />

@@ -15,6 +15,7 @@ import { buildPushPayload, notifyAdmins, sendNotificationToUser } from "@/lib/no
 import { notifyDeliveryAddressesUpdated } from "@/lib/customer/customerProfileNotifications";
 import { getCustomerNameBySubscriptionId } from "@/lib/notifications/lookups";
 import { isPastNextDayCutoff } from "@/lib/dates/ist";
+import type { CustomerCategory } from "@/lib/onboarding/category";
 
 /**
  * 5:00 PM IST next-day cutoff guard (core-clinic-architecture, Requirement 11.2).
@@ -159,6 +160,33 @@ async function assertOwnsSubscription(subscriptionId: string) {
 
   if (subscriptionError || !subscription) {
     throw new Error("Subscription not found for this customer");
+  }
+}
+
+/**
+ * Validates that a subscription belongs to the MEAL category.
+ * Throws an error if the subscription is not a MEAL subscription.
+ * 
+ * This prevents KIT customers from accessing meal subscription operations
+ * like pause/resume, daily preferences, and delivery address changes.
+ * 
+ * Requirements: 7.2, 7.5
+ */
+async function assertMealSubscription(subscriptionId: string): Promise<void> {
+  const { data: subscription, error } = await supabaseAdmin
+    .from("subscriptions")
+    .select("customer_category")
+    .eq("id", subscriptionId)
+    .single();
+
+  if (error || !subscription) {
+    throw new Error("Subscription not found");
+  }
+
+  const category = subscription.customer_category as CustomerCategory;
+  
+  if (category !== "MEAL") {
+    throw new Error("This operation is only available for meal subscriptions");
   }
 }
 
@@ -343,6 +371,9 @@ export async function bulkUpdateMealPreferencesAction(
 ) {
   try {
     await assertOwnsSubscription(subscriptionId);
+    
+    // Category validation: Prevent KIT customers from accessing meal operations (Req 7.2, 7.5)
+    await assertMealSubscription(subscriptionId);
 
     // Enforce the 5:00 PM IST next-day cutoff (Req 11.2): reject the whole
     // operation before any write when any targeted delivery day is locked, so
@@ -628,6 +659,9 @@ export async function bulkUpdatePausePreferencesAction(
 ) {
   try {
     await assertOwnsSubscription(subscriptionId);
+    
+    // Category validation: Prevent KIT customers from accessing meal operations (Req 7.2, 7.5)
+    await assertMealSubscription(subscriptionId);
 
     // Enforce the 5:00 PM IST next-day cutoff (Req 11.2): reject the pause
     // operation before any write when any targeted delivery day is locked.
@@ -671,6 +705,9 @@ export async function bulkUpdateAddressPreferencesAction(
 ) {
   try {
     await assertOwnsSubscription(subscriptionId);
+    
+    // Category validation: Prevent KIT customers from accessing meal operations (Req 7.2, 7.5)
+    await assertMealSubscription(subscriptionId);
 
     // Enforce the 5:00 PM IST next-day cutoff (Req 11.2): reject the address
     // change before any write when any targeted delivery day is locked.
