@@ -448,17 +448,10 @@ export function ProfileCompletionDialog({
           <Button
             type="button"
             variant="outline"
-            onClick={() => runSubmit("save")}
+            onClick={() => setOpen(false)}
             disabled={isBusy}
           >
-            {submitting === "save" ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Save"
-            )}
+            Skip for now
           </Button>
           <Button
             type="button"

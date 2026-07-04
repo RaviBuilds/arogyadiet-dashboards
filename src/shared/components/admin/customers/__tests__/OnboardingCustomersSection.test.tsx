@@ -41,6 +41,7 @@ beforeEach(() => {
 
 const customerRow = {
   profileId: "profile-1",
+  userId: "user-1",
   customerCode: "CUST-001",
   fullName: "Rahul Sharma",
   mobile: "9876543210",
@@ -50,6 +51,7 @@ const customerRow = {
   franchiseId: null,
   clinicId: null,
   createdAt: "2024-03-01T10:00:00.000Z",
+  customerCategory: null,
 };
 
 describe("OnboardingCustomersSection — loading state (Req 15.7)", () => {

@@ -10,6 +10,7 @@ import { buildPushPayload, notifyAdmins, sendNotificationToUser } from "@/lib/no
 import { getCustomerNameBySubscriptionId } from "@/lib/notifications/lookups";
 import { revalidatePath } from "next/cache";
 import { checkGroupManage } from "@/lib/auth/adminAccess";
+import type { CustomerCategory } from "@/lib/onboarding/category";
 
 // Use raw admin client to match the customer portal\'s elevated transaction permissions
 const supabaseAdmin = createSupabaseAdminClient(
@@ -19,6 +20,33 @@ const supabaseAdmin = createSupabaseAdminClient(
 
 const MEAL_PLANNER_NOTIFY_DEDUPE_MS = 2000;
 const adminMealPlannerNotifyTimestamps = new Map<string, number>();
+
+/**
+ * Validates that a subscription belongs to the MEAL category.
+ * Throws an error if the subscription is not a MEAL subscription.
+ * 
+ * This prevents KIT customers from accessing meal subscription operations
+ * like pause/resume, daily preferences, and delivery address changes.
+ * 
+ * Requirements: 7.2, 7.5
+ */
+async function assertMealSubscription(subscriptionId: string): Promise<void> {
+  const { data: subscription, error } = await supabaseAdmin
+    .from("subscriptions")
+    .select("customer_category")
+    .eq("id", subscriptionId)
+    .single();
+
+  if (error || !subscription) {
+    throw new Error("Subscription not found");
+  }
+
+  const category = subscription.customer_category as CustomerCategory;
+  
+  if (category !== "MEAL") {
+    throw new Error("This operation is only available for meal subscriptions");
+  }
+}
 
 async function resolveUserIdFromSubscription(
   subscriptionId: string,
@@ -90,6 +118,9 @@ export async function adminBulkUpdateMealPreferences(subscriptionId: string, upd
   const gate = await checkGroupManage("subscriptions");
   if (!gate.ok) return { success: false, error: gate.error };
   try {
+    // Category validation: Prevent KIT customers from accessing meal operations (Req 7.2, 7.5)
+    await assertMealSubscription(subscriptionId);
+    
     for (const update of updates) {
       const payload: any = {};
       if (update.categoryId !== undefined) payload.meal_category_id = update.categoryId;
@@ -118,6 +149,9 @@ export async function adminBulkUpdatePausePreferences(subscriptionId: string, up
   const gate = await checkGroupManage("subscriptions");
   if (!gate.ok) return { success: false, error: gate.error };
   try {
+    // Category validation: Prevent KIT customers from accessing meal operations (Req 7.2, 7.5)
+    await assertMealSubscription(subscriptionId);
+    
     const result = await processPausePreferenceUpdates(
       subscriptionId,
       updates,
@@ -149,6 +183,9 @@ export async function adminBulkUpdateAddressPreferences(subscriptionId: string, 
   const gate = await checkGroupManage("subscriptions");
   if (!gate.ok) return { success: false, error: gate.error };
   try {
+    // Category validation: Prevent KIT customers from accessing meal operations (Req 7.2, 7.5)
+    await assertMealSubscription(subscriptionId);
+    
     for (const update of updates) {
       const { error } = await supabaseAdmin
         .from("subscription_daily_preferences")

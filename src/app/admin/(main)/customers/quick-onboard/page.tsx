@@ -12,6 +12,7 @@ import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader"
 import { guardAdminGroup } from "@/lib/auth/adminAccess";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
+import { listKitProductsAction } from "@/actions/admin-actions/kitProductActions";
 import {
   QuickOnboardingForm,
   type OnboardingPlan,
@@ -24,15 +25,16 @@ export default async function QuickOnboardPage() {
 
   const supabaseAdmin = createAdminClient();
 
-  // Load active subscription plans for the Category/Plan step (Req 4.4) and the
-  // serviceable pincodes that drive the Address_Capture serviceability gate
-  // (Req 5.6), in parallel.
-  const [{ data: rawPlans }, serviceAreaPincodes] = await Promise.all([
+  // Load active subscription plans for the Category/Plan step (Req 4.4), KIT
+  // products for KIT category (Req 2.2), and the serviceable pincodes that drive
+  // the Address_Capture serviceability gate (Req 5.6), in parallel.
+  const [{ data: rawPlans }, kitProductsResult, serviceAreaPincodes] = await Promise.all([
     supabaseAdmin
       .from("subscription_plans")
       .select("id, name, price, base_price, tax_amount, duration_days")
       .eq("is_active", true)
       .order("price", { ascending: true }),
+    listKitProductsAction(),
     getServiceAreaPincodesAction(),
   ]);
 
@@ -43,6 +45,9 @@ export default async function QuickOnboardPage() {
     durationDays: Number(plan.duration_days ?? 0),
   }));
 
+  // Transform KIT products for the form
+  const kitProducts = kitProductsResult.success ? kitProductsResult.data ?? [] : [];
+
   return (
     <div className="flex flex-col gap-6 pb-4">
       <AdminPageHeader
@@ -51,6 +56,7 @@ export default async function QuickOnboardPage() {
       />
       <QuickOnboardingForm
         plans={plans}
+        kitProducts={kitProducts}
         serviceAreaPincodes={serviceAreaPincodes}
       />
     </div>

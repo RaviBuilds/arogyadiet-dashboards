@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/shared/components/ui/button";
 import {
+  CalendarCheck,
   CreditCard,
   LogOut,
   MapPin,
@@ -49,6 +50,10 @@ const manageMealItems: NavItem[] = [
     href: "/subscription/manage/address",
     icon: MapPin,
   },
+];
+
+const kitNavItems: NavItem[] = [
+  { name: "KIT Tracker", href: "/kit-tracker", icon: CalendarCheck },
 ];
 
 const bottomNavItems: NavItem[] = [
@@ -105,11 +110,20 @@ function SidebarContent({
   pathname,
   onNavigate,
   onLogout,
+  customerCategory,
 }: {
   pathname: string;
   onNavigate?: () => void;
   onLogout: () => void;
+  customerCategory?: string | null;
 }) {
+  const isKit = customerCategory === "KIT";
+
+  // Filter nav items for KIT customers — hide meal/shop-related items
+  const filteredMainNavItems = isKit
+    ? mainNavItems.filter((item) => !["New Subscription", "My Meals"].includes(item.name))
+    : mainNavItems;
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center border-b border-white/[0.08] px-6 py-5 lg:h-[60px]">
@@ -130,32 +144,49 @@ function SidebarContent({
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain py-4">
         <NavGroup
-          items={mainNavItems}
+          items={filteredMainNavItems}
           pathname={pathname}
           onNavigate={onNavigate}
         />
 
-        <div>
-          <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
-            <ShoppingBag className="h-3 w-3" /> Shop
+        {isKit && (
+          <div>
+            <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <CalendarCheck className="h-3 w-3" /> KIT Tracker
+            </div>
+            <NavGroup
+              items={kitNavItems}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
           </div>
-          <NavGroup
-            items={shopNavItems}
-            pathname={pathname}
-            onNavigate={onNavigate}
-          />
-        </div>
+        )}
 
-        <div>
-          <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
-            <Settings2 className="h-3 w-3" /> Manage Meals
+        {!isKit && (
+          <div>
+            <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <ShoppingBag className="h-3 w-3" /> Shop
+            </div>
+            <NavGroup
+              items={shopNavItems}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
           </div>
-          <NavGroup
-            items={manageMealItems}
-            pathname={pathname}
-            onNavigate={onNavigate}
-          />
-        </div>
+        )}
+
+        {!isKit && (
+          <div>
+            <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <Settings2 className="h-3 w-3" /> Manage Meals
+            </div>
+            <NavGroup
+              items={manageMealItems}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
+          </div>
+        )}
 
         <NavGroup
           items={bottomNavItems}
@@ -180,9 +211,11 @@ function SidebarContent({
 export function CustomerSidebar({
   isMobile = false,
   onNavigate,
+  customerCategory,
 }: {
   isMobile?: boolean;
   onNavigate?: () => void;
+  customerCategory?: string | null;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -207,6 +240,7 @@ export function CustomerSidebar({
         pathname={pathname}
         onNavigate={onNavigate}
         onLogout={handleLogout}
+        customerCategory={customerCategory}
       />
     </div>
   );

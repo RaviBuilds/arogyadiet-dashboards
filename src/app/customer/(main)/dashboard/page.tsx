@@ -35,6 +35,8 @@ import {
   ProfileCompletionDialog,
   type CompletableField,
 } from "@/shared/components/customer/ProfileCompletionDialog";
+import { KitDashboard } from "./KitDashboard";
+import { getShippingInfoAction } from "@/actions/admin-actions/shippingActions";
 
 export const revalidate = 0;
 
@@ -156,7 +158,7 @@ export default async function CustomerDashboard() {
     // Query active subscription details for the dialog
     const { data: dialogSub } = await supabase
       .from("subscriptions")
-      .select("customer_category, starts_on, effective_end_on, subscription_plans(name)")
+      .select("customer_category, starts_on, effective_end_on, subscription_plans(name), kit_products(name)")
       .eq("customer_profile_id", profile.id)
       .eq("status", "ACTIVE")
       .maybeSingle();
@@ -165,10 +167,18 @@ export default async function CustomerDashboard() {
       const plan = Array.isArray(dialogSub.subscription_plans)
         ? dialogSub.subscription_plans[0]
         : dialogSub.subscription_plans;
+      const kitProduct = Array.isArray((dialogSub as any).kit_products)
+        ? (dialogSub as any).kit_products[0]
+        : (dialogSub as any).kit_products;
       
+      // For KIT subscriptions, show the kit product name as the plan name
+      const planName = dialogSub.customer_category === "KIT"
+        ? (kitProduct?.name ?? null)
+        : (plan?.name ?? null);
+
       profileDialogSubscription = {
         category: dialogSub.customer_category,
-        planName: plan?.name ?? null,
+        planName,
         startDate: dialogSub.starts_on,
         endDate: dialogSub.effective_end_on,
       };
@@ -244,6 +254,60 @@ export default async function CustomerDashboard() {
       subscription={profileDialogSubscription}
     />
   ) : null;
+
+  // Category-based view selection (Req 8.1, 8.4)
+  // If customer has a KIT subscription, show KIT-specific dashboard
+  if (activeSub && activeSub.customer_category === "KIT") {
+    // Fetch KIT-specific data
+    const { data: kitSubscription } = await supabase
+      .from("subscriptions")
+      .select(
+        `
+        id,
+        subscription_code,
+        starts_on,
+        kit_duration_days,
+        customer_category,
+        status,
+        kit_products (
+          name,
+          base_price,
+          tax_rate
+        )
+      `
+      )
+      .eq("id", activeSub.id)
+      .single();
+
+    if (!kitSubscription) {
+      return (
+        <div className="p-6">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Subscription Error</AlertTitle>
+            <AlertDescription>
+              Failed to load KIT subscription details.
+            </AlertDescription>
+          </Alert>
+        </div>
+      );
+    }
+
+    // Fetch shipping information
+    const shippingResult = await getShippingInfoAction(customerProfileId);
+    const shippingInfo = shippingResult.success ? (shippingResult.data ?? null) : null;
+
+    // Render KIT-specific dashboard (Req 8.1, 8.3)
+    return (
+      <>
+        {profileDialog}
+        <KitDashboard
+          subscription={kitSubscription}
+          shippingInfo={shippingInfo}
+        />
+      </>
+    );
+  }
 
   if (!activeSub) {
     return (

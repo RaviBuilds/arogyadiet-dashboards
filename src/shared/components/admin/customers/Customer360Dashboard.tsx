@@ -2,7 +2,7 @@
 
 import React, { useState, useTransition, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
 import { getPincodeValidationError } from "@/lib/address/validatePincode";
@@ -56,6 +56,7 @@ import {
   BadgeIndianRupee,
   CheckCircle2,
   CreditCard,
+  Download,
   Edit,
   Eye,
   Eye as EyeIcon,
@@ -65,12 +66,14 @@ import {
   KeyRound,
   Loader2,
   MapPin,
+  Package,
   Plus,
   ReceiptText,
   Send,
   ShieldAlert,
   Star,
   Trash2,
+  Truck,
   UserCheck,
   UserX,
 } from "lucide-react";
@@ -84,6 +87,9 @@ import {
   AdminCouponsTab,
   type CouponRow,
 } from "./AdminCouponsTab";
+import { CourierForm } from "./CourierForm";
+import { AdminKitTrackerView } from "./kit-tracker/AdminKitTrackerView";
+import type { ShippingInfo } from "@/types/kitShipping";
 
 const AddressPickerMap = dynamic(
   () =>
@@ -170,6 +176,21 @@ interface BillingPayment {
   } | null;
 }
 
+/** The customer's active KIT subscription, when Primary_Category is KIT. */
+interface KitSubscriptionInfo {
+  subscriptionId: string;
+  kitProductName: string;
+  kitDurationDays: number;
+  status: string;
+  startsOn: string | null;
+  endsOn: string | null;
+  basePrice: number | null;
+  taxRate: number | null;
+  kitReceivedDate: string | null;
+  kitTrackerEndDate: string | null;
+  kitTotalSkippedDays: number;
+}
+
 export function Customer360Dashboard({
   customer,
   initialSubscriptionData,
@@ -183,12 +204,30 @@ export function Customer360Dashboard({
   uploadMedicalAction,
   franchiseId,
   backHref = "/customers",
+  customerCategory = null,
+  kitSubscription = null,
+  existingShippingInfo = null,
+  kitDailyLogs = [],
 }: {
   customer: CustomerProfile;
   initialSubscriptionData: InitialSubscriptionData;
   initialCoupons: CouponRow[];
   billingPayments?: BillingPayment[];
   hasActiveSubscription?: boolean;
+  /** The customer's current Primary_Category ("MEAL" | "KIT" | "ACCOMMODATION"), if any. */
+  customerCategory?: string | null;
+  /** Active KIT subscription details, present only when customerCategory is "KIT". */
+  kitSubscription?: KitSubscriptionInfo | null;
+  /** Existing courier/tracking info for the KIT order, if already saved. */
+  existingShippingInfo?: ShippingInfo | null;
+  /** Daily logs for the KIT tracker (read-only display in admin view). */
+  kitDailyLogs?: Array<{
+    log_date: string;
+    status: "FOOD_TAKEN" | "FOOD_SKIPPED";
+    physical_activity_minutes: number | null;
+    physical_activity_name: string | null;
+    weight_kg: number | null;
+  }>;
   /**
    * Injectable server actions. Defaults to admin-scoped actions, so the admin
    * portal works unchanged. The franchise portal passes franchise-scoped
@@ -242,8 +281,15 @@ export function Customer360Dashboard({
       actions?.deactivateCustomerAccount ?? deactivateCustomerAccount,
   };
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
-  const [activeTab, setActiveTab] = useState("Profile & Medical");
+  const isKitCustomer = customerCategory === "KIT";
+  const requestedTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(
+    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription"].includes(requestedTab)
+      ? requestedTab
+      : "Profile & Medical",
+  );
 
   // User Management State
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
@@ -488,14 +534,25 @@ export function Customer360Dashboard({
   return (
     <div className="w-full">
       <AdminSubmenuBar
-        tabs={[
-          "Profile & Medical",
-          "Add Subscription",
-          "Addresses",
-          "Billing",
-          "Coupons",
-          "User Management",
-        ]}
+        tabs={
+          isKitCustomer
+            ? [
+                "Profile & Medical",
+                "KIT",
+                "Shipping",
+                "Addresses",
+                "Billing",
+                "User Management",
+              ]
+            : [
+                "Profile & Medical",
+                "Add Subscription",
+                "Addresses",
+                "Billing",
+                "Coupons",
+                "User Management",
+              ]
+        }
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
@@ -668,6 +725,130 @@ export function Customer360Dashboard({
             submitAction={addSubscriptionAction}
             franchiseId={franchiseId}
           />
+        )}
+
+        {activeTab === "KIT" && kitSubscription && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight">
+                KIT Subscription
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Details of the current KIT package purchased by this customer.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card className="border-primary/20 bg-primary/5">
+                <CardContent className="p-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      KIT Product
+                    </p>
+                    <p className="mt-2 text-xl font-black">
+                      {kitSubscription.kitProductName}
+                    </p>
+                  </div>
+                  <Package className="h-8 w-8 text-primary" />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Duration
+                    </p>
+                    <p className="mt-2 text-2xl font-black">
+                      {kitSubscription.kitDurationDays}
+                      <span className="text-sm font-medium text-muted-foreground">
+                        {" "}
+                        days
+                      </span>
+                    </p>
+                  </div>
+                  <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Status
+                    </p>
+                    <Badge
+                      variant="outline"
+                      className={
+                        kitSubscription.status === "ACTIVE"
+                          ? "mt-2 border-emerald-500 text-emerald-600 bg-emerald-50"
+                          : "mt-2 border-slate-300 text-slate-600 bg-slate-50"
+                      }
+                    >
+                      {kitSubscription.status}
+                    </Badge>
+                  </div>
+                  <BadgeIndianRupee className="h-8 w-8 text-muted-foreground/50" />
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Package Timeline</CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    Start Date
+                  </p>
+                  <p className="font-semibold">
+                    {kitSubscription.startsOn &&
+                    isValid(new Date(kitSubscription.startsOn))
+                      ? format(new Date(kitSubscription.startsOn), "PPP")
+                      : "N/A"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    End Date
+                  </p>
+                  <p className="font-semibold">
+                    {kitSubscription.endsOn &&
+                    isValid(new Date(kitSubscription.endsOn))
+                      ? format(new Date(kitSubscription.endsOn), "PPP")
+                      : "N/A"}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* KIT Tracker — read-only admin view */}
+            <AdminKitTrackerView
+              kitReceivedDate={kitSubscription.kitReceivedDate}
+              kitTrackerEndDate={kitSubscription.kitTrackerEndDate}
+              kitTotalSkippedDays={kitSubscription.kitTotalSkippedDays}
+              kitDurationDays={kitSubscription.kitDurationDays}
+              dailyLogs={kitDailyLogs ?? []}
+            />
+          </div>
+        )}
+
+        {activeTab === "Shipping" && kitSubscription && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight">
+                Shipping Management
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Manage courier tracking for this customer&apos;s KIT order.
+              </p>
+            </div>
+
+            <CourierForm
+              customerId={customer.id}
+              subscriptionId={kitSubscription.subscriptionId}
+              existingShippingInfo={existingShippingInfo}
+            />
+          </div>
         )}
 
         {activeTab === "Addresses" && (
@@ -904,6 +1085,9 @@ export function Customer360Dashboard({
                           <th className="px-5 py-4 font-bold">Method</th>
                           <th className="px-5 py-4 font-bold">Status</th>
                           <th className="px-5 py-4 font-bold">Reference</th>
+                          <th className="px-5 py-4 font-bold text-right">
+                            Invoice
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -918,6 +1102,10 @@ export function Customer360Dashboard({
                           const isPaid = ["PAID", "SUCCESS", "CAPTURED"].includes(
                             payment.status,
                           );
+                          const isPendingManual =
+                            payment.status === "PENDING" &&
+                            payment.payment_method === "MANUAL";
+                          const showInvoiceButton = isPaid || isPendingManual;
 
                           return (
                             <tr key={payment.id} className="hover:bg-muted/20">
@@ -971,6 +1159,24 @@ export function Customer360Dashboard({
                               <td className="px-5 py-4 text-muted-foreground">
                                 {payment.payment_reference || payment.id.slice(0, 8)}
                               </td>
+                              <td className="px-5 py-4 text-right">
+                                {showInvoiceButton && (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    title="Download invoice PDF"
+                                    onClick={() =>
+                                      window.open(
+                                        `/customers/${customer.id}/billing/invoice/${payment.id}`,
+                                        "_blank",
+                                      )
+                                    }
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
@@ -983,7 +1189,7 @@ export function Customer360Dashboard({
           </div>
         )}
 
-        {activeTab === "Coupons" && (
+        {activeTab === "Coupons" && !isKitCustomer && (
           <AdminCouponsTab
             customerProfileId={customer.id}
             initialCoupons={initialCoupons}

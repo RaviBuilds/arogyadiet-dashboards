@@ -12,7 +12,7 @@ import {
 } from "@/shared/components/ui/table";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
-import { Eye, Loader2, UserPlus, CheckCircle2, AlertCircle } from "lucide-react";
+import { Eye, Loader2, UserPlus, CheckCircle2, AlertCircle, Truck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { DataTableCard } from "../core/DataTableCard";
@@ -197,8 +197,15 @@ export function OnboardingCustomersSection({
               >
                 {/* Customer Info */}
                 <TableCell>
-                  <div className="font-semibold tracking-tight text-slate-900">
-                    {row.fullName || "N/A"}
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold tracking-tight text-slate-900">
+                      {row.fullName || "N/A"}
+                    </span>
+                    {row.customerCategory === "KIT" && (
+                      <Badge className="rounded-full border-0 bg-orange-100 px-2 text-[10px] font-semibold text-orange-700 hover:bg-orange-100">
+                        KIT
+                      </Badge>
+                    )}
                   </div>
                   <div className="mt-0.5 text-xs text-slate-500">
                     {row.customerCode || "No code"}
@@ -247,17 +254,32 @@ export function OnboardingCustomersSection({
 
                 {/* Actions */}
                 <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 transition-all duration-200 hover:bg-slate-100"
-                    asChild
-                  >
-                    <Link href={`/customers/${row.profileId}`}>
-                      <Eye className="mr-1.5 h-4 w-4 text-primary" />
-                      View
-                    </Link>
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 transition-all duration-200 hover:bg-slate-100"
+                      asChild
+                    >
+                      <Link href={`/customers/${row.profileId}`}>
+                        <Eye className="mr-1.5 h-4 w-4 text-primary" />
+                        View
+                      </Link>
+                    </Button>
+                    {row.customerCategory === "KIT" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 transition-all duration-200 hover:bg-slate-100"
+                        asChild
+                      >
+                        <Link href={`/customers/${row.profileId}?tab=Shipping`}>
+                          <Truck className="mr-1.5 h-4 w-4 text-primary" />
+                          Shipping
+                        </Link>
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             ))

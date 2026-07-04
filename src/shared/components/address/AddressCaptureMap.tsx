@@ -43,6 +43,7 @@ import {
   notServiceableMessage,
   type AddressSaveError,
 } from "@/lib/address/serviceablePincode";
+import type { CustomerCategory } from "@/lib/onboarding/category";
 
 const HYDERABAD_CENTER = { lat: 17.385, lng: 78.4867 };
 
@@ -88,6 +89,7 @@ export interface AddressCaptureValue {
   searchText?: string;
   flatNumber: string;
   floorNumber?: string;
+  streetAddress: string;
   area: string;
   city: string;
   state: string;
@@ -121,6 +123,8 @@ export interface AddressCaptureMapProps {
   disabled?: boolean;
   /** Show the "locate me" button (defaults to true). */
   showLocateButton?: boolean;
+  /** Customer category for category-aware validation (Req 3.1, 3.2, 3.3). */
+  customerCategory?: CustomerCategory;
 }
 
 /** A blank value convenient for initialising the parent form. */
@@ -129,6 +133,7 @@ export const emptyAddressCaptureValue: AddressCaptureValue = {
   searchText: "",
   flatNumber: "",
   floorNumber: "",
+  streetAddress: "",
   area: "",
   city: "",
   state: "",
@@ -185,6 +190,7 @@ async function getCurrentPosition(): Promise<{
 }
 
 interface ResolvedLocalityFields {
+  streetAddress: string;
   area: string;
   city: string;
   state: string;
@@ -192,7 +198,7 @@ interface ResolvedLocalityFields {
 }
 
 /**
- * Extract area/city/state/pincode from Google address components. Fields that
+ * Extract streetAddress/area/city/state/pincode from Google address components. Fields that
  * cannot be determined are returned as empty strings so the caller can leave
  * them blank and surface an unresolved-address error (Req 5.7).
  */
@@ -216,7 +222,17 @@ function extractLocalityFields(
     byType("route")?.long_name ??
     "";
 
-  return { area, city, state, pincode };
+  // Build street address from premise, route, sublocality_level_2, sublocality_level_1, neighborhood
+  const streetParts = [
+    byType("premise")?.long_name,
+    byType("route")?.long_name,
+    byType("sublocality_level_2")?.long_name,
+    byType("sublocality_level_1")?.long_name,
+    byType("neighborhood")?.long_name,
+  ].filter(Boolean);
+  const streetAddress = streetParts.join(", ");
+
+  return { streetAddress, area, city, state, pincode };
 }
 
 function isFullyResolved(fields: ResolvedLocalityFields): boolean {
@@ -230,6 +246,7 @@ export function AddressCaptureMap({
   onValidityChange,
   disabled = false,
   showLocateButton = true,
+  customerCategory,
 }: AddressCaptureMapProps) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
@@ -277,9 +294,11 @@ export function AddressCaptureMap({
       pincode: value.pincode,
       flatNumber: value.flatNumber,
       serviceAreaPincodes,
+      customerCategory,
     });
     const resolved =
       isFullyResolved({
+        streetAddress: value.streetAddress,
         area: value.area,
         city: value.city,
         state: value.state,
@@ -304,6 +323,7 @@ export function AddressCaptureMap({
     value.lat,
     value.lng,
     serviceKey,
+    customerCategory,
   ]);
 
   const patchValue = useCallback((patch: Partial<AddressCaptureValue>) => {
@@ -328,7 +348,7 @@ export function AddressCaptureMap({
 
       if (!components || components.length === 0) {
         setUnresolved(true);
-        patchValue({ lat, lng, area: "", city: "", state: "", pincode: "" });
+        patchValue({ lat, lng, streetAddress: "", area: "", city: "", state: "", pincode: "" });
         return;
       }
 
@@ -430,6 +450,7 @@ export function AddressCaptureMap({
   }, [patchValue, reverseGeocode]);
 
   const showServiceableWarning =
+    customerCategory !== "KIT" && // Req 3.1, 3.2: KIT bypasses serviceability
     value.pincode.trim().length > 0 &&
     !isServiceable(value.pincode, serviceAreaPincodes);
   const showFlatError = flatTouched && !hasFlatNumber(value.flatNumber);
@@ -572,8 +593,8 @@ export function AddressCaptureMap({
         </Alert>
       )}
 
-      {/* Req 5.6: not-serviceable warning naming the pincode; stays visible
-          until a serviceable pincode is selected. */}
+      {/* Req 5.6, 3.3: not-serviceable warning naming the pincode; stays visible
+          until a serviceable pincode is selected. Hidden for KIT category (Req 3.1, 3.2). */}
       {showServiceableWarning && (
         <Alert variant="destructive">
           <AlertTriangle />
@@ -623,6 +644,17 @@ export function AddressCaptureMap({
       </div>
 
       {/* Req 5.3: auto-filled locality fields (read-only, resolved from map). */}
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="address-street">Street / Locality</Label>
+        <Input
+          id="address-street"
+          type="text"
+          readOnly
+          placeholder="Auto-filled from map"
+          value={value.streetAddress}
+        />
+      </div>
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <Label htmlFor="address-area">Area</Label>

@@ -44,6 +44,8 @@ interface CustomerHeaderProps {
 
   userId?: string | null;
 
+  customerCategory?: string | null;
+
 }
 
 
@@ -55,6 +57,8 @@ export function CustomerHeader({
   userName,
 
   userId,
+
+  customerCategory,
 
 }: CustomerHeaderProps) {
 
@@ -131,6 +135,8 @@ export function CustomerHeader({
               isMobile
 
               onNavigate={() => setIsSheetOpen(false)}
+
+              customerCategory={customerCategory}
 
             />
 
