@@ -66,6 +66,7 @@ import {
 import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
 import { CustomerOverview } from "./CustomerOverview";
 import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
+import { KitCustomerSection } from "./KitCustomerSection";
 import { Plus, Upload, UserPlus } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
 import {
   clinicDisplayName,
@@ -135,7 +136,7 @@ export default function CustomerDashboard({
   autoOpenCreate?: boolean;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("Customer Directory");
+  const [activeTab, setActiveTab] = useState("Meal Customers");
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [searchColumn, setSearchColumn] = useState("fullName");
@@ -186,7 +187,7 @@ export default function CustomerDashboard({
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    if (tab === "Customer Directory" || tab === "KIT Customer") {
+    if (tab === "Meal Customers" || tab === "KIT Customer") {
       setSearchColumn("fullName");
     } else {
       setSearchColumn("customer_name");
@@ -196,7 +197,11 @@ export default function CustomerDashboard({
   };
 
   const filteredCustomers = useMemo(() => {
-    let result = filterRowsByClinic(customers, clinicFilter);
+    // Meal Customers: exclude KIT category customers
+    let result = filterRowsByClinic(
+      customers.filter((c) => c.customerCategory !== "KIT"),
+      clinicFilter
+    );
 
     if (!showArchived) {
       result = result.filter((customer) => customer.isActive);
@@ -304,7 +309,7 @@ export default function CustomerDashboard({
   );
 
   const searchOptions = useMemo(() => {
-    if (activeTab === "Customer Directory" || activeTab === "KIT Customer") {
+    if (activeTab === "Meal Customers" || activeTab === "KIT Customer") {
       return [
         { value: "fullName", label: "Name" },
         { value: "mobile", label: "Phone Number" },
@@ -333,7 +338,7 @@ export default function CustomerDashboard({
   };
 
   const handleExportExcel = () => {
-    if (activeTab === "Customer Directory") {
+    if (activeTab === "Meal Customers") {
       if (filteredCustomers.length === 0) return;
       const exportData = filteredCustomers.map((row) => ({
         "Full Name": row.fullName,
@@ -496,10 +501,9 @@ export default function CustomerDashboard({
       <AdminSubmenuBar
         tabs={[
           "Overview",
-          "Customer Directory",
-          "Onboarded",
-          "Onboarding Completed",
+          "Meal Customers",
           "KIT Customer",
+          "Onboarded",
         ]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
@@ -526,9 +530,9 @@ export default function CustomerDashboard({
           stoppedSubscriptions={stoppedSubscriptions}
           onNavigate={handleTabChange}
         />
-      ) : activeTab === "Customer Directory" ? (
+      ) : activeTab === "Meal Customers" ? (
         <DataTableCard
-          header={<SectionHeader title="Customer Directory" icon={Users} />}
+          header={<SectionHeader title="Meal Customers" icon={Users} />}
           controls={
             <div className="flex flex-wrap items-center gap-4">
               <DataSearchFilter
@@ -959,8 +963,25 @@ export default function CustomerDashboard({
         </DataTableCard>
       ) : activeTab === "Onboarded" ? (
         <OnboardingCustomersSection status="IN_PROGRESS" />
-      ) : activeTab === "Onboarding Completed" ? (
-        <OnboardingCustomersSection status="COMPLETED" />
+      ) : activeTab === "KIT Customer" ? (
+        <KitCustomerSection
+          customers={filteredKitCustomers}
+          clinicFilter={clinicFilter}
+          setClinicFilter={setClinicFilter}
+          clinicOptions={clinicOptions}
+          showArchived={showArchived}
+          setShowArchived={setShowArchived}
+          searchColumn={searchColumn}
+          setSearchColumn={setSearchColumn}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          searchOptions={searchOptions}
+          isLoading={isLoading || isPending}
+          onRefresh={handleRefreshISR}
+          onExport={handleExportExcel}
+          onEdit={openEditModal}
+          onDeactivate={openDeleteModal}
+        />
       ) : null}
 
       {/* --- EDIT CUSTOMER MODAL --- */}

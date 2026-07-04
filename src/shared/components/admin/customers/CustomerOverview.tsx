@@ -267,7 +267,7 @@ export function CustomerOverview({
                 variant="outline"
                 size="sm"
                 className="transition-all duration-200"
-                onClick={() => onNavigate("Customer Directory")}
+                onClick={() => onNavigate("Meal Customers")}
               >
                 View Directory
               </Button>
