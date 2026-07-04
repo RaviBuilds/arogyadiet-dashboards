@@ -59,7 +59,7 @@ import {
   ONBOARDING_CUTOFF_HOUR_IST,
 } from "@/lib/onboarding/cutoff";
 import { istHourOf } from "@/lib/dates/ist";
-import { onboardCustomerAction } from "@/actions/admin-actions/onboardingActions";
+import { onboardCustomerAction, checkMobileUniqueAction } from "@/actions/admin-actions/onboardingActions";
 import { cn } from "@/lib/utils";
 import type { KitProduct } from "@/types/kitProduct";
 import {
@@ -232,6 +232,16 @@ export function QuickOnboardingForm({
         setTempPinError("Temporary PIN is required (exactly 6 digits).");
         return;
       }
+      // Check mobile uniqueness against the database before proceeding
+      const mobileValue = values.mobile;
+      if (mobileValue && /^[6-9]\d{9}$/.test(mobileValue)) {
+        const mobileCheck = await checkMobileUniqueAction(mobileValue);
+        if (!mobileCheck.available) {
+          setError("mobile", { type: "server", message: mobileCheck.message });
+          toast.error(mobileCheck.message);
+          return;
+        }
+      }
     }
 
     if (step === 2) {
@@ -299,6 +309,7 @@ export function QuickOnboardingForm({
         searchText: address.searchText,
         flatNumber: address.flatNumber,
         floorNumber: address.floorNumber,
+        streetAddress: address.streetAddress,
         area: address.area,
         city: address.city,
         state: address.state,
@@ -538,7 +549,7 @@ export function QuickOnboardingForm({
                       <div className="mt-2 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
                         <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
                         <p className="text-xs text-emerald-800 font-medium">
-                          {selectedKitProduct.name} · Base: ₹{selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · Tax: 5%
+                          {selectedKitProduct.name} · Total: ₹{selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (incl. 5% tax)
                         </p>
                       </div>
                     )}
@@ -608,17 +619,19 @@ export function QuickOnboardingForm({
                 </>
               )}
 
-              <Field label="Subscription start date" htmlFor="startDate" error={errors.startDate?.message} required>
-                <Input
-                  id="startDate"
-                  type="date"
-                  min={earliest}
-                  aria-invalid={Boolean(errors.startDate)}
-                  className="h-9 max-w-xs"
-                  {...register("startDate")}
-                />
-                <p className="text-xs text-slate-500">Earliest selectable start date is {earliest}.</p>
-              </Field>
+              {primaryCategory !== "KIT" && (
+                <Field label="Subscription start date" htmlFor="startDate" error={errors.startDate?.message} required>
+                  <Input
+                    id="startDate"
+                    type="date"
+                    min={earliest}
+                    aria-invalid={Boolean(errors.startDate)}
+                    className="h-9 max-w-xs"
+                    {...register("startDate")}
+                  />
+                  <p className="text-xs text-slate-500">Earliest selectable start date is {earliest}.</p>
+                </Field>
+              )}
 
               <Field label="Initial meal preference" error={errors.initialMealPreference?.message} required>
                 <Controller
@@ -829,15 +842,15 @@ export function QuickOnboardingForm({
                           <>
                             <ReviewRow
                               label="Base Price"
-                              value={`₹${selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              value={`₹${(selectedKitProduct.base_price / 1.05).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                             />
                             <ReviewRow
                               label="Tax (5%)"
-                              value={`₹${(selectedKitProduct.base_price * 0.05).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              value={`₹${(selectedKitProduct.base_price - selectedKitProduct.base_price / 1.05).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                             />
                             <ReviewRow
                               label="Total Price"
-                              value={`₹${(selectedKitProduct.base_price * 1.05).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              value={`₹${selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                               highlight
                             />
                             <ReviewRow

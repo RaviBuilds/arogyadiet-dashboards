@@ -145,3 +145,95 @@ export async function listKitProductsAction(): Promise<ActionResult<KitProduct[]
     };
   }
 }
+
+
+/**
+ * Update an existing KIT product
+ * 
+ * @param id - The KIT product UUID
+ * @param name - Updated product name
+ * @param price - Updated base price
+ * @returns Action result
+ */
+export async function updateKitProductAction(
+  id: string,
+  name: string,
+  price: number,
+): Promise<ActionResult<KitProduct>> {
+  const parsed = createKitProductSchema.safeParse({ name, price });
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message };
+  }
+
+  try {
+    const supabase = createAdminClient();
+
+    const { data, error } = await supabase
+      .from("kit_products")
+      .update({
+        name: parsed.data.name,
+        base_price: parsed.data.price,
+      })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("updateKitProductAction database error:", error);
+      return { success: false, error: "Failed to update KIT product. Please try again." };
+    }
+
+    const product = transformKitProductRow(data as KitProductRow);
+
+    await logAdminAction("UPDATE", "kit_products", product.id, {
+      name: product.name,
+      base_price: product.base_price,
+    });
+
+    revalidatePath("/admin/subscriptions/kits");
+    revalidatePath("/admin/customers/quick-onboard");
+
+    return { success: true, data: product };
+  } catch (error) {
+    console.error("updateKitProductAction unexpected error:", error);
+    return { success: false, error: "An unexpected error occurred while updating the product." };
+  }
+}
+
+/**
+ * Soft-delete a KIT product (sets is_active = false)
+ * 
+ * @param id - The KIT product UUID
+ * @returns Action result
+ */
+export async function deleteKitProductAction(
+  id: string,
+): Promise<ActionResult> {
+  if (!id) {
+    return { success: false, error: "Product ID is required." };
+  }
+
+  try {
+    const supabase = createAdminClient();
+
+    const { error } = await supabase
+      .from("kit_products")
+      .update({ is_active: false })
+      .eq("id", id);
+
+    if (error) {
+      console.error("deleteKitProductAction database error:", error);
+      return { success: false, error: "Failed to delete KIT product. Please try again." };
+    }
+
+    await logAdminAction("DELETE", "kit_products", id, { soft_delete: true });
+
+    revalidatePath("/admin/subscriptions/kits");
+    revalidatePath("/admin/customers/quick-onboard");
+
+    return { success: true };
+  } catch (error) {
+    console.error("deleteKitProductAction unexpected error:", error);
+    return { success: false, error: "An unexpected error occurred while deleting the product." };
+  }
+}

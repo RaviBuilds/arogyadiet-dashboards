@@ -14,7 +14,7 @@ import {
   transformShippingInfoRow,
   validateTrackingUrl,
 } from "@/types/kitShipping";
-import type { CustomerCategory } from "@/types/customer";
+import type { CustomerCategory } from "@/lib/onboarding/category";
 
 /**
  * KIT Shipping Management Actions
@@ -147,7 +147,8 @@ export async function saveShippingInfoAction(
           courier_partner: parsed.data.courier_partner,
           tracking_number: parsed.data.tracking_number,
           tracking_url: parsed.data.tracking_url || null,
-          shipped_at: parsed.data.shipped_at?.toISOString() || null,
+          // Auto-set shipped_at to now if not already set (entering tracking = shipped)
+          shipped_at: parsed.data.shipped_at?.toISOString() || new Date().toISOString(),
           delivered_at: parsed.data.delivered_at?.toISOString() || null,
         })
         .eq("id", existing.id)
@@ -195,7 +196,8 @@ export async function saveShippingInfoAction(
           courier_partner: parsed.data.courier_partner,
           tracking_number: parsed.data.tracking_number,
           tracking_url: parsed.data.tracking_url || null,
-          shipped_at: parsed.data.shipped_at?.toISOString() || null,
+          // Auto-set shipped_at to now (entering tracking info = package shipped)
+          shipped_at: parsed.data.shipped_at?.toISOString() || new Date().toISOString(),
           delivered_at: parsed.data.delivered_at?.toISOString() || null,
         })
         .select()

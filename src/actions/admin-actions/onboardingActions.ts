@@ -181,7 +181,8 @@ export async function onboardCustomerAction(
   }
 
   // (5) Start date must be on/after the earliest selectable date (Req 7.7).
-  if (!isStartDateAllowed(input.startDate, new Date())) {
+  // startDate is optional for KIT category — only validate when present.
+  if (input.startDate && !isStartDateAllowed(input.startDate, new Date())) {
     return {
       success: false,
       error: "The selected subscription start date is not permitted for the current cutoff.",
@@ -312,6 +313,51 @@ export async function activateAddOnCategoryAction(
 
   revalidatePath(ADMIN_CUSTOMERS_PATH);
   return { success: true, subscriptionId: result.subscriptionId };
+}
+
+// ---------------------------------------------------------------------------
+// checkMobileUniqueAction — early duplicate-mobile check (Step 1 gate)
+// ---------------------------------------------------------------------------
+
+export type CheckMobileUniqueResult =
+  | { available: true }
+  | { available: false; message: string };
+
+/**
+ * Check whether a mobile number is already used by any user in the system.
+ * Called when the admin clicks "Next" on Step 1 of the Quick Onboarding form
+ * to catch duplicates early (before reaching the final onboarding RPC).
+ *
+ * @param mobile the raw 10-digit mobile number entered by the admin
+ */
+export async function checkMobileUniqueAction(
+  mobile: string,
+): Promise<CheckMobileUniqueResult> {
+  // Basic format check
+  if (!/^[6-9]\d{9}$/.test(mobile)) {
+    return { available: false, message: "Enter a valid 10-digit mobile number." };
+  }
+
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("users")
+    .select("id")
+    .eq("mobile", mobile)
+    .maybeSingle();
+
+  if (error) {
+    // On DB errors, let the onboarding proceed — the RPC will catch duplicates.
+    return { available: true };
+  }
+
+  if (data) {
+    return {
+      available: false,
+      message: "This mobile number is already registered in the system.",
+    };
+  }
+
+  return { available: true };
 }
 
 // ---------------------------------------------------------------------------

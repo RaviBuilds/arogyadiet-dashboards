@@ -89,6 +89,7 @@ export interface AddressCaptureValue {
   searchText?: string;
   flatNumber: string;
   floorNumber?: string;
+  streetAddress: string;
   area: string;
   city: string;
   state: string;
@@ -132,6 +133,7 @@ export const emptyAddressCaptureValue: AddressCaptureValue = {
   searchText: "",
   flatNumber: "",
   floorNumber: "",
+  streetAddress: "",
   area: "",
   city: "",
   state: "",
@@ -188,6 +190,7 @@ async function getCurrentPosition(): Promise<{
 }
 
 interface ResolvedLocalityFields {
+  streetAddress: string;
   area: string;
   city: string;
   state: string;
@@ -195,7 +198,7 @@ interface ResolvedLocalityFields {
 }
 
 /**
- * Extract area/city/state/pincode from Google address components. Fields that
+ * Extract streetAddress/area/city/state/pincode from Google address components. Fields that
  * cannot be determined are returned as empty strings so the caller can leave
  * them blank and surface an unresolved-address error (Req 5.7).
  */
@@ -219,7 +222,17 @@ function extractLocalityFields(
     byType("route")?.long_name ??
     "";
 
-  return { area, city, state, pincode };
+  // Build street address from premise, route, sublocality_level_2, sublocality_level_1, neighborhood
+  const streetParts = [
+    byType("premise")?.long_name,
+    byType("route")?.long_name,
+    byType("sublocality_level_2")?.long_name,
+    byType("sublocality_level_1")?.long_name,
+    byType("neighborhood")?.long_name,
+  ].filter(Boolean);
+  const streetAddress = streetParts.join(", ");
+
+  return { streetAddress, area, city, state, pincode };
 }
 
 function isFullyResolved(fields: ResolvedLocalityFields): boolean {
@@ -285,6 +298,7 @@ export function AddressCaptureMap({
     });
     const resolved =
       isFullyResolved({
+        streetAddress: value.streetAddress,
         area: value.area,
         city: value.city,
         state: value.state,
@@ -334,7 +348,7 @@ export function AddressCaptureMap({
 
       if (!components || components.length === 0) {
         setUnresolved(true);
-        patchValue({ lat, lng, area: "", city: "", state: "", pincode: "" });
+        patchValue({ lat, lng, streetAddress: "", area: "", city: "", state: "", pincode: "" });
         return;
       }
 
@@ -630,6 +644,17 @@ export function AddressCaptureMap({
       </div>
 
       {/* Req 5.3: auto-filled locality fields (read-only, resolved from map). */}
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="address-street">Street / Locality</Label>
+        <Input
+          id="address-street"
+          type="text"
+          readOnly
+          placeholder="Auto-filled from map"
+          value={value.streetAddress}
+        />
+      </div>
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <Label htmlFor="address-area">Area</Label>

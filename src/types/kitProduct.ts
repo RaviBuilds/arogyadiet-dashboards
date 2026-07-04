@@ -41,25 +41,42 @@ export interface CreateKitProductInput {
 /**
  * KIT product with calculated tax and total
  * Used in UI displays and invoices
+ * 
+ * Note: base_price in the database is the TOTAL inclusive price.
+ * The display breaks it down into exclusive base + tax.
  */
 export interface KitProductWithCalculations extends KitProduct {
+  /** The pre-tax (exclusive) amount derived from the inclusive base_price */
+  exclusive_base: number;
+  /** Tax portion extracted from the inclusive base_price */
   tax_amount: number;
+  /** Total price (same as base_price since it's already inclusive) */
   total_price: number;
 }
 
 /**
- * Calculate tax and total for a KIT product
+ * Calculate the tax breakup from an INCLUSIVE price.
+ * 
+ * The base_price stored in the database is the total inclusive of tax.
+ * This function reverse-calculates the exclusive base and tax portion.
+ * 
+ * Example: base_price = ₹10,400 (inclusive of 5% tax)
+ *   exclusive_base = 10400 / 1.05 = ₹9,904.76
+ *   tax_amount = 10400 - 9904.76 = ₹495.24
+ *   total_price = ₹10,400
  */
-export function calculateKitProductPrice(basePrice: number, taxRate: number = 0.05): {
+export function calculateKitProductPrice(inclusivePrice: number, taxRate: number = 0.05): {
+  exclusive_base: number;
   tax_amount: number;
   total_price: number;
 } {
-  const tax_amount = basePrice * taxRate;
-  const total_price = basePrice + tax_amount;
+  const exclusive_base = inclusivePrice / (1 + taxRate);
+  const tax_amount = inclusivePrice - exclusive_base;
   
   return {
+    exclusive_base: Number(exclusive_base.toFixed(2)),
     tax_amount: Number(tax_amount.toFixed(2)),
-    total_price: Number(total_price.toFixed(2)),
+    total_price: Number(inclusivePrice.toFixed(2)),
   };
 }
 
@@ -77,10 +94,11 @@ export function transformKitProductRow(row: KitProductRow): KitProduct {
  * Transform KitProduct to include calculations
  */
 export function addCalculationsToKitProduct(product: KitProduct): KitProductWithCalculations {
-  const { tax_amount, total_price } = calculateKitProductPrice(product.base_price, product.tax_rate);
+  const { exclusive_base, tax_amount, total_price } = calculateKitProductPrice(product.base_price, product.tax_rate);
   
   return {
     ...product,
+    exclusive_base,
     tax_amount,
     total_price,
   };

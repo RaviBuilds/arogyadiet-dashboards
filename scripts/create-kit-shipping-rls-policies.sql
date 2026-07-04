@@ -28,16 +28,28 @@
 
 -- ─── kit_shipping_info ─────────────────────────────────────────────────────
 
+-- Base table-level GRANTs (Postgres checks these BEFORE evaluating RLS
+-- policies). Without them, `authenticated` gets "permission denied for table
+-- kit_shipping_info" regardless of how permissive the RLS policy is below.
+-- RLS still gates which ROWS each grantee can see/write.
+GRANT SELECT ON public.kit_shipping_info TO authenticated;
+GRANT INSERT, UPDATE, DELETE ON public.kit_shipping_info TO authenticated;
+
 ALTER TABLE public.kit_shipping_info ENABLE ROW LEVEL SECURITY;
 
 -- SELECT Policy: Admins see all records; customers see only their own shipping info
+-- NOTE: customer_profiles.user_id references users.id, NOT the Supabase auth
+-- UID directly — it must be joined through users.auth_user_id = auth.uid(),
+-- mirroring the pattern used by every other customer-owned-row policy in this
+-- schema (e.g. "Enable full access for user's own profile" on customer_profiles).
 DROP POLICY IF EXISTS kit_shipping_info_select ON public.kit_shipping_info;
 CREATE POLICY kit_shipping_info_select ON public.kit_shipping_info
   FOR SELECT USING (
     is_global_role()
     OR customer_profile_id IN (
-      SELECT id FROM public.customer_profiles 
-      WHERE user_id = auth.uid()
+      SELECT cp.id FROM public.customer_profiles cp
+      JOIN public.users u ON u.id = cp.user_id
+      WHERE u.auth_user_id = auth.uid()
     )
   );
 

@@ -179,6 +179,8 @@ export interface CustomerRow {
   franchiseId: string | null;
   clinicId: string | null;
   createdAt: string | null;
+  /** Primary_Category of the customer's subscription (MEAL/KIT/ACCOMMODATION), if any. */
+  customerCategory: string | null;
 }
 
 /** The completable `customer_profiles` fields a customer may fill in later. */
@@ -307,7 +309,7 @@ export async function listByOnboardingStatus(
   let query = admin
     .from("customer_profiles")
     .select(
-      "id, customer_code, onboarding_status, franchise_id, clinic_id, created_at, users(id, full_name, mobile, email, is_test_email)"
+      "id, customer_code, onboarding_status, franchise_id, clinic_id, created_at, users(id, full_name, mobile, email, is_test_email), subscriptions(customer_category, created_at)"
     )
     .eq("onboarding_status", status);
 
@@ -338,6 +340,30 @@ export async function listByOnboardingStatus(
         }
       | null;
 
+    // `subscriptions` is a to-many embed; pick the most recently created one
+    // to represent the customer's current Primary_Category on the list.
+    const subscriptionsRaw = record.subscriptions;
+    const subscriptions = Array.isArray(subscriptionsRaw)
+      ? (subscriptionsRaw as Array<{
+          customer_category?: string | null;
+          created_at?: string | null;
+        }>)
+      : subscriptionsRaw
+        ? [
+            subscriptionsRaw as {
+              customer_category?: string | null;
+              created_at?: string | null;
+            },
+          ]
+        : [];
+    const latestSubscription = subscriptions
+      .slice()
+      .sort((a, b) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
+      })[0];
+
     return {
       profileId: String(record.id),
       userId: user?.id ?? null,
@@ -350,6 +376,7 @@ export async function listByOnboardingStatus(
       franchiseId: (record.franchise_id as string | null) ?? null,
       clinicId: (record.clinic_id as string | null) ?? null,
       createdAt: (record.created_at as string | null) ?? null,
+      customerCategory: latestSubscription?.customer_category ?? null,
     };
   });
 }

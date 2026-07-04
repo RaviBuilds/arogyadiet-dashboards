@@ -158,7 +158,7 @@ export default async function CustomerDashboard() {
     // Query active subscription details for the dialog
     const { data: dialogSub } = await supabase
       .from("subscriptions")
-      .select("customer_category, starts_on, effective_end_on, subscription_plans(name)")
+      .select("customer_category, starts_on, effective_end_on, subscription_plans(name), kit_products(name)")
       .eq("customer_profile_id", profile.id)
       .eq("status", "ACTIVE")
       .maybeSingle();
@@ -167,10 +167,18 @@ export default async function CustomerDashboard() {
       const plan = Array.isArray(dialogSub.subscription_plans)
         ? dialogSub.subscription_plans[0]
         : dialogSub.subscription_plans;
+      const kitProduct = Array.isArray((dialogSub as any).kit_products)
+        ? (dialogSub as any).kit_products[0]
+        : (dialogSub as any).kit_products;
       
+      // For KIT subscriptions, show the kit product name as the plan name
+      const planName = dialogSub.customer_category === "KIT"
+        ? (kitProduct?.name ?? null)
+        : (plan?.name ?? null);
+
       profileDialogSubscription = {
         category: dialogSub.customer_category,
-        planName: plan?.name ?? null,
+        planName,
         startDate: dialogSub.starts_on,
         endDate: dialogSub.effective_end_on,
       };

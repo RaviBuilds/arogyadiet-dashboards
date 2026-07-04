@@ -24,6 +24,13 @@
 
 -- ─── kit_products ──────────────────────────────────────────────────────────
 
+-- Base table-level GRANTs (Postgres checks these BEFORE evaluating RLS
+-- policies). Without them, `authenticated`/`anon` get "permission denied for
+-- table kit_products" regardless of how permissive the RLS policy is below.
+-- RLS still gates which ROWS each grantee can see/write.
+GRANT SELECT ON public.kit_products TO authenticated, anon;
+GRANT INSERT, UPDATE, DELETE ON public.kit_products TO authenticated;
+
 ALTER TABLE public.kit_products ENABLE ROW LEVEL SECURITY;
 
 -- SELECT Policy: Admins see all products; customers see only active products

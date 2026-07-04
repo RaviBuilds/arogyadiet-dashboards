@@ -35,6 +35,7 @@ vi.mock("@/shared/components/address/AddressCaptureMap", async () => {
     searchText: "",
     flatNumber: "",
     floorNumber: "",
+    streetAddress: "",
     area: "",
     city: "",
     state: "",

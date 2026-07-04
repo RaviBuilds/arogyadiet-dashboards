@@ -36,23 +36,24 @@ interface ShippingTrackerProps {
 }
 
 /**
- * Generate tracking URL for known courier partners
- * For OTHER courier, uses the provided tracking_url
- * For known couriers, generates tracking URL based on tracking number
+ * Generate tracking URL for known courier partners.
+ * Only links to the courier's base tracking page — customer enters the
+ * tracking number manually on the courier website.
+ * For OTHER courier, uses the provided tracking_url as-is.
  */
 function getTrackingUrl(shippingInfo: ShippingInfo): string | null {
   if (shippingInfo.tracking_url) {
     return shippingInfo.tracking_url;
   }
 
-  // Generate tracking URLs for known courier partners
+  // Base tracking page URLs — do NOT include the tracking number
   switch (shippingInfo.courier_partner) {
     case 'APSRTC':
-      return `https://apsrtcparcel.in/track/${shippingInfo.tracking_number}`;
+      return `https://apsrtcparcel.in/track`;
     case 'TGSRTC':
-      return `https://www.tsrtc.telangana.gov.in/track/${shippingInfo.tracking_number}`;
+      return `https://www.tsrtc.telangana.gov.in/track`;
     case 'DTDC':
-      return `https://www.dtdc.in/tracking.asp?tracking_no=${shippingInfo.tracking_number}`;
+      return `https://www.dtdc.in/tracking`;
     default:
       return null;
   }

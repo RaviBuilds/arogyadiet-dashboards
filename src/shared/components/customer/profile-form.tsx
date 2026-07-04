@@ -517,6 +517,11 @@ async function onSubmit(data: ProfileFormValues) {
             </div>
           ) : (
             <div className="pt-2 animate-in fade-in">
+              {!isEditing && (
+                <p className="text-xs text-muted-foreground mb-2 italic">
+                  Please click on &quot;Edit Profile&quot; to update your medical history.
+                </p>
+              )}
               <div
                 className={cn(
                   "flex items-start space-x-3 p-4 rounded-xl border",

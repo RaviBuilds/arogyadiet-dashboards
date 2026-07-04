@@ -43,6 +43,12 @@ export function createAddressCaptureSchema(
       .max(20, "Floor number must be at most 20 characters.")
       .optional(),
 
+    // Street/locality details auto-filled from map (e.g. "Sree Apartments, 2nd Main Road, Tavarekere")
+    streetAddress: z
+      .string()
+      .max(255, "Street address must be at most 255 characters.")
+      .optional(),
+
     // Req 5.3: auto-filled from the selected map location.
     area: z.string().min(1, "Area could not be resolved from the location."),
     city: z.string().min(1, "City could not be resolved from the location."),

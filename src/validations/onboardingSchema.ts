@@ -74,7 +74,7 @@ export function createQuickOnboardingSchema(
       kitProductId: z.string().uuid("Select a valid KIT product.").optional(),
       kitDurationDays: z.coerce.number().int("Kit duration must be a whole number.").positive("Kit duration must be at least 1 day.").optional(),
 
-      startDate: z.string().min(1, "Start date is required."), // ISO date; cutoff refine at action time
+      startDate: z.string().optional(), // ISO date; required for MEAL, optional for KIT
       paymentStatus: z.enum(PAYMENT_STATUSES),
 
       // Initial meal preference for daily preferences (VEG, EGG, or CHICKEN).
@@ -107,9 +107,17 @@ export function createQuickOnboardingSchema(
             message: "Kit duration (days) is required for KIT category.",
           });
         }
-      } else if (data.primaryCategory === "MEAL") {
-        // MEAL category requires planId
-        if (!data.planId) {
+        // startDate is NOT required for KIT
+      } else {
+        // MEAL/Accommodation category requires startDate
+        if (!data.startDate || data.startDate.length === 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["startDate"],
+            message: "Start date is required.",
+          });
+        }
+        if (data.primaryCategory === "MEAL" && !data.planId) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["planId"],
@@ -150,7 +158,7 @@ export const quickOnboardingSchema = z
     planId: z.string().uuid("Select a valid subscription plan.").optional(),
     kitProductId: z.string().uuid("Select a valid KIT product.").optional(),
     kitDurationDays: z.coerce.number().int("Kit duration must be a whole number.").positive("Kit duration must be at least 1 day.").optional(),
-    startDate: z.string().min(1, "Start date is required."),
+    startDate: z.string().optional(),
     paymentStatus: z.enum(PAYMENT_STATUSES),
     initialMealPreference: z.enum(["VEG", "EGG", "CHICKEN"], {
       message: "Select an initial meal preference.",
@@ -176,9 +184,16 @@ export const quickOnboardingSchema = z
           message: "Kit duration (days) is required for KIT category.",
         });
       }
-    } else if (data.primaryCategory === "MEAL") {
-      // MEAL category requires planId
-      if (!data.planId) {
+    } else {
+      // MEAL/Accommodation category requires startDate
+      if (!data.startDate || data.startDate.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["startDate"],
+          message: "Start date is required.",
+        });
+      }
+      if (data.primaryCategory === "MEAL" && !data.planId) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["planId"],

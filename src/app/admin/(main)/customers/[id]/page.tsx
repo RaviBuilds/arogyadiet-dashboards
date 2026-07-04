@@ -6,6 +6,7 @@ import { Customer360Dashboard } from "@/shared/components/admin/customers/Custom
 import { Button } from "@/shared/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { guardAdminGroup } from "@/lib/auth/adminAccess";
+import { getShippingInfoAction } from "@/actions/admin-actions/shippingActions";
 
 export default async function Customer360Page({
   params,
@@ -32,7 +33,7 @@ export default async function Customer360Page({
       users!inner ( id, auth_user_id, full_name, email, mobile, is_active ),
       addresses ( id, tag, street_1, street_2, landmark, city, state, pincode, is_primary, lat, lng, updated_at ),
       medical_documents ( id, file_name, storage_path, uploaded_at, file_size_bytes ),
-      subscriptions ( id, status, starts_on, ends_on, effective_end_on, subscription_plans ( name ) )
+      subscriptions ( id, status, starts_on, ends_on, effective_end_on, customer_category, kit_duration_days, kit_received_date, kit_tracker_end_date, kit_total_skipped_days, subscription_plans ( name ), kit_products ( name, base_price, tax_rate ) )
       `,
     )
     .eq("id", id)
@@ -72,6 +73,72 @@ export default async function Customer360Page({
   // ── 3. Resolve active subscription (for "Add Subscription" form) ─────────
   const activeSubscription =
     (data.subscriptions as any[])?.find((s) => s.status === "ACTIVE") ?? null;
+
+  // ── 3b. Resolve the customer's current Primary_Category + KIT details ────
+  //       Prefers the ACTIVE subscription; falls back to the most recent one
+  //       so KIT tabs still surface useful info for lapsed/ended KIT orders.
+  const allSubscriptions = (data.subscriptions as any[]) ?? [];
+  const currentSubscription =
+    activeSubscription ??
+    allSubscriptions.slice().sort((a, b) => {
+      const aTime = a.starts_on ? new Date(a.starts_on).getTime() : 0;
+      const bTime = b.starts_on ? new Date(b.starts_on).getTime() : 0;
+      return bTime - aTime;
+    })[0] ??
+    null;
+
+  const customerCategory: string | null =
+    currentSubscription?.customer_category ?? null;
+
+  const kitSubscription =
+    customerCategory === "KIT" && currentSubscription
+      ? {
+          subscriptionId: currentSubscription.id as string,
+          kitProductName:
+            (currentSubscription.kit_products?.name as string) ??
+            "Unknown Product",
+          kitDurationDays: (currentSubscription.kit_duration_days as number) ?? 0,
+          status: (currentSubscription.status as string) ?? "ACTIVE",
+          startsOn: (currentSubscription.starts_on as string) ?? null,
+          endsOn:
+            (currentSubscription.effective_end_on as string) ??
+            (currentSubscription.ends_on as string) ??
+            null,
+          basePrice: (currentSubscription.kit_products?.base_price as number) ?? null,
+          taxRate: (currentSubscription.kit_products?.tax_rate as number) ?? null,
+          kitReceivedDate: (currentSubscription.kit_received_date as string) ?? null,
+          kitTrackerEndDate: (currentSubscription.kit_tracker_end_date as string) ?? null,
+          kitTotalSkippedDays: (currentSubscription.kit_total_skipped_days as number) ?? 0,
+        }
+      : null;
+
+  // ── 3c. Fetch existing shipping info for KIT customers ────────────────────
+  const shippingResult = kitSubscription
+    ? await getShippingInfoAction(id)
+    : null;
+  const existingShippingInfo =
+    shippingResult?.success ? shippingResult.data ?? null : null;
+
+  // ── 3d. Fetch kit_daily_logs for the KIT subscription (admin read-only view)
+  let kitDailyLogs: Array<{
+    log_date: string;
+    status: "FOOD_TAKEN" | "FOOD_SKIPPED";
+    physical_activity_minutes: number | null;
+    physical_activity_name: string | null;
+    weight_kg: number | null;
+  }> = [];
+
+  if (kitSubscription) {
+    const { data: logsData } = await supabase
+      .from("kit_daily_logs")
+      .select(
+        "log_date, status, physical_activity_minutes, physical_activity_name, weight_kg"
+      )
+      .eq("subscription_id", kitSubscription.subscriptionId)
+      .order("log_date", { ascending: true });
+
+    kitDailyLogs = (logsData ?? []) as typeof kitDailyLogs;
+  }
 
   // ── 4. Fetch lookup data for the subscription form + coupons ─────────────
   const [
@@ -213,6 +280,10 @@ export default async function Customer360Page({
         initialCoupons={(coupons ?? []) as any[]}
         billingPayments={(payments ?? []) as any[]}
         hasActiveSubscription={hasActiveSubscription}
+        customerCategory={customerCategory}
+        kitSubscription={kitSubscription}
+        existingShippingInfo={existingShippingInfo}
+        kitDailyLogs={kitDailyLogs}
       />
     </div>
   );

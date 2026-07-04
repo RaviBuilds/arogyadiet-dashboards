@@ -186,7 +186,7 @@ export default function CustomerDashboard({
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    if (tab === "Customer Directory") {
+    if (tab === "Customer Directory" || tab === "KIT Customer") {
       setSearchColumn("fullName");
     } else {
       setSearchColumn("customer_name");
@@ -236,6 +236,41 @@ export default function CustomerDashboard({
     return result;
   }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterMedical, showArchived, clinicFilter]);
 
+  // KIT Customer tab: same directory filtering pipeline, scoped to KIT category.
+  const kitCustomers = useMemo(
+    () => customers.filter((customer) => customer.customerCategory === "KIT"),
+    [customers],
+  );
+
+  const filteredKitCustomers = useMemo(() => {
+    let result = filterRowsByClinic(kitCustomers, clinicFilter);
+
+    if (!showArchived) {
+      result = result.filter((customer) => customer.isActive);
+    }
+
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase();
+      result = result.filter((row) => {
+        if (searchColumn === "fullName")
+          return row.fullName.toLowerCase().includes(lowerTerm);
+        if (searchColumn === "mobile")
+          return row.mobile.toLowerCase().includes(lowerTerm);
+        if (searchColumn === "email")
+          return row.email.toLowerCase().includes(lowerTerm);
+        if (searchColumn === "primary_pincode")
+          return row.primary_pincode.toLowerCase().includes(lowerTerm);
+        return true;
+      });
+    }
+
+    if (filterStatus !== "ALL") {
+      result = result.filter((customer) => customer.status === filterStatus);
+    }
+
+    return result;
+  }, [kitCustomers, searchTerm, searchColumn, filterStatus, showArchived, clinicFilter]);
+
   const filterSubList = (list: ActiveSubscriptionData[]) => {
     if (!searchTerm) return list;
     const lowerTerm = searchTerm.toLowerCase();
@@ -269,7 +304,7 @@ export default function CustomerDashboard({
   );
 
   const searchOptions = useMemo(() => {
-    if (activeTab === "Customer Directory") {
+    if (activeTab === "Customer Directory" || activeTab === "KIT Customer") {
       return [
         { value: "fullName", label: "Name" },
         { value: "mobile", label: "Phone Number" },
@@ -317,6 +352,26 @@ export default function CustomerDashboard({
       XLSX.writeFile(
         wb,
         `Customers_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
+    } else if (activeTab === "KIT Customer") {
+      if (filteredKitCustomers.length === 0) return;
+      const exportData = filteredKitCustomers.map((row) => ({
+        "Full Name": row.fullName,
+        Email: row.email,
+        Mobile: row.mobile,
+        Gender: row.gender,
+        "Date of Birth": row.dateOfBirth,
+        "Dietary Preference": row.dietary_preference,
+        "Primary Pincode": row.primary_pincode,
+        Clinic: clinicDisplayName(row.clinicName),
+        Status: row.status,
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "KIT Customers");
+      XLSX.writeFile(
+        wb,
+        `KIT_Customers_${new Date().toISOString().split("T")[0]}.xlsx`,
       );
     } else if (activeTab === "Active Subscriptions") {
       if (filteredActiveSubscriptions.length === 0) return;
@@ -444,6 +499,7 @@ export default function CustomerDashboard({
           "Customer Directory",
           "Onboarded",
           "Onboarding Completed",
+          "KIT Customer",
         ]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
@@ -867,7 +923,7 @@ export default function CustomerDashboard({
                           {customer.customerCategory === "KIT" && (
                             <DropdownMenuItem asChild>
                               <Link
-                                href={`/customers/${customer.id}/shipping`}
+                                href={`/customers/${customer.id}?tab=Shipping`}
                                 className="cursor-pointer font-medium flex items-center"
                               >
                                 <Truck className="mr-2 h-4 w-4 text-primary" />

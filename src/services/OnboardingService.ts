@@ -251,8 +251,16 @@ export async function onboard(
   // (4) Resolve clinic_id/franchise_id from the Primary_Address pincode
   //     (Req 14.5). Reject if the pincode maps to no clinic (Req 14.6) —
   //     nothing is persisted on an unresolved scope.
+  //     Exception: KIT category bypasses serviceability — any pincode is accepted.
   const resolution = await resolveClinicForPincode(payload.address.pincode);
-  if (resolution.type !== "resolved") {
+  let clinicId: string | null = null;
+  let franchiseId: string | null = null;
+
+  if (resolution.type === "resolved") {
+    clinicId = resolution.clinic_id;
+    franchiseId = await resolveFranchiseIdForClinic(clinicId);
+  } else if (category !== "KIT") {
+    // Only reject for non-KIT categories; KIT can ship anywhere
     return {
       ok: false,
       reason: "SCOPE_UNRESOLVED",
@@ -261,8 +269,6 @@ export async function onboard(
       fieldErrors: { "address.pincode": "This area is not served by any clinic." },
     };
   }
-  const clinicId = resolution.clinic_id;
-  const franchiseId = await resolveFranchiseIdForClinic(clinicId);
 
   // (5) Determine the email + Test_Email flag (Req 10.1/10.2/10.3).
   const { email, isTestEmail } = resolveEmail(payload, mobile);
@@ -335,7 +341,7 @@ export async function onboard(
     }
   }
 
-  const start = startOfDay(new Date(payload.startDate));
+  const start = startOfDay(new Date(payload.startDate || new Date()));
   const startsOn = format(start, "yyyy-MM-dd");
   
   // Calculate end date based on category
@@ -434,7 +440,7 @@ export async function onboard(
     address: {
       tag: payload.address.tag,
       street_1: buildStreet1(payload.address),
-      street_2: payload.address.searchText ?? null,
+      street_2: payload.address.streetAddress || payload.address.searchText || null,
       city: payload.address.city,
       state: payload.address.state,
       pincode: payload.address.pincode,
@@ -732,8 +738,16 @@ async function resolvePlanPricing(
 
 /**
  * Resolve the invoice amount and tax breakdown for a KIT product, using
- * the stored base_price and fixed 5% tax rate (Req 1.5, 10.1). Returns
- * `null` when the product does not exist or is inactive.
+ * the stored base_price (which is the INCLUSIVE price) and fixed 5% tax rate.
+ * The base_price in the database is already inclusive of tax, so we reverse-
+ * calculate the exclusive base and tax portion.
+ * 
+ * Example: base_price = ₹10,400 (inclusive of 5% tax)
+ *   exclusive base = 10400 / 1.05 = ₹9,904.76
+ *   tax = 10400 - 9904.76 = ₹495.24
+ *   total = ₹10,400
+ * 
+ * Returns `null` when the product does not exist or is inactive.
  */
 async function resolveKitProductPricing(
   kitProductId: string
@@ -750,15 +764,18 @@ async function resolveKitProductPricing(
     return null;
   }
 
-  const baseAmount = Number(product.base_price ?? 0);
-  const taxPercent = Number(product.tax_rate ?? 0.05) * 100; // Convert to percentage
-  const taxAmount = baseAmount * Number(product.tax_rate ?? 0.05);
-  const totalAmount = baseAmount + taxAmount;
+  const inclusivePrice = Number(product.base_price ?? 0);
+  const taxRate = Number(product.tax_rate ?? 0.05);
+  const taxPercent = taxRate * 100; // Convert to percentage
+  // Reverse-calculate: base_price is inclusive, so exclusive = inclusive / (1 + rate)
+  const baseAmount = inclusivePrice / (1 + taxRate);
+  const taxAmount = inclusivePrice - baseAmount;
+  const totalAmount = inclusivePrice; // Total is the stored price itself
 
   return {
-    totalAmount,
-    baseAmount,
-    taxAmount,
+    totalAmount: Number(totalAmount.toFixed(2)),
+    baseAmount: Number(baseAmount.toFixed(2)),
+    taxAmount: Number(taxAmount.toFixed(2)),
     taxPercent,
     productName: product.name as string,
   };
