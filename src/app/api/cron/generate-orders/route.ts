@@ -14,9 +14,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   console.log("generate-orders cron job started here");
   const secret = searchParams.get("secret");
-  const expectedSecret = process.env.CRON_SECRET || "arogya-demo-123";
+  const expectedSecret = process.env.CRON_SECRET;
 
-  if (secret !== expectedSecret) {
+  if (!expectedSecret || secret !== expectedSecret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

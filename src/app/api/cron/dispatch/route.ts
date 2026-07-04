@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
 import { getISTDateString } from "@/lib/dates/ist";
+import { notifyAdmins } from "@/lib/notifications";
 
 /**
  * GET /api/cron/dispatch?secret=<CRON_SECRET>&date=YYYY-MM-DD
@@ -12,9 +13,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
   const secret = searchParams.get("secret");
-  const expectedSecret = process.env.CRON_SECRET || "arogya-demo-123";
+  const expectedSecret = process.env.CRON_SECRET;
 
-  if (secret !== expectedSecret) {
+  if (!expectedSecret || secret !== expectedSecret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -29,6 +30,22 @@ export async function GET(request: Request) {
         { success: false, error: result.error },
         { status: 400 },
       );
+    }
+
+    try {
+      const stats = result.stats as { batchesCreated?: number; ordersAssigned?: number } | undefined;
+      const batchesCreated = stats?.batchesCreated ?? 0;
+      const ordersAssigned = stats?.ordersAssigned ?? 0;
+      await notifyAdmins({
+        title: "Dispatch Automation",
+        message: `Hi Admin, we have created ${batchesCreated} batches and assigned ${ordersAssigned} orders for today's delivery.`,
+        actionUrl: "/admin/operations",
+        sendEmail: true,
+        emailStrategy: "shared",
+        skipInApp: true,
+      });
+    } catch (notifyError) {
+      console.error("Dispatch notification error:", notifyError);
     }
 
     return NextResponse.json({ success: true, data: result }, { status: 200 });

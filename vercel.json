@@ -1,8 +1,20 @@
 {
-    "crons": [
-      {
-        "path": "/api/cron/activate-subscriptions?secret=arogyadietcron-123",
-        "schedule": "30 8 * * *"
-      }
-    ]
-  }
+  "crons": [
+    {
+      "path": "/api/cron/activate-subscriptions?secret=arogyadietcron-123",
+      "schedule": "30 8 * * *"
+    },
+    {
+      "path": "/api/cron/generate-orders?secret=arogyadietcron-123",
+      "schedule": "45 11 * * *"
+    },
+    {
+      "path": "/api/cron/link-products?secret=arogyadietcron-123",
+      "schedule": "35 18 * * *"
+    },
+    {
+      "path": "/api/cron/dispatch?secret=arogyadietcron-123",
+      "schedule": "40 18 * * *"
+    }
+  ]
+}

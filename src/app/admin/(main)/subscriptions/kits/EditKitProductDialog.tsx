@@ -32,7 +32,7 @@ const editKitProductSchema = z.object({
     .min(1, "Product name is required")
     .max(100, "Product name must be 100 characters or less"),
   price: z
-    .number({ invalid_type_error: "Price must be a number" })
+    .number({ error: "Price must be a number" })
     .positive("Price must be greater than 0")
     .max(1000000, "Price exceeds maximum allowed value"),
 });
