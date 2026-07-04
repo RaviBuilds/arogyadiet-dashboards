@@ -17,6 +17,16 @@ export interface KitDailyLog {
   physical_activity_minutes: number | null;
   physical_activity_name: string | null;
   weight_kg: number | null;
+  fat_consumption: string | null;
+  water_intake_liters: number | null;
+  buttermilk_intake: string | null;
+  soup_name_qty: string | null;
+  protein_curry: string | null;
+  main_dish: string | null;
+  veg_curry: string | null;
+  eggs_count: number | null;
+  salads_qty: string | null;
+  step_count: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -212,10 +222,9 @@ export async function saveDailyLogAction(
   const validInput = parsed.data;
   const status = validInput.status;
 
-  const activityMinutes =
-    status === "FOOD_TAKEN" && "activityMinutes" in validInput
-      ? (validInput.activityMinutes ?? null)
-      : null;
+  const isTaken = status === "FOOD_TAKEN" && "activityMinutes" in validInput;
+
+  const activityMinutes = isTaken ? (validInput.activityMinutes ?? null) : null;
   const activityName =
     status === "FOOD_TAKEN" && "activityName" in validInput
       ? (validInput.activityName ?? null)
@@ -223,6 +232,46 @@ export async function saveDailyLogAction(
   const weightKg =
     status === "FOOD_TAKEN" && "weightKg" in validInput
       ? (validInput.weightKg ?? null)
+      : null;
+  const fatConsumption =
+    status === "FOOD_TAKEN" && "fatConsumption" in validInput
+      ? (validInput.fatConsumption ?? null)
+      : null;
+  const waterIntakeLiters =
+    status === "FOOD_TAKEN" && "waterIntakeLiters" in validInput
+      ? (validInput.waterIntakeLiters ?? null)
+      : null;
+  const buttermilkIntake =
+    status === "FOOD_TAKEN" && "buttermilkIntake" in validInput
+      ? (validInput.buttermilkIntake ?? null)
+      : null;
+  const soupNameQty =
+    status === "FOOD_TAKEN" && "soupNameQty" in validInput
+      ? (validInput.soupNameQty ?? null)
+      : null;
+  const proteinCurry =
+    status === "FOOD_TAKEN" && "proteinCurry" in validInput
+      ? (validInput.proteinCurry ?? null)
+      : null;
+  const mainDish =
+    status === "FOOD_TAKEN" && "mainDish" in validInput
+      ? (validInput.mainDish ?? null)
+      : null;
+  const vegCurry =
+    status === "FOOD_TAKEN" && "vegCurry" in validInput
+      ? (validInput.vegCurry ?? null)
+      : null;
+  const eggsCount =
+    status === "FOOD_TAKEN" && "eggsCount" in validInput
+      ? (validInput.eggsCount ?? null)
+      : null;
+  const saladsQty =
+    status === "FOOD_TAKEN" && "saladsQty" in validInput
+      ? (validInput.saladsQty ?? null)
+      : null;
+  const stepCount =
+    status === "FOOD_TAKEN" && "stepCount" in validInput
+      ? (validInput.stepCount ?? null)
       : null;
 
   // 6. INSERT ... ON CONFLICT (subscription_id, log_date) DO UPDATE
@@ -236,6 +285,16 @@ export async function saveDailyLogAction(
         physical_activity_minutes: activityMinutes,
         physical_activity_name: activityName,
         weight_kg: weightKg,
+        fat_consumption: fatConsumption,
+        water_intake_liters: waterIntakeLiters,
+        buttermilk_intake: buttermilkIntake,
+        soup_name_qty: soupNameQty,
+        protein_curry: proteinCurry,
+        main_dish: mainDish,
+        veg_curry: vegCurry,
+        eggs_count: eggsCount,
+        salads_qty: saladsQty,
+        step_count: stepCount,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "subscription_id,log_date" }

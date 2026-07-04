@@ -35,6 +35,51 @@ export const dailyLogSchema = z.discriminatedUnion("status", [
         "Weight must have at most 2 decimal places."
       )
       .optional(),
+    fatConsumption: z
+      .string()
+      .max(200, "Fat consumption must be at most 200 characters.")
+      .optional(),
+    waterIntakeLiters: z
+      .number()
+      .min(0, "Water intake cannot be negative.")
+      .max(20, "Water intake cannot exceed 20 liters.")
+      .optional(),
+    buttermilkIntake: z
+      .string()
+      .max(200, "Buttermilk intake must be at most 200 characters.")
+      .optional(),
+    soupNameQty: z
+      .string()
+      .max(200, "Soup details must be at most 200 characters.")
+      .optional(),
+    proteinCurry: z
+      .string()
+      .max(200, "Protein curry must be at most 200 characters.")
+      .optional(),
+    mainDish: z
+      .string()
+      .max(200, "Main dish must be at most 200 characters.")
+      .optional(),
+    vegCurry: z
+      .string()
+      .max(200, "Veg curry must be at most 200 characters.")
+      .optional(),
+    eggsCount: z
+      .number()
+      .int("Eggs count must be a whole number.")
+      .min(0, "Eggs count cannot be negative.")
+      .max(50, "Eggs count cannot exceed 50.")
+      .optional(),
+    saladsQty: z
+      .string()
+      .max(200, "Salads quantity must be at most 200 characters.")
+      .optional(),
+    stepCount: z
+      .number()
+      .int("Step count must be a whole number.")
+      .min(0, "Step count cannot be negative.")
+      .max(200000, "Step count cannot exceed 200,000.")
+      .optional(),
   }),
   z.object({ status: z.literal("FOOD_SKIPPED") }),
 ]);

@@ -29,6 +29,16 @@ interface DailyLog {
   physical_activity_minutes: number | null;
   physical_activity_name: string | null;
   weight_kg: number | null;
+  fat_consumption?: string | null;
+  water_intake_liters?: number | null;
+  buttermilk_intake?: string | null;
+  soup_name_qty?: string | null;
+  protein_curry?: string | null;
+  main_dish?: string | null;
+  veg_curry?: string | null;
+  eggs_count?: number | null;
+  salads_qty?: string | null;
+  step_count?: number | null;
 }
 
 interface DailyTrackerClientProps {
