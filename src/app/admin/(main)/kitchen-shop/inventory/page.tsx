@@ -8,5 +8,12 @@ export default async function InventoryPage() {
   await guardAdminGroup("shop_products");
   const products = await adminGetProducts();
 
-  return <InventoryPageClient products={products} />;
+  return (
+    <InventoryPageClient
+      products={products}
+      accessMode="view-only"
+      pageTitle="Shop Products"
+      pageDescription="View shop products and control their visibility status."
+    />
+  );
 }

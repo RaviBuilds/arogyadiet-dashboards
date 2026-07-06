@@ -187,7 +187,7 @@ describe("QuickOnboardingForm — test-email control (Req 10.2)", () => {
   it("shows an optional email field with an adjacent test-email checkbox", async () => {
     const user = userEvent.setup();
     render(
-      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} />,
+      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} clinics={[]} />,
     );
 
     await goToReviewStep(user);
@@ -207,7 +207,7 @@ describe("QuickOnboardingForm — 5 PM cutoff acknowledgment gate (Req 7.1–7.4
   it("warns past the cutoff and gates Onboard behind the acknowledgment", async () => {
     const user = userEvent.setup();
     render(
-      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} />,
+      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} clinics={[]} />,
     );
 
     await goToReviewStep(user);
@@ -240,7 +240,7 @@ describe("QuickOnboardingForm — KIT product payment review (Req 4.1)", () => {
   it("displays KIT product name, base price, tax amount (5%), and total price", async () => {
     const user = userEvent.setup();
     render(
-      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} />,
+      <QuickOnboardingForm plans={PLANS} kitProducts={KIT_PRODUCTS} serviceAreaPincodes={["500081"]} clinics={[]} />,
     );
 
     // Step 1 — Details

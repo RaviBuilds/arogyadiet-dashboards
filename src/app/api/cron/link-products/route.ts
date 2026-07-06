@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 import { runProductLinkingAction } from "@/actions/admin-actions/systemActions";
+import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
 import { getISTDateString } from "@/lib/dates/ist";
 import { notifyAdmins } from "@/lib/notifications";
 
 /**
  * GET /api/cron/link-products?secret=<CRON_SECRET>&date=YYYY-MM-DD
  *
- * Scheduled at ~12:05 AM IST daily (via external cron / Supabase pg_cron).
+ * Scheduled at ~12:05 AM IST daily (via Vercel cron).
  * Links paid addon shop products to today's delivery_orders unless an explicit date is passed.
+ * After successful linking, automatically triggers the dispatch/routing step.
  */
+
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
@@ -24,6 +28,7 @@ export async function GET(request: Request) {
     const queryDate = searchParams.get("date");
     const targetDate = queryDate || today;
 
+    // Step 1: Link products
     const result = await runProductLinkingAction(targetDate);
 
     if (!result.success) {
@@ -46,6 +51,34 @@ export async function GET(request: Request) {
       console.error("Product link notification error:", notifyError);
     }
 
+    // Step 2: Trigger dispatch/routing after product linking completes
+    let dispatchResult = null;
+    try {
+      dispatchResult = await executeAutomatedDispatch(targetDate);
+
+      if (dispatchResult.error) {
+        console.error("Dispatch failed after product linking:", dispatchResult.error);
+      } else {
+        try {
+          const stats = dispatchResult.stats as { batchesCreated?: number; ordersAssigned?: number } | undefined;
+          const batchesCreated = stats?.batchesCreated ?? 0;
+          const ordersAssigned = stats?.ordersAssigned ?? 0;
+          await notifyAdmins({
+            title: "Dispatch Automation",
+            message: `Hi Admin, we have created ${batchesCreated} batches and assigned ${ordersAssigned} orders for today's delivery.`,
+            actionUrl: "/admin/operations",
+            sendEmail: true,
+            emailStrategy: "shared",
+            skipInApp: true,
+          });
+        } catch (notifyError) {
+          console.error("Dispatch notification error:", notifyError);
+        }
+      }
+    } catch (dispatchError) {
+      console.error("Dispatch execution error after product linking:", dispatchError);
+    }
+
     return NextResponse.json(
       {
         success: true,
@@ -53,6 +86,9 @@ export async function GET(request: Request) {
           targetDate: result.targetDate,
           linked: result.count,
           istToday: today,
+          dispatch: dispatchResult?.error
+            ? { success: false, error: dispatchResult.error }
+            : { success: true, stats: dispatchResult?.stats },
         },
       },
       { status: 200 },

@@ -727,3 +727,29 @@ export async function adminToggleCustomerActive(
   revalidatePath("/admin/customers");
   return { success: true };
 }
+
+// ── Clinic Assignment Action ──────────────────────────────────────────────────
+
+export async function adminAssignCustomerClinic(
+  profileId: string,
+  clinicId: string | null,
+) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  const { error } = await supabaseAdmin
+    .from("customer_profiles")
+    .update({ clinic_id: clinicId })
+    .eq("id", profileId);
+
+  if (error) return { success: false, error: error.message };
+
+  await logAdminAction("UPDATE", "customer", profileId, {
+    action: "clinic_assignment",
+    clinic_id: clinicId,
+  });
+
+  revalidatePath(`/admin/customers/${profileId}`);
+  revalidatePath("/admin/customers");
+  return { success: true };
+}

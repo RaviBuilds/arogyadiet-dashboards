@@ -27,8 +27,8 @@ import { ShippingTracker } from "./ShippingTracker";
 
 interface KitSubscription {
   id: string;
-  subscription_code: string;
-  starts_on: string;
+  subscription_code: string | null;
+  starts_on: string | null;
   kit_duration_days: number;
   customer_category: string;
   status: string;
@@ -46,9 +46,11 @@ interface KitSubscription {
 interface KitDashboardProps {
   subscription: KitSubscription;
   shippingInfo: ShippingInfo | null;
+  /** When true, indicates this is a new PENDING KIT being shown because the previous KIT expired */
+  isNewKitPending?: boolean;
 }
 
-export function KitDashboard({ subscription, shippingInfo }: KitDashboardProps) {
+export function KitDashboard({ subscription, shippingInfo, isNewKitPending }: KitDashboardProps) {
   // Handle kit_products being either an object or an array
   const kitProduct = Array.isArray(subscription.kit_products)
     ? subscription.kit_products[0]
@@ -71,24 +73,54 @@ export function KitDashboard({ subscription, shippingInfo }: KitDashboardProps) 
 
   return (
     <div className="relative z-10 max-w-5xl mx-auto space-y-6">
+      {/* New KIT Pending Banner - shown when previous KIT expired and a new one is on the way */}
+      {isNewKitPending && (
+        <Card className="border border-amber-200 bg-amber-50/50 shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-amber-100 p-2 text-amber-600 shrink-0">
+                <Package className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-amber-900 mb-1">
+                  New KIT Order on the Way
+                </p>
+                <p className="text-sm text-amber-800/90 leading-relaxed">
+                  Your previous KIT has expired. A new KIT has been ordered for you.
+                  Below are the details of your upcoming KIT delivery.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 tracking-tight">
-            My KIT Order
+            {isNewKitPending ? "New KIT Order" : "My KIT Order"}
           </h1>
           <p className="text-sm text-slate-500 mt-1 flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-green-600" /> Order ID:{" "}
             <span className="font-mono text-slate-700 font-medium">
-              {subscription.subscription_code}
+              {subscription.subscription_code ?? "Pending"}
             </span>
           </p>
         </div>
         <Badge
           variant="outline"
-          className="shrink-0 rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700"
+          className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${
+            isNewKitPending
+              ? "border-amber-200 bg-amber-50 text-amber-700"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+          }`}
         >
-          {subscription.status === 'ACTIVE' ? 'PAID' : subscription.status}
+          {isNewKitPending
+            ? "PENDING"
+            : subscription.status === "ACTIVE"
+              ? "PAID"
+              : subscription.status}
         </Badge>
       </div>
 

@@ -86,6 +86,9 @@ export function createQuickOnboardingSchema(
       // Req 7.2/7.3: cutoff acknowledgment (gating enforced in the UI/action).
       cutoffAcknowledged: z.boolean().default(false),
 
+      // Optional manual clinic assignment (for KIT customers).
+      clinicId: z.string().uuid("Select a valid clinic.").optional(),
+
       // Req 4.5 / 5: primary address captured via Address_Capture.
       address: createAddressCaptureSchema(serviceAreaPincodes, skipServiceabilityCheck),
     })
@@ -164,6 +167,7 @@ export const quickOnboardingSchema = z
       message: "Select an initial meal preference.",
     }),
     cutoffAcknowledged: z.boolean().default(false),
+    clinicId: z.string().uuid("Select a valid clinic.").optional(),
     address: addressCaptureSchema,
   })
   .superRefine((data, ctx) => {

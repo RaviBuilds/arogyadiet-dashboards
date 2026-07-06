@@ -29,7 +29,7 @@ export default async function CustomersPage({
       clinics ( name ),
       users!inner ( id, full_name, email, mobile, is_active ),
       addresses ( pincode, is_primary ),
-      subscriptions ( status, customer_category, subscription_plans ( name ) )
+      subscriptions ( status, customer_category, subscription_plans ( name ), kit_products ( name ) )
     `);
 
   if (error) console.error("Error fetching customers:", error);
@@ -63,11 +63,15 @@ export default async function CustomersPage({
 
     if (activeSub) {
       displayStatus = "Active";
-      activePlanName = activeSub.subscription_plans?.name || "Custom Plan";
+      activePlanName = activeSub.customer_category === "KIT"
+        ? activeSub.kit_products?.name || activeSub.subscription_plans?.name || "Custom Plan"
+        : activeSub.subscription_plans?.name || "Custom Plan";
       customerCategory = activeSub.customer_category;
     } else if (pendingSub) {
       displayStatus = "Pending";
-      activePlanName = pendingSub.subscription_plans?.name || "Custom Plan";
+      activePlanName = pendingSub.customer_category === "KIT"
+        ? pendingSub.kit_products?.name || pendingSub.subscription_plans?.name || "Custom Plan"
+        : pendingSub.subscription_plans?.name || "Custom Plan";
       customerCategory = pendingSub.customer_category;
     } else if (stoppedSub) {
       displayStatus = "Stopped";

@@ -51,6 +51,7 @@ import {
 import { ConfirmDeleteModal } from "../core/ConfirmDeleteModal";
 import { AdminMedicalUploadModal } from "./AdminMedicalUploadModal";
 import { ResetPinDialog } from "@/shared/components/admin/ResetPinDialog";
+import { ClinicAssignmentSelector } from "./ClinicAssignmentSelector";
 
 import {
   BadgeIndianRupee,
@@ -89,6 +90,7 @@ import {
 } from "./AdminCouponsTab";
 import { CourierForm } from "./CourierForm";
 import { AdminKitTrackerView } from "./kit-tracker/AdminKitTrackerView";
+import { KitEligibilityBadge } from "./KitEligibilityBadge";
 import type { ShippingInfo } from "@/types/kitShipping";
 
 const AddressPickerMap = dynamic(
@@ -208,6 +210,7 @@ export function Customer360Dashboard({
   kitSubscription = null,
   existingShippingInfo = null,
   kitDailyLogs = [],
+  customerClinicId = null,
 }: {
   customer: CustomerProfile;
   initialSubscriptionData: InitialSubscriptionData;
@@ -228,6 +231,8 @@ export function Customer360Dashboard({
     physical_activity_name: string | null;
     weight_kg: number | null;
   }>;
+  /** The customer's currently assigned clinic_id (for manual assignment on KIT customers). */
+  customerClinicId?: string | null;
   /**
    * Injectable server actions. Defaults to admin-scoped actions, so the admin
    * portal works unchanged. The franchise portal passes franchise-scoped
@@ -555,6 +560,17 @@ export function Customer360Dashboard({
         }
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        actions={
+          isKitCustomer ? (
+            <KitEligibilityBadge
+              customerProfileId={customer.id}
+              onSendNewKit={() => {
+                setActiveTab("KIT");
+                toast.info("Send New KIT form will be available here.");
+              }}
+            />
+          ) : undefined
+        }
       />
 
       <div className="mt-8">
@@ -715,6 +731,29 @@ export function Customer360Dashboard({
                 </div>
               </CardContent>
             </Card>
+
+            {/* Clinic Assignment Card — for KIT customers, admin can manually assign */}
+            {isKitCustomer && (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle>Clinic Assignment</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground mb-2">
+                      Assigned Clinic
+                    </p>
+                    <ClinicAssignmentSelector
+                      profileId={customer.id}
+                      currentClinicId={customerClinicId}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    For KIT customers, the clinic must be assigned manually by the admin.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 

@@ -42,6 +42,7 @@ const upsertProductSchema = z.object({
 type ActionResult = { success: boolean; error?: string };
 
 const INVENTORY_PATH = "/admin/kitchen-shop/inventory";
+const INVENTORY_SHOP_PRODUCTS_PATH = "/admin/inventory/shop-products";
 
 function getFormString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -206,6 +207,7 @@ export async function adminUpsertProduct(
   }
 
   revalidatePath(INVENTORY_PATH);
+  revalidatePath(INVENTORY_SHOP_PRODUCTS_PATH);
   return { success: true };
 }
 
@@ -232,6 +234,7 @@ export async function adminDeleteProduct(id: string): Promise<ActionResult> {
   }
 
   revalidatePath(INVENTORY_PATH);
+  revalidatePath(INVENTORY_SHOP_PRODUCTS_PATH);
   return { success: true };
 }
 
@@ -255,5 +258,6 @@ export async function adminToggleProductVisibility(
   }
 
   revalidatePath(INVENTORY_PATH);
+  revalidatePath(INVENTORY_SHOP_PRODUCTS_PATH);
   return { success: true };
 }

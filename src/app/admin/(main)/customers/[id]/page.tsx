@@ -30,6 +30,7 @@ export default async function Customer360Page({
       allergies,
       medical_history_notes,
       has_medical_history,
+      clinic_id,
       users!inner ( id, auth_user_id, full_name, email, mobile, is_active ),
       addresses ( id, tag, street_1, street_2, landmark, city, state, pincode, is_primary, lat, lng, updated_at ),
       medical_documents ( id, file_name, storage_path, uploaded_at, file_size_bytes ),
@@ -284,6 +285,7 @@ export default async function Customer360Page({
         kitSubscription={kitSubscription}
         existingShippingInfo={existingShippingInfo}
         kitDailyLogs={kitDailyLogs}
+        customerClinicId={(data as any).clinic_id ?? null}
       />
     </div>
   );

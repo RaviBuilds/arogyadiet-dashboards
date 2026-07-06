@@ -207,7 +207,9 @@ describe("Accessibility (mechanical subset) — customer-mobile-onboarding scree
     render(
       <QuickOnboardingForm
         plans={SAMPLE_PLANS}
+        kitProducts={[]}
         serviceAreaPincodes={SERVICE_PINCODES}
+        clinics={[]}
       />,
     );
     expect(screen.getByLabelText(/full name/i)).toBeInTheDocument();
