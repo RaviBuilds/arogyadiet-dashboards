@@ -272,6 +272,7 @@ export default function InventoryPageClient({
     const baseColumns: ColumnDef<AdminInventoryProduct>[] = [
       {
         id: "product",
+        accessorFn: (row) => row.name,
         header: "Product",
         cell: ({ row }) => {
           const imageUrl =
@@ -564,7 +565,7 @@ export default function InventoryPageClient({
           <DataTable
             columns={columns}
             data={products}
-            filterColumn="name"
+            filterColumn="product"
             filterPlaceholder="Search products by name..."
           />
         </div>
