@@ -69,6 +69,8 @@ export interface FranchiseStockTransfer {
   lines: FranchiseBatch[];
   dispatchedAt: string;
   sourceCentralKitchenId: string | null;
+  /** Storage paths for package verification images (null if none attached) */
+  packageImagePaths: string[] | null;
 }
 
 /**
@@ -86,4 +88,8 @@ export interface FranchiseLedgerEntry {
   comment: string | null;
   sourceCentralKitchenId: string | null;
   occurredAt: string;
+  /** Transfer ID for incoming entries — used to fetch package images */
+  transferId: string | null;
+  /** Whether this transfer has package images attached */
+  hasPackageImages: boolean;
 }

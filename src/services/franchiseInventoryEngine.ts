@@ -106,6 +106,33 @@ async function resolveProductInfo(
   return map;
 }
 
+/**
+ * Checks which transfer IDs have package images attached.
+ * Returns a Set of transfer IDs that have non-empty package_image_paths.
+ */
+async function getTransfersWithPackageImages(
+  transferIds: string[],
+): Promise<Set<string>> {
+  if (transferIds.length === 0) return new Set();
+
+  const uniqueIds = [...new Set(transferIds)];
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("franchise_stock_transfers")
+    .select("id, package_image_paths")
+    .in("id", uniqueIds)
+    .not("package_image_paths", "is", null);
+
+  if (error || !data) return new Set();
+
+  return new Set(
+    data
+      .filter((row) => Array.isArray(row.package_image_paths) && row.package_image_paths.length > 0)
+      .map((row) => row.id),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Read functions
 // ---------------------------------------------------------------------------
@@ -208,6 +235,7 @@ export async function getIncomingTransfers(
     lines: linesByTransfer.get(t.id) ?? [],
     dispatchedAt: t.dispatched_at,
     sourceCentralKitchenId: t.source_central_kitchen_id,
+    packageImagePaths: t.package_image_paths ?? null,
   }));
 }
 
@@ -227,16 +255,35 @@ export async function getFranchiseLedger(
   const productIds = entries.map((e) => e.product_id);
   const productInfo = await resolveProductInfo(productIds);
 
+  // Resolve which transfers have package images (for incoming entries)
+  const transferIds = entries
+    .filter((e) => e.direction === "IN" && e.source_transfer_id)
+    .map((e) => e.source_transfer_id!);
+  const transfersWithImages = await getTransfersWithPackageImages(transferIds);
+
   return entries.map((entry) => ({
     id: entry.id,
     direction: entry.direction,
     productName: productInfo.get(entry.product_id)?.name ?? "Unknown Product",
     quantity: Number(entry.quantity),
-    batchBreakdown: (entry.batch_breakdown as FranchiseBatch[]) ?? [],
+    batchBreakdown: ((entry.batch_breakdown as unknown[] | null) ?? []).map(
+      (b: unknown) => {
+        const raw = b as Record<string, unknown>;
+        return {
+          batchNumber: (raw.batchNumber ?? raw.batch_number ?? "—") as string,
+          quantity: Number(raw.quantity ?? 0),
+          expiryDate: (raw.expiryDate ?? raw.expiry_date ?? "") as string,
+        };
+      },
+    ),
     stockOutReason: entry.stock_out_reason as FranchiseLedgerEntry["stockOutReason"],
     comment: entry.comment,
     sourceCentralKitchenId: entry.source_central_kitchen_id,
     occurredAt: entry.occurred_at,
+    transferId: entry.source_transfer_id ?? null,
+    hasPackageImages: entry.source_transfer_id
+      ? transfersWithImages.has(entry.source_transfer_id)
+      : false,
   }));
 }
 

@@ -54,6 +54,7 @@ const TRANSFER_COLUMNS = [
   "rejected_at",
   "dispatched_by",
   "acted_by",
+  "package_image_paths",
   "created_at",
   "updated_at",
 ].join(", ");
@@ -121,6 +122,7 @@ export interface FranchiseStockTransferRow {
   rejected_at: string | null;
   dispatched_by: string | null;
   acted_by: string | null;
+  package_image_paths: string[] | null;
   created_at: string;
   updated_at: string;
 }

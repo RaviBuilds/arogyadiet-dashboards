@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/expire-kits?secret=arogyadietcron-123",
       "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-dispatch-images?secret=arogyadietcron-123",
+      "schedule": "0 3 * * *"
     }
   ]
 }

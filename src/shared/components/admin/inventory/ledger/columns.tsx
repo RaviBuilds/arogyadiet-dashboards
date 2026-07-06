@@ -12,6 +12,7 @@ import {
 } from "@/lib/inventory/product-schema";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
+import PackageImagesViewer from "@/shared/components/admin/inventory/PackageImagesViewer";
 
 const BASE_UOM_LABELS: Record<BaseUom, string> = {
   KG: "KG",
@@ -204,11 +205,19 @@ export const ledgerColumns: ColumnDef<TransactionLedgerEntry>[] = [
     accessorFn: (row) => `${row.productName} ${row.batchNumber}`,
     header: "Product & Batch",
     cell: ({ row }) => (
-      <div>
-        <p className="font-medium">{row.original.productName}</p>
-        <p className="text-sm text-muted-foreground">
-          {row.original.batchNumber}
-        </p>
+      <div className="flex items-center gap-1.5">
+        <div>
+          <p className="font-medium">{row.original.productName}</p>
+          <p className="text-sm text-muted-foreground">
+            {row.original.batchNumber}
+          </p>
+        </div>
+        {row.original.hasPackageImages && row.original.franchiseTransferId && (
+          <PackageImagesViewer
+            transferId={row.original.franchiseTransferId}
+            compact
+          />
+        )}
       </div>
     ),
     enableSorting: false,

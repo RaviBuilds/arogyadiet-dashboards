@@ -2,9 +2,11 @@ import { getCustomerSession } from "@/lib/customer/get-session";
 import { FloatingSupportMenu } from "@/shared/components/customer/FloatingSupportMenu";
 import { CustomerHeader } from "@/shared/components/layout/customer-header";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
+import { RouteProgressBar } from "@/shared/components/layout/RouteProgressBar";
 import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
 import { redirect } from "next/navigation";
 import { Metadata } from "next";
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 
@@ -23,6 +25,7 @@ export default async function CustomerLayout({
   if (error || !user) redirect("/login");
 
   const userName = profile?.full_name || user.user_metadata?.full_name || null;
+  const userPhone = profile?.mobile || user.phone || null;
 
   // Resolve the customer's subscription category for nav filtering
   let customerCategory: string | null = null;
@@ -42,6 +45,11 @@ export default async function CustomerLayout({
   return (
     // ADDED max-w-full and overflow-x-hidden to kill horizontal scroll
     <div className="flex min-h-screen w-full max-w-full bg-slate-50/50 print:block print:min-h-0 print:bg-white">
+      {/* Instant visual feedback the moment a nav link is clicked, before the
+          new route's data even starts loading. */}
+      <Suspense fallback={null}>
+        <RouteProgressBar />
+      </Suspense>
       {/* Global Subtle Background Texture */}
       <div 
         className="fixed inset-0 z-0 pointer-events-none opacity-35" 
@@ -59,6 +67,7 @@ export default async function CustomerLayout({
         <CustomerHeader
           userEmail={user.email || ""}
           userName={userName}
+          userPhone={userPhone}
           userId={profile?.id ?? null}
           customerCategory={customerCategory}
         />

@@ -1,13 +1,10 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { Button } from "@/shared/components/ui/button";
 import {
   CalendarCheck,
   CreditCard,
   History,
-  LogOut,
   MapPin,
   User,
   Utensils,
@@ -20,7 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 type NavItem = {
   name: string;
@@ -111,12 +108,10 @@ function NavGroup({
 function SidebarContent({
   pathname,
   onNavigate,
-  onLogout,
   customerCategory,
 }: {
   pathname: string;
   onNavigate?: () => void;
-  onLogout: () => void;
   customerCategory?: string | null;
 }) {
   const isKit = customerCategory === "KIT";
@@ -196,16 +191,6 @@ function SidebarContent({
           onNavigate={onNavigate}
         />
       </div>
-
-      <div className="z-10 mt-auto shrink-0 border-t border-white/[0.08] bg-zinc-950 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 rounded-xl text-zinc-400 transition-all duration-200 hover:bg-red-500/10 hover:text-red-400"
-          onClick={onLogout}
-        >
-          <LogOut className="h-4 w-4" /> Logout
-        </Button>
-      </div>
     </div>
   );
 }
@@ -220,14 +205,6 @@ export function CustomerSidebar({
   customerCategory?: string | null;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const supabase = createClient();
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  };
 
   return (
     <div
@@ -241,7 +218,6 @@ export function CustomerSidebar({
       <SidebarContent
         pathname={pathname}
         onNavigate={onNavigate}
-        onLogout={handleLogout}
         customerCategory={customerCategory}
       />
     </div>

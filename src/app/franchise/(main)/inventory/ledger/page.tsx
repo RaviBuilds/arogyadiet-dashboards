@@ -1,9 +1,11 @@
 import { cookies } from "next/headers";
-import { BookOpen } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, BookOpen } from "lucide-react";
 
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
 import { getFranchiseLedger } from "@/services/franchiseInventoryEngine";
 import type { Scope } from "@/types/franchise";
+import { Button } from "@/shared/components/ui/button";
 import FranchiseLedgerWorkspace from "./_components/FranchiseLedgerWorkspace";
 
 export const revalidate = 0;
@@ -26,6 +28,14 @@ export default async function FranchiseLedgerPage() {
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in duration-500">
+      <div className="flex items-center gap-4">
+        <Button asChild variant="outline" size="sm">
+          <Link href="/inventory">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Inventory
+          </Link>
+        </Button>
+      </div>
       <PageHeader
         title="Audit Ledger"
         subtitle="Immutable transaction history for every stock movement. Switch between incoming and outgoing entries for a focused view."

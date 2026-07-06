@@ -1,7 +1,6 @@
 "use client";
 
-import { type ReactNode, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -10,7 +9,6 @@ import {
   type DispatchStockReason,
 } from "@/lib/inventory/product-schema";
 import type { FranchiseDestination } from "@/lib/franchise-inventory/active-destination-filter";
-import { dispatchToFranchiseAction } from "@/actions/admin-actions/franchiseDispatchActions";
 import { useInventoryStore } from "@/shared/stores/useInventoryStore";
 import { Button } from "@/shared/components/ui/button";
 import {
@@ -58,11 +56,9 @@ export default function DispatchStockModal({
   franchiseDestinations = [],
 }: DispatchStockModalProps) {
   const addOutboundItem = useInventoryStore((state) => state.addOutboundItem);
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [quantity, setQuantity] = useState("");
   const [destination, setDestination] = useState("");
-  const [isPending, startTransition] = useTransition();
 
   const uomLabel = BASE_UOM_LABELS[baseUom];
 
@@ -98,26 +94,26 @@ export default function DispatchStockModal({
     const qty = Number(quantity);
 
     if (isFranchiseDestination) {
-      // Dispatch to franchise via dedicated server action
+      // Add franchise dispatch to outbound cart (same pattern as other destinations)
       const franchiseId = destination.slice(FRANCHISE_PREFIX.length);
+      const franchise = franchiseDestinations.find((f) => f.id === franchiseId);
+      const franchiseName = franchise?.name ?? "Unknown Franchise";
 
-      startTransition(async () => {
-        const formData = new FormData();
-        formData.set("dest_franchise_id", franchiseId);
-        formData.set("product_id", productId);
-        formData.set("quantity", String(qty));
-
-        const result = await dispatchToFranchiseAction(formData);
-
-        if (result.success) {
-          toast.success(`Dispatched ${qty} ${uomLabel} to franchise`);
-          resetForm();
-          setOpen(false);
-          router.refresh();
-        } else {
-          toast.error(result.error);
-        }
+      // Use a synthetic reason for display; the actual dispatch will use the franchise RPC
+      addOutboundItem({
+        productId,
+        name: productName,
+        qty,
+        reason: `Sent to ${franchiseName}` as DispatchStockReason,
+        franchiseId,
+        franchiseName,
       });
+
+      toast.success("Added to Outbound Cart", {
+        description: `${qty} ${uomLabel} of "${productName}" → ${franchiseName}`,
+      });
+      resetForm();
+      setOpen(false);
     } else {
       // Existing branch-based dispatch via outbound cart
       addOutboundItem({
@@ -127,7 +123,7 @@ export default function DispatchStockModal({
         reason: destination as DispatchStockReason,
       });
 
-      toast.success("Added to Staging");
+      toast.success("Added to Outbound Cart");
       resetForm();
       setOpen(false);
     }
@@ -225,22 +221,16 @@ export default function DispatchStockModal({
 
           <p className="text-sm text-muted-foreground">
             Note: Stock will be deducted automatically using FIFO (oldest expiry
-            first).
-            {isFranchiseDestination &&
-              " Franchise dispatch is processed immediately."}
+            first) when the outbound batch is processed.
           </p>
 
           <Button
             type="submit"
             variant="destructive"
-            disabled={!destination || hasNoDestinations || isPending}
+            disabled={!destination || hasNoDestinations}
             className="w-full"
           >
-            {isPending
-              ? "Dispatching..."
-              : isFranchiseDestination
-                ? "Dispatch to Franchise"
-                : "Add to Outbound Cart"}
+            Add to Outbound Cart
           </Button>
         </form>
       </DialogContent>

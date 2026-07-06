@@ -11,6 +11,7 @@ import { Badge } from "@/shared/components/ui/badge";
 import { PackageOpen, Boxes } from "lucide-react";
 import type { FranchiseStockTransfer } from "@/types/franchiseInventory";
 import ReceiveTransferControls from "./ReceiveTransferControls";
+import PackageImagesViewer from "@/shared/components/admin/inventory/PackageImagesViewer";
 
 interface IncomingTransfersPanelProps {
   transfers: FranchiseStockTransfer[];
@@ -163,6 +164,13 @@ function TransferCard({ transfer }: { transfer: FranchiseStockTransfer }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Package images viewer */}
+      {transfer.packageImagePaths && transfer.packageImagePaths.length > 0 && (
+        <div className="mb-3">
+          <PackageImagesViewer transferId={transfer.id} />
         </div>
       )}
 

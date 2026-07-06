@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Inbox, Loader2, Package, Trash2 } from "lucide-react";
+import { Camera, Inbox, Loader2, Package, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
   bulkDispatchAction,
   bulkReceiveAction,
 } from "@/actions/inventory-actions";
+import { bulkDispatchToFranchiseAction } from "@/actions/admin-actions/franchiseDispatchActions";
 import { INVENTORY_SOURCE_LABELS } from "@/lib/inventory/product-schema";
 import { Button } from "@/shared/components/ui/button";
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
@@ -26,6 +27,7 @@ import {
   TabsTrigger,
 } from "@/shared/components/ui/tabs";
 import {
+  selectHasFranchiseItems,
   selectInboundBatchCost,
   selectTotalCartCount,
   useInventoryStore,
@@ -78,6 +80,7 @@ export default function OperationsCart() {
   const [isMounted, setIsMounted] = useState(false);
   const [isInboundPending, startInboundTransition] = useTransition();
   const [isOutboundPending, startOutboundTransition] = useTransition();
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const inboundCart = useInventoryStore((state) => state.inboundCart);
   const outboundCart = useInventoryStore((state) => state.outboundCart);
@@ -89,9 +92,19 @@ export default function OperationsCart() {
   const clearOutboundCart = useInventoryStore(
     (state) => state.clearOutboundCart,
   );
+  const franchisePackageImages = useInventoryStore(
+    (state) => state.franchisePackageImages,
+  );
+  const addFranchisePackageImage = useInventoryStore(
+    (state) => state.addFranchisePackageImage,
+  );
+  const removeFranchisePackageImage = useInventoryStore(
+    (state) => state.removeFranchisePackageImage,
+  );
 
   const totalCartCount = useInventoryStore(selectTotalCartCount);
   const inboundBatchCost = useInventoryStore(selectInboundBatchCost);
+  const hasFranchiseItems = useInventoryStore(selectHasFranchiseItems);
 
   useEffect(() => {
     setIsMounted(true);
@@ -148,26 +161,75 @@ export default function OperationsCart() {
     }
 
     startOutboundTransition(async () => {
-      const payload = outboundCart.map(({ productId, name, qty, reason }) => ({
-        productId,
-        name,
-        quantity: qty,
-        reason,
-      }));
+      // Split outbound items into regular dispatch and franchise dispatch
+      const regularItems = outboundCart.filter((item) => !item.franchiseId);
+      const franchiseItems = outboundCart.filter((item) => !!item.franchiseId);
 
-      const result = await bulkDispatchAction(payload);
+      let totalProcessed = 0;
+      let totalDispatched = 0;
 
-      if (result.success) {
-        toast.success(
-          `${result.totalDispatched} units dispatched across ${result.processed} item${result.processed === 1 ? "" : "s"}.`,
-        );
-        clearOutboundCart();
-        setIsOpen(false);
-        router.refresh();
-        return;
+      // Process regular dispatch items (Kitchen Consumption, Customer Sale, etc.)
+      if (regularItems.length > 0) {
+        const payload = regularItems.map(({ productId, name, qty, reason }) => ({
+          productId,
+          name,
+          quantity: qty,
+          reason,
+        }));
+
+        const result = await bulkDispatchAction(payload);
+
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+
+        totalProcessed += result.processed ?? 0;
+        totalDispatched += result.totalDispatched ?? 0;
       }
 
-      toast.error(result.error);
+      // Process franchise dispatch items (with optional package images)
+      if (franchiseItems.length > 0) {
+        const formData = new FormData();
+        const franchisePayload = franchiseItems.map(
+          ({ productId, name, qty, franchiseId }) => ({
+            dest_franchise_id: franchiseId!,
+            product_id: productId,
+            name,
+            quantity: qty,
+          }),
+        );
+        formData.set("items", JSON.stringify(franchisePayload));
+
+        // Attach package images if any
+        franchisePackageImages.forEach((file, index) => {
+          formData.append(`packageImage-${index}`, file);
+        });
+
+        const franchiseResult =
+          await bulkDispatchToFranchiseAction(formData);
+
+        if (!franchiseResult.success) {
+          toast.error(franchiseResult.error);
+          // If regular items already processed, still clear those from cart
+          if (regularItems.length > 0 && totalProcessed > 0) {
+            toast.info(
+              `${totalProcessed} regular items were dispatched before the franchise error.`,
+            );
+          }
+          return;
+        }
+
+        totalProcessed += franchiseResult.processed ?? 0;
+        totalDispatched += franchiseResult.totalDispatched ?? 0;
+      }
+
+      toast.success(
+        `${totalDispatched} units dispatched across ${totalProcessed} item${totalProcessed === 1 ? "" : "s"}.`,
+      );
+      clearOutboundCart();
+      setIsOpen(false);
+      router.refresh();
     });
   }
 
@@ -278,7 +340,7 @@ export default function OperationsCart() {
                         <StagingCartItem
                           key={item.id}
                           name={item.name}
-                          details={`Qty: ${item.qty} · ${item.reason}`}
+                          details={`Qty: ${item.qty} · ${item.franchiseName ? `→ ${item.franchiseName}` : item.reason}`}
                           onRemove={() => removeOutboundItem(item.id)}
                         />
                       ))}
@@ -287,6 +349,78 @@ export default function OperationsCart() {
                 </ScrollArea>
 
                 <div className="mt-auto border-t bg-background px-6 pt-4 pb-6">
+                  {/* Package images section — only visible when franchise items exist */}
+                  {hasFranchiseItems && (
+                    <div className="mb-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          <Camera className="h-3.5 w-3.5" />
+                          Package Photos (optional)
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {franchisePackageImages.length}/10
+                        </span>
+                      </div>
+                      {franchisePackageImages.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {franchisePackageImages.map((file, idx) => (
+                            <div
+                              key={`${file.name}-${idx}`}
+                              className="group relative h-14 w-14 overflow-hidden rounded-lg border bg-slate-50"
+                            >
+                              <img
+                                src={URL.createObjectURL(file)}
+                                alt={`Package ${idx + 1}`}
+                                className="h-full w-full object-cover"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeFranchisePackageImage(idx)}
+                                className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100"
+                                aria-label={`Remove image ${idx + 1}`}
+                              >
+                                <X className="h-4 w-4 text-white" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {franchisePackageImages.length < 10 && (
+                        <>
+                          <input
+                            ref={imageInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => {
+                              const files = e.target.files;
+                              if (!files) return;
+                              const remaining = 10 - franchisePackageImages.length;
+                              for (let i = 0; i < Math.min(files.length, remaining); i++) {
+                                addFranchisePackageImage(files[i]);
+                              }
+                              e.target.value = "";
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-full text-xs"
+                            onClick={() => imageInputRef.current?.click()}
+                          >
+                            <Camera className="mr-1.5 h-3.5 w-3.5" />
+                            Attach Package Photos
+                          </Button>
+                        </>
+                      )}
+                      <p className="text-[11px] text-muted-foreground">
+                        Photos of prepared packages for franchise verification.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="mb-4 flex items-center justify-between">
                     <span className="text-sm font-medium text-muted-foreground">
                       Items Staged
