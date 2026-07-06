@@ -37,6 +37,7 @@ import {
 } from "@/shared/components/customer/ProfileCompletionDialog";
 import { KitDashboard } from "./KitDashboard";
 import { getShippingInfoAction } from "@/actions/admin-actions/shippingActions";
+import * as kitLifecycleRepo from "@/repositories/kitLifecycleRepository";
 
 export const revalidate = 0;
 
@@ -310,6 +311,67 @@ export default async function CustomerDashboard() {
   }
 
   if (!activeSub) {
+    // Check if customer has an EXPIRED KIT and a newer PENDING subscription (Req 5.1, 5.2)
+    const kitSubscriptions = await kitLifecycleRepo.getCustomerKitSubscriptions(customerProfileId);
+    const expiredKit = kitSubscriptions.find((s) => s.status === "EXPIRED");
+    const pendingKit = kitSubscriptions.find((s) => s.status === "PENDING");
+
+    if (expiredKit && pendingKit) {
+      // Fetch the PENDING subscription's product info and shipping info
+      const { data: pendingKitSubscription } = await supabase
+        .from("subscriptions")
+        .select(
+          `
+          id,
+          subscription_code,
+          starts_on,
+          kit_duration_days,
+          customer_category,
+          status,
+          kit_products (
+            name,
+            base_price,
+            tax_rate
+          )
+        `
+        )
+        .eq("id", pendingKit.id)
+        .single();
+
+      const pendingShippingInfo = await kitLifecycleRepo.getShippingInfo(pendingKit.id);
+
+      if (pendingKitSubscription) {
+        // Transform shipping info to match ShippingInfo type expected by ShippingTracker
+        let shippingInfo = null;
+        if (pendingShippingInfo) {
+          const { transformShippingInfoRow } = await import("@/types/kitShipping");
+          shippingInfo = transformShippingInfoRow({
+            id: pendingShippingInfo.id,
+            customer_profile_id: pendingShippingInfo.customer_profile_id,
+            subscription_id: pendingShippingInfo.subscription_id,
+            courier_partner: pendingShippingInfo.courier_partner as "OTHER" | "APSRTC" | "TGSRTC" | "DTDC",
+            tracking_number: pendingShippingInfo.tracking_number,
+            tracking_url: pendingShippingInfo.tracking_url,
+            shipped_at: pendingShippingInfo.shipped_at,
+            delivered_at: pendingShippingInfo.delivered_at,
+            created_at: pendingShippingInfo.created_at,
+            updated_at: pendingShippingInfo.created_at, // Use created_at as fallback
+          });
+        }
+
+        return (
+          <>
+            {profileDialog}
+            <KitDashboard
+              subscription={pendingKitSubscription}
+              shippingInfo={shippingInfo}
+              isNewKitPending
+            />
+          </>
+        );
+      }
+    }
+
     return (
       <div className="relative z-10 max-w-4xl mx-auto mt-1 animate-in fade-in slide-in-from-bottom-4">
         {profileDialog}

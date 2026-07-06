@@ -252,6 +252,7 @@ export async function onboard(
   //     (Req 14.5). Reject if the pincode maps to no clinic (Req 14.6) —
   //     nothing is persisted on an unresolved scope.
   //     Exception: KIT category bypasses serviceability — any pincode is accepted.
+  //     For KIT customers, if the admin manually selected a clinic, use that.
   const resolution = await resolveClinicForPincode(payload.address.pincode);
   let clinicId: string | null = null;
   let franchiseId: string | null = null;
@@ -268,6 +269,12 @@ export async function onboard(
         "The selected address could not be matched to a serviceable clinic. Onboarding was not completed.",
       fieldErrors: { "address.pincode": "This area is not served by any clinic." },
     };
+  }
+
+  // For KIT customers, allow manually assigned clinic from admin form
+  if (category === "KIT" && !clinicId && payload.clinicId) {
+    clinicId = payload.clinicId;
+    franchiseId = await resolveFranchiseIdForClinic(clinicId);
   }
 
   // (5) Determine the email + Test_Email flag (Req 10.1/10.2/10.3).

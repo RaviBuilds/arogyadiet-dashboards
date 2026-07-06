@@ -26,9 +26,10 @@ export default async function QuickOnboardPage() {
   const supabaseAdmin = createAdminClient();
 
   // Load active subscription plans for the Category/Plan step (Req 4.4), KIT
-  // products for KIT category (Req 2.2), and the serviceable pincodes that drive
-  // the Address_Capture serviceability gate (Req 5.6), in parallel.
-  const [{ data: rawPlans }, kitProductsResult, serviceAreaPincodes] = await Promise.all([
+  // products for KIT category (Req 2.2), the serviceable pincodes that drive
+  // the Address_Capture serviceability gate (Req 5.6), and available clinics for
+  // manual clinic assignment on KIT customers, in parallel.
+  const [{ data: rawPlans }, kitProductsResult, serviceAreaPincodes, { data: rawClinics }] = await Promise.all([
     supabaseAdmin
       .from("subscription_plans")
       .select("id, name, price, base_price, tax_amount, duration_days")
@@ -36,6 +37,11 @@ export default async function QuickOnboardPage() {
       .order("price", { ascending: true }),
     listKitProductsAction(),
     getServiceAreaPincodesAction(),
+    supabaseAdmin
+      .from("clinics")
+      .select("id, name")
+      .is("franchise_id", null)
+      .order("name", { ascending: true }),
   ]);
 
   const plans: OnboardingPlan[] = (rawPlans ?? []).map((plan) => ({
@@ -48,6 +54,12 @@ export default async function QuickOnboardPage() {
   // Transform KIT products for the form
   const kitProducts = kitProductsResult.success ? kitProductsResult.data ?? [] : [];
 
+  // Transform clinics for the form
+  const clinics = (rawClinics ?? []).map((c: any) => ({
+    id: c.id as string,
+    name: c.name as string,
+  }));
+
   return (
     <div className="flex flex-col gap-6 pb-4">
       <AdminPageHeader
@@ -58,6 +70,7 @@ export default async function QuickOnboardPage() {
         plans={plans}
         kitProducts={kitProducts}
         serviceAreaPincodes={serviceAreaPincodes}
+        clinics={clinics}
       />
     </div>
   );

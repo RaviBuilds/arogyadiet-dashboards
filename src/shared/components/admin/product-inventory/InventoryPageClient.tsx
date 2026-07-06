@@ -4,13 +4,16 @@ import { useMemo, useRef, useState, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
 import {
+  AlertTriangle,
   Eye,
   EyeOff,
   ImageIcon,
+  Layers,
   Loader2,
   Package,
   Pencil,
   Plus,
+  ShoppingBag,
   Trash2,
   Wallet,
 } from "lucide-react";
@@ -41,7 +44,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/shared/components/ui/alert-dialog";
+import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
+import { Card, CardContent } from "@/shared/components/ui/card";
 import {
   Dialog,
   DialogClose,
@@ -57,10 +62,72 @@ import { Separator } from "@/shared/components/ui/separator";
 import { Switch } from "@/shared/components/ui/switch";
 import { cn } from "@/lib/utils";
 
+type AccessMode = "view-only" | "full-access";
+
+const VALID_ACCESS_MODES: AccessMode[] = ["view-only", "full-access"];
+
 interface InventoryPageClientProps {
   products: AdminInventoryProduct[];
+  accessMode?: AccessMode;
+  pageTitle?: string;
+  pageDescription?: string;
 }
 
+/* ----- Stat cards matching the Master Catalog metric cards ----- */
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  subtext,
+  iconBg,
+  iconColor,
+  valueClassName,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  subtext?: string;
+  iconBg: string;
+  iconColor: string;
+  valueClassName?: string;
+}) {
+  return (
+    <Card className="border shadow-sm transition-all hover:border-slate-300 hover:shadow-md">
+      <CardContent className="p-5">
+        <div className="flex items-start gap-4">
+          <div
+            className={cn(
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+              iconBg,
+            )}
+          >
+            <Icon className={cn("h-5 w-5", iconColor)} />
+          </div>
+          <div className="min-w-0">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {label}
+            </p>
+            <p
+              className={cn(
+                "text-2xl font-bold tracking-tight text-foreground",
+                valueClassName,
+              )}
+            >
+              {value}
+            </p>
+            {subtext ? (
+              <p className="mt-1 truncate text-sm text-muted-foreground">
+                {subtext}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ----- Form section inside dialog ----- */
 function FormSection({
   title,
   description,
@@ -77,11 +144,11 @@ function FormSection({
   return (
     <section className={cn("space-y-4", className)}>
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
-          <Icon className="h-4 w-4 text-muted-foreground" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100">
+          <Icon className="h-4 w-4 text-slate-600" />
         </div>
         <div>
-          <h3 className="text-sm font-semibold leading-none tracking-tight">
+          <h3 className="text-sm font-semibold leading-none tracking-tight text-slate-900">
             {title}
           </h3>
           {description ? (
@@ -96,7 +163,16 @@ function FormSection({
 
 export default function InventoryPageClient({
   products,
+  accessMode: accessModeProp,
+  pageTitle = "Inventory",
+  pageDescription = "Manage shop product catalog, stock levels, and availability.",
 }: InventoryPageClientProps) {
+  // Fall back to "full-access" if an invalid accessMode value is provided
+  const accessMode: AccessMode =
+    accessModeProp && VALID_ACCESS_MODES.includes(accessModeProp)
+      ? accessModeProp
+      : "full-access";
+  const isViewOnly = accessMode === "view-only";
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [productModalOpen, setProductModalOpen] = useState(false);
@@ -192,61 +268,96 @@ export default function InventoryPageClient({
     });
   };
 
-  const columns = useMemo<ColumnDef<AdminInventoryProduct>[]>(
-    () => [
+  const columns = useMemo<ColumnDef<AdminInventoryProduct>[]>(() => {
+    const baseColumns: ColumnDef<AdminInventoryProduct>[] = [
       {
-        id: "image",
-        header: "Image",
+        id: "product",
+        header: "Product",
         cell: ({ row }) => {
           const imageUrl =
             row.original.banner_image_url ?? row.original.image_urls?.[0];
 
-          return imageUrl ? (
-            <img
-              src={imageUrl}
-              alt={row.original.name}
-              className="h-10 w-10 rounded-md border object-cover"
-            />
-          ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted text-xs text-muted-foreground">
-              N/A
+          return (
+            <div className="flex items-center gap-3">
+              {imageUrl ? (
+                <img
+                  src={imageUrl}
+                  alt={row.original.name}
+                  className="h-11 w-11 rounded-lg border border-slate-200 object-cover shadow-sm"
+                />
+              ) : (
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50">
+                  <Package className="h-4 w-4 text-slate-400" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-900">
+                  {row.original.name}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {row.original.sku ?? "No SKU"}
+                </p>
+              </div>
             </div>
           );
         },
       },
       {
-        accessorKey: "name",
-        header: "Name",
-      },
-      {
-        accessorKey: "sku",
-        header: "SKU",
-        cell: ({ row }) => row.original.sku ?? "—",
-      },
-      {
         accessorKey: "category",
         header: "Category",
-        cell: ({ row }) => row.original.category ?? "Uncategorized",
+        cell: ({ row }) => (
+          <Badge variant="secondary" className="font-normal">
+            {row.original.category ?? "Uncategorized"}
+          </Badge>
+        ),
       },
       {
         accessorKey: "stock_quantity",
-        header: "Stock Quantity",
-        cell: ({ row }) =>
-          typeof row.original.stock_quantity === "number"
-            ? row.original.stock_quantity
-            : "—",
+        header: "Stock",
+        cell: ({ row }) => {
+          const qty = row.original.stock_quantity;
+          const isLow = typeof qty === "number" && qty <= 5 && qty > 0;
+          const isOut = typeof qty === "number" && qty === 0;
+
+          return (
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "text-sm font-semibold tabular-nums",
+                  isOut && "text-red-600",
+                  isLow && "text-amber-600",
+                  !isOut && !isLow && "text-slate-900",
+                )}
+              >
+                {typeof qty === "number" ? qty : "—"}
+              </span>
+              {isOut ? (
+                <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                  Out
+                </Badge>
+              ) : isLow ? (
+                <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 text-[10px] px-1.5 py-0">
+                  Low
+                </Badge>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         accessorKey: "sale_price",
         header: "Sale Price",
-        cell: ({ row }) =>
-          typeof row.original.sale_price === "number"
-            ? `₹${row.original.sale_price.toFixed(2)}`
-            : "—",
+        cell: ({ row }) => (
+          <span className="text-sm font-semibold tabular-nums text-slate-900">
+            {typeof row.original.sale_price === "number"
+              ? `₹${row.original.sale_price.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`
+              : "—"}
+          </span>
+        ),
       },
       {
         accessorKey: "is_active",
-        header: "Status",
+        header: "Visibility",
         cell: ({ row }) => {
           const product = row.original;
           const isToggling = togglingId === product.id;
@@ -255,7 +366,7 @@ export default function InventoryPageClient({
             <div className="flex items-center gap-3">
               <Switch
                 checked={product.is_active}
-                disabled={isToggling || isPending}
+                disabled={isToggling || isPending || isViewOnly}
                 onCheckedChange={() => handleToggleVisibility(product)}
                 aria-label={
                   product.is_active
@@ -269,36 +380,41 @@ export default function InventoryPageClient({
                 ) : product.is_active ? (
                   <Eye className="h-3.5 w-3.5 text-emerald-600" />
                 ) : (
-                  <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+                  <EyeOff className="h-3.5 w-3.5 text-slate-400" />
                 )}
                 <span
-                  className={
+                  className={cn(
+                    "text-xs font-medium",
                     product.is_active
-                      ? "font-medium text-emerald-600"
-                      : "text-muted-foreground"
-                  }
+                      ? "text-emerald-600"
+                      : "text-slate-400",
+                  )}
                 >
-                  {product.is_active ? "Active" : "Inactive"}
+                  {product.is_active ? "Active" : "Hidden"}
                 </span>
               </div>
             </div>
           );
         },
       },
-      {
+    ];
+
+    if (!isViewOnly) {
+      baseColumns.push({
         id: "actions",
-        header: "Actions",
+        header: "",
         cell: ({ row }) => {
           const product = row.original;
           const isDeleting = deletingId === product.id;
 
           return (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-end gap-1.5">
               <DialogTrigger asChild>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
+                  className="h-8 gap-1.5 text-slate-600 hover:text-slate-900"
                   onPointerDown={() => openEditModal(product)}
                 >
                   <Pencil className="h-3.5 w-3.5" />
@@ -315,8 +431,9 @@ export default function InventoryPageClient({
                 <AlertDialogTrigger asChild>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
+                    className="h-8 gap-1.5 text-slate-600 hover:text-red-600"
                     disabled={isDeleting || isPending}
                   >
                     {isDeleting ? (
@@ -359,10 +476,105 @@ export default function InventoryPageClient({
             </div>
           );
         },
-      },
-    ],
-    [isPending, togglingId, deletingId],
+      });
+    }
+
+    return baseColumns;
+  }, [isPending, togglingId, deletingId, isViewOnly]);
+
+  /* ----- Compute summary stats ----- */
+  const totalProducts = products.length;
+  const activeProducts = products.filter((p) => p.is_active).length;
+  const outOfStock = products.filter(
+    (p) => typeof p.stock_quantity === "number" && p.stock_quantity === 0,
+  ).length;
+  const categories = new Set(
+    products.map((p) => p.category).filter(Boolean),
+  ).size;
+
+  const tableContent = (
+    <div className="space-y-6 p-6">
+      <AdminPageHeader
+        title={pageTitle}
+        description={pageDescription}
+        action={
+          !isViewOnly ? (
+            <DialogTrigger asChild>
+              <Button type="button" onPointerDown={openCreateModal}>
+                <Plus className="h-4 w-4" />
+                Add New Product
+              </Button>
+            </DialogTrigger>
+          ) : undefined
+        }
+      />
+
+      {/* Summary stat cards */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard
+          icon={ShoppingBag}
+          label="Total Products"
+          value={String(totalProducts)}
+          subtext="In catalog"
+          iconBg="bg-blue-50"
+          iconColor="text-blue-600"
+        />
+        <StatCard
+          icon={Eye}
+          label="Active & Visible"
+          value={String(activeProducts)}
+          subtext="Shown in shop"
+          iconBg="bg-emerald-50"
+          iconColor="text-emerald-600"
+        />
+        <StatCard
+          icon={AlertTriangle}
+          label="Out of Stock"
+          value={String(outOfStock)}
+          subtext={outOfStock === 0 ? "All stocked" : "Needs restock"}
+          iconBg="bg-red-50"
+          iconColor="text-red-600"
+          valueClassName={outOfStock > 0 ? "text-red-600" : undefined}
+        />
+        <StatCard
+          icon={Layers}
+          label="Categories"
+          value={String(categories)}
+          subtext="Product groups"
+          iconBg="bg-violet-50"
+          iconColor="text-violet-600"
+        />
+      </div>
+
+      {/* Product table card */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                Product Catalog
+              </h2>
+              <p className="text-xs text-slate-500">
+                {totalProducts} product{totalProducts !== 1 ? "s" : ""} shown
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="px-6 pb-6">
+          <DataTable
+            columns={columns}
+            data={products}
+            filterColumn="name"
+            filterPlaceholder="Search products by name..."
+          />
+        </div>
+      </div>
+    </div>
   );
+
+  if (isViewOnly) {
+    return tableContent;
+  }
 
   return (
     <>
@@ -370,33 +582,18 @@ export default function InventoryPageClient({
         open={productModalOpen}
         onOpenChange={handleProductModalOpenChange}
       >
-        <div className="space-y-6">
-          <AdminPageHeader
-            title="Inventory"
-            description="Manage shop product catalog, stock levels, and availability."
-            action={
-              <DialogTrigger asChild>
-                <Button type="button" onPointerDown={openCreateModal}>
-                  <Plus className="h-4 w-4" />
-                  Add New Product
-                </Button>
-              </DialogTrigger>
-            }
-          />
+        {tableContent}
 
-          <DataTable
-            columns={columns}
-            data={products}
-            filterColumn="name"
-            filterPlaceholder="Filter products..."
-          />
-        </div>
-
-        <DialogContent className="flex h-[90vh] max-h-[90vh] w-[80vw] max-w-[80vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[80vw]">
-          <DialogHeader className="shrink-0 border-b px-6 py-4">
-            <DialogTitle>
+        <DialogContent className="flex h-[90vh] max-h-[90vh] w-[90vw] max-w-3xl flex-col gap-0 overflow-hidden rounded-2xl border-slate-200 p-0 shadow-xl">
+          <DialogHeader className="shrink-0 border-b border-slate-100 bg-slate-50/50 px-6 py-5">
+            <DialogTitle className="text-lg font-semibold text-slate-900">
               {editingProduct ? "Edit Product" : "Add New Product"}
             </DialogTitle>
+            <p className="text-sm text-slate-500">
+              {editingProduct
+                ? "Update product details, pricing, and media."
+                : "Fill in the product details to add it to your shop catalog."}
+            </p>
           </DialogHeader>
 
           <form
@@ -417,36 +614,42 @@ export default function InventoryPageClient({
                 >
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="name">Name</Label>
+                      <Label htmlFor="name" className="text-xs font-medium text-slate-700">Name</Label>
                       <Input
                         id="name"
                         name="name"
+                        placeholder="e.g. Ayur Punarjeeva Forte"
                         defaultValue={editingProduct?.name ?? ""}
                         required
+                        className="border-slate-200 focus-visible:ring-primary/30"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="sku">SKU</Label>
+                      <Label htmlFor="sku" className="text-xs font-medium text-slate-700">SKU</Label>
                       <Input
                         id="sku"
                         name="sku"
+                        placeholder="ADT202400001"
                         defaultValue={editingProduct?.sku ?? ""}
                         required
+                        className="border-slate-200 focus-visible:ring-primary/30"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="category">Category</Label>
+                      <Label htmlFor="category" className="text-xs font-medium text-slate-700">Category</Label>
                       <Input
                         id="category"
                         name="category"
+                        placeholder="Supplements"
                         defaultValue={editingProduct?.category ?? ""}
+                        className="border-slate-200 focus-visible:ring-primary/30"
                       />
                     </div>
 
                     <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="description">Description</Label>
+                      <Label htmlFor="description" className="text-xs font-medium text-slate-700">Description</Label>
                       <ProductDescriptionEditor
                         id="description"
                         name="description"
@@ -456,7 +659,7 @@ export default function InventoryPageClient({
                   </div>
                 </FormSection>
 
-                <Separator />
+                <Separator className="bg-slate-100" />
 
                 <FormSection
                   title="Pricing & Inventory"
@@ -465,45 +668,51 @@ export default function InventoryPageClient({
                 >
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="originalPrice">Original Price</Label>
+                      <Label htmlFor="originalPrice" className="text-xs font-medium text-slate-700">Original Price (₹)</Label>
                       <Input
                         id="originalPrice"
                         name="originalPrice"
                         type="number"
                         min="0"
                         step="0.01"
+                        placeholder="0.00"
                         defaultValue={editingProduct?.original_price ?? 0}
                         required
+                        className="border-slate-200 focus-visible:ring-primary/30"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="salePrice">Sale Price</Label>
+                      <Label htmlFor="salePrice" className="text-xs font-medium text-slate-700">Sale Price (₹)</Label>
                       <Input
                         id="salePrice"
                         name="salePrice"
                         type="number"
                         min="0"
                         step="0.01"
+                        placeholder="0.00"
                         defaultValue={editingProduct?.sale_price ?? ""}
+                        className="border-slate-200 focus-visible:ring-primary/30"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="stockQuantity">Stock Quantity</Label>
+                      <Label htmlFor="stockQuantity" className="text-xs font-medium text-slate-700">Stock Quantity</Label>
                       <Input
                         id="stockQuantity"
                         name="stockQuantity"
                         type="number"
                         min="0"
                         step="1"
+                        placeholder="0"
                         defaultValue={editingProduct?.stock_quantity ?? 0}
                         required
+                        className="border-slate-200 focus-visible:ring-primary/30"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="taxPercent">Tax Percent</Label>
+                      <Label htmlFor="taxPercent" className="text-xs font-medium text-slate-700">Tax Percent (%)</Label>
                       <Input
                         id="taxPercent"
                         name="taxPercent"
@@ -511,13 +720,15 @@ export default function InventoryPageClient({
                         min="0"
                         max="100"
                         step="0.01"
+                        placeholder="18"
                         defaultValue={editingProduct?.tax_percent ?? ""}
+                        className="border-slate-200 focus-visible:ring-primary/30"
                       />
                     </div>
                   </div>
                 </FormSection>
 
-                <Separator />
+                <Separator className="bg-slate-100" />
 
                 <FormSection
                   title="Media"
@@ -525,7 +736,7 @@ export default function InventoryPageClient({
                   icon={ImageIcon}
                 >
                   <div className="space-y-2">
-                    <Label>Upload Images</Label>
+                    <Label className="text-xs font-medium text-slate-700">Upload Images</Label>
                     <ProductMediaGallery
                       ref={mediaGalleryRef}
                       existingImages={editingProduct?.image_urls ?? []}
@@ -535,7 +746,7 @@ export default function InventoryPageClient({
                         null
                       }
                     />
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-slate-500">
                       Upload one or more images. The first image is the banner by
                       default; use &quot;Set banner&quot; to change it.
                     </p>
@@ -544,9 +755,9 @@ export default function InventoryPageClient({
               </div>
             </div>
 
-            <DialogFooter className="sticky bottom-0 z-10 shrink-0 gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-backdrop-filter:bg-background/80 sm:flex-row sm:justify-end">
+            <DialogFooter className="sticky bottom-0 z-10 shrink-0 gap-2 border-t border-slate-100 bg-slate-50/80 px-6 py-4 backdrop-blur supports-backdrop-filter:bg-slate-50/60 sm:flex-row sm:justify-end">
               <DialogClose asChild>
-                <Button type="button" variant="outline" disabled={isPending}>
+                <Button type="button" variant="outline" disabled={isPending} className="border-slate-200">
                   Cancel
                 </Button>
               </DialogClose>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   Table,
@@ -46,6 +46,7 @@ import {
   getBulkKitShippingStatusAction,
   type KitCustomerShippingStatus,
 } from "@/actions/admin-actions/kitCustomerShippingActions";
+import { getExpiredKitCustomersAction } from "@/actions/admin-actions/kitLifecycleActions";
 import {
   clinicDisplayName,
   ALL_CLINICS,
@@ -60,6 +61,8 @@ interface KitCustomerSectionProps {
   clinicOptions: { id: string; name: string }[];
   showArchived: boolean;
   setShowArchived: (val: boolean) => void;
+  showExpired: boolean;
+  setShowExpired: (val: boolean) => void;
   searchColumn: string;
   setSearchColumn: (val: string) => void;
   searchTerm: string;
@@ -94,6 +97,8 @@ export function KitCustomerSection({
   clinicOptions,
   showArchived,
   setShowArchived,
+  showExpired,
+  setShowExpired,
   searchColumn,
   setSearchColumn,
   searchTerm,
@@ -110,15 +115,64 @@ export function KitCustomerSection({
   >(new Map());
   const [loadingShipping, setLoadingShipping] = useState(false);
 
+  // Expired KIT customers state
+  const [expiredCustomerIds, setExpiredCustomerIds] = useState<Set<string>>(new Set());
+  const [loadingExpired, setLoadingExpired] = useState(false);
+
+  // Fetch expired KIT customer IDs for filtering
+  const fetchExpiredCustomers = useCallback(async () => {
+    if (!showExpired) {
+      setExpiredCustomerIds(new Set());
+      return;
+    }
+
+    setLoadingExpired(true);
+    const result = await getExpiredKitCustomersAction();
+
+    if (result.success) {
+      const ids = new Set(result.data.map((c) => c.customerProfileId));
+      setExpiredCustomerIds(ids);
+    }
+    setLoadingExpired(false);
+  }, [showExpired]);
+
+  useEffect(() => {
+    fetchExpiredCustomers();
+  }, [fetchExpiredCustomers]);
+
+  // Determine which customers to display based on toggle states
+  // - Default (neither toggle): show customers list as-is (active/pending from parent)
+  // - Show Expired only: filter to only expired customers from the full customer set
+  // - Show Archived only: handled by parent via showArchived (includes inactive)
+  // - Both active: union of archived + expired, each appearing at most once
+  const displayCustomers = useMemo(() => {
+    if (!showExpired) {
+      // No expired filter active — show the parent-filtered list as-is
+      return customers;
+    }
+
+    if (showExpired && !showArchived) {
+      // Show only expired customers (those whose most recent KIT subscription is EXPIRED)
+      return customers.filter((c) => expiredCustomerIds.has(c.id));
+    }
+
+    // Both active: union of archived (inactive) + expired
+    // The parent already includes inactive customers when showArchived is true,
+    // so we filter to those that are either inactive OR expired
+    return customers.filter(
+      (c) => !c.isActive || expiredCustomerIds.has(c.id)
+    );
+  }, [customers, showExpired, showArchived, expiredCustomerIds]);
+
   // Fetch shipping statuses for all visible KIT customers
   const fetchShippingStatuses = useCallback(async () => {
-    if (customers.length === 0) {
+    if (displayCustomers.length === 0) {
       setShippingStatuses(new Map());
       return;
     }
 
     setLoadingShipping(true);
-    const ids = customers.map((c) => c.id);
+    const ids = displayCustomers.map((c) => c.id);
     const result = await getBulkKitShippingStatusAction(ids);
 
     if (result.success) {
@@ -129,7 +183,7 @@ export function KitCustomerSection({
       setShippingStatuses(map);
     }
     setLoadingShipping(false);
-  }, [customers]);
+  }, [displayCustomers]);
 
   useEffect(() => {
     fetchShippingStatuses();
@@ -172,6 +226,15 @@ export function KitCustomerSection({
           >
             {showArchived ? "Showing Archived" : "Show Archived"}
           </Button>
+          <Button
+            type="button"
+            variant={showExpired ? "default" : "outline"}
+            size="sm"
+            className="transition-all duration-200"
+            onClick={() => setShowExpired(!showExpired)}
+          >
+            {showExpired ? "Showing Expired" : "Show Expired"}
+          </Button>
         </div>
       }
       actions={
@@ -205,7 +268,21 @@ export function KitCustomerSection({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {customers.length === 0 ? (
+          {(loadingExpired && showExpired) ? (
+            <TableRow>
+              <TableCell
+                colSpan={6}
+                className="text-center py-12 text-sm text-slate-500"
+              >
+                <div className="flex flex-col items-center gap-1.5">
+                  <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                  <span className="text-sm text-slate-500">
+                    Loading expired customers...
+                  </span>
+                </div>
+              </TableCell>
+            </TableRow>
+          ) : displayCustomers.length === 0 ? (
             <TableRow>
               <TableCell
                 colSpan={6}
@@ -223,7 +300,7 @@ export function KitCustomerSection({
               </TableCell>
             </TableRow>
           ) : (
-            customers.map((customer) => {
+            displayCustomers.map((customer) => {
               const shipping = shippingStatuses.get(customer.id);
               const shipmentStatus = shipping?.status ?? "Not Shipped";
               const shipmentDate = shipping?.statusUpdatedAt ?? null;
@@ -260,8 +337,19 @@ export function KitCustomerSection({
                     <div className="font-medium text-slate-900">
                       {customer.mobile}
                     </div>
-                    <div className="text-sm text-slate-500 mt-0.5">
-                      {customer.email}
+                    <div className="mt-1">
+                      <Badge
+                        className={cn(
+                          "rounded-full border-0 px-2 text-[10px] font-semibold",
+                          customer.dietary_preference === "Veg"
+                            ? "bg-green-100 text-green-700 hover:bg-green-100"
+                            : "bg-red-100 text-red-700 hover:bg-red-100"
+                        )}
+                      >
+                        {customer.dietary_preference === "N/A"
+                          ? "Not Set"
+                          : customer.dietary_preference}
+                      </Badge>
                     </div>
                   </TableCell>
 

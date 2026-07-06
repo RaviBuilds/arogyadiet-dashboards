@@ -19,6 +19,7 @@ function buildNavItems(basePath: string) {
     { label: "Manufacturing Hub", href: `${basePath}/manufacturing` },
     { label: "Product Mapping", href: `${basePath}/mappings` },
     { label: "Audit Ledger", href: `${basePath}/ledger` },
+    { label: "Shop Products", href: `${basePath}/shop-products` },
   ];
 }
 

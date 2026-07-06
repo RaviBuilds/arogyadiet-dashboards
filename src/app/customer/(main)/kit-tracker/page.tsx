@@ -4,6 +4,10 @@ import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { PackageReceiptScreen } from "@/shared/components/customer/kit-tracker/PackageReceiptScreen";
 import { DailyTrackerClient } from "@/shared/components/customer/kit-tracker/DailyTrackerClient";
+import { getKitTrackerStateAction } from "@/actions/kitLifecycleActions";
+import { StartNewKitFlow } from "@/shared/components/customer/kit-tracker/StartNewKitFlow";
+import { NewKitArrivalBanner } from "@/shared/components/customer/kit-tracker/NewKitArrivalBanner";
+import { KitExpirationMessage } from "@/shared/components/customer/kit-tracker/KitExpirationMessage";
 
 export const revalidate = 0;
 
@@ -37,6 +41,64 @@ export default async function KitTrackerPage() {
   if (activeSub && activeSub.customer_category !== "KIT") {
     redirect("/dashboard?msg=kit-tracker-unavailable");
   }
+
+  // ---------------------------------------------------------------------------
+  // Determine KIT Tracker display state using lifecycle action (Req 7.3, 7.4, 7.5)
+  // Priority: start_flow > receipt_flow > processing > expiration > active
+  // ---------------------------------------------------------------------------
+  const stateResult = await getKitTrackerStateAction();
+
+  if (stateResult.success) {
+    const { state } = stateResult;
+
+    switch (state.type) {
+      // Priority 1: New KIT received (delivered_at set) → Start flow
+      case "start_flow":
+        return (
+          <StartNewKitFlow
+            subscriptionId={state.subscriptionId}
+            deliveredAt={state.deliveredAt}
+            kitDurationDays={state.kitDurationDays}
+          />
+        );
+
+      // Priority 2: New KIT shipped but not received → Arrival banner
+      case "receipt_flow":
+        return (
+          <NewKitArrivalBanner
+            subscriptionId={state.subscriptionId}
+            courierPartner={state.courierPartner}
+            trackingNumber={state.trackingNumber}
+            trackingUrl={state.trackingUrl}
+            shippedAt={state.shippedAt}
+          />
+        );
+
+      // Priority 3: New KIT exists but no shipping info yet → Processing banner
+      case "processing":
+        return (
+          <NewKitArrivalBanner
+            subscriptionId={state.subscriptionId}
+            courierPartner={null}
+            trackingNumber={null}
+            trackingUrl={null}
+            shippedAt={null}
+          />
+        );
+
+      // Priority 4: Expired with no new KIT → Expiration message
+      case "expiration":
+        return <KitExpirationMessage />;
+
+      // Priority 5: Active → fall through to existing daily tracker logic below
+      case "active":
+        break;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Active KIT — Existing Daily Tracker logic
+  // ---------------------------------------------------------------------------
 
   // Fetch the KIT subscription with tracker fields
   const { data: subscription } = await supabase

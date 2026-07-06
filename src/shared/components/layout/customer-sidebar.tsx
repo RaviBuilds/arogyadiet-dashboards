@@ -6,6 +6,7 @@ import { Button } from "@/shared/components/ui/button";
 import {
   CalendarCheck,
   CreditCard,
+  History,
   LogOut,
   MapPin,
   User,
@@ -54,6 +55,7 @@ const manageMealItems: NavItem[] = [
 
 const kitNavItems: NavItem[] = [
   { name: "KIT Tracker", href: "/kit-tracker", icon: CalendarCheck },
+  { name: "KIT History", href: "/kit-history", icon: History },
 ];
 
 const bottomNavItems: NavItem[] = [

@@ -147,6 +147,7 @@ export default function CustomerDashboard({
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
   const [filterMedical, setFilterMedical] = useState<string>("ALL");
   const [showArchived, setShowArchived] = useState(false);
+  const [showExpired, setShowExpired] = useState(false);
   const [clinicFilter, setClinicFilter] =
     useState<ClinicFilterSelection>(ALL_CLINICS);
 
@@ -250,8 +251,15 @@ export default function CustomerDashboard({
   const filteredKitCustomers = useMemo(() => {
     let result = filterRowsByClinic(kitCustomers, clinicFilter);
 
-    if (!showArchived) {
+    if (!showArchived && !showExpired) {
       result = result.filter((customer) => customer.isActive);
+    } else if (showArchived && !showExpired) {
+      // showArchived includes inactive (archived) customers — no isActive filter
+    } else if (!showArchived && showExpired) {
+      // When showExpired is active, include all customers so the child component
+      // can filter by expired subscription status (expired customers may still be "active" accounts)
+    } else {
+      // Both active: include all, child handles union logic
     }
 
     if (searchTerm) {
@@ -274,7 +282,7 @@ export default function CustomerDashboard({
     }
 
     return result;
-  }, [kitCustomers, searchTerm, searchColumn, filterStatus, showArchived, clinicFilter]);
+  }, [kitCustomers, searchTerm, searchColumn, filterStatus, showArchived, showExpired, clinicFilter]);
 
   const filterSubList = (list: ActiveSubscriptionData[]) => {
     if (!searchTerm) return list;
@@ -971,6 +979,8 @@ export default function CustomerDashboard({
           clinicOptions={clinicOptions}
           showArchived={showArchived}
           setShowArchived={setShowArchived}
+          showExpired={showExpired}
+          setShowExpired={setShowExpired}
           searchColumn={searchColumn}
           setSearchColumn={setSearchColumn}
           searchTerm={searchTerm}
