@@ -421,6 +421,7 @@ export async function getTransactionLedger(
       financial_value_changed,
       timestamp,
       reason,
+      franchise_transfer_id,
       inventory_lots!inner (
         batch_number,
         source_type,
@@ -436,7 +437,35 @@ export async function getTransactionLedger(
     throw new Error(error.message);
   }
 
-  return (data ?? []).map((row) => mapTransactionLedgerRow(row));
+  const entries = (data ?? []).map((row) => mapTransactionLedgerRow(row));
+
+  // Resolve which franchise transfers have package images
+  const transferIds = entries
+    .filter((e) => e.franchiseTransferId)
+    .map((e) => e.franchiseTransferId!);
+
+  if (transferIds.length > 0) {
+    const uniqueIds = [...new Set(transferIds)];
+    const { data: transferData } = await supabase
+      .from("franchise_stock_transfers")
+      .select("id, package_image_paths")
+      .in("id", uniqueIds)
+      .not("package_image_paths", "is", null);
+
+    const withImages = new Set(
+      (transferData ?? [])
+        .filter((t) => Array.isArray(t.package_image_paths) && t.package_image_paths.length > 0)
+        .map((t) => t.id),
+    );
+
+    for (const entry of entries) {
+      if (entry.franchiseTransferId && withImages.has(entry.franchiseTransferId)) {
+        entry.hasPackageImages = true;
+      }
+    }
+  }
+
+  return entries;
 }
 
 async function resolveExpiryDate(

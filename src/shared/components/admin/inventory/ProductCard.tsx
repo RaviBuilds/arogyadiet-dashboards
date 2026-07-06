@@ -199,8 +199,8 @@ export default function ProductCard({
                   </p>
                 ) : (
                   <ul className="space-y-2">
-                    {product.activeLots.map((lot) => (
-                      <li key={lot.batchNumber} className="text-sm">
+                    {product.activeLots.map((lot, idx) => (
+                      <li key={`${lot.batchNumber}-${idx}`} className="text-sm">
                         <span className="font-medium">Batch:</span>{" "}
                         {lot.batchNumber}
                         <br />
@@ -235,7 +235,7 @@ export default function ProductCard({
             />
           </div>
           ) : stockOperations ? (
-          <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-4">
+          <div className="mt-4 grid grid-cols-2 gap-3 border-t pt-4">
             <ReceiveStockModal
               productId={product.id}
               productName={product.name}

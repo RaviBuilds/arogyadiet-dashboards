@@ -265,6 +265,10 @@ export type TransactionLedgerEntry = {
   sourceName: string | null;
   /** Outgoing entries only — why the stock left (DISPATCH_STOCK_REASONS). */
   reason: DispatchStockReason | null;
+  /** For franchise dispatch entries — the transfer ID to fetch package images */
+  franchiseTransferId: string | null;
+  /** Whether the franchise transfer has package images attached */
+  hasPackageImages: boolean;
 };
 
 export const MFG_ORDER_STATUSES = ["PENDING", "COMPLETED"] as const;
@@ -726,6 +730,7 @@ type TransactionLedgerRow = {
   financial_value_changed: string | number;
   timestamp: string;
   reason: DispatchStockReason | null;
+  franchise_transfer_id: string | null;
   inventory_lots: TransactionLedgerLotSummary | TransactionLedgerLotSummary[];
 };
 
@@ -747,6 +752,8 @@ export function mapTransactionLedgerRow(
     sourceType: lot.source_type ?? null,
     sourceName: lot.source_name ?? null,
     reason: row.reason ?? null,
+    franchiseTransferId: row.franchise_transfer_id ?? null,
+    hasPackageImages: false, // Resolved separately after mapping
   };
 }
 

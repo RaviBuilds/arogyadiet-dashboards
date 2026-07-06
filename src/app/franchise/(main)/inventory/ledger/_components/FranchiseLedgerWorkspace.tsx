@@ -60,6 +60,7 @@ import type {
   FranchiseLedgerEntry,
   StockOutReason,
 } from "@/types/franchiseInventory";
+import PackageImagesViewer from "@/shared/components/admin/inventory/PackageImagesViewer";
 
 // ---------------------------------------------------------------------------
 // Destination labels (outgoing) — same vocabulary as the Dispatch modal.
@@ -586,10 +587,20 @@ function LedgerTable({
                       <DirectionBadge direction={entry.direction} />
                     </TableCell>
                     <TableCell>
-                      <p className="font-medium">{entry.productName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {batchSummary(entry)}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <div>
+                          <p className="font-medium">{entry.productName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {batchSummary(entry)}
+                          </p>
+                        </div>
+                        {entry.hasPackageImages && entry.transferId && (
+                          <PackageImagesViewer
+                            transferId={entry.transferId}
+                            compact
+                          />
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-0.5">

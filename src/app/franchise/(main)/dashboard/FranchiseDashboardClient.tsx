@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Activity,
   LayoutDashboard,
+  MessageSquareWarning,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
@@ -212,11 +213,12 @@ export default function FranchiseDashboardClient({
 
       {/* Quick Actions */}
       <SectionCard icon={TrendingUp} title="Quick Actions" subtitle="Jump to a workspace">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <QuickAction href="/customers" label="Manage Customers" icon={Users} />
           <QuickAction href="/subscriptions" label="Subscriptions" icon={CreditCard} />
           <QuickAction href="/riders" label="Manage Riders" icon={Truck} />
           <QuickAction href="/operations" label="Operations" icon={TrendingUp} />
+          <QuickAction href="/disputes" label="Disputes" icon={MessageSquareWarning} />
         </div>
       </SectionCard>
     </div>

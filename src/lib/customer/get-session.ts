@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 export type CustomerUserProfile = {
   id: string;
   full_name: string | null;
+  mobile: string | null;
 };
 
 export type CustomerSession = {
@@ -33,7 +34,7 @@ export const getCustomerSession = cache(async (): Promise<CustomerSession> => {
 
   const { data: profile } = await supabase
     .from("users")
-    .select("id, full_name")
+    .select("id, full_name, mobile")
     .eq("auth_user_id", user.id)
     .maybeSingle();
 
