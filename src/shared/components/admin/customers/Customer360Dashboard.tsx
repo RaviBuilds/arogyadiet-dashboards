@@ -732,8 +732,9 @@ export function Customer360Dashboard({
               </CardContent>
             </Card>
 
-            {/* Clinic Assignment Card — for KIT customers, admin can manually assign */}
-            {isKitCustomer && (
+            {/* Clinic Assignment Card — for KIT customers, admin can manually assign.
+                Hidden for franchise admins since KIT customers are auto-assigned to the franchise clinic. */}
+            {isKitCustomer && !franchiseId && (
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle>Clinic Assignment</CardTitle>

@@ -14,6 +14,7 @@ import { startNewKitSchema } from "@/validations/kitLifecycleSchema";
 import * as KitLifecycleService from "@/services/KitLifecycleService";
 import * as repo from "@/repositories/kitLifecycleRepository";
 import type { KitHistoryEntry } from "@/types/kitLifecycle";
+import { createServerTimer } from "@/lib/perf/server-timing";
 
 // ---------------------------------------------------------------------------
 // Types — KIT Tracker Display State (Discriminated Union)
@@ -182,15 +183,28 @@ export async function startNewKitAction(
 export async function getKitHistoryAction(): Promise<
   { success: true; history: KitHistoryEntry[] } | { success: false; error: string }
 > {
-  const auth = await authenticateCustomer();
+  const timer = createServerTimer("getKitHistoryAction");
+
+  const auth = await timer.measure("authenticateCustomer()", () =>
+    authenticateCustomer(),
+  );
+
   if (!auth.success) {
+    timer.done();
     return { success: false, error: auth.error };
   }
 
+  const customerProfileId = auth.customerProfileId;
+
   try {
-    const history = await KitLifecycleService.getKitHistory(auth.customerProfileId);
+    const history = await timer.measure(
+      "KitLifecycleService.getKitHistory()",
+      () => KitLifecycleService.getKitHistory(customerProfileId),
+    );
+    timer.done();
     return { success: true, history };
   } catch (error) {
+    timer.done();
     const message =
       error instanceof Error ? error.message : "Failed to fetch KIT history.";
     return { success: false, error: message };

@@ -10,6 +10,7 @@ import {
 // (production default / unset), every new branch added for Task 12.1 is a
 // no-op and the middleware behaves exactly as it did before this change.
 import { FRANCHISE_FEATURES_ENABLED } from "@/lib/franchise/constants";
+import { createServerTimer } from "@/lib/perf/server-timing";
 
 /**
  * [Req 16.5] Builds the franchise-portal root URL on the `franchies` subdomain,
@@ -31,6 +32,17 @@ function franchiseRootUrl(
 }
 
 export async function middleware(request: NextRequest) {
+  const timer = createServerTimer(`middleware ${request.nextUrl.pathname}`);
+
+  // [Task 10.1 — Open Question resolution] `/api` routes (including
+  // /api/notifications) never reach the Identity_Header-setting logic below
+  // because of this early return. DECISION: option (a) — Requirement 12
+  // (notifications route optimization) is implemented independently of
+  // Identity_Headers, using a single combined auth.getUser() + users lookup
+  // with the SSR client inside the route handler itself, rather than
+  // widening this early-return's blast radius to run identity-resolution
+  // for every /api route (webhooks, cron, admin APIs, etc.). This early
+  // return remains unchanged.
   if (request.nextUrl.pathname.startsWith("/api")) {
     return NextResponse.next();
   }
@@ -134,9 +146,13 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  timer.mark("supabase client created");
+
+  let authResult: any;
+  await timer.measure("auth.getUser()", async () => {
+    authResult = await supabase.auth.getUser();
+  });
+  const { data: { user } } = authResult;
 
   // FIX: Safely extract role code
   let roleCode = null;
@@ -162,13 +178,17 @@ export async function middleware(request: NextRequest) {
   // NOTE: is_temp_pin column may not exist yet (pending migration); default to null.
   let isTempPin: boolean | null = null;
   if (user) {
-    const { data: userProfile } = await supabase
-      .from("users")
-      .select(
-        "admin_access_level, admin_operations_access, roles(code), customer_profiles(id, onboarding_status)",
-      )
-      .eq("auth_user_id", user.id)
-      .single();
+    let userProfileResult: any;
+    await timer.measure("users+roles+profiles query", async () => {
+      userProfileResult = await supabase
+        .from("users")
+        .select(
+          "admin_access_level, admin_operations_access, roles(code), customer_profiles(id, onboarding_status)",
+        )
+        .eq("auth_user_id", user.id)
+        .single();
+    });
+    const { data: userProfile } = userProfileResult;
 
     const rolesData = userProfile?.roles as
       | { code: string }[]
@@ -290,6 +310,22 @@ export async function middleware(request: NextRequest) {
           return NextResponse.redirect(loginUrl);
         }
 
+        // [Req 9.1, 9.2, 9.3, 9.7] Propagate the already-verified identity
+        // downstream via Identity_Headers so getCustomerSession() (Node
+        // runtime) does not have to re-run auth.getUser() + users/
+        // customer_profiles lookups that Middleware (Edge runtime) has
+        // already performed above. These are set ONLY on `response.headers`
+        // — the object used to construct the internal rewritten request
+        // seen by Server Components via headers() — never via
+        // `response.cookies.set` and never copied onto the outer
+        // browser-visible response. No new Supabase client or query is
+        // introduced; both values were already resolved by the single
+        // `users` query at the top of this function.
+        response.headers.set("x-auth-user-id", user.id);
+        if (customerProfileId) {
+          response.headers.set("x-customer-profile-id", customerProfileId);
+        }
+
         // [Req 1.1–1.4] Resolve customer_category from active subscription and
         // propagate via x-customer-category header. Uses the existing Supabase
         // client — no new instantiation. Falls back to empty string if no active
@@ -297,21 +333,24 @@ export async function middleware(request: NextRequest) {
         let customerCategory = "";
         if (customerProfileId) {
           try {
-            const { data: catRow } = await supabase
-              .from("subscriptions")
-              .select("customer_category")
-              .eq("customer_profile_id", customerProfileId)
-              .eq("status", "ACTIVE")
-              .order("created_at", { ascending: false })
-              .limit(1)
-              .maybeSingle();
-            customerCategory = catRow?.customer_category ?? "";
+            await timer.measure("subscriptions.customer_category query", async () => {
+              const { data: catRow } = await supabase
+                .from("subscriptions")
+                .select("customer_category")
+                .eq("customer_profile_id", customerProfileId)
+                .eq("status", "ACTIVE")
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              customerCategory = catRow?.customer_category ?? "";
+            });
           } catch {
             // Query failure must not block navigation — fall back to empty string
             customerCategory = "";
           }
         }
         response.headers.set("x-customer-category", customerCategory);
+        timer.done();
       }
       if (currentSubdomain === "admin" && roleCode !== "ADMIN") {
         // FRANCHISE_ADMIN trying to access admin portal → redirect to franchise portal

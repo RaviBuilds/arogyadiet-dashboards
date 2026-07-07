@@ -3,10 +3,12 @@ import { CustomerHeader } from "@/shared/components/layout/customer-header";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
 import { RouteProgressBar } from "@/shared/components/layout/RouteProgressBar";
 import { DeferredClientProviders } from "@/shared/components/customer/DeferredClientProviders";
+import { HydrationTimer } from "@/shared/components/perf/HydrationTimer";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { Metadata } from "next";
 import { Suspense } from "react";
+import { createServerTimer } from "@/lib/perf/server-timing";
 
 
 export const metadata: Metadata = {
@@ -19,7 +21,10 @@ export default async function CustomerLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const timer = createServerTimer("CustomerLayout");
+
   const { user, profile, error } = await getCustomerSession();
+  timer.mark("getCustomerSession resolved");
 
   if (error || !user) redirect("/login");
 
@@ -29,6 +34,8 @@ export default async function CustomerLayout({
   // Read customer category from middleware-propagated header (no DB call needed)
   const headerStore = await headers();
   const customerCategory = headerStore.get("x-customer-category") || null;
+  timer.mark("headers read");
+  timer.done();
 
   return (
     // ADDED max-w-full and overflow-x-hidden to kill horizontal scroll
@@ -48,6 +55,7 @@ export default async function CustomerLayout({
         }} 
       />
       <DeferredClientProviders userId={profile?.id ?? null} />
+      <HydrationTimer />
       <CustomerSidebar isMobile={false} customerCategory={customerCategory} />
 
       {/* Added min-w-0 to allow text truncation inside flex children */}

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
@@ -14,15 +14,11 @@ export default async function OrderTrackingPage({
   params: Promise<{ orderId: string }>;
 }) {
   const { orderId } = await params;
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { supabase, user, error: sessionError } = await getCustomerSession();
+  if (sessionError || !user) redirect("/login");
 
   // Fetch the specific order, including the rider's details, avatar, and destination address
-  const { data: order, error } = await supabase
+  const { data: order, error: orderError } = await supabase
     .from("delivery_orders")
     .select(
       `
@@ -36,7 +32,7 @@ export default async function OrderTrackingPage({
     .eq("id", orderId)
     .single();
 
-  if (error || !order) {
+  if (orderError || !order) {
     return (
       <div className="max-w-4xl mx-auto p-4 text-center mt-20">
         <h2 className="text-2xl font-bold text-zinc-900">Order not found</h2>

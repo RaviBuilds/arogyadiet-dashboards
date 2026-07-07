@@ -31,6 +31,12 @@ export function RouteProgressBar() {
     setVisible(true);
     setProgress(15);
 
+    // Performance mark for profiling SPA transition time
+    if (typeof performance !== "undefined") {
+      performance.clearMarks("route-transition-start");
+      performance.mark("route-transition-start");
+    }
+
     // Trickle the bar forward while we wait for the RSC payload to arrive,
     // so it never looks fully stalled even on slow requests.
     trickleIntervalRef.current = setInterval(() => {

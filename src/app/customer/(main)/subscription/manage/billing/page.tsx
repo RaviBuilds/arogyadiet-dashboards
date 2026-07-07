@@ -1,38 +1,20 @@
-import { createClient } from "@/lib/supabase/server";
+import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
 import { BillingClient } from "@/shared/components/customer/subscription/manage/billing-client";
 
 export const revalidate = 0;
 
 export default async function ManageBillingPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  const { supabase, user, customerProfileId, error } =
+    await getCustomerSession();
 
-  if (userError || !user) redirect("/login");
-
-  const { data: appUser } = await supabase
-    .from("users")
-    .select("id")
-    .eq("auth_user_id", user.id)
-    .single();
-
-  if (!appUser) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("customer_profiles")
-    .select("id")
-    .eq("user_id", appUser.id)
-    .single();
-
-  if (!profile) redirect("/profile");
+  if (error || !user) redirect("/login");
+  if (!customerProfileId) redirect("/profile");
 
   const { data: activeSub } = await supabase
     .from("subscriptions")
     .select("*")
-    .eq("customer_profile_id", profile.id)
+    .eq("customer_profile_id", customerProfileId)
     .eq("status", "ACTIVE")
     .maybeSingle();
 
@@ -41,7 +23,7 @@ export default async function ManageBillingPage() {
     .select(
       "id, amount, payment_method, status, created_at, paid_at, subscription_id, base_amount, tax_percent, tax_amount, discount_amount, invoice_type, payment_reference, payment_notes",
     )
-    .eq("customer_profile_id", profile.id)
+    .eq("customer_profile_id", customerProfileId)
     .order("created_at", { ascending: false });
 
   const paymentIds = (payments ?? []).map((p: any) => p.id);
@@ -54,7 +36,7 @@ export default async function ManageBillingPage() {
       ? supabase
           .from("addon_orders")
           .select("id, payment_id")
-          .eq("customer_profile_id", profile.id)
+          .eq("customer_profile_id", customerProfileId)
           .in("payment_id", paymentIds)
       : Promise.resolve({ data: [] as any[] }),
     subscriptionIds.length
