@@ -57,9 +57,18 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   const [loading, setLoading] = useState(true);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const hasLoadedOnceRef = useRef(false);
+  // [Req 12.5, 12.6] Prevents concurrent/rapid duplicate fetches — e.g. the
+  // mount effect and a near-simultaneous popover-open or refresh-event
+  // trigger — from firing two overlapping requests to /api/notifications.
+  // Legitimate distinct triggers (mount, refresh event, popover open, poll
+  // interval) are preserved; only overlapping in-flight calls are collapsed.
+  const inFlightRef = useRef(false);
 
   const fetchNotifications = useCallback(
     async (options?: { silent?: boolean }) => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+
       const silent = options?.silent ?? false;
 
       if (!silent) {
@@ -112,6 +121,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
           setUnreadCount(0);
         }
       } finally {
+        inFlightRef.current = false;
         if (!silent) {
           setLoading(false);
         }

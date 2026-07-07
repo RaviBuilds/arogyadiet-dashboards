@@ -127,6 +127,11 @@ function revalidateFranchiseCustomer(profileId?: string) {
   if (profileId) revalidatePath(`/franchise/customers/${profileId}`);
 }
 
+/** Public revalidation helper for ISR refresh from the client dashboard. */
+export async function revalidateFranchiseCustomersPage() {
+  revalidatePath("/franchise/customers");
+}
+
 // ── Profile & Medical ─────────────────────────────────────────────────────────
 
 export async function franchiseUpdateCustomerBasicInfo(

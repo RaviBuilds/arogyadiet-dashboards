@@ -85,6 +85,34 @@ const ONESIGNAL_APP_ID = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 const ONESIGNAL_SCRIPT_SRC =
   "https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js";
 
+// [Req 14.1-14.5] OneSignal's web SDK enforces its own domain allowlist and
+// throws ("Can only be used on: https://...") when window.location.hostname
+// doesn't match the configured production domain — this happens on every
+// single page load in local/non-production environments (e.g.
+// customer.localhost:3000), re-running and failing the full init/login flow
+// each time. This guard detects the mismatch client-side BEFORE invoking
+// OneSignal.init()/.login(), so the flow is skipped instead of repeatedly
+// failing. Configured via NEXT_PUBLIC_ONESIGNAL_ALLOWED_HOSTNAMES (comma-
+// separated); defaults to the production hostname so behavior is unchanged
+// there. Fails OPEN (returns true — proceed with init) on SSR, empty
+// config, or any thrown error, per Req 14.5.
+const ALLOWED_ONESIGNAL_HOSTNAMES = (
+  process.env.NEXT_PUBLIC_ONESIGNAL_ALLOWED_HOSTNAMES ?? "customer.arogyadiet.com"
+)
+  .split(",")
+  .map((h) => h.trim())
+  .filter(Boolean);
+
+function isOneSignalDomainAllowed(): boolean {
+  try {
+    if (typeof window === "undefined") return true; // SSR — inconclusive, proceed
+    if (ALLOWED_ONESIGNAL_HOSTNAMES.length === 0) return true; // no config — proceed
+    return ALLOWED_ONESIGNAL_HOSTNAMES.includes(window.location.hostname);
+  } catch {
+    return true; // detection failed — fail open, proceed with init
+  }
+}
+
 // ─── Platform Detection (lazy, client-only) ─────────────────────────────────────
 
 /**
@@ -230,6 +258,13 @@ export function OneSignalProvider({ userId }: { userId: string | null }) {
     };
 
     const runWithOneSignal = async (OneSignal: OneSignalClient) => {
+      if (!isOneSignalDomainAllowed()) {
+        // [Req 14.2] Skip the init/login flow entirely for this page load —
+        // no re-run/retry loop on subsequent navigations either, since this
+        // check re-runs per-effect (per userId change) rather than caching a
+        // false result across the component's lifetime.
+        return;
+      }
       try {
         if (!initStartedRef.current) {
           initStartedRef.current = true;

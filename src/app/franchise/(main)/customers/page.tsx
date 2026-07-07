@@ -32,9 +32,11 @@ export default async function FranchiseCustomersPage() {
       allergies,
       has_medical_history,
       franchise_id,
+      clinic_id,
+      clinics ( name ),
       users!inner ( id, full_name, email, mobile, is_active ),
       addresses ( pincode, is_primary ),
-      subscriptions ( status, subscription_plans ( name ) )
+      subscriptions ( status, customer_category, subscription_plans ( name ), kit_products ( name ) )
     `)
     .eq("franchise_id", franchiseId);
 
@@ -52,24 +54,40 @@ export default async function FranchiseCustomersPage() {
       if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
     }
 
-    const activeSub = customer.subscriptions?.find((s: any) => s.status === "ACTIVE");
-    const pendingSub = customer.subscriptions?.find((s: any) => s.status === "PENDING");
-    const stoppedSub = customer.subscriptions?.find((s: any) => s.status === "STOPPED" || s.status === "CANCELLED");
-    const expiredSub = customer.subscriptions?.find((s: any) => s.status === "EXPIRED");
+    // Priority order: Active > Pending > Stopped > Expired > No Plan
+    const subs = customer.subscriptions || [];
+    const activeSub = subs.find((s: any) => s.status === "ACTIVE");
+    const pendingSub = subs.find((s: any) => s.status === "PENDING");
+    const stoppedSub = subs.find((s: any) => s.status === "STOPPED" || s.status === "CANCELLED");
+    const expiredSub = subs.find((s: any) => s.status === "EXPIRED");
 
     let displayStatus: string;
     let activePlanName: string | null = null;
+    let customerCategory: string | null = null;
+
+    // Determine highest-priority subscription for status + category
+    const prioritySub = activeSub || pendingSub || stoppedSub || expiredSub;
 
     if (activeSub) {
       displayStatus = "Active";
-      activePlanName = activeSub.subscription_plans?.name || "Custom Plan";
+      customerCategory = activeSub.customer_category || null;
+      activePlanName =
+        activeSub.customer_category === "KIT"
+          ? activeSub.kit_products?.name || "KIT Plan"
+          : activeSub.subscription_plans?.name || "Custom Plan";
     } else if (pendingSub) {
       displayStatus = "Pending";
-      activePlanName = pendingSub.subscription_plans?.name || "Custom Plan";
+      customerCategory = pendingSub.customer_category || null;
+      activePlanName =
+        pendingSub.customer_category === "KIT"
+          ? pendingSub.kit_products?.name || "KIT Plan"
+          : pendingSub.subscription_plans?.name || "Custom Plan";
     } else if (stoppedSub) {
       displayStatus = "Stopped";
+      customerCategory = stoppedSub.customer_category || null;
     } else if (expiredSub) {
       displayStatus = "Expired";
+      customerCategory = expiredSub.customer_category || null;
     } else {
       displayStatus = "No Plan";
     }
@@ -90,16 +108,14 @@ export default async function FranchiseCustomersPage() {
       allergies: customer.allergies || null,
       hasMedicalHistory: customer.has_medical_history || false,
       activePlanName,
+      customerCategory,
+      clinic_id: customer.clinic_id || null,
+      clinicName: customer.clinics?.name || null,
     };
   });
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in duration-500">
-      <PageHeader
-        title="Customers"
-        subtitle="Manage your franchise customers and their subscriptions."
-        icon={Users}
-      />
       <FranchiseCustomerDashboard customers={customers} franchiseId={franchiseId} />
     </div>
   );

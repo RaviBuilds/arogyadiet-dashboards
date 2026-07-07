@@ -1,5 +1,4 @@
 import { getCustomerSession } from "@/lib/customer/get-session";
-import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { PackageReceiptScreen } from "@/shared/components/customer/kit-tracker/PackageReceiptScreen";
@@ -12,30 +11,28 @@ import { KitExpirationMessage } from "@/shared/components/customer/kit-tracker/K
 export const revalidate = 0;
 
 export default async function KitTrackerPage() {
-  const { user, profile, error } = await getCustomerSession();
+  const { supabase, user, customerProfileId, error } = await getCustomerSession();
   if (error || !user) redirect("/login");
+  if (!customerProfileId) redirect("/dashboard?msg=kit-tracker-unavailable");
 
-  const supabase = await createClient();
   const todayServerDate = format(new Date(), "yyyy-MM-dd");
 
-  // Resolve customer_profile_id from the users table
-  const { data: cpRow } = await supabase
-    .from("customer_profiles")
-    .select("id")
-    .eq("user_id", profile?.id ?? "")
-    .maybeSingle();
-
-  if (!cpRow) redirect("/dashboard?msg=kit-tracker-unavailable");
-
-  // Check the customer's active subscription category
-  const { data: activeSub } = await supabase
-    .from("subscriptions")
-    .select("id, customer_category")
-    .eq("customer_profile_id", cpRow.id)
-    .in("status", ["ACTIVE", "PENDING"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // [Req 11.1, 11.2] The active-subscription-category check and
+  // getKitTrackerStateAction() do not depend on each other's results — both
+  // depend only on the already-resolved customerProfileId — so they run
+  // concurrently instead of sequentially.
+  const [activeSubResult, stateResult] = await Promise.all([
+    supabase
+      .from("subscriptions")
+      .select("id, customer_category")
+      .eq("customer_profile_id", customerProfileId)
+      .in("status", ["ACTIVE", "PENDING"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    getKitTrackerStateAction(),
+  ]);
+  const activeSub = activeSubResult.data;
 
   // If the customer has an active subscription but it's not KIT, redirect (Req 1.3)
   if (activeSub && activeSub.customer_category !== "KIT") {
@@ -46,7 +43,6 @@ export default async function KitTrackerPage() {
   // Determine KIT Tracker display state using lifecycle action (Req 7.3, 7.4, 7.5)
   // Priority: start_flow > receipt_flow > processing > expiration > active
   // ---------------------------------------------------------------------------
-  const stateResult = await getKitTrackerStateAction();
 
   if (stateResult.success) {
     const { state } = stateResult;
@@ -106,7 +102,7 @@ export default async function KitTrackerPage() {
     .select(
       "id, customer_category, starts_on, kit_duration_days, kit_received_date, kit_tracker_end_date, kit_total_skipped_days"
     )
-    .eq("customer_profile_id", cpRow.id)
+    .eq("customer_profile_id", customerProfileId)
     .eq("customer_category", "KIT")
     .in("status", ["ACTIVE", "PENDING"])
     .order("created_at", { ascending: false })

@@ -2,11 +2,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cookies } from "next/headers";
 import { Badge } from "@/shared/components/ui/badge";
-import { Building2, User } from "lucide-react";
+import { Building2, User, Stethoscope, MapPin } from "lucide-react";
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
 import { SectionCard } from "@/shared/components/franchise/ui/GlassCard";
 import FranchiseServiceAreaCard from "./FranchiseServiceAreaCard";
-import type { FranchisePincodeRequest } from "@/types/franchise";
+import { listClinicsByFranchise } from "@/repositories/franchise/franchiseClinicRepository";
+import type { FranchisePincodeRequest, FranchiseClinic } from "@/types/franchise";
 
 export const revalidate = 0;
 
@@ -28,6 +29,7 @@ export default async function FranchiseProfilePage() {
   let franchise: { name: string; status: string; created_at: string } | null = null;
   let pincodes: string[] = [];
   let requests: FranchisePincodeRequest[] = [];
+  let clinics: FranchiseClinic[] = [];
 
   // Franchise + pincode records are protected by RLS and not readable by the
   // FRANCHISE_ADMIN role directly, so read them with the service-role client
@@ -56,6 +58,13 @@ export default async function FranchiseProfilePage() {
       .eq("franchise_id", franchiseId)
       .order("created_at", { ascending: false });
     requests = (reqs ?? []) as FranchisePincodeRequest[];
+
+    // Fetch linked clinics
+    try {
+      clinics = await listClinicsByFranchise(franchiseId);
+    } catch {
+      clinics = [];
+    }
   }
 
   return (
@@ -130,6 +139,46 @@ export default async function FranchiseProfilePage() {
           </div>
         </SectionCard>
       </div>
+
+      {/* Linked Clinic Info */}
+      {clinics.length > 0 && (
+        <SectionCard
+          icon={Stethoscope}
+          title="Linked Clinic"
+          subtitle={`${clinics.length} clinic${clinics.length > 1 ? "s" : ""} linked to your franchise`}
+        >
+          <div className="space-y-4">
+            {clinics.map((clinic) => (
+              <div
+                key={clinic.id}
+                className="rounded-lg border border-slate-100 bg-slate-50/50 p-4 space-y-3 text-sm"
+              >
+                <div className="flex justify-between">
+                  <span className="text-xs uppercase tracking-wider text-slate-400">
+                    Clinic Name
+                  </span>
+                  <span className="font-medium text-slate-700">{clinic.name}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-xs uppercase tracking-wider text-slate-400 shrink-0">
+                    Address
+                  </span>
+                  <span className="text-slate-700 text-right">{clinic.address}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs uppercase tracking-wider text-slate-400">
+                    Coordinates
+                  </span>
+                  <span className="text-slate-500 font-mono text-xs flex items-center gap-1">
+                    <MapPin className="h-3 w-3" />
+                    {clinic.latitude.toFixed(5)}, {clinic.longitude.toFixed(5)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
 
       {/* Service Pincodes — view active + request new */}
       <FranchiseServiceAreaCard approvedPincodes={pincodes} requests={requests} />
