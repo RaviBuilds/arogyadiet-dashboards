@@ -151,6 +151,9 @@ export async function middleware(request: NextRequest) {
   // session this holds 0 or 1 entries; it stays an array so the exactly-one
   // rule (and the ambiguous case) can be evaluated uniformly.
   let customerOnboardingStatuses: (string | null)[] = [];
+  // [Req 1.1–1.4] The customer profile ID resolved from the `customer_profiles`
+  // embed, used to query `subscriptions` for `customer_category` header propagation.
+  let customerProfileId: string | null = null;
   // [Req 2.8] Track whether the user still has a temporary PIN. Used as a
   // defense-in-depth guard: the session should NOT be established while
   // is_temp_pin is true (pinAuthActions only calls signInWithPassword after
@@ -162,7 +165,7 @@ export async function middleware(request: NextRequest) {
     const { data: userProfile } = await supabase
       .from("users")
       .select(
-        "admin_access_level, admin_operations_access, roles(code), customer_profiles(onboarding_status)",
+        "admin_access_level, admin_operations_access, roles(code), customer_profiles(id, onboarding_status)",
       )
       .eq("auth_user_id", user.id)
       .single();
@@ -180,10 +183,10 @@ export async function middleware(request: NextRequest) {
 
     // Normalize the `customer_profiles` embed (supabase-js may return a to-one
     // relation as an object, a single-element array, or null) into a flat list
-    // of onboarding statuses for the customer-portal gate below.
+    // for the customer-portal gate below.
     const profilesData = userProfile?.customer_profiles as
-      | { onboarding_status: string | null }[]
-      | { onboarding_status: string | null }
+      | { id: string; onboarding_status: string | null }[]
+      | { id: string; onboarding_status: string | null }
       | null
       | undefined;
     const profileList = Array.isArray(profilesData)
@@ -192,6 +195,8 @@ export async function middleware(request: NextRequest) {
         ? [profilesData]
         : [];
     customerOnboardingStatuses = profileList.map((p) => p.onboarding_status);
+    // [Req 1.1] Resolve customer profile ID for downstream subscription query
+    customerProfileId = profileList[0]?.id ?? null;
   }
 
   // [Req 18.7 — DB scope binding] DECISION: do NOT bind the DB session context
@@ -284,6 +289,29 @@ export async function middleware(request: NextRequest) {
           const loginUrl = new URL("/login", request.url);
           return NextResponse.redirect(loginUrl);
         }
+
+        // [Req 1.1–1.4] Resolve customer_category from active subscription and
+        // propagate via x-customer-category header. Uses the existing Supabase
+        // client — no new instantiation. Falls back to empty string if no active
+        // subscription or if the query fails (safe degradation per design).
+        let customerCategory = "";
+        if (customerProfileId) {
+          try {
+            const { data: catRow } = await supabase
+              .from("subscriptions")
+              .select("customer_category")
+              .eq("customer_profile_id", customerProfileId)
+              .eq("status", "ACTIVE")
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            customerCategory = catRow?.customer_category ?? "";
+          } catch {
+            // Query failure must not block navigation — fall back to empty string
+            customerCategory = "";
+          }
+        }
+        response.headers.set("x-customer-category", customerCategory);
       }
       if (currentSubdomain === "admin" && roleCode !== "ADMIN") {
         // FRANCHISE_ADMIN trying to access admin portal → redirect to franchise portal

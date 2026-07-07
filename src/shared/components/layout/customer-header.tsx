@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import {
   Sheet,
   SheetContent,
@@ -10,7 +11,6 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
-import { CartSheet } from "@/shared/components/customer/cart-sheet";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
 import { buttonVariants } from "@/shared/components/ui/button";
 import {
@@ -21,9 +21,19 @@ import {
 } from "@/shared/components/ui/dropdown-menu";
 import { Menu, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { NotificationBell } from "@/components/shared/NotificationBell";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+
+// Dynamically import heavy interactive components that aren't needed for first paint
+const CartSheet = dynamic(
+  () => import("@/shared/components/customer/cart-sheet").then((m) => m.CartSheet),
+  { ssr: false },
+);
+
+const NotificationBell = dynamic(
+  () => import("@/shared/components/shared/NotificationBell").then((m) => m.NotificationBell),
+  { ssr: false },
+);
 
 interface CustomerHeaderProps {
   userEmail: string;

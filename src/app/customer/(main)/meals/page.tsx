@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getCustomerSession } from "@/lib/customer/get-session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import { format, parseISO } from "date-fns";
@@ -61,35 +61,17 @@ export default async function MyMealsPage({
   const currentPage = parseInt(page || "1", 10);
   const pageSize = 10;
 
-  const supabase = await createClient();
+  // 1. Authenticate & Get Profile via unified session helper
+  const { supabase, user, customerProfileId, error } = await getCustomerSession();
+  if (error || !user) redirect("/login");
+  if (!customerProfileId) redirect("/dashboard");
 
-  // 1. Authenticate & Get Profile
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: appUser } = await supabase
-    .from("users")
-    .select("id")
-    .eq("auth_user_id", user.id)
-    .single();
-
-  const { data: profile } = await supabase
-    .from("customer_profiles")
-    .select("id")
-    .eq("user_id", appUser?.id)
-    .single();
-
-  if (!profile) redirect("/dashboard");
-
-  const customerProfileId = profile.id;
-
-  // Track Shop Orders (Standalone Addons)
-  const { data: shopOrders } = await supabase
-    .from("addon_orders")
-    .select(
-      `
+  // Track Shop Orders & Active Subscription in parallel (both depend only on customerProfileId)
+  const [shopOrdersRes, activeSubRes] = await Promise.all([
+    supabase
+      .from("addon_orders")
+      .select(
+        `
   id, 
   created_at, 
   total_amount, 
@@ -98,18 +80,20 @@ export default async function MyMealsPage({
   delivery_orders (delivery_date, status),
   addon_order_items ( quantity, unit_price, products (name) )
 `,
-    )
-    .eq("customer_profile_id", customerProfileId)
-    .eq("status", "PAID")
-    .order("created_at", { ascending: false });
+      )
+      .eq("customer_profile_id", customerProfileId)
+      .eq("status", "PAID")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("subscriptions")
+      .select("id, total_days, consumed_days, starts_on")
+      .eq("customer_profile_id", customerProfileId)
+      .eq("status", "ACTIVE")
+      .single(),
+  ]);
 
-  // 2. Fetch Active Subscription
-  const { data: activeSub } = await supabase
-    .from("subscriptions")
-    .select("id, total_days, consumed_days, starts_on")
-    .eq("customer_profile_id", customerProfileId)
-    .eq("status", "ACTIVE")
-    .single();
+  const shopOrders = shopOrdersRes.data;
+  const activeSub = activeSubRes.data;
 
   const todayStr = format(new Date(), "yyyy-MM-dd");
 

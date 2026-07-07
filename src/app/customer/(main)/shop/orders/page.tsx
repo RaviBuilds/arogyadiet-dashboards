@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
 import { Info, ShoppingBag } from "lucide-react";
 import Link from "next/link";
@@ -8,26 +8,10 @@ import { ShopOrdersClient } from "./shop-orders-client";
 export const revalidate = 0;
 
 export default async function ShopOrdersPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: appUser } = await supabase
-    .from("users")
-    .select("id")
-    .eq("auth_user_id", user.id)
-    .single();
-
-  const { data: profile } = await supabase
-    .from("customer_profiles")
-    .select("id")
-    .eq("user_id", appUser?.id)
-    .single();
-
-  if (!profile) redirect("/dashboard");
+  const { supabase, user, customerProfileId, error } =
+    await getCustomerSession();
+  if (error || !user) redirect("/login");
+  if (!customerProfileId) redirect("/dashboard");
 
   const { data: orders } = await supabase
     .from("addon_orders")
@@ -47,7 +31,7 @@ export default async function ShopOrdersPage() {
       )
     `,
     )
-    .eq("customer_profile_id", profile.id)
+    .eq("customer_profile_id", customerProfileId)
     .order("created_at", { ascending: false });
 
   return (

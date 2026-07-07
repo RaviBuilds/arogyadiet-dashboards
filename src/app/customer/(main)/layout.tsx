@@ -1,13 +1,12 @@
 import { getCustomerSession } from "@/lib/customer/get-session";
-import { FloatingSupportMenu } from "@/shared/components/customer/FloatingSupportMenu";
 import { CustomerHeader } from "@/shared/components/layout/customer-header";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
 import { RouteProgressBar } from "@/shared/components/layout/RouteProgressBar";
-import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
+import { DeferredClientProviders } from "@/shared/components/customer/DeferredClientProviders";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { Metadata } from "next";
 import { Suspense } from "react";
-import { createClient } from "@/lib/supabase/server";
 
 
 export const metadata: Metadata = {
@@ -27,20 +26,9 @@ export default async function CustomerLayout({
   const userName = profile?.full_name || user.user_metadata?.full_name || null;
   const userPhone = profile?.mobile || user.phone || null;
 
-  // Resolve the customer's subscription category for nav filtering
-  let customerCategory: string | null = null;
-  if (profile?.id) {
-    const supabase = await createClient();
-    const { data: catRow } = await supabase
-      .from("subscriptions")
-      .select("customer_category")
-      .eq("customer_profile_id", (await supabase.from("customer_profiles").select("id").eq("user_id", profile.id).maybeSingle()).data?.id ?? "")
-      .eq("status", "ACTIVE")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    customerCategory = catRow?.customer_category ?? null;
-  }
+  // Read customer category from middleware-propagated header (no DB call needed)
+  const headerStore = await headers();
+  const customerCategory = headerStore.get("x-customer-category") || null;
 
   return (
     // ADDED max-w-full and overflow-x-hidden to kill horizontal scroll
@@ -59,7 +47,7 @@ export default async function CustomerLayout({
           backgroundSize: "350px" 
         }} 
       />
-      <OneSignalProvider userId={profile?.id ?? null} />
+      <DeferredClientProviders userId={profile?.id ?? null} />
       <CustomerSidebar isMobile={false} customerCategory={customerCategory} />
 
       {/* Added min-w-0 to allow text truncation inside flex children */}
@@ -75,8 +63,6 @@ export default async function CustomerLayout({
           {children}
         </main>
       </div>
-
-      <FloatingSupportMenu />
     </div>
   );
 }

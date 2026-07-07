@@ -1,70 +1,79 @@
-import { getUserAddresses } from "@/services/addressService";
 import { AddressList } from "@/shared/components/customer/address-list";
 import { CustomerLogoutButton } from "@/shared/components/customer/customer-logout-button";
 import { PinChangeForm } from "@/shared/components/customer/pin-change-form";
-import { createClient } from "@/lib/supabase/server";
 import { ProfileForm } from "@/shared/components/customer/profile-form";
 import { displayableEmailOrNull } from "@/lib/onboarding/testEmail";
+import { getCustomerSession } from "@/lib/customer/get-session";
+import { redirect } from "next/navigation";
 import {
   Card,
   CardContent,
 } from "@/shared/components/ui/card";
 
 export default async function CustomerProfilePage() {
-  // Fetch data securely on the server
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user, profile, customerProfileId, error } =
+    await getCustomerSession();
+  if (error || !user) redirect("/login");
 
-  if (!user) return null; // Or handle redirect
+  // Parallelize independent queries: full user record, customer_profiles data, addresses, and medical_documents
+  // All queries only depend on profile.id or customerProfileId which are already resolved
+  const [dbUserResult, customerProfileResult, addressesResult, medicalDocsResult] =
+    await Promise.all([
+      profile
+        ? supabase
+            .from("users")
+            .select("email, is_test_email")
+            .eq("id", profile.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      customerProfileId
+        ? supabase
+            .from("customer_profiles")
+            .select("*")
+            .eq("id", customerProfileId)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      customerProfileId
+        ? supabase
+            .from("addresses")
+            .select("*")
+            .eq("customer_profile_id", customerProfileId)
+            .order("is_primary", { ascending: false })
+            .order("created_at", { ascending: false })
+        : Promise.resolve({ data: [] }),
+      customerProfileId
+        ? supabase
+            .from("medical_documents")
+            .select("*")
+            .eq("customer_profile_id", customerProfileId)
+            .order("uploaded_at", { ascending: false })
+        : Promise.resolve({ data: [] }),
+    ]);
 
-  // 1. Fetch Identity Info from 'users' table
-  const { data: dbUser } = await supabase
-    .from("users")
-    .select("*")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  const dbUser = dbUserResult.data;
+  const customerProfile = customerProfileResult.data;
+  const addresses = (addressesResult.data as any[]) || [];
+  const docs = (medicalDocsResult.data as any[]) || [];
 
-  // 2. Fetch Customer Specific Info from 'customer_profiles' table
-  let customerProfile = null;
-  if (dbUser) {
-    const { data: cpData } = await supabase
-      .from("customer_profiles")
-      .select("*")
-      .eq("user_id", dbUser.id)
-      .maybeSingle();
-
-    customerProfile = cpData;
-  }
-
-  // 3. Fetch uploaded medical documents and generate secure Signed URLs
+  // Generate secure Signed URLs for medical documents
   let documentsWithUrls: any[] = [];
-  if (customerProfile?.id) {
-    const { data: docs } = await supabase
-      .from("medical_documents")
-      .select("*")
-      .eq("customer_profile_id", customerProfile.id)
-      .order("uploaded_at", { ascending: false });
+  if (docs.length > 0) {
+    documentsWithUrls = await Promise.all(
+      docs.map(async (doc) => {
+        // Generates a temporary secure link valid for 1 hour
+        const { data } = await supabase.storage
+          .from("medical_records")
+          .createSignedUrl(doc.storage_path, 3600);
 
-    if (docs && docs.length > 0) {
-      documentsWithUrls = await Promise.all(
-        docs.map(async (doc) => {
-          // Generates a temporary secure link valid for 1 hour
-          const { data } = await supabase.storage
-            .from("medical_records")
-            .createSignedUrl(doc.storage_path, 3600);
-
-          return {
-            ...doc,
-            signedUrl: data?.signedUrl || null,
-          };
-        }),
-      );
-    }
+        return {
+          ...doc,
+          signedUrl: data?.signedUrl || null,
+        };
+      }),
+    );
   }
 
-  // 4. Combine the data to pass into the form.
+  // Combine the data to pass into the form.
   // Email: never surface an admin-entered placeholder Test_Email to the
   // customer (Req 10.4) — `displayableEmailOrNull` filters it out, so the
   // field starts blank until the customer supplies a real address.
@@ -77,9 +86,9 @@ export default async function CustomerProfilePage() {
 
   const initialProfileData = {
     id: customerProfile?.id || null,
-    full_name: dbUser?.full_name || "",
+    full_name: profile?.full_name || "",
     email: displayEmail || "",
-    phone: dbUser?.mobile || "", // Note: mapping DB 'mobile' to Form 'phone'
+    phone: profile?.mobile || "", // Note: mapping DB 'mobile' to Form 'phone'
     gender: customerProfile?.gender || "",
     date_of_birth: customerProfile?.date_of_birth || "",
     dietary_preference:
@@ -93,7 +102,6 @@ export default async function CustomerProfilePage() {
     ),
   };
 
-  const addresses = await getUserAddresses();
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 animate-in fade-in slide-in-from-bottom-4">
