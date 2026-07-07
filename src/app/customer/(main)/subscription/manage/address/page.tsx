@@ -1,36 +1,20 @@
-import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
+import { getCustomerSession } from "@/lib/customer/get-session";
 import { AddressSwitcherClient } from "@/shared/components/customer/subscription/manage/address-switcher-client";
 
 export const revalidate = 0;
 
 export default async function ManageAddressPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const { supabase, user, customerProfileId, error } =
+    await getCustomerSession();
+  if (error || !user) redirect("/login");
 
-  // Fetch Profile & Active Sub
-  const { data: profile } = await supabase
-    .from("customer_profiles")
-    .select("id")
-    .eq(
-      "user_id",
-      (
-        await supabase
-          .from("users")
-          .select("id")
-          .eq("auth_user_id", user.id)
-          .single()
-      ).data?.id,
-    )
-    .single();
+  // Fetch Active Sub
   const { data: activeSub } = await supabase
     .from("subscriptions")
     .select("id, effective_end_on")
-    .eq("customer_profile_id", profile?.id)
+    .eq("customer_profile_id", customerProfileId)
     .eq("status", "ACTIVE")
     .single();
 
@@ -47,7 +31,7 @@ export default async function ManageAddressPage() {
   const { data: addresses } = await supabase
     .from("addresses")
     .select("*")
-    .eq("customer_profile_id", profile?.id);
+    .eq("customer_profile_id", customerProfileId);
 
   // Fetch Daily Schedule Address IDs & Pause Status
   const todayStr = format(new Date(), "yyyy-MM-dd");

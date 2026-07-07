@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
@@ -62,40 +62,38 @@ function formatDate(value: string | null): string {
 }
 
 export default async function StorefrontPage() {
-  const supabase = await createClient();
+  const { supabase, user, customerProfileId, error } =
+    await getCustomerSession();
+  if (error || !user) redirect("/login");
 
-  // 1. Authenticate
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  // Parallelize independent queries: subscriptions, plans, and profile data
+  const [subscriptionsResult, plansResult, profileResult] = await Promise.all([
+    customerProfileId
+      ? supabase
+          .from("subscriptions")
+          .select(
+            "id, status, starts_on, effective_end_on, subscription_code, subscription_plans ( name, duration_days )",
+          )
+          .eq("customer_profile_id", customerProfileId)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: null as AccountSubscription[] | null }),
+    supabase
+      .from("subscription_plans")
+      .select("*")
+      .eq("is_active", true)
+      .order("price"),
+    customerProfileId
+      ? supabase
+          .from("customer_profiles")
+          .select("*")
+          .eq("id", customerProfileId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
-  const { data: appUser } = await supabase
-    .from("users")
-    .select("id")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (!appUser) redirect("/login");
-
-  // 2. Fetch Profile & Active Subscriptions
-  const { data: profile } = await supabase
-    .from("customer_profiles")
-    .select("*")
-    .eq("user_id", appUser.id)
-    .maybeSingle();
-
-  // 2b. Fetch the subscription attached during onboarding (or any existing one).
-  //     Access is NOT gated on email presence, so onboarded customers see this
-  //     exactly like legacy customers (Req 11.1/11.5).
-  const { data: subscriptions } = profile
-    ? await supabase
-        .from("subscriptions")
-        .select(
-          "id, status, starts_on, effective_end_on, subscription_code, subscription_plans ( name, duration_days )",
-        )
-        .eq("customer_profile_id", profile.id)
-        .order("created_at", { ascending: false })
-    : { data: null as AccountSubscription[] | null };
+  const subscriptions = subscriptionsResult.data;
+  const plans = plansResult.data;
+  const profile = profileResult.data;
 
   // Pick the most relevant subscription to display (Req 11.1).
   const currentSubscription =
@@ -116,22 +114,6 @@ export default async function StorefrontPage() {
   const currentStatus = currentSubscription?.status ?? "";
   const isActiveStatus = currentStatus === "ACTIVE";
   const isPendingStatus = currentStatus === "PENDING";
-
-  // 3. Fetch Plans
-  const { data: plans } = await supabase
-    .from("subscription_plans")
-    .select("*")
-    .eq("is_active", true)
-    .order("price");
-
-    // const customOrder = [30, 90, 60];
-
-    // const plans = plansData?.sort((a, b) => {
-    //   return (
-    //     customOrder.indexOf(a.duration_days) -
-    //     customOrder.indexOf(b.duration_days)
-    //   );
-    // });
 
   const isProfileComplete = !!profile?.dietary_preference;
 

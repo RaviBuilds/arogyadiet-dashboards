@@ -81,7 +81,6 @@ export interface QuickOnboardingFormProps {
   plans: OnboardingPlan[];
   kitProducts: KitProduct[];
   serviceAreaPincodes: string[];
-  clinics: { id: string; name: string }[];
 }
 
 const detailsSchema = z.object({
@@ -140,7 +139,6 @@ export function QuickOnboardingForm({
   plans,
   kitProducts,
   serviceAreaPincodes,
-  clinics,
 }: QuickOnboardingFormProps) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
@@ -164,7 +162,6 @@ export function QuickOnboardingForm({
   const [tempPin, setTempPin] = useState("");
   const [tempPinError, setTempPinError] = useState<string | null>(null);
   const [showPin, setShowPin] = useState(false);
-  const [selectedClinicId, setSelectedClinicId] = useState<string>("");
 
   const {
     register,
@@ -321,7 +318,6 @@ export function QuickOnboardingForm({
         lng: address.lng,
       },
       tempPin,
-      clinicId: selectedClinicId && selectedClinicId !== "none" ? selectedClinicId : undefined,
     };
 
     startTransition(async () => {
@@ -444,22 +440,6 @@ export function QuickOnboardingForm({
                   />
                 </Field>
               </div>
-
-              <Field label="Clinic" htmlFor="clinicId" hint="Optional — required for KIT customers">
-                <Select value={selectedClinicId} onValueChange={setSelectedClinicId}>
-                  <SelectTrigger id="clinicId" aria-label="Clinic" className="h-9">
-                    <SelectValue placeholder="Select clinic" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No clinic</SelectItem>
-                    {clinics.map((clinic) => (
-                      <SelectItem key={clinic.id} value={clinic.id}>
-                        {clinic.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
 
               <Field label="Allergies" htmlFor="allergies" error={errors.allergies?.message} hint="Optional">
                 <Textarea

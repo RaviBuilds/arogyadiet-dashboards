@@ -1,34 +1,24 @@
-import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { MealPlannerClient } from "@/shared/components/customer/subscription/manage/meal-planner-client";
 import { repairOverLimitPauseCredits } from "@/actions/manageMealActions";
 import { fetchHolidaysInRange } from "@/actions/admin-actions/holidayActions";
+import { getCustomerSession } from "@/lib/customer/get-session";
 
 export const revalidate = 0;
 
 export default async function ManageMealPlannerPage() {
-  const supabase = await createClient();
+  const { supabase, user, customerProfileId, error } =
+    await getCustomerSession();
 
-  // 1. Authenticate
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  if (error || !user) redirect("/login");
+  if (!customerProfileId) redirect("/profile");
 
+  // Fetch customer profile details needed for this page
   const { data: profile } = await supabase
     .from("customer_profiles")
     .select("id, dietary_preference, franchise_id")
-    .eq(
-      "user_id",
-      (
-        await supabase
-          .from("users")
-          .select("id")
-          .eq("auth_user_id", user.id)
-          .single()
-      ).data?.id,
-    )
+    .eq("id", customerProfileId)
     .single();
 
   if (!profile) redirect("/profile");
@@ -80,7 +70,6 @@ export default async function ManageMealPlannerPage() {
 
   // 4. Fetch the Daily Roster (From subscription start until end date)
   const startDate = activeSub.starts_on || format(new Date(), "yyyy-MM-dd");
-  const todayStr = format(new Date(), "yyyy-MM-dd");
 
   const { data: dailyPrefs } = await supabase
     .from("subscription_daily_preferences")

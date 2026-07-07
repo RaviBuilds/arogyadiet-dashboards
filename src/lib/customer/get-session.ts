@@ -12,6 +12,7 @@ export type CustomerSession = {
   supabase: Awaited<ReturnType<typeof createClient>>;
   user: User | null;
   profile: CustomerUserProfile | null;
+  customerProfileId: string | null;
   error: AuthError | null;
 };
 
@@ -28,6 +29,7 @@ export const getCustomerSession = cache(async (): Promise<CustomerSession> => {
       supabase,
       user: null,
       profile: null,
+      customerProfileId: null,
       error: userError,
     };
   }
@@ -38,10 +40,22 @@ export const getCustomerSession = cache(async (): Promise<CustomerSession> => {
     .eq("auth_user_id", user.id)
     .maybeSingle();
 
+  // Resolve customer profile ID
+  let customerProfileId: string | null = null;
+  if (profile?.id) {
+    const { data: cp } = await supabase
+      .from("customer_profiles")
+      .select("id")
+      .eq("user_id", profile.id)
+      .maybeSingle();
+    customerProfileId = cp?.id ?? null;
+  }
+
   return {
     supabase,
     user,
     profile: profile ?? null,
+    customerProfileId,
     error: null,
   };
 });
