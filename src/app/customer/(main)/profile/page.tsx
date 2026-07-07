@@ -4,6 +4,7 @@ import { CustomerLogoutButton } from "@/shared/components/customer/customer-logo
 import { PinChangeForm } from "@/shared/components/customer/pin-change-form";
 import { createClient } from "@/lib/supabase/server";
 import { ProfileForm } from "@/shared/components/customer/profile-form";
+import { displayableEmailOrNull } from "@/lib/onboarding/testEmail";
 import {
   Card,
   CardContent,
@@ -63,11 +64,21 @@ export default async function CustomerProfilePage() {
     }
   }
 
-  // 4. Combine the data to pass into the form
+  // 4. Combine the data to pass into the form.
+  // Email: never surface an admin-entered placeholder Test_Email to the
+  // customer (Req 10.4) — `displayableEmailOrNull` filters it out, so the
+  // field starts blank until the customer supplies a real address.
+  const displayEmail = dbUser
+    ? displayableEmailOrNull({
+        email: dbUser.email ?? null,
+        is_test_email: Boolean(dbUser.is_test_email),
+      })
+    : null;
+
   const initialProfileData = {
     id: customerProfile?.id || null,
     full_name: dbUser?.full_name || "",
-    email: user.email || "",
+    email: displayEmail || "",
     phone: dbUser?.mobile || "", // Note: mapping DB 'mobile' to Form 'phone'
     gender: customerProfile?.gender || "",
     date_of_birth: customerProfile?.date_of_birth || "",

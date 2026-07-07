@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { profileSchema, ProfileFormValues } from "@/validations/profileSchema";
 import { updateProfileAction } from "@/actions/profileActions";
+import { submitRealEmailAction } from "@/actions/profileCompletionActions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -109,6 +110,21 @@ async function onSubmit(data: ProfileFormValues) {
   }
   // ------------------------------------------------
 
+  // If the customer changed their email, replace the placeholder/previous
+  // email via the dedicated action first (it enforces uniqueness server-side
+  // and keeps the Auth identity in sync). Abort on failure before touching
+  // the rest of the profile so nothing is partially saved.
+  const newEmail = data.email?.trim();
+  if (newEmail && newEmail !== initialData.email) {
+    const emailResult = await submitRealEmailAction(newEmail);
+    if ("error" in emailResult) {
+      setIsPending(false);
+      form.setError("email", { type: "server", message: emailResult.error });
+      toast.error(emailResult.error);
+      return;
+    }
+  }
+
   const result = await updateProfileAction(data);
 
   setIsPending(false);
@@ -209,14 +225,41 @@ async function onSubmit(data: ProfileFormValues) {
             )}
           </div>
 
-          {/* Email (Read Only) */}
+          {/* Email */}
           <div className="space-y-2">
-            <Label className="text-xs font-medium uppercase tracking-wider text-slate-500">
+            <Label
+              className={cn(
+                "text-xs font-medium uppercase tracking-wider",
+                form.formState.errors.email
+                  ? "text-red-500"
+                  : "text-slate-500",
+              )}
+            >
               Email Address
             </Label>
-            <div className="flex h-11 items-center gap-3 rounded-lg bg-slate-50/80 px-3 py-2.5 italic text-slate-500">
-              <Mail className="h-4 w-4 text-slate-400" /> {watchedValues.email}
-            </div>
+            {isEditing ? (
+              <Input
+                type="email"
+                placeholder="you@example.com"
+                {...form.register("email")}
+                className={cn(
+                  "h-11",
+                  form.formState.errors.email && "border-red-500",
+                )}
+              />
+            ) : (
+              <div className="flex h-11 items-center gap-3 rounded-lg bg-slate-50/80 px-3 py-2.5 font-medium text-slate-900">
+                <Mail className="h-4 w-4 text-slate-400" />{" "}
+                {watchedValues.email || (
+                  <span className="italic text-slate-500">Not provided</span>
+                )}
+              </div>
+            )}
+            {form.formState.errors.email && (
+              <p className="text-[11px] font-medium text-red-500">
+                {form.formState.errors.email.message}
+              </p>
+            )}
           </div>
 
           {/* Mobile */}
