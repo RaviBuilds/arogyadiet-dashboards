@@ -563,6 +563,33 @@ export async function replaceTestEmailWithReal(
     };
   }
 
+  // Keep the Supabase Auth identity's email in sync. The PIN login flow
+  // (`pinAuthActions.establishSession`) calls `signInWithPassword` with the
+  // email read from `public.users`, which Supabase Auth verifies against
+  // `auth.users.email` — leaving that stale would lock the customer out of
+  // their next login after replacing the placeholder.
+  const { data: userRow } = await admin
+    .from("users")
+    .select("auth_user_id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (userRow?.auth_user_id) {
+    const { error: authError } = await admin.auth.admin.updateUserById(
+      userRow.auth_user_id as string,
+      { email }
+    );
+    if (authError) {
+      // The public.users row already changed and is the source of truth the
+      // login flow reads from, so don't fail the whole operation — just log
+      // for investigation.
+      console.error(
+        `[replaceTestEmailWithReal] Failed to sync auth email for user ${userId}:`,
+        authError.message
+      );
+    }
+  }
+
   return { ok: true };
 }
 

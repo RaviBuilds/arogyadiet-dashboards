@@ -3,7 +3,18 @@ import { z } from "zod";
 export const profileSchema = z
   .object({
     full_name: z.string().min(2, "Full name is required"),
-    email: z.string().email("Valid email is required"),
+    // Email is optional here: some customers only have an admin-entered
+    // placeholder (Test_Email), which is deliberately excluded from
+    // customer-facing display, so the field may start out blank. When the
+    // customer does provide a value it must be a valid, reasonably sized
+    // email address.
+    email: z
+      .string()
+      .max(254, "Email must be at most 254 characters.")
+      .refine(
+        (v) => v.trim().length === 0 || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
+        "Enter a valid email address.",
+      ),
     phone: z.string().regex(/^[6-9]\d{9}$/, "Invalid Indian mobile number"),
     date_of_birth: z.string().min(1, "Date of birth is required"),
 
