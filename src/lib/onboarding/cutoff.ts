@@ -24,6 +24,8 @@ import {
   RIDER_DAY_ROLLOVER_HOUR_IST,
 } from "@/lib/dates/ist";
 
+export type { PastDayStatus } from "@/types/onboarding";
+
 /**
  * Cutoff hour (0–23) in IST after which the earliest selectable start date
  * shifts from tomorrow to the day-after-tomorrow. 17 = 5:00 PM IST. This is the
@@ -63,4 +65,68 @@ export function isStartDateAllowed(
   cutoffHourIST: number = ONBOARDING_CUTOFF_HOUR_IST,
 ): boolean {
   return startDate >= earliestStartDate(now, cutoffHourIST);
+}
+
+
+// ─── Past-Date Onboarding Utilities ────────────────────────────────────────────
+//
+// Feature: onboarding-past-date-flexibility — past-date subscription start logic
+// (Requirements 1.2, 3.1, 3.2).
+//
+// These helpers support the admin "Past date start date" toggle, which unlocks a
+// 30-day-back date range and requires capturing past day delivery statuses via
+// the Past Day Status Popup.
+
+/** Maximum number of days in the past that a start date can be set. */
+export const PAST_DATE_MAX_DAYS = 30;
+
+/**
+ * Returns the boundary date (YYYY-MM-DD, inclusive) up to which past day
+ * delivery statuses must be captured.
+ *
+ *   - At/after 17:00 IST → today's IST date (today's delivery outcome is known)
+ *   - Before 17:00 IST   → yesterday's IST date (today's delivery is still in
+ *     progress and cannot be confirmed yet)
+ *
+ * Pure over `now`. (Requirements 3.1, 3.2)
+ */
+export function pastDayStatusBoundary(now: Date): string {
+  const istHour = istHourOf(now);
+  const istToday = istDateStringOf(now);
+  if (istHour >= ONBOARDING_CUTOFF_HOUR_IST) {
+    return istToday;
+  }
+  return addDaysToISODate(istToday, -1);
+}
+
+/**
+ * Returns `true` iff `startDate` (YYYY-MM-DD) is a valid past start date for
+ * onboarding: it must be strictly before today AND at most 30 days in the past.
+ *
+ *   - startDate < istToday
+ *   - startDate >= istToday − 30 days
+ *
+ * Pure over `startDate` and `now`. (Requirements 1.2)
+ */
+export function isPastStartDateValid(startDate: string, now: Date): boolean {
+  const istToday = istDateStringOf(now);
+  const thirtyDaysAgo = addDaysToISODate(istToday, -PAST_DATE_MAX_DAYS);
+  // YYYY-MM-DD strings compare correctly lexicographically.
+  return startDate < istToday && startDate >= thirtyDaysAgo;
+}
+
+/**
+ * Returns the selectable past-date range as { start, end } (inclusive, YYYY-MM-DD)
+ * given today's IST date string.
+ *
+ *   - start = today − 30 days
+ *   - end   = today − 1 day (yesterday)
+ *
+ * Pure over `today`. (Requirements 1.2)
+ */
+export function getPastDateRange(today: string): { start: string; end: string } {
+  return {
+    start: addDaysToISODate(today, -PAST_DATE_MAX_DAYS),
+    end: addDaysToISODate(today, -1),
+  };
 }

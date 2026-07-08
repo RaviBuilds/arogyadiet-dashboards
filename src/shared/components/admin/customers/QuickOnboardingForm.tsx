@@ -3,7 +3,7 @@
 // src/shared/components/admin/customers/QuickOnboardingForm.tsx
 // UI/UX refresh — all data logic and validation unchanged.
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -56,9 +56,12 @@ import {
 import { CUSTOMER_CATEGORIES } from "@/lib/onboarding/category";
 import {
   earliestStartDate,
+  getPastDateRange,
+  pastDayStatusBoundary,
   ONBOARDING_CUTOFF_HOUR_IST,
 } from "@/lib/onboarding/cutoff";
-import { istHourOf } from "@/lib/dates/ist";
+import { istHourOf, istDateStringOf, addDaysToISODate } from "@/lib/dates/ist";
+import { PastDayStatusPopup } from "@/shared/components/admin/customers/PastDayStatusPopup";
 import { onboardCustomerAction, checkMobileUniqueAction } from "@/actions/admin-actions/onboardingActions";
 import { cn } from "@/lib/utils";
 import type { KitProduct } from "@/types/kitProduct";
@@ -119,6 +122,9 @@ const detailsSchema = z.object({
   }),
   paymentStatus: z.enum(["PAID", "PENDING"]),
   cutoffAcknowledged: z.boolean().default(false),
+  pastDateEnabled: z.boolean().default(false),
+  pastDayStatuses: z.array(z.any()).optional().default([]),
+  automationOverrideAcknowledged: z.boolean().default(false),
 });
 
 type DetailsFormValues = z.input<typeof detailsSchema>;
@@ -150,6 +156,10 @@ export function QuickOnboardingForm({
     () => istHourOf(now) >= ONBOARDING_CUTOFF_HOUR_IST,
     [now],
   );
+  const istToday = useMemo(() => istDateStringOf(now), [now]);
+  const pastDateRange = useMemo(() => getPastDateRange(istToday), [istToday]);
+
+  const [showPastDayPopup, setShowPastDayPopup] = useState(false);
 
   const [address, setAddress] = useState<AddressCaptureValue>(
     emptyAddressCaptureValue,
@@ -169,6 +179,7 @@ export function QuickOnboardingForm({
     handleSubmit,
     trigger,
     setError,
+    setValue,
     formState: { errors },
   } = useForm<DetailsFormValues>({
     resolver: zodResolver(detailsSchema),
@@ -188,6 +199,9 @@ export function QuickOnboardingForm({
       startDate: earliest,
       paymentStatus: "PENDING",
       cutoffAcknowledged: false,
+      pastDateEnabled: false,
+      pastDayStatuses: [],
+      automationOverrideAcknowledged: false,
     },
   });
 
@@ -196,17 +210,36 @@ export function QuickOnboardingForm({
   const cutoffAcknowledged = values.cutoffAcknowledged;
   const isTestEmail = values.isTestEmail;
   const primaryCategory = values.primaryCategory;
+  const pastDateEnabled = values.pastDateEnabled;
+  const startDate = values.startDate;
+  const automationOverrideAcknowledged = values.automationOverrideAcknowledged;
   const selectedPlanId = values.planId;
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) ?? null;
   const selectedKitProductId = values.kitProductId;
   const selectedKitProduct = kitProducts.find((k) => k.id === selectedKitProductId) ?? null;
   const addressResolved = Boolean(addressValidity?.canSave);
 
+  // Req 5.8: Evaluate once at component mount — isAfterCutoff is already memoized at render time.
+  // Tomorrow's date in IST for comparison (Req 5.2, 5.7).
+  const tomorrowIST = useMemo(() => addDaysToISODate(istToday, 1), [istToday]);
+
+  // Req 5.2: Show automation override checkbox when after cutoff AND start date is tomorrow.
+  const showAutomationOverride = isAfterCutoff && startDate === tomorrowIST;
+
+  // Req 5.4, 5.5: Disable Onboard CTA when override checkbox visible but unchecked.
   const canOnboard =
     !isSubmitting &&
     paymentStatus === "PAID" &&
     (!isAfterCutoff || cutoffAcknowledged) &&
+    (!showAutomationOverride || automationOverrideAcknowledged) &&
     addressResolved;
+
+  // Req 5.7: When start date changes away from tomorrow, reset the acknowledgment field.
+  useEffect(() => {
+    if (!showAutomationOverride && automationOverrideAcknowledged) {
+      setValue("automationOverrideAcknowledged", false);
+    }
+  }, [showAutomationOverride, automationOverrideAcknowledged, setValue]);
 
   const goNext = async () => {
     const fields = STEP_FIELDS[step];
@@ -249,6 +282,13 @@ export function QuickOnboardingForm({
       if (!addressResolved) return;
     }
     if (!valid) return;
+
+    // Intercept step 1 → step 2 advance when past date mode is active (Req 1.5, 3.1, 3.2)
+    if (step === 1 && pastDateEnabled && values.startDate && values.startDate < istToday) {
+      setShowPastDayPopup(true);
+      return;
+    }
+
     setStep((prev) => Math.min(prev + 1, STEPS.length - 1) as StepIndex);
   };
 
@@ -258,6 +298,7 @@ export function QuickOnboardingForm({
     if (!fieldErrors) return;
     let jumpToAddress = false;
     let jumpToDetails = false;
+    let jumpToPlan = false;
     for (const [key, message] of Object.entries(fieldErrors)) {
       if (key.startsWith("address")) {
         setAddressServerError(message);
@@ -269,9 +310,22 @@ export function QuickOnboardingForm({
         jumpToDetails = true;
         continue;
       }
+      // Dotted paths like "pastDayStatuses.2.mealType" refer to array entries
+      // within the popup which is already closed at submission time — show as
+      // individual toast notifications since they can't map to inline fields.
+      if (key.startsWith("pastDayStatuses.") && key.includes(".")) {
+        toast.error(message);
+        jumpToPlan = true;
+        continue;
+      }
+      // Top-level past-date fields navigate back to step 1 (Category & Plan)
+      if (key === "pastDateEnabled" || key === "pastDayStatuses" || key === "startDate") {
+        jumpToPlan = true;
+      }
       setError(key as keyof DetailsFormValues, { type: "server", message });
     }
     if (jumpToAddress) setStep(2);
+    else if (jumpToPlan) setStep(1);
     else if (jumpToDetails) setStep(0);
   };
 
@@ -621,15 +675,61 @@ export function QuickOnboardingForm({
 
               {primaryCategory !== "KIT" && (
                 <Field label="Subscription start date" htmlFor="startDate" error={errors.startDate?.message} required>
-                  <Input
-                    id="startDate"
-                    type="date"
-                    min={earliest}
-                    aria-invalid={Boolean(errors.startDate)}
-                    className="h-9 max-w-xs"
-                    {...register("startDate")}
-                  />
-                  <p className="text-xs text-slate-500">Earliest selectable start date is {earliest}.</p>
+                  {pastDateEnabled ? (
+                    <>
+                      <Input
+                        id="startDate"
+                        type="date"
+                        min={pastDateRange.start}
+                        max={pastDateRange.end}
+                        aria-invalid={Boolean(errors.startDate)}
+                        className="h-9 max-w-xs"
+                        {...register("startDate")}
+                      />
+                      <p className="text-xs text-slate-500">
+                        Select a past date between {pastDateRange.start} and {pastDateRange.end}.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Input
+                        id="startDate"
+                        type="date"
+                        min={earliest}
+                        aria-invalid={Boolean(errors.startDate)}
+                        className="h-9 max-w-xs"
+                        {...register("startDate")}
+                      />
+                      <p className="text-xs text-slate-500">Earliest selectable start date is {earliest}.</p>
+                    </>
+                  )}
+
+                  {/* Past date start date checkbox — Req 1.1, 1.2, 1.3, 1.4 */}
+                  <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-slate-600 select-none">
+                    <Controller
+                      control={control}
+                      name="pastDateEnabled"
+                      render={({ field }) => (
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={(checked) => {
+                            const enabled = checked === true;
+                            field.onChange(enabled);
+                            if (!enabled) {
+                              // Req 1.4: clear selected start date and discard pastDayStatuses
+                              setValue("startDate", "");
+                              setValue("pastDayStatuses", []);
+                            } else {
+                              // When enabling past-date mode, clear the start date
+                              // so admin must pick a valid past date
+                              setValue("startDate", "");
+                            }
+                          }}
+                        />
+                      )}
+                    />
+                    Past date start date
+                  </label>
                 </Field>
               )}
 
@@ -947,6 +1047,34 @@ export function QuickOnboardingForm({
                 </Alert>
               )}
 
+              {/* Automation Override Acknowledgment — Req 5.2, 5.3, 5.4, 5.5, 5.7 */}
+              {showAutomationOverride && (
+                <Alert>
+                  <AlertTriangle />
+                  <AlertTitle>Automation override confirmation</AlertTitle>
+                  <AlertDescription>
+                    <label className="mt-2 flex cursor-pointer items-start gap-2">
+                      <Controller
+                        control={control}
+                        name="automationOverrideAcknowledged"
+                        render={({ field }) => (
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(checked) =>
+                              field.onChange(checked === true)
+                            }
+                            aria-label="Acknowledge automation override"
+                          />
+                        )}
+                      />
+                      <span className="text-sm">
+                        I understand automation needs to run again by operation admin. I have received confirmation from process admin to process this onboarding customer.
+                      </span>
+                    </label>
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {paymentStatus !== "PAID" && (
                 <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                   Payment must be marked PAID before onboarding can proceed.
@@ -1022,6 +1150,21 @@ export function QuickOnboardingForm({
           </TooltipProvider>
         )}
       </div>
+
+      {/* ── Past Day Status Popup ── (Req 1.5, 3.1, 3.2) */}
+      <PastDayStatusPopup
+        open={showPastDayPopup}
+        startDate={values.startDate ?? ""}
+        endDate={pastDayStatusBoundary(now)}
+        onConfirm={(entries) => {
+          setValue("pastDayStatuses", entries);
+          setShowPastDayPopup(false);
+          setStep((prev) => Math.min(prev + 1, STEPS.length - 1) as StepIndex);
+        }}
+        onCancel={() => {
+          setShowPastDayPopup(false);
+        }}
+      />
     </form>
   );
 }

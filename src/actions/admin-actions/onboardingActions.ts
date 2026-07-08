@@ -36,7 +36,14 @@ import {
 } from "@/lib/auth/adminAccess";
 import { resolveFranchiseContext } from "@/lib/franchise/context";
 import { normalizePincode } from "@/lib/address/validatePincode";
-import { isStartDateAllowed } from "@/lib/onboarding/cutoff";
+import {
+  isStartDateAllowed,
+  isPastStartDateValid,
+  pastDayStatusBoundary,
+  PAST_DATE_MAX_DAYS,
+} from "@/lib/onboarding/cutoff";
+import { istDateStringOf, addDaysToISODate } from "@/lib/dates/ist";
+import type { PastDayStatus } from "@/types/onboarding";
 import {
   isValidCategory,
   type CustomerCategory,
@@ -180,16 +187,127 @@ export async function onboardCustomerAction(
     };
   }
 
-  // (5) Start date must be on/after the earliest selectable date (Req 7.7).
-  // startDate is optional for KIT category — only validate when present.
-  if (input.startDate && !isStartDateAllowed(input.startDate, new Date())) {
-    return {
-      success: false,
-      error: "The selected subscription start date is not permitted for the current cutoff.",
-      fieldErrors: {
-        startDate: "Select an allowed start date (respecting the 5 PM cutoff).",
-      },
-    };
+  // (5) Start date validation — past-date-aware (Req 7.1–7.7).
+  // When pastDateEnabled is true, bypass the existing cutoff check and run
+  // past-date-specific validations instead. When false, enforce the cutoff as
+  // before, rejecting past dates that lack the pastDateEnabled flag.
+  const now = new Date();
+  const istToday = istDateStringOf(now);
+
+  if (input.startDate) {
+    if (input.pastDateEnabled) {
+      // ── Past-date mode is ON ─────────────────────────────────────────────
+
+      // (5a) Validate start date is within the 30-day past range (Req 7.2).
+      if (!isPastStartDateValid(input.startDate, now)) {
+        // Could be: date is not actually in the past, or > 30 days back
+        if (input.startDate < addDaysToISODate(istToday, -PAST_DATE_MAX_DAYS)) {
+          return {
+            success: false,
+            error: "Date exceeds maximum 30-day past range.",
+            fieldErrors: {
+              startDate: "Start date cannot be more than 30 days in the past.",
+            },
+          };
+        }
+        return {
+          success: false,
+          error: "The selected start date is not a valid past date.",
+          fieldErrors: {
+            startDate: "Start date must be earlier than today and within 30 days.",
+          },
+        };
+      }
+
+      // (5b) pastDayStatuses must be present and non-empty (Req 7.3).
+      const pastDayStatuses: PastDayStatus[] = input.pastDayStatuses ?? [];
+      if (pastDayStatuses.length === 0) {
+        return {
+          success: false,
+          error: "Past day statuses are required.",
+          fieldErrors: {
+            pastDayStatuses: "Past day statuses are required when past-date mode is enabled.",
+          },
+        };
+      }
+
+      // (5c) Entry count must match calendar days from startDate to boundary (Req 7.4).
+      const boundaryDate = pastDayStatusBoundary(now);
+      const expectedDays = calendarDayCount(input.startDate, boundaryDate);
+      if (pastDayStatuses.length !== expectedDays) {
+        return {
+          success: false,
+          error: `Day count mismatch: expected ${expectedDays} entries, got ${pastDayStatuses.length}.`,
+          fieldErrors: {
+            pastDayStatuses: `Expected ${expectedDays} entries (from ${input.startDate} to ${boundaryDate}), got ${pastDayStatuses.length}.`,
+          },
+        };
+      }
+
+      // (5d) Validate each entry: Delivered must have mealType + deliveryAddress (Req 7.5).
+      const fieldErrors: Record<string, string> = {};
+      const seenDates = new Set<string>();
+
+      for (let i = 0; i < pastDayStatuses.length; i++) {
+        const entry = pastDayStatuses[i];
+
+        // Check for date outside valid range or duplicates (Req 7.6).
+        if (entry.date < input.startDate || entry.date > boundaryDate) {
+          fieldErrors[`pastDayStatuses.${i}.date`] =
+            `Date ${entry.date} is outside the valid range [${input.startDate}, ${boundaryDate}].`;
+        } else if (seenDates.has(entry.date)) {
+          fieldErrors[`pastDayStatuses.${i}.date`] =
+            `Duplicate date entry: ${entry.date}.`;
+        }
+        seenDates.add(entry.date);
+
+        // Check Delivered entry completeness (Req 7.5).
+        if (entry.mealStatus === "Delivered") {
+          if (!entry.mealType) {
+            fieldErrors[`pastDayStatuses.${i}.mealType`] =
+              "Meal type required for delivered days.";
+          }
+          if (!entry.deliveryAddress) {
+            fieldErrors[`pastDayStatuses.${i}.deliveryAddress`] =
+              "Address required for delivered days.";
+          }
+        }
+      }
+
+      if (Object.keys(fieldErrors).length > 0) {
+        // Determine the top-level error message based on error types
+        const hasDateErrors = Object.keys(fieldErrors).some((k) => k.endsWith(".date"));
+        const topError = hasDateErrors
+          ? "Invalid date entry found."
+          : "Some past day status entries are incomplete.";
+        return { success: false, error: topError, fieldErrors };
+      }
+    } else {
+      // ── Past-date mode is OFF ────────────────────────────────────────────
+
+      // (5e) If the start date is in the past but pastDateEnabled is false → reject (Req 7.1).
+      if (input.startDate < istToday) {
+        return {
+          success: false,
+          error: "Past-date mode must be enabled.",
+          fieldErrors: {
+            pastDateEnabled: "Enable past-date mode to use a past start date.",
+            startDate: "Past-date mode must be enabled for past start dates.",
+          },
+        };
+      }
+
+      // (5f) Standard cutoff validation for future/present dates (Req 7.7).
+      if (!isStartDateAllowed(input.startDate, now)) {
+        return {
+          success: false,
+          error: "The selected subscription start date is not permitted for the current cutoff.",
+          fieldErrors: {
+            startDate: "Select an allowed start date (respecting the 5 PM cutoff).",
+          },
+        };
+      }
+    }
   }
 
   // (6) Delegate the atomic write to the service (Req 6.1-6.6).
@@ -435,4 +553,19 @@ function zodFieldErrors(
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message;
   return typeof err === "string" ? err : "An unexpected error occurred.";
+}
+
+/**
+ * Compute the number of calendar days from `startDate` to `endDate` inclusive.
+ * Both must be YYYY-MM-DD strings. Returns 0 if startDate > endDate.
+ * Pure over its inputs — uses UTC arithmetic to avoid timezone edge cases.
+ */
+function calendarDayCount(startDate: string, endDate: string): number {
+  const [sy, sm, sd] = startDate.split("-").map(Number);
+  const [ey, em, ed] = endDate.split("-").map(Number);
+  const start = Date.UTC(sy, sm - 1, sd);
+  const end = Date.UTC(ey, em - 1, ed);
+  const diffMs = end - start;
+  if (diffMs < 0) return 0;
+  return Math.round(diffMs / (24 * 60 * 60 * 1000)) + 1;
 }
