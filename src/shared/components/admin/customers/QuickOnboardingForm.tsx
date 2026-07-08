@@ -230,7 +230,6 @@ export function QuickOnboardingForm({
   const canOnboard =
     !isSubmitting &&
     paymentStatus === "PAID" &&
-    (!isAfterCutoff || cutoffAcknowledged) &&
     (!showAutomationOverride || automationOverrideAcknowledged) &&
     addressResolved;
 
@@ -240,6 +239,20 @@ export function QuickOnboardingForm({
       setValue("automationOverrideAcknowledged", false);
     }
   }, [showAutomationOverride, automationOverrideAcknowledged, setValue]);
+
+  // Auto-select the first KIT product when switching to KIT category (like plans for MEAL).
+  useEffect(() => {
+    if (primaryCategory === "KIT" && kitProducts.length > 0 && !selectedKitProductId) {
+      setValue("kitProductId", kitProducts[0].id);
+    }
+  }, [primaryCategory, kitProducts, selectedKitProductId, setValue]);
+
+  // Auto-select the first plan when switching to MEAL category.
+  useEffect(() => {
+    if (primaryCategory === "MEAL" && plans.length > 0 && !selectedPlanId) {
+      setValue("planId", plans[0].id);
+    }
+  }, [primaryCategory, plans, selectedPlanId, setValue]);
 
   const goNext = async () => {
     const fields = STEP_FIELDS[step];
@@ -695,12 +708,16 @@ export function QuickOnboardingForm({
                       <Input
                         id="startDate"
                         type="date"
-                        min={earliest}
+                        min={tomorrowIST}
                         aria-invalid={Boolean(errors.startDate)}
                         className="h-9 max-w-xs"
                         {...register("startDate")}
                       />
-                      <p className="text-xs text-slate-500">Earliest selectable start date is {earliest}.</p>
+                      <p className="text-xs text-slate-500">
+                        {isAfterCutoff
+                          ? `Earliest start date is ${earliest}. Tomorrow (${tomorrowIST}) requires automation override acknowledgment.`
+                          : `Earliest selectable start date is ${earliest}.`}
+                      </p>
                     </>
                   )}
 
@@ -785,13 +802,13 @@ export function QuickOnboardingForm({
                 </p>
               </Field>
 
-              {isAfterCutoff && (
+              {isAfterCutoff && startDate === tomorrowIST && (
                 <Alert variant="destructive">
                   <AlertTriangle />
                   <AlertTitle>Past the 5 PM cutoff</AlertTitle>
                   <AlertDescription>
-                    It is past the 5:00 PM cutoff. Please contact the operations admin to confirm whether
-                    the delivery automation can be re-run, and select only the next-day or day-after start date.
+                    It is past the 5:00 PM cutoff. You have selected tomorrow as the start date.
+                    On the final step you will need to acknowledge that the operations admin will re-run the delivery automation.
                   </AlertDescription>
                 </Alert>
               )}
@@ -1018,38 +1035,9 @@ export function QuickOnboardingForm({
                 </div>
               </div>
 
-              {/* Cutoff acknowledgment */}
-              {isAfterCutoff && (
-                <Alert variant="destructive">
-                  <AlertTriangle />
-                  <AlertTitle>Cutoff acknowledgment required</AlertTitle>
-                  <AlertDescription>
-                    <label className="mt-2 flex cursor-pointer items-start gap-2">
-                      <Controller
-                        control={control}
-                        name="cutoffAcknowledged"
-                        render={({ field }) => (
-                          <Checkbox
-                            checked={field.value}
-                            onCheckedChange={(checked) =>
-                              field.onChange(checked === true)
-                            }
-                            aria-label="Acknowledge cutoff"
-                          />
-                        )}
-                      />
-                      <span>
-                        I have confirmed with the operations admin that the automation
-                        can be re-run, and I have selected only the next-day or day-after start date.
-                      </span>
-                    </label>
-                  </AlertDescription>
-                </Alert>
-              )}
-
               {/* Automation Override Acknowledgment — Req 5.2, 5.3, 5.4, 5.5, 5.7 */}
               {showAutomationOverride && (
-                <Alert>
+                <Alert variant="destructive">
                   <AlertTriangle />
                   <AlertTitle>Automation override confirmation</AlertTitle>
                   <AlertDescription>
@@ -1067,7 +1055,7 @@ export function QuickOnboardingForm({
                           />
                         )}
                       />
-                      <span className="text-sm">
+                      <span className="text-sm text-red-600">
                         I understand automation needs to run again by operation admin. I have received confirmation from process admin to process this onboarding customer.
                       </span>
                     </label>
