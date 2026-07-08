@@ -70,7 +70,11 @@ function validOnboarding(overrides: Record<string, unknown> = {}) {
 }
 
 /** Build the onboarding schema bound to the sample service area. */
-const onboardingSchema = createQuickOnboardingSchema(SERVICE_AREA);
+// Use a fixed `now` (2026-06-20T06:00:00Z = 11:30 IST, before 5 PM cutoff)
+// so the earliest selectable start date is 2026-06-21 and the fixture's
+// startDate "2026-07-01" always passes cutoff validation.
+const FIXED_NOW = new Date("2026-06-20T06:00:00Z");
+const onboardingSchema = createQuickOnboardingSchema(SERVICE_AREA, false, FIXED_NOW);
 /** Build the address schema bound to the sample service area. */
 const addressSchema = createAddressCaptureSchema(SERVICE_AREA);
 

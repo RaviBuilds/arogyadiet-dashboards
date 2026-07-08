@@ -50,6 +50,13 @@ import {
   profileCompletionSchema,
   type ProfileCompletionInput,
 } from "@/validations/profileCompletionSchema";
+import { pastDayStatusBoundary } from "@/lib/onboarding/cutoff";
+import {
+  generateDailyPreferences,
+  RecordCountMismatchError,
+  type DailyPreferencesContext,
+} from "@/lib/onboarding/dailyPreferences";
+import type { PastDayStatus } from "@/types/onboarding";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -482,6 +489,114 @@ export async function onboard(
       };
     }
     return { ok: false, reason: "ERROR", message: result.message };
+  }
+
+  // ─── Past-Date Daily Preferences Generation ──────────────────────────────
+  // When pastDateEnabled is true and pastDayStatuses are present, generate
+  // daily preference records for the entire subscription period:
+  //   - Past days use the captured statuses (Delivered/Skipped)
+  //   - Future days use the initial meal preference and primary address
+  //   - Skipped days extend effective_end_on and increment pause_credits_used
+  // (Requirements 3.3, 4.1–4.6, 6.1–6.7)
+  if (
+    payload.pastDateEnabled &&
+    payload.pastDayStatuses &&
+    payload.pastDayStatuses.length > 0 &&
+    category === "MEAL" &&
+    plan &&
+    endsOn
+  ) {
+    try {
+      const pastDayStatuses = payload.pastDayStatuses as PastDayStatus[];
+
+      // Resolve meal category IDs for all meal types (VEG, EGG, CHICKEN).
+      const mealCategoryMap = await resolveMealCategoryMap();
+
+      // Resolve secondary address ID if one of the past days references it.
+      const hasSecondaryAddress = pastDayStatuses.some(
+        (s) => s.deliveryAddress === "Secondary",
+      );
+      let secondaryAddressId: string | null = null;
+      if (hasSecondaryAddress) {
+        secondaryAddressId = await resolveSecondaryAddressId(
+          result.ids.profile_id,
+          result.ids.address_id,
+        );
+      }
+
+      // Compute the boundary date for past/future day separation.
+      const boundaryDate = pastDayStatusBoundary(new Date());
+
+      // Generate daily preference records (pure computation).
+      const prefsResult = generateDailyPreferences({
+        subscriptionId: result.ids.subscription_id,
+        customerProfileId: result.ids.profile_id,
+        startsOn,
+        originalEndsOn: endsOn,
+        totalDays: plan.totalDays,
+        initialMealCategoryId: mealCategoryId,
+        primaryAddressId: result.ids.address_id,
+        secondaryAddressId,
+        mealCategoryMap,
+        boundaryDate,
+        pastDayStatuses,
+      });
+
+      // Persist the generated daily preference records.
+      const admin_db = createAdminClient();
+      const { error: prefsError } = await admin_db
+        .from("subscription_daily_preferences")
+        .insert(prefsResult.records);
+
+      if (prefsError) {
+        // Daily preferences insertion failed — compensate the entire onboarding.
+        await safeDeleteAuthUser(authUserId);
+        return {
+          ok: false,
+          reason: "ERROR",
+          message: "Failed to generate daily preferences. No changes were saved. Please try again.",
+        };
+      }
+
+      // Update the subscription with effective_end_on and pause_credits_used
+      // if there were skipped days.
+      if (prefsResult.skippedCount > 0) {
+        const { error: subUpdateError } = await admin_db
+          .from("subscriptions")
+          .update({
+            effective_end_on: prefsResult.effectiveEndOn,
+            pause_credits_used: prefsResult.skippedCount,
+          })
+          .eq("id", result.ids.subscription_id);
+
+        if (subUpdateError) {
+          // Subscription update failed — compensate.
+          await safeDeleteAuthUser(authUserId);
+          return {
+            ok: false,
+            reason: "ERROR",
+            message: "Failed to update subscription end date. No changes were saved. Please try again.",
+          };
+        }
+      }
+    } catch (err) {
+      if (err instanceof RecordCountMismatchError) {
+        // Record count validation failed — this is a logic error, not a DB error.
+        await safeDeleteAuthUser(authUserId);
+        return {
+          ok: false,
+          reason: "ERROR",
+          message: err.message,
+        };
+      }
+      // Unexpected error during daily preferences generation.
+      await safeDeleteAuthUser(authUserId);
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: describeError(err),
+      };
+    }
   }
 
   return { ok: true, ids: result.ids, authUserId };
@@ -946,4 +1061,55 @@ function zodFieldErrors(error: z.ZodError): Record<string, string> {
     }
   }
   return out;
+}
+
+// ─── Past-Date Onboarding Helpers ──────────────────────────────────────────────
+
+/**
+ * Resolve a map from meal type codes (VEG, EGG, CHICKEN) to their
+ * `meal_categories.id` UUIDs. Used to map the captured PastDayStatus.mealType
+ * to the correct meal_category_id for daily preference records.
+ */
+async function resolveMealCategoryMap(): Promise<Record<string, string>> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("meal_categories")
+    .select("id, code")
+    .in("code", ["VEG", "EGG", "CHICKEN"]);
+
+  const map: Record<string, string> = {};
+  if (data) {
+    for (const row of data) {
+      const record = row as { id: string; code: string };
+      map[record.code] = record.id;
+    }
+  }
+  return map;
+}
+
+/**
+ * Resolve the secondary (non-primary) address ID for a customer profile.
+ * Returns null when no secondary address exists. Used for past-date onboarding
+ * where a delivered day's deliveryAddress is "Secondary".
+ *
+ * Note: At onboarding time, the customer typically only has ONE address (the
+ * just-created primary address). If the admin captured "Secondary" in the
+ * PastDayStatus popup, but no secondary address exists, the generation logic
+ * falls back to the primary address. This edge case is documented in the
+ * design's resolveDeliveryAddress function.
+ */
+async function resolveSecondaryAddressId(
+  customerProfileId: string,
+  primaryAddressId: string,
+): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("addresses")
+    .select("id")
+    .eq("customer_profile_id", customerProfileId)
+    .neq("id", primaryAddressId)
+    .limit(1)
+    .maybeSingle();
+
+  return (data?.id as string | null) ?? null;
 }
