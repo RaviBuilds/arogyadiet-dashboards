@@ -654,3 +654,146 @@ export async function movePincode(
     };
   }
 }
+
+// ─── Refresh Clinic Mapping (backfill NULL clinic_id) ────────────────────────
+
+/**
+ * Refresh clinic mapping for all customers and addresses that have NULL
+ * clinic_id. This resolves the clinic from the primary address pincode via
+ * rider_service_areas and stamps it on:
+ *   1. customer_profiles.clinic_id
+ *   2. addresses.clinic_id (primary only)
+ *   3. delivery_orders.clinic_id (future, unassigned orders)
+ *
+ * Use case: customers created via bulk import before clinic infrastructure was
+ * set up, or any customer whose clinic assignment was missed.
+ *
+ * Returns the count of customers, addresses, and orders that were stamped.
+ */
+export async function refreshClinicMappingAction(): Promise<
+  ActionResult<{ customersFixed: number; addressesFixed: number; ordersFixed: number }>
+> {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
+  const auth = await assertCallerCanManageServiceAreas();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const admin = createAdminClient();
+
+  // 1. Build a pincode → clinic_id lookup from rider_service_areas
+  const { data: serviceAreas, error: saError } = await admin
+    .from("rider_service_areas")
+    .select("pincode, clinic_id")
+    .not("clinic_id", "is", null);
+
+  if (saError) {
+    return { success: false, error: `Failed to load service areas: ${saError.message}` };
+  }
+
+  const pincodeToClinic = new Map<string, string>();
+  for (const sa of serviceAreas ?? []) {
+    if (sa.pincode && sa.clinic_id) {
+      pincodeToClinic.set(sa.pincode, sa.clinic_id);
+    }
+  }
+
+  if (pincodeToClinic.size === 0) {
+    return {
+      success: true,
+      data: { customersFixed: 0, addressesFixed: 0, ordersFixed: 0 },
+    };
+  }
+
+  // 2. Find all primary addresses with NULL clinic_id that have a resolvable pincode
+  const { data: nullAddresses, error: addrError } = await admin
+    .from("addresses")
+    .select("id, pincode, customer_profile_id")
+    .is("clinic_id", null)
+    .eq("is_primary", true)
+    .not("customer_profile_id", "is", null);
+
+  if (addrError) {
+    return { success: false, error: `Failed to load addresses: ${addrError.message}` };
+  }
+
+  let addressesFixed = 0;
+  let customersFixed = 0;
+  const fixedProfileIds: string[] = [];
+
+  for (const addr of nullAddresses ?? []) {
+    const clinicId = pincodeToClinic.get(addr.pincode);
+    if (!clinicId) continue;
+
+    // Stamp the address
+    const { error: addrUpdateErr } = await admin
+      .from("addresses")
+      .update({ clinic_id: clinicId })
+      .eq("id", addr.id);
+
+    if (!addrUpdateErr) {
+      addressesFixed++;
+    }
+
+    // Stamp the customer_profile (only if currently NULL)
+    if (addr.customer_profile_id) {
+      const { error: cpUpdateErr, count } = await admin
+        .from("customer_profiles")
+        .update({ clinic_id: clinicId }, { count: "exact" })
+        .eq("id", addr.customer_profile_id)
+        .is("clinic_id", null);
+
+      if (!cpUpdateErr && (count ?? 0) > 0) {
+        customersFixed++;
+        fixedProfileIds.push(addr.customer_profile_id);
+      }
+    }
+  }
+
+  // 3. Fix delivery_orders: stamp clinic_id on future, unassigned orders where
+  //    the customer was just fixed (or any order with NULL clinic_id whose
+  //    customer now has a clinic)
+  let ordersFixed = 0;
+  const today = new Date().toISOString().split("T")[0];
+
+  if (fixedProfileIds.length > 0) {
+    // Process in batches to avoid query-size limits
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < fixedProfileIds.length; i += BATCH_SIZE) {
+      const batch = fixedProfileIds.slice(i, i + BATCH_SIZE);
+
+      // For each profile, get their clinic_id and update matching orders
+      const { data: profiles } = await admin
+        .from("customer_profiles")
+        .select("id, clinic_id")
+        .in("id", batch)
+        .not("clinic_id", "is", null);
+
+      for (const profile of profiles ?? []) {
+        const { count } = await admin
+          .from("delivery_orders")
+          .update({ clinic_id: profile.clinic_id }, { count: "exact" })
+          .eq("customer_profile_id", profile.id)
+          .is("clinic_id", null)
+          .is("assigned_rider_id", null)
+          .gte("delivery_date", today);
+
+        ordersFixed += count ?? 0;
+      }
+    }
+  }
+
+  await logAdminAction("UPDATE", "service_area", null, {
+    action: "refresh_clinic_mapping",
+    customers_fixed: customersFixed,
+    addresses_fixed: addressesFixed,
+    orders_fixed: ordersFixed,
+  });
+
+  revalidatePath(ADMIN_RIDERS_PATH);
+  revalidatePath("/admin/customers");
+
+  return {
+    success: true,
+    data: { customersFixed, addressesFixed, ordersFixed },
+  };
+}

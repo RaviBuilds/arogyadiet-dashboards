@@ -28,7 +28,7 @@ export default async function CustomersPage({
       clinic_id,
       clinics ( name ),
       users!inner ( id, full_name, email, mobile, is_active ),
-      addresses ( pincode, is_primary ),
+      addresses ( pincode, is_primary, lat, lng ),
       subscriptions ( status, customer_category, subscription_plans ( name ), kit_products ( name ) )
     `);
 
@@ -37,7 +37,7 @@ export default async function CustomersPage({
   const customers = (rawCustomers || []).map((customer: any) => {
     const primaryAddress = customer.addresses?.find(
       (addr: any) => addr.is_primary,
-    );
+    ) ?? customer.addresses?.[0];
 
     // Calculate Age
     let age = null;
@@ -104,6 +104,7 @@ export default async function CustomersPage({
       clinic_id: customer.clinic_id || null,
       clinicName: customer.clinics?.name || null,
       franchiseId: customer.franchise_id || null,
+      hasCoords: Boolean(primaryAddress?.lat && primaryAddress?.lng),
     };
   });
 

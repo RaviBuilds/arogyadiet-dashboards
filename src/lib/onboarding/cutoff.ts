@@ -130,3 +130,39 @@ export function getPastDateRange(today: string): { start: string; end: string } 
     end: addDaysToISODate(today, -1),
   };
 }
+
+// ─── Admin Add Subscription: Past-Date Range ──────────────────────────────────
+//
+// Feature: new-plan-past-date-start — computes the selectable past-date range
+// for the Admin Add Subscription Form, constrained by the previous subscription's
+// end date to prevent overlap.
+// (Requirements 1.3, 1.4, 1.5, 2.1)
+
+/**
+ * Returns the selectable past-date range for the Admin Add Subscription form as
+ * { start, end } (inclusive, YYYY-MM-DD), taking into account the previous
+ * subscription's end date.
+ *
+ *   - start = max(previousEndDate + 1 day, istToday − 30 days) when
+ *     previousEndDate exists, or istToday − 30 days when null.
+ *   - end   = istToday − 1 day (yesterday)
+ *
+ * Pure over its inputs.
+ */
+export function getPastDateRangeForAddSub(
+  istToday: string,
+  previousEndDate: string | null,
+): { start: string; end: string } {
+  const thirtyDaysAgo = addDaysToISODate(istToday, -PAST_DATE_MAX_DAYS);
+  const yesterday = addDaysToISODate(istToday, -1);
+
+  let start: string;
+  if (previousEndDate) {
+    const afterPrevEnd = addDaysToISODate(previousEndDate, 1);
+    start = afterPrevEnd > thirtyDaysAgo ? afterPrevEnd : thirtyDaysAgo;
+  } else {
+    start = thirtyDaysAgo;
+  }
+
+  return { start, end: yesterday };
+}

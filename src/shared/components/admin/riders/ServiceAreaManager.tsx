@@ -38,6 +38,7 @@ import {
   Unlock,
   ArrowRightLeft,
   Building2,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -47,6 +48,7 @@ import {
   deletePincode,
   movePincode,
   assignClinicToPincode,
+  refreshClinicMappingAction,
 } from "@/actions/admin-actions/serviceAreaActions";
 import {
   assignServiceAreaToRider,
@@ -182,6 +184,33 @@ export default function ServiceAreaManager({
       wb,
       `Rider_Area_Mapping_${new Date().toISOString().split("T")[0]}.xlsx`,
     );
+  };
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefreshClinicMapping = () => {
+    setIsRefreshing(true);
+    startTransition(async () => {
+      try {
+        const res = await refreshClinicMappingAction();
+        if (res.success) {
+          const { customersFixed, addressesFixed, ordersFixed } = res.data;
+          if (customersFixed === 0 && addressesFixed === 0 && ordersFixed === 0) {
+            toast.info("All customers are already mapped to their correct clinic.");
+          } else {
+            toast.success(
+              `Clinic mapping refreshed: ${customersFixed} customer${customersFixed === 1 ? "" : "s"}, ${addressesFixed} address${addressesFixed === 1 ? "" : "es"}, ${ordersFixed} order${ordersFixed === 1 ? "" : "s"} fixed.`,
+              { duration: 8000 },
+            );
+          }
+          revalidateRidersPage();
+        } else {
+          toast.error(res.error);
+        }
+      } finally {
+        setIsRefreshing(false);
+      }
+    });
   };
 
   const openAddModal = () => {
@@ -402,6 +431,20 @@ export default function ServiceAreaManager({
               onClick={handleExportAreas}
               disabled={allAreas.length === 0}
             />
+            <Button
+              onClick={handleRefreshClinicMapping}
+              disabled={isRefreshing || isPending}
+              variant="outline"
+              className="border-primary/30 text-primary hover:bg-primary/5"
+              title="Re-map customers with missing clinic assignment based on pincode"
+            >
+              {isRefreshing ? (
+                <Loader2 className="h-4 w-4 md:mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 md:mr-2" />
+              )}
+              <span className="hidden md:inline">Refresh Mapping</span>
+            </Button>
             <Button
               onClick={openAddModal}
               disabled={clinics.length === 0}

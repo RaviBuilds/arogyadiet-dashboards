@@ -1,21 +1,28 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useTransition } from "react";
+import React, { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { addDays, format, startOfDay } from "date-fns";
 import { useRouter } from "next/navigation";
-import { CalendarIcon, Clock3, IndianRupee, Loader2, PauseCircle } from "lucide-react";
+import { CalendarIcon, Clock3, IndianRupee, Loader2, PauseCircle, AlertTriangle } from "lucide-react";
 
 import { addSubscription } from "@/actions/admin-actions/adminSubscriptionActions";
 import { cn } from "@/lib/utils";
+import { earliestStartDate, getPastDateRangeForAddSub, pastDayStatusBoundary, ONBOARDING_CUTOFF_HOUR_IST } from "@/lib/onboarding/cutoff";
+import { hasOverlap, type ExistingSubscription } from "@/lib/subscriptions/overlap";
+import { getISTDateString, addDaysToISODate, parseISODateString, istHourOf, istDateStringOf } from "@/lib/dates/ist";
+import type { PastDayStatus } from "@/types/onboarding";
 
+import { Alert, AlertDescription, AlertTitle } from "@/shared/components/ui/alert";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
+import { Checkbox } from "@/shared/components/ui/checkbox";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
+import { Switch } from "@/shared/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/shared/components/ui/radio-group";
 import {
   Select,
@@ -38,6 +45,7 @@ import {
 } from "@/shared/components/ui/popover";
 import { Calendar } from "@/shared/components/ui/calendar";
 import { Separator } from "@/shared/components/ui/separator";
+import { PastDayStatusPopup } from "@/shared/components/admin/customers/PastDayStatusPopup";
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -66,6 +74,8 @@ type AddressOption = {
 
 export type InitialSubscriptionData = {
   activeSubscription: { id: string; effective_end_on: string } | null;
+  previousSubscriptionEndDate: string | null; // YYYY-MM-DD of last completed sub's effective_end_on
+  existingSubscriptions: ExistingSubscription[]; // ACTIVE/PENDING subs for overlap detection
   subscriptionPlans: SubscriptionPlan[];
   mealCategories: MealCategory[];
   addresses: AddressOption[];
@@ -85,6 +95,13 @@ function getMinStartDate(activeSubEnd: string | null): Date {
 
 // ─── Zod schema ──────────────────────────────────────────────────────────────
 
+const pastDayStatusSchema = z.object({
+  date: z.string(),
+  mealStatus: z.enum(["Delivered", "Skipped"]),
+  mealType: z.enum(["VEG", "EGG", "CHICKEN"]).nullable(),
+  deliveryAddress: z.enum(["Primary", "Secondary"]).nullable(),
+});
+
 const formSchema = z
   .object({
     mode: z.enum(["existing", "custom"]),
@@ -101,6 +118,9 @@ const formSchema = z
     taxAmount: z.number().optional(),
     totalAmount: z.number().optional(),
     pauseCredits: z.number().int().min(0).optional(),
+    pastDateEnabled: z.boolean(),
+    pastDayStatuses: z.array(pastDayStatusSchema),
+    automationOverrideAcknowledged: z.boolean(),
   })
   .superRefine((d, ctx) => {
     if (d.mode === "existing" && !d.planId) {
@@ -145,6 +165,8 @@ export function AdminAddSubscriptionForm({
   const [isPending, startTransition] = useTransition();
   const [isStartDateOpen, setIsStartDateOpen] = useState(false);
   const [isEndDateOpen, setIsEndDateOpen] = useState(false);
+  const [showPastDayStatusPopup, setShowPastDayStatusPopup] = useState(false);
+  const pendingFormDataRef = useRef<FormValues | null>(null);
 
   const { activeSubscription, mealCategories, addresses } = initialData;
   const subscriptionPlans = useMemo(
@@ -160,6 +182,14 @@ export function AdminAddSubscriptionForm({
 
   const willBePending = activeSubscription !== null;
 
+  // Determine if past date toggle should be disabled
+  // (when previousSubscriptionEndDate >= yesterday IST, no valid past dates exist)
+  const pastDateToggleDisabled = useMemo(() => {
+    if (!initialData.previousSubscriptionEndDate) return false;
+    const yesterday = addDaysToISODate(getISTDateString(0), -1);
+    return initialData.previousSubscriptionEndDate >= yesterday;
+  }, [initialData.previousSubscriptionEndDate]);
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -169,6 +199,9 @@ export function AdminAddSubscriptionForm({
       paymentReference: "",
       paymentNotes: "",
       taxPercent: 0,
+      pastDateEnabled: false,
+      pastDayStatuses: [],
+      automationOverrideAcknowledged: false,
     },
   });
 
@@ -181,8 +214,104 @@ export function AdminAddSubscriptionForm({
   const basePrice = watch("basePrice");
   const taxPercent = watch("taxPercent");
   const paymentStatus = watch("paymentStatus");
+  const pastDateEnabled = watch("pastDateEnabled");
 
   const selectedPlan = subscriptionPlans.find((p) => p.id === planId);
+
+  // ─── Past-date calendar logic (Req 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.4) ────
+  const istToday = useMemo(() => getISTDateString(0), []);
+
+  // Compute past-date range using getPastDateRangeForAddSub
+  const pastDateRange = useMemo(
+    () => getPastDateRangeForAddSub(istToday, initialData.previousSubscriptionEndDate),
+    [istToday, initialData.previousSubscriptionEndDate],
+  );
+
+  // Compute future-mode min date using cutoff logic from cutoff.ts
+  const futureMinDate = useMemo(() => {
+    const earliest = earliestStartDate(new Date());
+    return parseISODateString(earliest);
+  }, []);
+
+  // Compute the plan duration (needed for overlap end date calculation)
+  const planDurationDays = useMemo(() => {
+    if (mode === "existing" && selectedPlan) {
+      return selectedPlan.duration_days;
+    }
+    // For custom mode, use the difference between start and end if available
+    const endDate = form.getValues("endDate");
+    if (mode === "custom" && startDate && endDate) {
+      return Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    }
+    // Default fallback — use 30 days for overlap checking when plan info unavailable
+    return 30;
+  }, [mode, selectedPlan, startDate, form]);
+
+  // Calendar disabled function: handles both past-date and future-date modes + overlap
+  const isDateDisabled = useMemo(() => {
+    return (date: Date): boolean => {
+      const dateStr = format(date, "yyyy-MM-dd");
+
+      if (pastDateEnabled) {
+        // Past Date Mode: only allow dates within [pastDateRange.start, pastDateRange.end]
+        if (dateStr < pastDateRange.start || dateStr > pastDateRange.end) {
+          return true;
+        }
+      } else {
+        // Future Date Mode: disable dates before the future min date
+        if (date < futureMinDate) {
+          return true;
+        }
+      }
+
+      // In both modes: disable dates that would cause overlap with existing subs
+      // Compute the proposed subscription end date: startDate + duration - 1
+      const proposedEndStr = addDaysToISODate(dateStr, planDurationDays - 1);
+      if (hasOverlap(dateStr, proposedEndStr, initialData.existingSubscriptions)) {
+        return true;
+      }
+
+      return false;
+    };
+  }, [pastDateEnabled, pastDateRange, futureMinDate, planDurationDays, initialData.existingSubscriptions]);
+
+  // ─── 5 PM IST Cutoff Alert Logic (Req 4.1, 4.2, 4.3, 4.4, 4.5, 4.6) ──────
+  const isAfterCutoff = useMemo(() => {
+    return istHourOf(new Date()) >= ONBOARDING_CUTOFF_HOUR_IST;
+  }, []);
+
+  const tomorrowIST = useMemo(() => {
+    return addDaysToISODate(istDateStringOf(new Date()), 1);
+  }, []);
+
+  const automationOverrideAcknowledged = watch("automationOverrideAcknowledged");
+
+  const showAutomationAlert = useMemo(() => {
+    if (!isAfterCutoff || pastDateEnabled || !startDate) return false;
+    const startDateStr = format(startDate, "yyyy-MM-dd");
+    return startDateStr === tomorrowIST;
+  }, [isAfterCutoff, pastDateEnabled, startDate, tomorrowIST]);
+
+  // Reset acknowledgment when alert hides (start date changes away from tomorrow or pastDateEnabled turns on)
+  useEffect(() => {
+    if (!showAutomationAlert) {
+      setValue("automationOverrideAcknowledged", false);
+    }
+  }, [showAutomationAlert, setValue]);
+
+  // Reset start date when pastDateEnabled toggles (valid range changes completely)
+  useEffect(() => {
+    if (pastDateEnabled) {
+      // When switching to past-date mode, reset to a valid past date or clear selection
+      const pastStart = parseISODateString(pastDateRange.start);
+      setValue("startDate", pastStart);
+      setValue("pastDayStatuses", []);
+    } else {
+      // When switching to future-date mode, reset to the future min date
+      setValue("startDate", futureMinDate);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pastDateEnabled]);
 
   // Auto-fill plan details when plan / startDate changes
   useEffect(() => {
@@ -207,6 +336,21 @@ export function AdminAddSubscriptionForm({
   }, [mode, basePrice, taxPercent, setValue]);
 
   const onSubmit = (values: FormValues) => {
+    // Req 3.1: If pastDateEnabled AND startDate is in the past, open the PastDayStatusPopup
+    const startDateStr = format(values.startDate, "yyyy-MM-dd");
+    if (values.pastDateEnabled && startDateStr < istToday) {
+      // Store validated form data so we can proceed after popup confirmation
+      pendingFormDataRef.current = values;
+      setShowPastDayStatusPopup(true);
+      return;
+    }
+
+    // Normal submission (no past date or pastDateEnabled is off)
+    performSubmission(values);
+  };
+
+  /** Actually submits the form data to the server action. */
+  const performSubmission = (values: FormValues) => {
     startTransition(async () => {
       const isCustom = values.mode === "custom";
 
@@ -216,13 +360,15 @@ export function AdminAddSubscriptionForm({
         paymentNotes: values.paymentNotes || undefined,
       };
 
+      const startDateStr = format(values.startDate, "yyyy-MM-dd");
+
       const payload = isCustom
         ? {
             customerProfileId,
             mealCategoryId: values.mealCategoryId,
             deliveryAddressId: values.deliveryAddressId,
             ...commonPaymentFields,
-            startDate: format(values.startDate, "yyyy-MM-dd"),
+            startDate: startDateStr,
             basePrice: values.basePrice!,
             taxPercent: values.taxPercent ?? 0,
             taxAmount: values.taxAmount ?? 0,
@@ -230,15 +376,27 @@ export function AdminAddSubscriptionForm({
             pauseCredits: values.pauseCredits!,
             endDate: format(values.endDate!, "yyyy-MM-dd"),
             ...(franchiseId ? { franchiseId } : {}),
+            // Past date fields
+            ...(values.pastDateEnabled ? {
+              pastDateEnabled: true,
+              pastDayStatuses: values.pastDayStatuses,
+              skipStartDateCheck: true,
+            } : {}),
           }
         : {
             customerProfileId,
             mealCategoryId: values.mealCategoryId,
             deliveryAddressId: values.deliveryAddressId,
             ...commonPaymentFields,
-            startDate: format(values.startDate, "yyyy-MM-dd"),
+            startDate: startDateStr,
             planId: values.planId!,
             ...(franchiseId ? { franchiseId } : {}),
+            // Past date fields
+            ...(values.pastDateEnabled ? {
+              pastDateEnabled: true,
+              pastDayStatuses: values.pastDayStatuses,
+              skipStartDateCheck: true,
+            } : {}),
           };
 
       const res = await submitAction(payload, isCustom);
@@ -252,12 +410,39 @@ export function AdminAddSubscriptionForm({
           paymentReference: "",
           paymentNotes: "",
           taxPercent: 0,
+          pastDateEnabled: false,
+          pastDayStatuses: [],
+          automationOverrideAcknowledged: false,
         });
         router.refresh();
       } else {
         toast.error(res.error ?? "Failed to create subscription.");
       }
     });
+  };
+
+  /** Handles PastDayStatusPopup confirmation (Req 3.6) */
+  const handlePastDayStatusConfirm = (entries: { date: string; mealStatus: "Delivered" | "Skipped" | null; mealType: "VEG" | "EGG" | "CHICKEN" | null; deliveryAddress: "Primary" | "Secondary" | null }[]) => {
+    setShowPastDayStatusPopup(false);
+    const formData = pendingFormDataRef.current;
+    if (!formData) return;
+
+    // The popup validates all entries are complete before calling onConfirm,
+    // so it's safe to treat them as PastDayStatus (non-null mealStatus)
+    const validEntries = entries as PastDayStatus[];
+
+    // Store past day statuses in form state
+    setValue("pastDayStatuses", validEntries);
+
+    // Proceed with submission using the stored form data + past day entries
+    performSubmission({ ...formData, pastDayStatuses: validEntries });
+    pendingFormDataRef.current = null;
+  };
+
+  /** Handles PastDayStatusPopup cancellation (Req 3.7) */
+  const handlePastDayStatusCancel = () => {
+    setShowPastDayStatusPopup(false);
+    pendingFormDataRef.current = null;
   };
 
   return (
@@ -535,6 +720,40 @@ export function AdminAddSubscriptionForm({
 
           {/* ── Common fields ── */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {/* Past Date Mode Toggle — only visible when no active subscription (Req 1.6) */}
+            {activeSubscription === null && (
+              <div className="col-span-full space-y-2">
+                <div className="flex items-center gap-3">
+                  <Controller
+                    control={control}
+                    name="pastDateEnabled"
+                    render={({ field }) => (
+                      <Switch
+                        id="past-date-toggle"
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={pastDateToggleDisabled}
+                      />
+                    )}
+                  />
+                  <Label
+                    htmlFor="past-date-toggle"
+                    className={cn(
+                      "text-sm font-medium",
+                      pastDateToggleDisabled && "text-muted-foreground",
+                    )}
+                  >
+                    Past date start date
+                  </Label>
+                </div>
+                {pastDateToggleDisabled && (
+                  <p className="text-xs text-muted-foreground">
+                    No valid past dates available
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Start Date */}
             <div className="space-y-2">
               <Label>Start Date</Label>
@@ -562,22 +781,38 @@ export function AdminAddSubscriptionForm({
                     <PopoverContent className="w-auto p-0" align="start">
                       <Calendar
                         mode="single"
-                        defaultMonth={field.value ?? minStartDate}
+                        defaultMonth={
+                          field.value ??
+                          (pastDateEnabled
+                            ? parseISODateString(pastDateRange.start)
+                            : futureMinDate)
+                        }
                         selected={field.value}
                         onSelect={(date) => {
                           if (!date) return;
                           field.onChange(date);
                           setIsStartDateOpen(false);
                         }}
-                        disabled={(date) => date < minStartDate}
+                        disabled={isDateDisabled}
                       />
                     </PopoverContent>
                   </Popover>
                 )}
               />
               <p className="text-xs text-muted-foreground">
-                Earliest allowed:{" "}
-                <span className="font-medium">{format(minStartDate, "PPP")}</span>
+                {pastDateEnabled ? (
+                  <>
+                    Selectable range:{" "}
+                    <span className="font-medium">
+                      {pastDateRange.start} to {pastDateRange.end}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    Earliest allowed:{" "}
+                    <span className="font-medium">{format(futureMinDate, "PPP")}</span>
+                  </>
+                )}
               </p>
             </div>
 
@@ -772,16 +1007,60 @@ export function AdminAddSubscriptionForm({
 
           <Separator />
 
+          {/* ── 5 PM IST Cutoff Alert with Automation Override (Req 4.1–4.6) ── */}
+          {showAutomationAlert && (
+            <Alert className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertTitle className="text-amber-800 dark:text-amber-200">
+                After-cutoff subscription
+              </AlertTitle>
+              <AlertDescription className="mt-1 text-amber-700 dark:text-amber-300">
+                Operations will need to re-run the delivery automation for this subscription to take effect.
+              </AlertDescription>
+              <div className="mt-3 flex items-center gap-2">
+                <Controller
+                  control={control}
+                  name="automationOverrideAcknowledged"
+                  render={({ field }) => (
+                    <Checkbox
+                      id="automation-override-ack"
+                      checked={field.value}
+                      onCheckedChange={(checked) => field.onChange(checked === true)}
+                    />
+                  )}
+                />
+                <Label
+                  htmlFor="automation-override-ack"
+                  className="text-sm font-normal text-amber-800 dark:text-amber-200 cursor-pointer"
+                >
+                  I acknowledge that operations will re-run automation
+                </Label>
+              </div>
+            </Alert>
+          )}
+
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
               A unique subscription code will be auto-generated.
             </p>
-            <Button type="submit" disabled={isPending || addresses.length === 0}>
+            <Button
+              type="submit"
+              disabled={isPending || addresses.length === 0 || (showAutomationAlert && !automationOverrideAcknowledged)}
+            >
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create Subscription
             </Button>
           </div>
         </form>
+
+        {/* ── Past Day Status Popup (Req 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7) ── */}
+        <PastDayStatusPopup
+          open={showPastDayStatusPopup}
+          startDate={startDate ? format(startDate, "yyyy-MM-dd") : ""}
+          endDate={pastDayStatusBoundary(new Date())}
+          onConfirm={handlePastDayStatusConfirm}
+          onCancel={handlePastDayStatusCancel}
+        />
       </CardContent>
     </Card>
   );

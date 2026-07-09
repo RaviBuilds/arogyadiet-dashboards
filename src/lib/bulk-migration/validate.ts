@@ -202,6 +202,11 @@ export function validateCustomerRows(rows: RawRow[]): {
 
     if (errors.some((e) => e.row === rowNum)) return;
 
+    // If no address is explicitly marked primary, mark the first one as primary
+    if (addresses.length > 0 && !addresses.some((a) => a.is_primary)) {
+      addresses[0].is_primary = true;
+    }
+
     valid.push({
       rowIndex: rowNum,
       fullName,

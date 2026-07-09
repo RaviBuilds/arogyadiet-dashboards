@@ -231,6 +231,21 @@ export default async function Customer360Page({
   ) ?? false;
 
   // ── 6. Shape lookup data for the Add Subscription form ───────────────────
+  // Compute the previous (most recent non-active) subscription's effective_end_on
+  const previousSubscription = allSubscriptions
+    .filter((s: any) => s.status === "EXPIRED" || s.status === "CANCELLED")
+    .sort((a: any, b: any) => {
+      const aEnd = a.effective_end_on ?? a.ends_on ?? "";
+      const bEnd = b.effective_end_on ?? b.ends_on ?? "";
+      return bEnd.localeCompare(aEnd); // most recent first
+    })[0] ?? null;
+
+  const previousSubscriptionEndDate: string | null = previousSubscription
+    ? (previousSubscription.effective_end_on as string) ??
+      (previousSubscription.ends_on as string) ??
+      null
+    : null;
+
   const initialSubscriptionData = {
     activeSubscription: activeSubscription
       ? {
@@ -240,6 +255,14 @@ export default async function Customer360Page({
             (activeSubscription.ends_on as string),
         }
       : null,
+    previousSubscriptionEndDate,
+    existingSubscriptions: allSubscriptions
+      .filter((s: any) => s.status === "ACTIVE" || s.status === "PENDING")
+      .map((s: any) => ({
+        starts_on: s.starts_on as string,
+        effective_end_on: (s.effective_end_on as string) ?? (s.ends_on as string),
+        status: s.status as string,
+      })),
     subscriptionPlans: (subscriptionPlans ?? []).map((p: any) => ({
       id: p.id as string,
       name: p.name as string,

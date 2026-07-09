@@ -47,6 +47,8 @@ import {
   Loader2,
   Filter,
   Truck,
+  MapPin,
+  Navigation,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -94,6 +96,7 @@ export interface CustomerData {
   isActive: boolean;
   clinic_id: string | null;
   clinicName: string | null;
+  hasCoords?: boolean;
 }
 
 export interface ActiveSubscriptionData {
@@ -150,6 +153,8 @@ export default function CustomerDashboard({
   const [showExpired, setShowExpired] = useState(false);
   const [clinicFilter, setClinicFilter] =
     useState<ClinicFilterSelection>(ALL_CLINICS);
+  const [filterUnassignedClinic, setFilterUnassignedClinic] = useState(false);
+  const [filterNoCoords, setFilterNoCoords] = useState(false);
 
   // Distinct clinics present in the loaded customer rows, for the filter control.
   const clinicOptions = useMemo(() => {
@@ -204,6 +209,16 @@ export default function CustomerDashboard({
       clinicFilter
     );
 
+    // Filter for unassigned clinic
+    if (filterUnassignedClinic) {
+      result = result.filter((customer) => !customer.clinic_id);
+    }
+
+    // Filter for no coordinates
+    if (filterNoCoords) {
+      result = result.filter((customer) => !customer.hasCoords);
+    }
+
     if (!showArchived) {
       result = result.filter((customer) => customer.isActive);
     }
@@ -240,7 +255,7 @@ export default function CustomerDashboard({
     }
 
     return result;
-  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterMedical, showArchived, clinicFilter]);
+  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterMedical, showArchived, clinicFilter, filterUnassignedClinic, filterNoCoords]);
 
   // KIT Customer tab: same directory filtering pipeline, scoped to KIT category.
   const kitCustomers = useMemo(
@@ -552,7 +567,10 @@ export default function CustomerDashboard({
               />
               <Select
                 value={clinicFilter ?? ALL_CLINICS}
-                onValueChange={(val) => setClinicFilter(val)}
+                onValueChange={(val) => {
+                  setClinicFilter(val);
+                  if (val !== ALL_CLINICS) setFilterUnassignedClinic(false);
+                }}
               >
                 <SelectTrigger className="w-[200px] border-slate-200 bg-white transition-all duration-200">
                   <SelectValue placeholder="Filter by clinic..." />
@@ -566,6 +584,35 @@ export default function CustomerDashboard({
                   ))}
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                variant={filterUnassignedClinic ? "default" : "outline"}
+                size="sm"
+                className={cn(
+                  "transition-all duration-200",
+                  filterUnassignedClinic && "bg-amber-600 hover:bg-amber-700 text-white border-amber-600"
+                )}
+                onClick={() => {
+                  setFilterUnassignedClinic((prev) => !prev);
+                  if (!filterUnassignedClinic) setClinicFilter(ALL_CLINICS);
+                }}
+              >
+                <MapPin className="h-3.5 w-3.5 mr-1.5" />
+                {filterUnassignedClinic ? "Clinic: Unassigned" : "Unassigned"}
+              </Button>
+              <Button
+                type="button"
+                variant={filterNoCoords ? "default" : "outline"}
+                size="sm"
+                className={cn(
+                  "transition-all duration-200",
+                  filterNoCoords && "bg-rose-600 hover:bg-rose-700 text-white border-rose-600"
+                )}
+                onClick={() => setFilterNoCoords((prev) => !prev)}
+              >
+                <Navigation className="h-3.5 w-3.5 mr-1.5" />
+                {filterNoCoords ? "No GPS: Active" : "No GPS"}
+              </Button>
               <Button
                 type="button"
                 variant={showArchived ? "default" : "outline"}
@@ -822,25 +869,43 @@ export default function CustomerDashboard({
                     {/* Column 1: Customer Info */}
                     <TableCell>
                       <div className="font-semibold text-slate-900 tracking-tight">{customer.fullName}</div>
-                      <div className="text-sm text-slate-500 mt-0.5">
-                        {customer.gender && customer.gender !== "N/A" ? (
-                          <span>
-                            ( {customer.gender.charAt(0).toUpperCase()} -{" "}
-                            {customer.age ? `${customer.age} yrs` : "N/A"} )
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-sm text-slate-500">
+                          {customer.gender && customer.gender !== "N/A" ? (
+                            <span>
+                              ( {customer.gender.charAt(0).toUpperCase()} -{" "}
+                              {customer.age ? `${customer.age} yrs` : "N/A"} )
+                            </span>
+                          ) : (
+                            <span>( N/A )</span>
+                          )}
+                        </span>
+                        {customer.hasCoords ? (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600" title="GPS coordinates available">
+                            <Navigation className="h-2.5 w-2.5" />
                           </span>
                         ) : (
-                          <span>( N/A )</span>
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-rose-500" title="No GPS coordinates">
+                            <Navigation className="h-2.5 w-2.5" />
+                            <span className="sr-only">No GPS</span>
+                          </span>
                         )}
                       </div>
-                      <div
-                        className={cn(
-                          "text-xs mt-0.5",
-                          customer.clinicName
-                            ? "text-slate-500"
-                            : "text-slate-400 italic",
-                        )}
-                      >
-                        {clinicDisplayName(customer.clinicName)}
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-xs font-mono text-slate-500">
+                          {customer.primary_pincode !== "N/A" ? customer.primary_pincode : "—"}
+                        </span>
+                        <span className="text-slate-300">·</span>
+                        <span
+                          className={cn(
+                            "text-xs",
+                            customer.clinicName
+                              ? "text-slate-500"
+                              : "text-amber-600 font-medium",
+                          )}
+                        >
+                          {customer.clinicName ? clinicDisplayName(customer.clinicName) : "Unassigned"}
+                        </span>
                       </div>
                     </TableCell>
 
