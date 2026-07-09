@@ -30,6 +30,7 @@ import {
   isArchivedCustomerEmail,
 } from "@/lib/customers/customerArchive";
 import { checkGroupManage } from "@/lib/auth/adminAccess";
+import { resolveClinicForPincode } from "@/lib/clinic/pincode-resolver";
 
 // Initialize Admin Client
 const supabaseAdmin = createAdminClient(
@@ -384,6 +385,16 @@ export async function adminCreateCustomerAction(data: AdminCreateCustomerData) {
   }
 
   // 4. Insert into customer_profiles
+  // Resolve clinic_id from primary address pincode (if available)
+  let resolvedClinicId: string | null = null;
+  const primaryAddress = data.addresses?.find((a) => a.is_primary) ?? data.addresses?.[0];
+  if (primaryAddress?.pincode) {
+    const clinicResolution = await resolveClinicForPincode(primaryAddress.pincode);
+    if (clinicResolution.type === "resolved") {
+      resolvedClinicId = clinicResolution.clinic_id;
+    }
+  }
+
   const { data: profileData, error: profileError } = await supabaseAdmin
     .from("customer_profiles")
     .insert({
@@ -395,6 +406,7 @@ export async function adminCreateCustomerAction(data: AdminCreateCustomerData) {
       allergies: data.allergies || null,
       has_medical_history: data.hasMedicalHistory ?? false,
       medical_history_notes: data.medicalHistoryNotes || null,
+      clinic_id: resolvedClinicId,
     })
     .select("id")
     .single();
@@ -481,6 +493,9 @@ export async function adminCreateAddressForCustomer(
     is_primary: parsed.data.is_primary,
     lat: parsed.data.lat ?? null,
     lng: parsed.data.lng ?? null,
+    clinic_id: await resolveClinicForPincode(parsed.data.pincode).then(
+      (r) => (r.type === "resolved" ? r.clinic_id : null)
+    ),
   });
 
   if (error) return { success: false, error: error.message };

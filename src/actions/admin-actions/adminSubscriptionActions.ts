@@ -13,6 +13,20 @@ import {
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { getCustomerNameByProfileId } from "@/lib/notifications/lookups";
 import { checkGroupManage } from "@/lib/auth/adminAccess";
+import {
+  isValidPastStartDate,
+  hasOverlap,
+  validatePastDayStatuses,
+  type ExistingSubscription,
+} from "@/lib/subscriptions/overlap";
+import { pastDayStatusBoundary } from "@/lib/onboarding/cutoff";
+import { getISTDateString } from "@/lib/dates/ist";
+import {
+  generateDailyPreferences,
+  RecordCountMismatchError,
+} from "@/lib/onboarding/dailyPreferences";
+import type { PastDayStatus } from "@/types/onboarding";
+import { cascadePendingSubscriptionDates } from "@/actions/manageMealActions";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -23,6 +37,15 @@ function generateSubscriptionCode(): string {
 function getEarliestAllowedStartDate(): Date {
   return startOfDay(addDays(new Date(), 1));
 }
+
+// ─── past day status entry schema ────────────────────────────────────────────
+
+const pastDayStatusEntrySchema = z.object({
+  date: z.string(),
+  mealStatus: z.enum(["Delivered", "Skipped"]),
+  mealType: z.enum(["VEG", "EGG", "CHICKEN"]).nullable(),
+  deliveryAddress: z.enum(["Primary", "Secondary"]).nullable(),
+});
 
 // ─── shared base schema ──────────────────────────────────────────────────────
 
@@ -36,6 +59,9 @@ const baseSchema = z.object({
   startDate: z
     .string()
     .refine((d) => !isNaN(new Date(d).getTime()), { message: "Invalid start date" }),
+  pastDateEnabled: z.boolean().optional().default(false),
+  pastDayStatuses: z.array(pastDayStatusEntrySchema).optional(),
+  skipStartDateCheck: z.boolean().optional().default(false),
 });
 
 // ─── mode-specific extensions ────────────────────────────────────────────────
@@ -98,18 +124,144 @@ export async function addSubscription(
     paymentReference,
     paymentNotes,
     startDate,
+    pastDateEnabled,
+    pastDayStatuses,
+    skipStartDateCheck,
   } = parsed.data;
 
   try {
     const start = startOfDay(new Date(startDate));
 
-    if (!options?.skipStartDateCheck) {
+    if (!options?.skipStartDateCheck && !skipStartDateCheck && !pastDateEnabled) {
       const earliest = getEarliestAllowedStartDate();
       if (start < earliest) {
         return {
           success: false,
           error: "Start date cannot be today or in the past.",
         };
+      }
+    }
+
+    // ─── Past-date server-side validation ──────────────────────────────────────
+    if (pastDateEnabled) {
+      const istToday = getISTDateString(0);
+
+      // Get previous subscription's end date for this customer
+      const { data: prevSubs, error: prevSubErr } = await supabase
+        .from("subscriptions")
+        .select("effective_end_on")
+        .eq("customer_profile_id", customerProfileId)
+        .neq("status", "ACTIVE")
+        .neq("status", "CANCELLED")
+        .order("effective_end_on", { ascending: false })
+        .limit(1);
+
+      if (prevSubErr) throw new Error(prevSubErr.message);
+
+      const previousEndDate: string | null =
+        prevSubs && prevSubs.length > 0
+          ? prevSubs[0].effective_end_on
+          : null;
+
+      // Validate start date is within allowed range
+      if (!isValidPastStartDate(startDate, istToday, previousEndDate)) {
+        if (previousEndDate && startDate <= previousEndDate) {
+          return {
+            success: false,
+            error: `Start date must be after previous subscription end date (${previousEndDate}).`,
+          };
+        }
+        return {
+          success: false,
+          error: "Start date cannot be more than 30 days in the past.",
+        };
+      }
+
+      // Compute end date for overlap check
+      let computedEndDate: string;
+      if (!isCustomPlan) {
+        const d = parsed.data as z.infer<typeof existingPlanSchema>;
+        const { data: planData, error: planLookupErr } = await supabase
+          .from("subscription_plans")
+          .select("duration_days")
+          .eq("id", d.planId)
+          .single();
+        if (planLookupErr) throw new Error(planLookupErr.message);
+        const endDate = addDays(start, planData.duration_days - 1);
+        computedEndDate = format(endDate, "yyyy-MM-dd");
+      } else {
+        const d = parsed.data as z.infer<typeof customPlanSchema>;
+        computedEndDate = d.endDate;
+      }
+
+      // Fetch all non-cancelled subscriptions for overlap check
+      const { data: existingSubs, error: existingSubsErr } = await supabase
+        .from("subscriptions")
+        .select("starts_on, effective_end_on, status")
+        .eq("customer_profile_id", customerProfileId)
+        .neq("status", "CANCELLED");
+
+      if (existingSubsErr) throw new Error(existingSubsErr.message);
+
+      const existingSubsForOverlap: ExistingSubscription[] = (existingSubs ?? []).map(
+        (s) => ({
+          starts_on: s.starts_on,
+          effective_end_on: s.effective_end_on,
+          status: s.status,
+        }),
+      );
+
+      if (hasOverlap(startDate, computedEndDate, existingSubsForOverlap)) {
+        // Find the conflicting subscription to provide details
+        const conflicting = existingSubsForOverlap.find(
+          (sub) =>
+            (sub.status === "ACTIVE" || sub.status === "PENDING") &&
+            sub.starts_on <= computedEndDate &&
+            sub.effective_end_on >= startDate,
+        );
+        const conflictDetail = conflicting
+          ? ` (${conflicting.starts_on} — ${conflicting.effective_end_on})`
+          : "";
+        return {
+          success: false,
+          error: `Date range overlaps with existing subscription${conflictDetail}.`,
+        };
+      }
+
+      // Validate past day statuses completeness
+      if (pastDayStatuses && pastDayStatuses.length > 0) {
+        const boundaryDate = pastDayStatusBoundary(new Date());
+        const validationResult = validatePastDayStatuses(
+          pastDayStatuses,
+          startDate,
+          boundaryDate,
+        );
+        if (!validationResult.valid) {
+          // Determine which type of error to surface
+          const reason = validationResult.reason;
+          if (reason.includes("Missing entry") || reason.includes("Expected")) {
+            return {
+              success: false,
+              error: `Delivery status is required for all days from ${startDate} to ${boundaryDate}.`,
+            };
+          }
+          // Extract date from reason if possible for specific entry errors
+          const dateMatch = reason.match(/\d{4}-\d{2}-\d{2}/);
+          const errorDate = dateMatch ? dateMatch[0] : startDate;
+          return {
+            success: false,
+            error: `Invalid delivery status entry for ${errorDate}: ${reason}`,
+          };
+        }
+      } else {
+        // Past day statuses are required when pastDateEnabled is true
+        const boundaryDate = pastDayStatusBoundary(new Date());
+        if (startDate <= boundaryDate) {
+          return {
+            success: false,
+            error: `Delivery status is required for all days from ${startDate} to ${boundaryDate}.`,
+          };
+        }
       }
     }
 
@@ -233,24 +385,127 @@ export async function addSubscription(
     const dailyPrefs = [];
     let cursor = start;
 
-    for (let i = 0; i < totalDays; i++) {
-      dailyPrefs.push({
-        subscription_id: newSub.id,
-        customer_profile_id: customerProfileId,
-        preference_date: format(cursor, "yyyy-MM-dd"),
-        meal_category_id: mealCategoryId,
-        delivery_address_id: deliveryAddressId,
-        is_paused: false,
-        pause_credit_used: false,
-      });
-      cursor = addDays(cursor, 1);
+    if (
+      pastDateEnabled &&
+      pastDayStatuses &&
+      pastDayStatuses.length > 0
+    ) {
+      // ─── Past-date daily preferences: use generateDailyPreferences ───────
+      // Resolve meal category IDs for mapping mealType codes to UUIDs.
+      const { data: mealCatsData } = await supabase
+        .from("meal_categories")
+        .select("id, code")
+        .in("code", ["VEG", "EGG", "CHICKEN"]);
+
+      const mealCategoryMap: Record<string, string> = {};
+      if (mealCatsData) {
+        for (const row of mealCatsData) {
+          mealCategoryMap[row.code] = row.id;
+        }
+      }
+
+      // Resolve address mapping: "Primary" → first address, "Secondary" → second address.
+      // Fetch customer addresses ordered by creation (is_primary first).
+      const { data: customerAddresses } = await supabase
+        .from("addresses")
+        .select("id, is_primary")
+        .eq("customer_profile_id", customerProfileId)
+        .order("is_primary", { ascending: false })
+        .order("created_at", { ascending: true });
+
+      const primaryAddressId = deliveryAddressId; // The form's selected address is the primary
+      let secondaryAddressId: string | null = null;
+      if (customerAddresses && customerAddresses.length > 1) {
+        // Find the first address that isn't the primary (deliveryAddressId)
+        const secondary = customerAddresses.find((a) => a.id !== deliveryAddressId);
+        secondaryAddressId = secondary?.id ?? null;
+      }
+
+      // Compute boundary date for past/future separation.
+      const boundaryDate = pastDayStatusBoundary(new Date());
+
+      try {
+        const prefsResult = generateDailyPreferences({
+          subscriptionId: newSub.id,
+          customerProfileId,
+          startsOn,
+          originalEndsOn: endsOn,
+          totalDays,
+          initialMealCategoryId: mealCategoryId,
+          primaryAddressId,
+          secondaryAddressId,
+          mealCategoryMap,
+          boundaryDate,
+          pastDayStatuses: pastDayStatuses as PastDayStatus[],
+        });
+
+        const { error: prefsErr } = await supabase
+          .from("subscription_daily_preferences")
+          .insert(prefsResult.records);
+
+        if (prefsErr) throw new Error(prefsErr.message);
+
+        // Update subscription with adjusted effective_end_on and pause_credits_used
+        // if there were skipped days.
+        if (prefsResult.skippedCount > 0) {
+          const { error: subUpdateErr } = await supabase
+            .from("subscriptions")
+            .update({
+              effective_end_on: prefsResult.effectiveEndOn,
+              pause_credits_used: prefsResult.skippedCount,
+            })
+            .eq("id", newSub.id);
+
+          if (subUpdateErr) throw new Error(subUpdateErr.message);
+
+          // Update the local endsOn reference for cascade logic downstream
+          effectiveEndDate = new Date(prefsResult.effectiveEndOn);
+        }
+      } catch (err) {
+        if (err instanceof RecordCountMismatchError) {
+          return {
+            success: false,
+            error: err.message,
+          };
+        }
+        throw err;
+      }
+    } else {
+      // ─── Standard daily preferences (future-date subscription) ────────────
+      for (let i = 0; i < totalDays; i++) {
+        dailyPrefs.push({
+          subscription_id: newSub.id,
+          customer_profile_id: customerProfileId,
+          preference_date: format(cursor, "yyyy-MM-dd"),
+          meal_category_id: mealCategoryId,
+          delivery_address_id: deliveryAddressId,
+          is_paused: false,
+          pause_credit_used: false,
+        });
+        cursor = addDays(cursor, 1);
+      }
+
+      const { error: prefsErr } = await supabase
+        .from("subscription_daily_preferences")
+        .insert(dailyPrefs);
+
+      if (prefsErr) throw new Error(prefsErr.message);
     }
 
-    const { error: prefsErr } = await supabase
-      .from("subscription_daily_preferences")
-      .insert(dailyPrefs);
-
-    if (prefsErr) throw new Error(prefsErr.message);
+    // Cascade pending subscription dates after creation.
+    // When the new sub is ACTIVE: use its effective_end_on so any existing PENDING subs shift after it.
+    // When the new sub is PENDING: use the active subscription's effective_end_on as baseEndDate
+    // to re-cascade all PENDING subs (including the newly created one) in order.
+    const cascadeEndDate = format(effectiveEndDate, "yyyy-MM-dd");
+    if (subscriptionStatus === "ACTIVE") {
+      await cascadePendingSubscriptionDates(customerProfileId, cascadeEndDate);
+    } else if (activeSubscriptions && activeSubscriptions.length > 0) {
+      const latestActiveEnd = activeSubscriptions.reduce((latest, s) => {
+        const endRef = new Date(s.effective_end_on ?? s.ends_on!);
+        return endRef > latest ? endRef : latest;
+      }, new Date(0));
+      await cascadePendingSubscriptionDates(customerProfileId, latestActiveEnd);
+    }
 
     // Always insert a payment/invoice row regardless of payment status.
     // status: PAID (collected) or PENDING (not yet collected).

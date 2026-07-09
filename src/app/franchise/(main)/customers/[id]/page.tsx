@@ -198,6 +198,26 @@ export default async function FranchiseCustomer360Page({
             (activeSubscription.ends_on as string),
         }
       : null,
+    previousSubscriptionEndDate: (() => {
+      const allSubs = (data.subscriptions as any[]) ?? [];
+      const prev = allSubs
+        .filter((s: any) => s.status === "EXPIRED" || s.status === "CANCELLED")
+        .sort((a: any, b: any) => {
+          const aEnd = a.effective_end_on ?? a.ends_on ?? "";
+          const bEnd = b.effective_end_on ?? b.ends_on ?? "";
+          return bEnd.localeCompare(aEnd); // most recent first
+        })[0] ?? null;
+      return prev
+        ? (prev.effective_end_on as string) ?? (prev.ends_on as string) ?? null
+        : null;
+    })(),
+    existingSubscriptions: ((data.subscriptions as any[]) ?? [])
+      .filter((s: any) => s.status === "ACTIVE" || s.status === "PENDING")
+      .map((s: any) => ({
+        starts_on: s.starts_on as string,
+        effective_end_on: (s.effective_end_on as string) ?? (s.ends_on as string),
+        status: s.status as string,
+      })),
     subscriptionPlans: (subscriptionPlans ?? []).map((p: any) => ({
       id: p.id as string,
       name: p.name as string,

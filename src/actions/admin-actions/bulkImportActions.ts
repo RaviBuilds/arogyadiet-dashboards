@@ -295,6 +295,8 @@ function buildSubscriptionPayload(
     paymentReference: row.paymentReference,
     paymentNotes: row.paymentNotes,
     startDate: row.startDate,
+    pastDateEnabled: true,
+    skipStartDateCheck: true,
   };
 
   if (row.mode === "CUSTOM") {
