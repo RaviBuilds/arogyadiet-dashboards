@@ -1,7 +1,8 @@
 "use client";
 
 // src/shared/components/customer/ProfileCompletionDialog.tsx
-// Customer-portal profile-completion popup (customer-mobile-onboarding, Task 10.2).
+// Customer-portal profile-completion popup (customer-mobile-onboarding, Task 10.2;
+// extended for accommodation customers in Task 10.1 of accommodation-customer-flow).
 //
 // Shown on the customer dashboard while the Customer_Record is IN_PROGRESS
 // (the dashboard RSC decides visibility from `onboarding_status` and only
@@ -21,13 +22,41 @@
 // Radix Dialog provides the focus trap + focus restore, and every input has an
 // associated <Label> (Req 15.12).
 //
-// Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.7, 10.5, 15.1, 15.12
+// --- Accommodation customers (customerCategory === "ACCOMMODATION") ---
+// For accommodation customers, medical history is MANDATORY rather than
+// optional (Req 6.1-6.9):
+//   - The subscription section shows stay type/occupancy/dates instead of the
+//     Meal/KIT subscription block (Req 6.1).
+//   - A confirmation checkbox is shown alongside the medical history textarea;
+//     checking it clears + disables the textarea, unchecking re-enables it
+//     (Req 6.2, 6.4, 6.9).
+//   - "Mark complete onboarding" stays disabled until the textarea has at
+//     least 1 non-whitespace character OR the checkbox is checked (Req 6.3).
+//   - A document upload control accepts images/PDF, max 5 files, max 10MB
+//     each (Req 6.5).
+//   - The "Skip for now" button is removed — the dialog's built-in top-right
+//     X close button (from the Dialog primitive) is used instead, and closing
+//     without completing simply re-displays the popup on the next /dashboard
+//     visit since nothing is persisted (Req 6.6, 6.8).
+//
+// Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.7, 10.5, 15.1, 15.12,
+//               6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
 import { format, parseISO } from "date-fns";
-import { Loader2, Utensils, Calendar } from "lucide-react";
+import {
+  Loader2,
+  Utensils,
+  Calendar,
+  BedDouble,
+  Users,
+  UploadCloud,
+  FileText,
+  X as RemoveFileIcon,
+  AlertCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -36,9 +65,14 @@ import {
   type ProfileCompletionActionResult,
 } from "@/actions/profileCompletionActions";
 import {
+  completeAccommodationProfileAction,
+  type ProfileCompletionActionResult as AccommodationProfileCompletionActionResult,
+} from "@/actions/accommodationOnboardingActions";
+import {
   profileCompletionSchema,
   type ProfileCompletionInput,
 } from "@/validations/profileCompletionSchema";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
@@ -50,6 +84,7 @@ import {
 import { Field, FieldError, FieldLabel } from "@/shared/components/ui/field";
 import { Input } from "@/shared/components/ui/input";
 import { Textarea } from "@/shared/components/ui/textarea";
+import { Checkbox } from "@/shared/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -86,6 +121,7 @@ type FormValues = {
   dietaryPreference: string;
   allergies: string;
   medicalHistoryNotes: string;
+  medicalHistoryConfirmed: boolean;
   email: string;
 };
 
@@ -95,8 +131,18 @@ const EMPTY_VALUES: FormValues = {
   dietaryPreference: "",
   allergies: "",
   medicalHistoryNotes: "",
+  medicalHistoryConfirmed: false,
   email: "",
 };
+
+// ---------------------------------------------------------------------------
+// Accommodation document-upload constraints (Req 6.5)
+// ---------------------------------------------------------------------------
+
+const MAX_MEDICAL_DOCUMENT_FILES = 5;
+const MAX_MEDICAL_DOCUMENT_SIZE_MB = 10;
+const MAX_MEDICAL_DOCUMENT_SIZE_BYTES =
+  MAX_MEDICAL_DOCUMENT_SIZE_MB * 1024 * 1024;
 
 interface ProfileCompletionDialogProps {
   /**
@@ -113,6 +159,8 @@ interface ProfileCompletionDialogProps {
   defaultOpen?: boolean;
   /**
    * Optional subscription details to display at the top of the dialog.
+   * Ignored for accommodation customers, which render `accommodationStay`
+   * instead (Req 6.1).
    */
   subscription?: {
     category: string | null;
@@ -120,6 +168,25 @@ interface ProfileCompletionDialogProps {
     startDate: string | null;
     endDate: string | null;
   } | null;
+  /**
+   * The customer's category. When "ACCOMMODATION", the dialog renders the
+   * accommodation-specific subscription section and makes medical history
+   * mandatory (Req 6.1-6.9).
+   */
+  customerCategory?: string | null;
+  /** Active/pending stay details shown for accommodation customers (Req 6.1). */
+  accommodationStay?: {
+    stayType: string;
+    occupancyType: string;
+    startDate: string | null;
+    endDate: string | null;
+  } | null;
+  /**
+   * The customer's `customer_profiles.id`. Required to persist medical
+   * history via `completeAccommodationProfileAction` for accommodation
+   * customers.
+   */
+  customerProfileId?: string | null;
 }
 
 /**
@@ -130,8 +197,9 @@ interface ProfileCompletionDialogProps {
 function buildPayload(values: FormValues): ProfileCompletionInput {
   const payload: Record<string, string> = {};
   const put = (key: keyof FormValues) => {
-    const v = values[key]?.trim();
-    if (v) payload[key] = v;
+    const v = values[key];
+    const trimmed = typeof v === "string" ? v.trim() : "";
+    if (trimmed) payload[key] = trimmed;
   };
   put("dateOfBirth");
   put("gender");
@@ -147,16 +215,27 @@ export function ProfileCompletionDialog({
   isTestEmail = false,
   defaultOpen = true,
   subscription = null,
+  customerCategory = null,
+  accommodationStay = null,
+  customerProfileId = null,
 }: ProfileCompletionDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(defaultOpen);
   const [submitting, setSubmitting] = useState<null | "save" | "complete">(null);
+
+  // Accommodation-only: selected medical documents pending upload (Req 6.5).
+  const [medicalDocuments, setMedicalDocuments] = useState<File[]>([]);
+  const [documentError, setDocumentError] = useState<string | null>(null);
+
+  const isAccommodation = customerCategory === "ACCOMMODATION";
 
   const {
     control,
     register,
     handleSubmit,
     getValues,
+    watch,
+    setValue,
     setError,
     clearErrors,
     formState: { errors },
@@ -165,10 +244,117 @@ export function ProfileCompletionDialog({
   const fieldsToRender = emptyFields.filter((f) =>
     ALL_COMPLETABLE_FIELDS.includes(f),
   );
+  // Medical history is mandatory for accommodation customers, so always show
+  // it regardless of whether it was already empty (Req 6.2).
+  if (isAccommodation && !fieldsToRender.includes("medicalHistoryNotes")) {
+    fieldsToRender.push("medicalHistoryNotes");
+  }
+
+  // Live values used to drive the mutual-exclusion + button-enablement rules.
+  const medicalHistoryNotesValue = watch("medicalHistoryNotes");
+  const medicalHistoryConfirmed = watch("medicalHistoryConfirmed");
+
+  /**
+   * Req 6.3: enabled iff the textarea has ≥1 non-whitespace char OR the
+   * confirmation checkbox is checked. Implemented inline (rather than
+   * importing `AccommodationService.isProfileComplete`) because that module
+   * also pulls in the server-only `stayRepository` and cannot be bundled into
+   * a client component.
+   */
+  const accommodationProfileComplete =
+    medicalHistoryConfirmed ||
+    (medicalHistoryNotesValue?.trim().length ?? 0) > 0;
+
+  /** Req 6.4/6.9: mutual exclusion between the checkbox and the textarea. */
+  function handleMedicalHistoryConfirmedChange(checked: boolean) {
+    setValue("medicalHistoryConfirmed", checked);
+    if (checked) {
+      setValue("medicalHistoryNotes", "");
+    }
+  }
+
+  function handleDocumentSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    setDocumentError(null);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    if (medicalDocuments.length + files.length > MAX_MEDICAL_DOCUMENT_FILES) {
+      setDocumentError(
+        `You can upload a maximum of ${MAX_MEDICAL_DOCUMENT_FILES} documents.`,
+      );
+      e.target.value = "";
+      return;
+    }
+
+    const validFiles: File[] = [];
+    for (const file of files) {
+      const isAccepted =
+        file.type.startsWith("image/") || file.type === "application/pdf";
+      if (!isAccepted) {
+        setDocumentError(`${file.name} must be an image or PDF file.`);
+        continue;
+      }
+      if (file.size > MAX_MEDICAL_DOCUMENT_SIZE_BYTES) {
+        setDocumentError(
+          `${file.name} exceeds the ${MAX_MEDICAL_DOCUMENT_SIZE_MB}MB limit.`,
+        );
+        continue;
+      }
+      validFiles.push(file);
+    }
+
+    setMedicalDocuments((prev) => [...prev, ...validFiles]);
+    e.target.value = "";
+  }
+
+  function removeDocument(index: number) {
+    setMedicalDocuments((prev) => prev.filter((_, i) => i !== index));
+    setDocumentError(null);
+  }
+
+  /**
+   * Uploads the selected medical documents to the private `medical_records`
+   * storage bucket, mirroring the pattern in `medical-document-upload-modal.tsx`.
+   * Returns the document references to persist on `customer_profiles.medical_documents`.
+   */
+  async function uploadMedicalDocuments(): Promise<
+    Array<{ name: string; url: string; type: string }>
+  > {
+    if (medicalDocuments.length === 0) return [];
+
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error("Unauthorized.");
+    }
+
+    const uploaded: Array<{ name: string; url: string; type: string }> = [];
+    for (const file of medicalDocuments) {
+      const fileExt = file.name.split(".").pop();
+      const safeFileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
+      const filePath = `${user.id}/${safeFileName}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("medical_records")
+        .upload(filePath, file, { cacheControl: "3600", upsert: false });
+      if (uploadError) {
+        throw new Error(uploadError.message);
+      }
+
+      uploaded.push({
+        name: file.name,
+        url: uploadData.path,
+        type: file.type,
+      });
+    }
+    return uploaded;
+  }
 
   /** Apply an action result: on success close/refresh, on failure flag fields. */
   function applyResult(
-    result: ProfileCompletionActionResult,
+    result: ProfileCompletionActionResult | AccommodationProfileCompletionActionResult,
     intent: "save" | "complete",
   ): boolean {
     if ("error" in result) {
@@ -209,7 +395,44 @@ export function ProfileCompletionDialog({
     return false;
   }
 
+  /** Accommodation-specific completion: mandatory medical history + documents. */
+  async function runAccommodationComplete() {
+    clearErrors();
+    if (!customerProfileId) {
+      toast.error("Unable to complete onboarding: missing customer reference.");
+      return;
+    }
+
+    setSubmitting("complete");
+    try {
+      const uploadedDocuments = await uploadMedicalDocuments();
+      const values = getValues();
+      const result = await completeAccommodationProfileAction({
+        customerProfileId,
+        medicalHistoryNotes: values.medicalHistoryNotes,
+        medicalHistoryConfirmed: values.medicalHistoryConfirmed,
+        medicalDocuments: uploadedDocuments,
+      });
+      const success = applyResult(result, "complete");
+      if (success) {
+        router.push("/profile#medical-documents");
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong. Please try again.",
+      );
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
   async function runSubmit(intent: "save" | "complete") {
+    if (isAccommodation && intent === "complete") {
+      return runAccommodationComplete();
+    }
+
     clearErrors();
     const payload = buildPayload(getValues());
     if (!validateLocally(payload)) {
@@ -222,7 +445,7 @@ export function ProfileCompletionDialog({
           ? await markOnboardingCompletedAction(payload)
           : await saveProfileCompletionAction(payload);
       const success = applyResult(result, intent);
-      
+
       // Redirect to profile page medical documents section after completion
       if (success && intent === "complete") {
         router.push("/profile#medical-documents");
@@ -261,48 +484,91 @@ export function ProfileCompletionDialog({
         <DialogHeader>
           <DialogTitle>Complete your profile</DialogTitle>
           <DialogDescription>
-            Add a few more details to finish setting up your account. Every field
-            is optional — you can fill them in now or later.
+            {isAccommodation
+              ? "Add a few more details to finish setting up your account. Medical history is required before you can complete onboarding."
+              : "Add a few more details to finish setting up your account. Every field is optional — you can fill them in now or later."}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Subscription Details Section */}
-        {subscription && (
+        {/* Subscription / Accommodation stay details section (Req 6.1) */}
+        {isAccommodation && accommodationStay ? (
           <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
             <div className="mb-3 flex items-center gap-2">
               <div className="rounded-full bg-emerald-100 p-1.5">
-                <Utensils className="h-4 w-4 text-emerald-600" />
+                <BedDouble className="h-4 w-4 text-emerald-600" />
               </div>
               <h4 className="text-sm font-semibold text-slate-900">
-                Your Subscription
+                Your Stay
               </h4>
             </div>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-slate-500">Service:</span>
+                <span className="text-slate-500">Stay Type:</span>
                 <span className="font-medium text-slate-900">
-                  {getCategoryLabel(subscription.category)}
+                  {accommodationStay.stayType || "N/A"}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Plan:</span>
-                <span className="font-medium text-slate-900">
-                  {subscription.planName || "N/A"}
-                </span>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Occupancy:</span>
+                <div className="flex items-center gap-1.5 text-right">
+                  <Users className="h-3.5 w-3.5 text-slate-400" />
+                  <span className="font-medium text-slate-900">
+                    {accommodationStay.occupancyType || "N/A"}
+                  </span>
+                </div>
               </div>
               <div className="flex items-start justify-between">
                 <span className="text-slate-500">Duration:</span>
                 <div className="flex items-center gap-1.5 text-right">
                   <Calendar className="h-3.5 w-3.5 text-slate-400" />
                   <span className="font-medium text-slate-900">
-                    {formatSubscriptionDate(subscription.startDate)}
+                    {formatSubscriptionDate(accommodationStay.startDate)}
                     {" → "}
-                    {formatSubscriptionDate(subscription.endDate)}
+                    {formatSubscriptionDate(accommodationStay.endDate)}
                   </span>
                 </div>
               </div>
             </div>
           </div>
+        ) : (
+          !isAccommodation &&
+          subscription && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <div className="rounded-full bg-emerald-100 p-1.5">
+                  <Utensils className="h-4 w-4 text-emerald-600" />
+                </div>
+                <h4 className="text-sm font-semibold text-slate-900">
+                  Your Subscription
+                </h4>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Service:</span>
+                  <span className="font-medium text-slate-900">
+                    {getCategoryLabel(subscription.category)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Plan:</span>
+                  <span className="font-medium text-slate-900">
+                    {subscription.planName || "N/A"}
+                  </span>
+                </div>
+                <div className="flex items-start justify-between">
+                  <span className="text-slate-500">Duration:</span>
+                  <div className="flex items-center gap-1.5 text-right">
+                    <Calendar className="h-3.5 w-3.5 text-slate-400" />
+                    <span className="font-medium text-slate-900">
+                      {formatSubscriptionDate(subscription.startDate)}
+                      {" → "}
+                      {formatSubscriptionDate(subscription.endDate)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
         )}
 
         {/* handleSubmit gates on RHF's own state; our buttons call runSubmit
@@ -413,7 +679,8 @@ export function ProfileCompletionDialog({
               <Textarea
                 id="pcd-medicalHistoryNotes"
                 placeholder="Any medical conditions or dietary restrictions?"
-                disabled={isBusy}
+                disabled={isBusy || (isAccommodation && medicalHistoryConfirmed)}
+                maxLength={2000}
                 aria-invalid={!!errors.medicalHistoryNotes}
                 {...register("medicalHistoryNotes")}
               />
@@ -422,6 +689,95 @@ export function ProfileCompletionDialog({
                   errors.medicalHistoryNotes ? [errors.medicalHistoryNotes] : []
                 }
               />
+
+              {/* Req 6.2/6.4/6.9: mandatory confirmation checkbox with mutual
+                  exclusion against the textarea, accommodation customers only. */}
+              {isAccommodation && (
+                <Controller
+                  control={control}
+                  name="medicalHistoryConfirmed"
+                  render={({ field }) => (
+                    <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
+                      <Checkbox
+                        id="pcd-medicalHistoryConfirmed"
+                        checked={field.value}
+                        disabled={isBusy}
+                        onCheckedChange={(checked) =>
+                          handleMedicalHistoryConfirmedChange(checked === true)
+                        }
+                      />
+                      <span>
+                        I confirm I don&apos;t have any medical history to
+                        share with ArogyaDiet
+                      </span>
+                    </label>
+                  )}
+                />
+              )}
+
+              {/* Req 6.5: document upload, accommodation customers only. */}
+              {isAccommodation && (
+                <div className="mt-3 space-y-2">
+                  <FieldLabel htmlFor="pcd-medicalDocuments">
+                    Medical documents (optional)
+                  </FieldLabel>
+                  <div className="relative rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center transition-colors hover:bg-slate-100">
+                    <input
+                      id="pcd-medicalDocuments"
+                      type="file"
+                      multiple
+                      accept="image/*,application/pdf"
+                      onChange={handleDocumentSelect}
+                      disabled={
+                        isBusy ||
+                        medicalDocuments.length >= MAX_MEDICAL_DOCUMENT_FILES
+                      }
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                    />
+                    <UploadCloud className="mx-auto mb-2 h-6 w-6 text-slate-400" />
+                    <p className="text-xs font-medium text-slate-600">
+                      Click to upload images or PDFs (max{" "}
+                      {MAX_MEDICAL_DOCUMENT_FILES} files,{" "}
+                      {MAX_MEDICAL_DOCUMENT_SIZE_MB}MB each)
+                    </p>
+                  </div>
+
+                  {documentError && (
+                    <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-2">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />
+                      <p className="text-xs font-medium text-red-800">
+                        {documentError}
+                      </p>
+                    </div>
+                  )}
+
+                  {medicalDocuments.length > 0 && (
+                    <div className="space-y-1.5">
+                      {medicalDocuments.map((file, index) => (
+                        <div
+                          key={`${file.name}-${index}`}
+                          className="flex items-center justify-between rounded-md border bg-white p-2 shadow-sm"
+                        >
+                          <div className="flex items-center gap-2 overflow-hidden">
+                            <FileText className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                            <span className="truncate text-xs font-medium text-slate-900">
+                              {file.name}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeDocument(index)}
+                            disabled={isBusy}
+                            className="rounded p-0.5 text-slate-400 hover:text-red-600 disabled:opacity-50"
+                          >
+                            <RemoveFileIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </Field>
           )}
 
@@ -445,18 +801,24 @@ export function ProfileCompletionDialog({
         </form>
 
         <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setOpen(false)}
-            disabled={isBusy}
-          >
-            Skip for now
-          </Button>
+          {/* Req 6.6: accommodation customers rely on the Dialog's built-in
+              top-right X close button instead of "Skip for now". */}
+          {!isAccommodation && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+              disabled={isBusy}
+              className="min-h-11"
+            >
+              Skip for now
+            </Button>
+          )}
           <Button
             type="button"
             onClick={() => runSubmit("complete")}
-            disabled={isBusy}
+            disabled={isBusy || (isAccommodation && !accommodationProfileComplete)}
+            className="min-h-11"
           >
             {submitting === "complete" ? (
               <>

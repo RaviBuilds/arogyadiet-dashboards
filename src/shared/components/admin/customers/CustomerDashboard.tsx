@@ -69,6 +69,7 @@ import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
 import { CustomerOverview } from "./CustomerOverview";
 import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
 import { KitCustomerSection } from "./KitCustomerSection";
+import { AccommodationCustomerSection } from "./AccommodationCustomerSection";
 import { Plus, Upload, UserPlus } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
 import {
   clinicDisplayName,
@@ -193,7 +194,7 @@ export default function CustomerDashboard({
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    if (tab === "Meal Customers" || tab === "KIT Customer") {
+    if (tab === "Meal Customers" || tab === "KIT Customer" || tab === "Accommodation Customers") {
       setSearchColumn("fullName");
     } else {
       setSearchColumn("customer_name");
@@ -203,9 +204,9 @@ export default function CustomerDashboard({
   };
 
   const filteredCustomers = useMemo(() => {
-    // Meal Customers: exclude KIT category customers
+    // Meal Customers: exclude KIT and ACCOMMODATION category customers
     let result = filterRowsByClinic(
-      customers.filter((c) => c.customerCategory !== "KIT"),
+      customers.filter((c) => c.customerCategory !== "KIT" && c.customerCategory !== "ACCOMMODATION"),
       clinicFilter
     );
 
@@ -299,6 +300,33 @@ export default function CustomerDashboard({
     return result;
   }, [kitCustomers, searchTerm, searchColumn, filterStatus, showArchived, showExpired, clinicFilter]);
 
+  // Accommodation Customers tab: scoped to ACCOMMODATION category.
+  const accommodationCustomers = useMemo(
+    () => customers.filter((customer) => customer.customerCategory === "ACCOMMODATION"),
+    [customers],
+  );
+
+  const filteredAccommodationCustomers = useMemo(() => {
+    let result = [...accommodationCustomers];
+
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase();
+      result = result.filter((row) => {
+        if (searchColumn === "fullName")
+          return row.fullName.toLowerCase().includes(lowerTerm);
+        if (searchColumn === "mobile")
+          return row.mobile.toLowerCase().includes(lowerTerm);
+        if (searchColumn === "email")
+          return row.email.toLowerCase().includes(lowerTerm);
+        if (searchColumn === "primary_pincode")
+          return row.primary_pincode.toLowerCase().includes(lowerTerm);
+        return true;
+      });
+    }
+
+    return result;
+  }, [accommodationCustomers, searchTerm, searchColumn]);
+
   const filterSubList = (list: ActiveSubscriptionData[]) => {
     if (!searchTerm) return list;
     const lowerTerm = searchTerm.toLowerCase();
@@ -332,7 +360,7 @@ export default function CustomerDashboard({
   );
 
   const searchOptions = useMemo(() => {
-    if (activeTab === "Meal Customers" || activeTab === "KIT Customer") {
+    if (activeTab === "Meal Customers" || activeTab === "KIT Customer" || activeTab === "Accommodation Customers") {
       return [
         { value: "fullName", label: "Name" },
         { value: "mobile", label: "Phone Number" },
@@ -400,6 +428,26 @@ export default function CustomerDashboard({
       XLSX.writeFile(
         wb,
         `KIT_Customers_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
+    } else if (activeTab === "Accommodation Customers") {
+      if (filteredAccommodationCustomers.length === 0) return;
+      const exportData = filteredAccommodationCustomers.map((row) => ({
+        "Full Name": row.fullName,
+        Email: row.email,
+        Mobile: row.mobile,
+        Gender: row.gender,
+        "Date of Birth": row.dateOfBirth,
+        "Dietary Preference": row.dietary_preference,
+        Allergies: row.allergies ?? "",
+        "Medical History": row.hasMedicalHistory ? "Yes" : "No",
+        Status: row.status,
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Accommodation Customers");
+      XLSX.writeFile(
+        wb,
+        `Accommodation_Customers_${new Date().toISOString().split("T")[0]}.xlsx`,
       );
     } else if (activeTab === "Active Subscriptions") {
       if (filteredActiveSubscriptions.length === 0) return;
@@ -526,6 +574,7 @@ export default function CustomerDashboard({
           "Overview",
           "Meal Customers",
           "KIT Customer",
+          "Accommodation Customers",
           "Onboarded",
         ]}
         activeTab={activeTab}
@@ -1046,6 +1095,22 @@ export default function CustomerDashboard({
           setShowArchived={setShowArchived}
           showExpired={showExpired}
           setShowExpired={setShowExpired}
+          searchColumn={searchColumn}
+          setSearchColumn={setSearchColumn}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          searchOptions={searchOptions}
+          isLoading={isLoading || isPending}
+          onRefresh={handleRefreshISR}
+          onExport={handleExportExcel}
+          onEdit={openEditModal}
+          onDeactivate={openDeleteModal}
+        />
+      ) : activeTab === "Accommodation Customers" ? (
+        <AccommodationCustomerSection
+          customers={filteredAccommodationCustomers}
+          showArchived={showArchived}
+          setShowArchived={setShowArchived}
           searchColumn={searchColumn}
           setSearchColumn={setSearchColumn}
           searchTerm={searchTerm}
