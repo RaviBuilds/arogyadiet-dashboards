@@ -10,6 +10,8 @@ import { BackgroundGeolocation } from "@capacitor-community/background-geolocati
 import { Capacitor } from "@capacitor/core";
 import { createClient } from "@/lib/supabase/client";
 import { enableKeepAwake, disableKeepAwake } from "@/lib/capacitor/keep-awake";
+import { useOffDutyReconcile } from "@/shared/hooks/useOffDutyReconcile";
+import { toast } from "sonner";
 
 type RiderStatusToggleProps = {
   initialStatus: boolean;
@@ -29,8 +31,22 @@ export function RiderStatusToggle({
   // Throttle DB writes so a fast GPS stream can't hammer Supabase / the WebView.
   const lastWriteRef = useRef<number>(0);
 
-  const startBackgroundTracking = useCallback(async () => {
-    if (!Capacitor.isNativePlatform()) return;
+  // Foreground reconcile: when the app returns to the foreground, check if the
+  // server has flipped is_online=false (auto-off-duty / admin action) while the
+  // app was backgrounded. If so, stop native tracking. No-op when watcher is
+  // already cleared or rider is already off. (Req 12.4, 12.5, 15.7)
+  useOffDutyReconcile({
+    riderId,
+    getWatcherId: useCallback(() => watcherIdRef.current, []),
+    onWatcherCleared: useCallback(() => {
+      watcherIdRef.current = null;
+      setIsOnDuty(false);
+      disableKeepAwake();
+    }, []),
+  });
+
+  const startBackgroundTracking = useCallback(async (): Promise<boolean> => {
+    if (!Capacitor.isNativePlatform()) return true;
 
     const supabase = createClient();
 
@@ -74,8 +90,10 @@ export function RiderStatusToggle({
       );
 
       watcherIdRef.current = watcherId;
+      return true;
     } catch (err) {
       console.error("Failed to start background geolocation:", err);
+      return false;
     }
   }, [riderId]);
 
@@ -111,25 +129,33 @@ export function RiderStatusToggle({
   const handleToggle = (checked: boolean) => {
     setIsOnDuty(checked);
     startTransition(async () => {
+      // Step 1: Set is_online on the server and confirm success
       const result = await setRiderOnlineAction(checked);
       if (result.error) {
-        setIsOnDuty(!checked); // Revert on failure
-        console.error(result.error);
-        // Revert tracking state on failure
-        if (checked) {
-          await stopBackgroundTracking();
-        }
-      } else {
-        // Toggle succeeded — manage background geolocation
-        if (checked) {
-          await startBackgroundTracking();
-          await enableKeepAwake();
-        } else {
-          await stopBackgroundTracking();
-          await disableKeepAwake();
-        }
-        router.refresh();
+        // Req 9.4: is_online set failed — revert toggle, no watcher, surface error
+        setIsOnDuty(!checked);
+        toast.error(result.error);
+        return;
       }
+
+      // Step 2: Manage background geolocation based on the confirmed state
+      if (checked) {
+        // Req 9.1: is_online=true confirmed, now start tracking
+        const trackingStarted = await startBackgroundTracking();
+        if (!trackingStarted) {
+          // Req 9.5: addWatcher failed after is_online=true — revert is_online, revert toggle, surface error
+          await setRiderOnlineAction(false);
+          setIsOnDuty(false);
+          toast.error("Could not start location tracking. Please try again.");
+          return;
+        }
+        await enableKeepAwake();
+      } else {
+        // Req 9.3: Off toggle — call removeWatcher
+        await stopBackgroundTracking();
+        await disableKeepAwake();
+      }
+      router.refresh();
     });
   };
 

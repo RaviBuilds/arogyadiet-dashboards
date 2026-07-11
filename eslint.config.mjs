@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Project-owned native Capacitor plugin fork — self-contained package with
+    // its own build; not part of the Next.js app compilation.
+    "native/**",
   ]),
 
   // Cross-portal import guard: Master portal must NOT import from Admin portal

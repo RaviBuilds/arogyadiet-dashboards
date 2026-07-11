@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
 import { getISTDateString } from "@/lib/dates/ist";
 import { notifyAdmins } from "@/lib/notifications";
+import { persistWorkloadSnapshots } from "@/lib/clinic/workload";
 
 /**
  * GET /api/cron/dispatch?secret=<CRON_SECRET>&date=YYYY-MM-DD
@@ -30,6 +31,13 @@ export async function GET(request: Request) {
         { success: false, error: result.error },
         { status: 400 },
       );
+    }
+
+    // Persist workload snapshots after dispatch (finalized counts)
+    try {
+      await persistWorkloadSnapshots(targetDate);
+    } catch (snapshotError) {
+      console.error("Workload snapshot error after dispatch cron:", snapshotError);
     }
 
     try {

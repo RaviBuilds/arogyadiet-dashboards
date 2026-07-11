@@ -21,6 +21,7 @@ import {
   PowerOff,
 } from "lucide-react";
 import { RiderStatusToggle } from "@/shared/components/rider/rider-status-toggle";
+import { AutoOffDutyNotice } from "@/shared/components/rider/AutoOffDutyNotice";
 import {
   Card,
   CardContent,
@@ -151,6 +152,7 @@ export async function RiderDashboardContent() {
       </div>
 
       <RiderStatusToggle initialStatus={isOnDuty} riderId={riderProfile.id} />
+      <AutoOffDutyNotice isOnline={isOnDuty} />
 
       {!isOnDuty && (
         <Card className="border-dashed border-2 border-zinc-200 shadow-none bg-white rounded-2xl">

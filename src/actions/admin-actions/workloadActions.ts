@@ -22,10 +22,12 @@ import {
 import { getISTDateString } from "@/lib/dates/ist";
 import {
   computeClinicMealCounts,
+  computeClinicShopProductCounts,
   getWorkloadStatistics,
 } from "@/lib/clinic/workload";
 import { listClinics } from "@/repositories/clinic/clinicRepository";
 import { listKitchens } from "@/repositories/clinic/kitchenRepository";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   WorkloadAggregate,
   WorkloadMealCounts,
@@ -36,12 +38,14 @@ export interface ClinicWorkloadCount extends WorkloadMealCounts {
   clinic_id: string;
   clinic_name: string;
   kitchen_id: string;
+  shop_product_counts: Record<string, number>;
 }
 
 /** Next-day meal counts aggregated for one Kitchen. */
 export interface KitchenWorkloadCount extends WorkloadMealCounts {
   kitchen_id: string;
   kitchen_name: string;
+  shop_product_counts: Record<string, number>;
 }
 
 /** Next-day prep workload broken down per Clinic and per Kitchen (Req 13.1). */
@@ -49,12 +53,14 @@ export interface NextDayWorkload {
   target_date: string;
   clinics: ClinicWorkloadCount[];
   kitchens: KitchenWorkloadCount[];
+  /** Map of product ID → product name for rendering product names in the UI. */
+  productNames: Record<string, string>;
 }
 
 /** Full payload returned to the workload view. */
 export interface ClinicWorkloadView {
   nextDay: NextDayWorkload;
-  history: WorkloadAggregate[];
+  history: (WorkloadAggregate & { clinic_name?: string; kitchen_name?: string })[];
 }
 
 type WorkloadActionResult =
@@ -133,10 +139,11 @@ export async function getClinicWorkloadView(): Promise<WorkloadActionResult> {
 
   const clinicCounts: ClinicWorkloadCount[] = [];
   // Accumulate per-kitchen totals as we walk the clinics.
-  const kitchenAccum = new Map<string, WorkloadMealCounts>();
+  const kitchenAccum = new Map<string, WorkloadMealCounts & { shop_product_counts: Record<string, number> }>();
 
   for (const clinic of coreClinics) {
     const counts = await computeClinicMealCounts(clinic.id, tomorrow);
+    const shopCounts = await computeClinicShopProductCounts(clinic.id, tomorrow);
 
     clinicCounts.push({
       clinic_id: clinic.id,
@@ -145,17 +152,25 @@ export async function getClinicWorkloadView(): Promise<WorkloadActionResult> {
       veg_count: counts.veg_count,
       non_veg_count: counts.non_veg_count,
       egg_count: counts.egg_count,
+      shop_product_counts: shopCounts,
     });
 
     const existing = kitchenAccum.get(clinic.kitchen_id) ?? {
       veg_count: 0,
       non_veg_count: 0,
       egg_count: 0,
+      shop_product_counts: {},
     };
+    // Merge shop product counts
+    const mergedProducts = { ...existing.shop_product_counts };
+    for (const [pid, qty] of Object.entries(shopCounts)) {
+      mergedProducts[pid] = (mergedProducts[pid] ?? 0) + qty;
+    }
     kitchenAccum.set(clinic.kitchen_id, {
       veg_count: existing.veg_count + counts.veg_count,
       non_veg_count: existing.non_veg_count + counts.non_veg_count,
       egg_count: existing.egg_count + counts.egg_count,
+      shop_product_counts: mergedProducts,
     });
   }
 
@@ -166,16 +181,35 @@ export async function getClinicWorkloadView(): Promise<WorkloadActionResult> {
       veg_count: counts.veg_count,
       non_veg_count: counts.non_veg_count,
       egg_count: counts.egg_count,
+      shop_product_counts: counts.shop_product_counts,
     }))
     .sort((a, b) => a.kitchen_name.localeCompare(b.kitchen_name));
 
-  // ── History: most recent 30 calendar days up to and including today ──────────
-  // (Req 13.2). getWorkloadStatistics returns an empty array when no snapshots
-  // fall in range, which surfaces as the zero-count state (Req 13.3).
+  // Resolve product names for all product IDs appearing in next-day counts.
+  const allProductIds = new Set<string>();
+  for (const c of clinicCounts) {
+    for (const pid of Object.keys(c.shop_product_counts)) allProductIds.add(pid);
+  }
+  const productNames: Record<string, string> = {};
+  if (allProductIds.size > 0) {
+    const admin = createAdminClient();
+    const { data: products } = await admin
+      .from("products")
+      .select("id, name")
+      .in("id", [...allProductIds]);
+    for (const p of products ?? []) {
+      productNames[p.id] = p.name;
+    }
+  }
+
+  // ── History: most recent 30 calendar days up to and including tomorrow ─────
+  // Shows all persisted delivery workload data including tomorrow (the date that
+  // orders/dispatch target). This way, once the admin runs any automation, the
+  // data immediately appears in history.
   let history: WorkloadAggregate[] = [];
   const stats = await getWorkloadStatistics({
     startDate: getISTDateString(-29),
-    endDate: getISTDateString(),
+    endDate: getISTDateString(1),
     grouping: "day",
   });
   if (stats.success) {
@@ -185,6 +219,16 @@ export async function getClinicWorkloadView(): Promise<WorkloadActionResult> {
   // history rather than failing the whole view — the next-day workload and the
   // empty-state messaging still render (Req 13.3).
 
+  // Build name lookup maps for history entries
+  const clinicNameById = new Map(allClinics.map((c) => [c.id, c.name]));
+
+  // Enrich history with readable clinic/kitchen names
+  const enrichedHistory = history.map((row) => ({
+    ...row,
+    clinic_name: clinicNameById.get(row.clinic_id) ?? row.clinic_id,
+    kitchen_name: kitchenNameById.get(row.kitchen_id) ?? row.kitchen_id,
+  }));
+
   return {
     success: true,
     data: {
@@ -192,8 +236,9 @@ export async function getClinicWorkloadView(): Promise<WorkloadActionResult> {
         target_date: tomorrow,
         clinics: clinicCounts,
         kitchens: kitchenCounts,
+        productNames,
       },
-      history,
+      history: enrichedHistory,
     },
   };
 }

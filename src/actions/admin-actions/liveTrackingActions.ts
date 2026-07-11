@@ -4,6 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/delivery/orderStatuses";
 import { resolveAddressCoordinates } from "@/lib/geocoding";
 import { applyOperationsScope, type OperationsScope } from "@/lib/franchise/scope";
+import { checkGroupManage } from "@/lib/auth/adminAccess";
+import {
+  ACTIVE_DELIVERY_STATUSES as DUTY_ACTIVE_STATUSES,
+  getISTToday as getDutyISTToday,
+  propagateOffDuty,
+} from "@/lib/delivery/duty-lifecycle";
 
 function getISTDateString(offsetDays = 0) {
   const date = new Date();
@@ -324,4 +330,95 @@ export async function getAdminLiveTrackingData(
     },
     stops,
   };
+}
+
+
+// ─── Admin Off-Duty Action ──────────────────────────────────────────────────────
+
+export type AdminSetRiderOffDutyResult =
+  | { success: true }
+  | { success: false; error: "unauthorized" | "not_found" | "active_assignment" };
+
+/**
+ * Admin-initiated off-duty action with active-assignment guard.
+ *
+ * 1. Verify admin authorization (riders group, manage level).
+ * 2. Verify the rider exists in rider_profiles.
+ * 3. Server-authoritative re-check: any active orders today → reject.
+ * 4. Set is_online=false, last_offline_at=now().
+ * 5. Invoke propagateOffDuty to signal the native service.
+ *
+ * Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 14.7
+ */
+export async function adminSetRiderOffDutyAction(
+  riderId: string,
+): Promise<AdminSetRiderOffDutyResult> {
+  // 1. Admin authorization gate
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) {
+    return { success: false, error: "unauthorized" };
+  }
+
+  const supabase = createAdminClient();
+
+  // 2. Verify rider exists
+  const { data: rider, error: riderError } = await supabase
+    .from("rider_profiles")
+    .select("id")
+    .eq("id", riderId)
+    .maybeSingle();
+
+  if (riderError) {
+    console.error("[adminSetRiderOffDutyAction] rider lookup error:", riderError);
+    return { success: false, error: "not_found" };
+  }
+
+  if (!rider) {
+    return { success: false, error: "not_found" };
+  }
+
+  // 3. Server-authoritative re-check of active orders today
+  const today = getDutyISTToday();
+
+  const { data: activeOrders, error: ordersError } = await supabase
+    .from("delivery_orders")
+    .select("id")
+    .eq("assigned_rider_id", riderId)
+    .eq("delivery_date", today)
+    .in("status", [...DUTY_ACTIVE_STATUSES])
+    .limit(1);
+
+  if (ordersError) {
+    console.error("[adminSetRiderOffDutyAction] orders check error:", ordersError);
+    // On query failure, treat conservatively as active to avoid premature off-duty
+    return { success: false, error: "active_assignment" };
+  }
+
+  if (activeOrders && activeOrders.length > 0) {
+    return { success: false, error: "active_assignment" };
+  }
+
+  // 4. Set is_online=false, last_offline_at=now()
+  const { error: updateError } = await supabase
+    .from("rider_profiles")
+    .update({
+      is_online: false,
+      last_offline_at: new Date().toISOString(),
+    })
+    .eq("id", riderId);
+
+  if (updateError) {
+    console.error("[adminSetRiderOffDutyAction] update error:", updateError);
+    return { success: false, error: "active_assignment" };
+  }
+
+  // 5. Invoke propagateOffDuty (placeholder until task 11.1)
+  try {
+    await propagateOffDuty(riderId);
+  } catch (err) {
+    // Propagation failure does not revert the is_online=false state (Req 10.8 analog)
+    console.error("[adminSetRiderOffDutyAction] propagateOffDuty error:", err);
+  }
+
+  return { success: true };
 }

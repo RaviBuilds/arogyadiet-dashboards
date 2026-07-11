@@ -7,6 +7,7 @@ import { generateDailyOrders } from "@/actions/system-actions/orderGeneration";
 import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
 import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
 import { checkGroupManage } from "@/lib/auth/adminAccess";
+import { persistWorkloadSnapshots } from "@/lib/clinic/workload";
 
 type ProductLinkingResult =
   | { success: true; count: number; targetDate: string }
@@ -178,6 +179,13 @@ export async function triggerSystemAutomation(
         return { success: false, error: result.error };
       }
 
+      // Persist workload snapshots after dispatch (finalized counts)
+      try {
+        await persistWorkloadSnapshots(targetDate);
+      } catch (snapshotError) {
+        console.error("Workload snapshot error after manual dispatch:", snapshotError);
+      }
+
       await logAdminAction("UPDATE", "system_automation", automationName, {
         executed_action: "executeAutomatedDispatch",
         target_date: targetDate,
@@ -208,6 +216,13 @@ export async function triggerSystemAutomation(
           success: false,
           error: result.error ?? "Order generation failed.",
         };
+      }
+
+      // Persist workload snapshots after order creation (initial meal counts)
+      try {
+        await persistWorkloadSnapshots(targetDate);
+      } catch (snapshotError) {
+        console.error("Workload snapshot error after manual order gen:", snapshotError);
       }
 
       await logAdminAction("UPDATE", "system_automation", automationName, {

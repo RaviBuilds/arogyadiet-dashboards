@@ -22,6 +22,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   insertSnapshot,
   listSnapshotsInRange,
+  upsertSnapshot,
 } from "@/repositories/clinic/snapshotRepository";
 import type {
   ActionResult,
@@ -408,4 +409,56 @@ export async function getWorkloadStatistics(params: {
           : "Failed to read workload snapshots.",
     };
   }
+}
+
+/**
+ * Persist (upsert) workload snapshots for ALL Core Clinics for a given date.
+ * Computes meal counts and shop product counts from existing delivery_orders
+ * and addon_orders, then upserts so that re-runs overwrite previous data.
+ *
+ * Call this after order generation or after dispatch to record the current
+ * state of the kitchen workload. Returns the count of clinics processed.
+ */
+export async function persistWorkloadSnapshots(
+  targetDate: string
+): Promise<{ clinicsProcessed: number; errors: string[] }> {
+  const admin = createAdminClient();
+
+  const { data: coreClinics, error } = await admin
+    .from("clinics")
+    .select("id, kitchen_id")
+    .is("franchise_id", null);
+
+  if (error) {
+    return { clinicsProcessed: 0, errors: [`Failed to load core clinics: ${error.message}`] };
+  }
+
+  const clinics = (coreClinics ?? []) as { id: string; kitchen_id: string }[];
+  const errors: string[] = [];
+  let processed = 0;
+
+  for (const clinic of clinics) {
+    try {
+      const meals = await computeClinicMealCounts(clinic.id, targetDate);
+      const shopProductCounts = await computeClinicShopProductCounts(clinic.id, targetDate);
+
+      await upsertSnapshot({
+        clinic_id: clinic.id,
+        kitchen_id: clinic.kitchen_id,
+        target_date: targetDate,
+        veg_count: clampCount(meals.veg_count),
+        non_veg_count: clampCount(meals.non_veg_count),
+        egg_count: clampCount(meals.egg_count),
+        shop_product_counts: clampShopProductCounts(shopProductCounts),
+      });
+
+      processed++;
+    } catch (err) {
+      errors.push(
+        `Clinic ${clinic.id}: ${err instanceof Error ? err.message : "Unknown error"}`
+      );
+    }
+  }
+
+  return { clinicsProcessed: processed, errors };
 }

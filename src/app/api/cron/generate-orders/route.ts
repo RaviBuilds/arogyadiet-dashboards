@@ -3,6 +3,7 @@ import { generateDailyOrders } from "@/actions/system-actions/orderGeneration";
 import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
 import { buildPushPayload, notifyAdmins } from "@/lib/notifications";
 import { notifyCustomersMealsOrderCreated } from "@/lib/notifications/orderNotifications";
+import { persistWorkloadSnapshots } from "@/lib/clinic/workload";
 
 /**
  * GET /api/cron/generate-orders?secret=<CRON_SECRET>&date=YYYY-MM-DD
@@ -42,6 +43,14 @@ export async function GET(request: Request) {
         { success: false, error: result.error },
         { status: 500 },
       );
+    }
+
+    // Persist workload snapshots after order creation (initial meal counts)
+    let snapshotResult = null;
+    try {
+      snapshotResult = await persistWorkloadSnapshots(targetDate);
+    } catch (snapshotError) {
+      console.error("Workload snapshot error after order generation:", snapshotError);
     }
 
     try {

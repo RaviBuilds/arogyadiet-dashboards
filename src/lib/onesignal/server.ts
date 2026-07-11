@@ -78,3 +78,68 @@ export async function sendPushToExternalUserIds(
     console.error("Caught fetch exception:", fetchError);
   }
 }
+
+/**
+ * Sends a data-only (silent) push notification to one or more users by external ID.
+ *
+ * Data-only pushes do not show a visible notification — they deliver a payload
+ * directly to the app's push handler (e.g., for triggering background actions
+ * like stopping GPS tracking on off-duty).
+ *
+ * Uses `content_available: true` for iOS silent push compatibility and
+ * Android data messages via the `data` field.
+ */
+export async function sendDataPushToExternalUserIds(
+  userIds: string[],
+  data: Record<string, string>,
+): Promise<void> {
+  if (!isOneSignalConfigured()) return;
+
+  const externalIds = [
+    ...new Set(userIds.map((id) => id.trim()).filter(Boolean)),
+  ];
+  if (externalIds.length === 0) return;
+
+  const body = {
+    app_id: ONESIGNAL_APP_ID,
+    include_aliases: { external_id: externalIds },
+    target_channel: "push",
+    content_available: true,
+    // Android: data-only message (no notification bar)
+    android_channel_id: undefined,
+    // Suppress visible notification by omitting headings/contents
+    // and setting content_available for background delivery
+    data,
+  };
+
+  try {
+    const response = await fetch(ONESIGNAL_NOTIFICATIONS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        Authorization: `Basic ${ONESIGNAL_REST_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("OneSignal data push API error:", errorText);
+      return;
+    }
+
+    const result = (await response.json()) as {
+      id?: string;
+      errors?: unknown;
+    };
+
+    if (!result?.id) {
+      console.error(
+        "OneSignal data push was not created:",
+        result?.errors ?? result,
+      );
+    }
+  } catch (fetchError) {
+    console.error("OneSignal data push fetch exception:", fetchError);
+  }
+}
