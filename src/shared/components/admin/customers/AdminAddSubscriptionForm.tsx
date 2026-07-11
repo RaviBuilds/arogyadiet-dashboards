@@ -181,7 +181,7 @@ export function AdminAddSubscriptionForm({
   );
 
   const willBePending = activeSubscription !== null;
-
+  console.log(willBePending);
   // Determine if past date toggle should be disabled
   // (when previousSubscriptionEndDate >= yesterday IST, no valid past dates exist)
   const pastDateToggleDisabled = useMemo(() => {
