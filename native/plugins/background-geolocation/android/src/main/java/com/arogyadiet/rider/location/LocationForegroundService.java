@@ -361,12 +361,27 @@ public class LocationForegroundService extends Service implements LocationEngine
         // The null-action redelivery handler will resume from persisted ShiftState.
         Intent restartIntent = new Intent(this, LocationForegroundService.class);
 
-        PendingIntent pendingIntent = PendingIntent.getForegroundService(
-                this,
-                LocationConstants.NOTIFICATION_ID, // request code — reuse notification id for uniqueness
-                restartIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-        );
+        // PendingIntent.getForegroundService() requires API 26 (Android O). On
+        // API 24/25 there are no background-start restrictions, so a plain
+        // getService() PendingIntent restarts the service correctly. Guard the
+        // call so the module compiles and runs on minSdk 24.
+        PendingIntent pendingIntent;
+        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            pendingIntent = PendingIntent.getForegroundService(
+                    this,
+                    LocationConstants.NOTIFICATION_ID, // request code — reuse notification id for uniqueness
+                    restartIntent,
+                    piFlags
+            );
+        } else {
+            pendingIntent = PendingIntent.getService(
+                    this,
+                    LocationConstants.NOTIFICATION_ID,
+                    restartIntent,
+                    piFlags
+            );
+        }
 
         long triggerAtMillis = System.currentTimeMillis() + 5000; // 5 seconds from now
 

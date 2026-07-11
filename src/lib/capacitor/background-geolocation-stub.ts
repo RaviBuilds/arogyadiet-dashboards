@@ -1,11 +1,25 @@
 /**
- * Stub for @capacitor-community/background-geolocation.
+ * Capacitor bridge shim for @capacitor-community/background-geolocation.
  *
- * This package is native-only (Android/iOS) with no JavaScript implementation.
- * During web builds (Next.js/Turbopack), this stub is resolved instead.
- * All actual usage is guarded by Capacitor.isNativePlatform() checks,
- * so this code never executes in practice.
+ * The upstream package ships no JavaScript runtime entry, so web bundlers
+ * (Next.js/Turbopack) can't resolve it directly — hence this local module is
+ * aliased in place of the package (see next.config.ts).
+ *
+ * IMPORTANT: This must delegate to Capacitor's `registerPlugin` rather than
+ * throw. The native app loads the deployed web build via `server.url`, so the
+ * JavaScript that runs on the device is THIS build. If this module throws (or
+ * no-ops), the hardened native LocationForegroundService can never be reached
+ * from the device — which is exactly the bug we are fixing.
+ *
+ * `registerPlugin` is safe everywhere:
+ *   - On a native device it returns a proxy that bridges to the native
+ *     @CapacitorPlugin(name = "BackgroundGeolocation") implementation.
+ *   - In a plain web browser it returns a proxy whose method calls reject with
+ *     "not implemented on web" — but every caller is already guarded by
+ *     Capacitor.isNativePlatform(), so those methods are never invoked on web.
  */
+
+import { registerPlugin } from "@capacitor/core";
 
 export interface WatcherOptions {
   backgroundMessage?: string;
@@ -40,14 +54,11 @@ export interface BackgroundGeolocationPlugin {
   openSettings(): Promise<void>;
 }
 
-function throwNativeOnly(): never {
-  throw new Error(
-    "@capacitor-community/background-geolocation is only available on native platforms.",
-  );
-}
-
-export const BackgroundGeolocation: BackgroundGeolocationPlugin = {
-  addWatcher: () => throwNativeOnly(),
-  removeWatcher: () => throwNativeOnly(),
-  openSettings: () => throwNativeOnly(),
-};
+/**
+ * The real plugin proxy. On native this bridges to the hardened
+ * LocationForegroundService via the "BackgroundGeolocation" plugin name; on
+ * web it is a proxy whose calls reject (never invoked, due to isNativePlatform
+ * guards at every call site).
+ */
+export const BackgroundGeolocation =
+  registerPlugin<BackgroundGeolocationPlugin>("BackgroundGeolocation");
