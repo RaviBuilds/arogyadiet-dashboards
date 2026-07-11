@@ -54,6 +54,7 @@ export async function GET(request: Request) {
 
     // Step 2: Trigger dispatch/routing after product linking completes
     let dispatchResult = null;
+    console.log(dispatchResult);
     try {
       dispatchResult = await executeAutomatedDispatch(targetDate);
 
