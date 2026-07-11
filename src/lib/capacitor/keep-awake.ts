@@ -23,7 +23,7 @@ export async function enableKeepAwake(): Promise<void> {
     await KeepAwake.keepAwake();
     isKeptAwake = true;
   } catch (err) {
-    console.error("Failed to enable keep awake:", err);
+    console.error("Failed to enable keep awake ::", err);
   }
 }
 
@@ -35,6 +35,6 @@ export async function disableKeepAwake(): Promise<void> {
     await KeepAwake.allowSleep();
     isKeptAwake = false;
   } catch (err) {
-    console.error("Failed to disable keep awake:", err);
+    console.error("Failed to disable keep awake ::", err);
   }
 }
