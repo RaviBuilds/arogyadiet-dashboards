@@ -36,7 +36,9 @@ import {
   type CompletableField,
 } from "@/shared/components/customer/ProfileCompletionDialog";
 import { KitDashboard } from "./KitDashboard";
+import { AccommodationDashboard } from "./AccommodationDashboard";
 import { getShippingInfoAction } from "@/actions/admin-actions/shippingActions";
+import { getActiveStayAction } from "@/actions/stayActions";
 import * as kitLifecycleRepo from "@/repositories/kitLifecycleRepository";
 
 export const revalidate = 0;
@@ -136,6 +138,13 @@ export default async function CustomerDashboard() {
     startDate: string | null;
     endDate: string | null;
   } | null = null;
+  let profileDialogCustomerCategory: string | null = null;
+  let profileDialogAccommodationStay: {
+    stayType: string;
+    occupancyType: string;
+    startDate: string | null;
+    endDate: string | null;
+  } | null = null;
 
   if (showProfileDialog) {
     const isEmpty = (v: unknown) =>
@@ -183,6 +192,22 @@ export default async function CustomerDashboard() {
         startDate: dialogSub.starts_on,
         endDate: dialogSub.effective_end_on,
       };
+      profileDialogCustomerCategory = dialogSub.customer_category;
+    }
+
+    // For accommodation customers, the popup shows stay details instead of
+    // the Meal/KIT subscription block (Req 6.1) — fetch the active/pending
+    // stay via the same fallback logic used on the Stay Tracker page.
+    if (profileDialogCustomerCategory === "ACCOMMODATION") {
+      const stayResult = await getActiveStayAction(customerProfileId);
+      if ("data" in stayResult && stayResult.data) {
+        profileDialogAccommodationStay = {
+          stayType: stayResult.data.stayType,
+          occupancyType: stayResult.data.occupancyType,
+          startDate: stayResult.data.startDate,
+          endDate: stayResult.data.endDate,
+        };
+      }
     }
   }
 
@@ -253,6 +278,9 @@ export default async function CustomerDashboard() {
       emptyFields={profileDialogEmptyFields}
       isTestEmail={profileDialogIsTestEmail}
       subscription={profileDialogSubscription}
+      customerCategory={profileDialogCustomerCategory}
+      accommodationStay={profileDialogAccommodationStay}
+      customerProfileId={customerProfileId}
     />
   ) : null;
 
@@ -306,6 +334,20 @@ export default async function CustomerDashboard() {
           subscription={kitSubscription}
           shippingInfo={shippingInfo}
         />
+      </>
+    );
+  }
+
+  // If customer has an ACCOMMODATION subscription, show the accommodation
+  // stay dashboard instead of the generic meal dashboard (Req 8.1, 8.2).
+  if (activeSub && activeSub.customer_category === "ACCOMMODATION") {
+    const stayResult = await getActiveStayAction(customerProfileId);
+    const stay = "data" in stayResult ? stayResult.data : null;
+
+    return (
+      <>
+        {profileDialog}
+        <AccommodationDashboard stay={stay} />
       </>
     );
   }

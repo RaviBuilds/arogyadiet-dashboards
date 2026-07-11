@@ -14,6 +14,9 @@ import {
   ShoppingBag,
   PackageSearch,
   ClipboardList,
+  Droplet,
+  FileText,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -53,6 +56,17 @@ const manageMealItems: NavItem[] = [
 const kitNavItems: NavItem[] = [
   { name: "KIT Tracker", href: "/kit-tracker", icon: CalendarCheck },
   { name: "KIT History", href: "/kit-history", icon: History },
+];
+
+const accommodationNavItems: NavItem[] = [
+  { name: "Stay Tracker", href: "/stay-tracker", icon: CalendarCheck },
+  { name: "Stay History", href: "/stay-history", icon: History },
+];
+
+const accommodationStandaloneNavItems: NavItem[] = [
+  { name: "My Health Logs", href: "/health-logs", icon: Droplet },
+  { name: "Health Report", href: "/health-report", icon: FileText },
+  { name: "Add-on Services", href: "/addon-services", icon: Sparkles },
 ];
 
 const bottomNavItems: NavItem[] = [
@@ -115,11 +129,13 @@ function SidebarContent({
   customerCategory?: string | null;
 }) {
   const isKit = customerCategory === "KIT";
+  const isAccommodation = customerCategory === "ACCOMMODATION";
 
-  // Filter nav items for KIT customers — hide meal/shop-related items
-  const filteredMainNavItems = isKit
-    ? mainNavItems.filter((item) => !["New Subscription", "My Meals"].includes(item.name))
-    : mainNavItems;
+  // Filter nav items for KIT/ACCOMMODATION customers — hide meal/shop-related items
+  const filteredMainNavItems =
+    isKit || isAccommodation
+      ? mainNavItems.filter((item) => !["New Subscription", "My Meals"].includes(item.name))
+      : mainNavItems;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -159,7 +175,28 @@ function SidebarContent({
           </div>
         )}
 
-        {!isKit && (
+        {isAccommodation && (
+          <div>
+            <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <CalendarCheck className="h-3 w-3" /> Stay Tracker
+            </div>
+            <NavGroup
+              items={accommodationNavItems}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
+          </div>
+        )}
+
+        {isAccommodation && (
+          <NavGroup
+            items={accommodationStandaloneNavItems}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        )}
+
+        {!isKit && !isAccommodation && (
           <div>
             <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
               <ShoppingBag className="h-3 w-3" /> Shop
@@ -172,7 +209,7 @@ function SidebarContent({
           </div>
         )}
 
-        {!isKit && (
+        {!isKit && !isAccommodation && (
           <div>
             <div className="mb-2 flex items-center gap-2 px-5 text-xs font-medium uppercase tracking-wider text-zinc-500">
               <Settings2 className="h-3 w-3" /> Manage Meals

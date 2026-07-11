@@ -63,6 +63,7 @@ import {
 import { istHourOf, istDateStringOf, addDaysToISODate } from "@/lib/dates/ist";
 import { PastDayStatusPopup } from "@/shared/components/admin/customers/PastDayStatusPopup";
 import { onboardCustomerAction, checkMobileUniqueAction } from "@/actions/admin-actions/onboardingActions";
+import { onboardAccommodationCustomerAction } from "@/actions/accommodationOnboardingActions";
 import { cn } from "@/lib/utils";
 import type { KitProduct } from "@/types/kitProduct";
 import {
@@ -120,6 +121,13 @@ const detailsSchema = z.object({
   initialMealPreference: z.enum(["VEG", "EGG", "CHICKEN"], {
     message: "Select an initial meal preference.",
   }),
+  // Accommodation-specific fields (Req 1.1–1.9, 2.1–2.8)
+  totalNights: z.coerce.number().int().min(1, "Must be at least 1 night.").max(365, "Cannot exceed 365 nights.").optional(),
+  stayType: z.enum(["AC Villa", "Village Style Hut"]).optional(),
+  occupancyType: z.enum(["Single", "Double"]).optional(),
+  paymentAmount: z.coerce.number().min(1, "Amount must be at least ₹1.").max(9999999, "Amount cannot exceed ₹99,99,999.").optional(),
+  isSharedPayment: z.boolean().default(false),
+  paymentHostMobile: z.string().regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit mobile number.").optional().or(z.literal("")),
   paymentStatus: z.enum(["PAID", "PENDING"]),
   cutoffAcknowledged: z.boolean().default(false),
   pastDateEnabled: z.boolean().default(false),
@@ -130,9 +138,11 @@ const detailsSchema = z.object({
 type DetailsFormValues = z.input<typeof detailsSchema>;
 
 const STEPS = ["Details", "Category & Plan", "Address", "Payment & Review"] as const;
+const ACCOMMODATION_STEPS = ["Details", "Category & Plan", "Payment & Review"] as const;
 type StepIndex = 0 | 1 | 2 | 3;
 
 const STEP_ICONS = [User, Utensils, MapPin, CreditCard] as const;
+const ACCOMMODATION_STEP_ICONS = [User, Utensils, CreditCard] as const;
 
 const STEP_FIELDS: Record<number, (keyof DetailsFormValues)[]> = {
   0: ["fullName", "mobile", "gender", "dietaryPreference", "allergies"],
@@ -197,6 +207,14 @@ export function QuickOnboardingForm({
       kitProductId: undefined,
       kitDurationDays: undefined,
       startDate: earliest,
+      initialMealPreference: undefined,
+      // Accommodation-specific defaults
+      totalNights: undefined,
+      stayType: undefined,
+      occupancyType: undefined,
+      paymentAmount: undefined,
+      isSharedPayment: false,
+      paymentHostMobile: "",
       paymentStatus: "PENDING",
       cutoffAcknowledged: false,
       pastDateEnabled: false,
@@ -219,6 +237,14 @@ export function QuickOnboardingForm({
   const selectedKitProduct = kitProducts.find((k) => k.id === selectedKitProductId) ?? null;
   const addressResolved = Boolean(addressValidity?.canSave);
 
+  // Accommodation-specific derived state (Req 1.1, 1.9, 2.1, 2.8, 3.1)
+  const isAccommodation = primaryCategory === "ACCOMMODATION";
+  const isSharedPayment = values.isSharedPayment ?? false;
+
+  // Determine active steps based on category
+  const activeSteps = isAccommodation ? ACCOMMODATION_STEPS : STEPS;
+  const activeStepIcons = isAccommodation ? ACCOMMODATION_STEP_ICONS : STEP_ICONS;
+
   // Req 5.8: Evaluate once at component mount — isAfterCutoff is already memoized at render time.
   // Tomorrow's date in IST for comparison (Req 5.2, 5.7).
   const tomorrowIST = useMemo(() => addDaysToISODate(istToday, 1), [istToday]);
@@ -231,7 +257,7 @@ export function QuickOnboardingForm({
     !isSubmitting &&
     paymentStatus === "PAID" &&
     (!showAutomationOverride || automationOverrideAcknowledged) &&
-    addressResolved;
+    (isAccommodation || addressResolved);
 
   // Req 5.7: When start date changes away from tomorrow, reset the acknowledgment field.
   useEffect(() => {
@@ -254,6 +280,13 @@ export function QuickOnboardingForm({
     }
   }, [primaryCategory, plans, selectedPlanId, setValue]);
 
+  // Reset start date to today when switching to ACCOMMODATION (no 5PM cutoff rule — Req 1.2)
+  useEffect(() => {
+    if (primaryCategory === "ACCOMMODATION") {
+      setValue("startDate", istToday);
+    }
+  }, [primaryCategory, istToday, setValue]);
+
   const goNext = async () => {
     const fields = STEP_FIELDS[step];
     
@@ -261,7 +294,16 @@ export function QuickOnboardingForm({
     let fieldsToValidate = fields;
     if (step === 1) {
       const category = values.primaryCategory;
-      if (category === "KIT") {
+      if (category === "ACCOMMODATION") {
+        // ACCOMMODATION category: validate accommodation-specific fields, skip planId and KIT fields
+        fieldsToValidate = ["primaryCategory", "startDate", "initialMealPreference", "totalNights", "stayType", "occupancyType"];
+        // Conditionally validate payment fields
+        if (!values.isSharedPayment) {
+          fieldsToValidate = [...fieldsToValidate, "paymentAmount"];
+        } else {
+          fieldsToValidate = [...fieldsToValidate, "paymentHostMobile"];
+        }
+      } else if (category === "KIT") {
         // KIT category: validate kitProductId and kitDurationDays, skip planId
         fieldsToValidate = ["primaryCategory", "kitProductId", "kitDurationDays", "startDate", "initialMealPreference"];
       } else if (category === "MEAL") {
@@ -290,22 +332,36 @@ export function QuickOnboardingForm({
       }
     }
 
-    if (step === 2) {
+    if (step === 2 && !isAccommodation) {
       setAddressTouched(true);
       if (!addressResolved) return;
     }
     if (!valid) return;
 
     // Intercept step 1 → step 2 advance when past date mode is active (Req 1.5, 3.1, 3.2)
-    if (step === 1 && pastDateEnabled && values.startDate && values.startDate < istToday) {
+    // Only for MEAL/KIT categories
+    if (step === 1 && !isAccommodation && pastDateEnabled && values.startDate && values.startDate < istToday) {
       setShowPastDayPopup(true);
+      return;
+    }
+
+    // ACCOMMODATION: skip address step (Req 3.1) — jump from step 1 directly to step 3
+    if (step === 1 && isAccommodation) {
+      setStep(3);
       return;
     }
 
     setStep((prev) => Math.min(prev + 1, STEPS.length - 1) as StepIndex);
   };
 
-  const goBack = () => setStep((prev) => Math.max(prev - 1, 0) as StepIndex);
+  const goBack = () => {
+    // ACCOMMODATION: skip address step going backwards (Req 3.1)
+    if (step === 3 && isAccommodation) {
+      setStep(1);
+      return;
+    }
+    setStep((prev) => Math.max(prev - 1, 0) as StepIndex);
+  };
 
   const applyServerFieldErrors = (fieldErrors?: Record<string, string>) => {
     if (!fieldErrors) return;
@@ -346,11 +402,14 @@ export function QuickOnboardingForm({
     setAddressServerError(null);
     setTempPinError(null);
 
-    if (!addressResolved) {
-      setAddressTouched(true);
-      setStep(2);
-      toast.error("Complete the address before onboarding.");
-      return;
+    // ACCOMMODATION: skip address validation (Req 3.1)
+    if (!isAccommodation) {
+      if (!addressResolved) {
+        setAddressTouched(true);
+        setStep(2);
+        toast.error("Complete the address before onboarding.");
+        return;
+      }
     }
 
     if (!isValidPinFormat(tempPin)) {
@@ -360,6 +419,43 @@ export function QuickOnboardingForm({
       return;
     }
 
+    // ACCOMMODATION flow: call onboardAccommodationCustomerAction (Req 1.9, 3.1)
+    if (isAccommodation) {
+      const accommodationPayload = {
+        fullName: values.fullName,
+        mobile: values.mobile,
+        gender: values.gender as "Male" | "Female" | "Other",
+        dietaryPreference: values.dietaryPreference as "Veg" | "Non-Veg",
+        allergies: values.allergies && values.allergies.trim() !== "" ? values.allergies : undefined,
+        email: values.email && values.email.trim() !== "" ? values.email : undefined,
+        startDate: values.startDate,
+        totalNights: Number(values.totalNights),
+        stayType: values.stayType as "AC Villa" | "Village Style Hut",
+        occupancyType: values.occupancyType as "Single" | "Double",
+        mealPreference: values.initialMealPreference as "VEG" | "EGG" | "CHICKEN",
+        paymentAmount: values.isSharedPayment ? undefined : Number(values.paymentAmount) || undefined,
+        isSharedPayment: values.isSharedPayment ?? false,
+        paymentHostMobile: values.isSharedPayment ? (values.paymentHostMobile || undefined) : undefined,
+        tempPin,
+      };
+
+      startTransition(async () => {
+        const result = await onboardAccommodationCustomerAction(accommodationPayload);
+        if ("success" in result && result.success) {
+          toast.success("Accommodation customer onboarded successfully.");
+          router.push("/customers");
+          router.refresh();
+          return;
+        }
+        if ("error" in result) {
+          toast.error(result.error);
+          applyServerFieldErrors(result.fieldErrors);
+        }
+      });
+      return;
+    }
+
+    // MEAL / KIT flow: existing behavior
     const payload = {
       ...values,
       email:
@@ -403,7 +499,7 @@ export function QuickOnboardingForm({
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
       {/* ── Progress Stepper ── */}
-      <Stepper current={step} />
+      <Stepper current={step} steps={activeSteps} icons={activeStepIcons} isAccommodation={isAccommodation} />
 
       {/* ── Step panel ── */}
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -423,7 +519,7 @@ export function QuickOnboardingForm({
             <p className="text-xs text-slate-500">{STEP_SUBTITLES[step]}</p>
           </div>
           <span className="ml-auto text-xs font-medium text-slate-400">
-            Step {step + 1} of {STEPS.length}
+            Step {isAccommodation ? (step === 3 ? 3 : step + 1) : step + 1} of {activeSteps.length}
           </span>
         </div>
 
@@ -639,6 +735,215 @@ export function QuickOnboardingForm({
                     </p>
                   </Field>
                 </>
+              ) : primaryCategory === "ACCOMMODATION" ? (
+                <>
+                  {/* ── ACCOMMODATION-SPECIFIC FIELDS (Req 1.1–1.9, 2.1–2.8) ── */}
+
+                  {/* Stay Start Date — no 5 PM cutoff for accommodation (Req 1.2) */}
+                  <Field label="Stay start date" htmlFor="startDate" error={errors.startDate?.message} required>
+                    <Input
+                      id="startDate"
+                      type="date"
+                      min={istToday}
+                      max={addDaysToISODate(istToday, 365)}
+                      aria-invalid={Boolean(errors.startDate)}
+                      className="h-9 max-w-xs"
+                      {...register("startDate")}
+                    />
+                    <p className="text-xs text-slate-500">
+                      Today or any future date up to 365 days. No 5 PM cutoff applies.
+                    </p>
+                  </Field>
+
+                  {/* Total Nights (Req 1.3, 1.4) */}
+                  <Field label="Total nights" htmlFor="totalNights" error={errors.totalNights?.message} required>
+                    <Input
+                      id="totalNights"
+                      type="number"
+                      inputMode="numeric"
+                      min="1"
+                      max="365"
+                      placeholder="e.g. 14"
+                      aria-invalid={Boolean(errors.totalNights)}
+                      className="h-9 max-w-xs"
+                      {...register("totalNights", { valueAsNumber: true })}
+                    />
+                    {values.totalNights !== undefined && Number(values.totalNights) > 0 && Number(values.totalNights) < 7 && (
+                      <p className="text-xs text-yellow-600 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 mt-1">
+                        ⚠️ Recommended minimum stay is 7 nights for the best wellness experience.
+                      </p>
+                    )}
+                  </Field>
+
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    {/* Stay Type (Req 1.5) */}
+                    <Field label="Stay type" error={errors.stayType?.message} required>
+                      <Controller
+                        control={control}
+                        name="stayType"
+                        render={({ field }) => (
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <SelectTrigger
+                              aria-label="Stay type"
+                              aria-invalid={Boolean(errors.stayType)}
+                              className="h-9"
+                            >
+                              <SelectValue placeholder="Select stay type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="AC Villa">AC Villa</SelectItem>
+                              <SelectItem value="Village Style Hut">Village Style Hut</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </Field>
+
+                    {/* Occupancy Type (Req 1.6) */}
+                    <Field label="Occupancy type" error={errors.occupancyType?.message} required>
+                      <Controller
+                        control={control}
+                        name="occupancyType"
+                        render={({ field }) => (
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <SelectTrigger
+                              aria-label="Occupancy type"
+                              aria-invalid={Boolean(errors.occupancyType)}
+                              className="h-9"
+                            >
+                              <SelectValue placeholder="Select occupancy" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Single">Single</SelectItem>
+                              <SelectItem value="Double">Double</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </Field>
+                  </div>
+
+                  {/* Meal Preference for accommodation (Req 1.8) */}
+                  <Field label="Meal preference" error={errors.initialMealPreference?.message} required>
+                    <Controller
+                      control={control}
+                      name="initialMealPreference"
+                      render={({ field }) => (
+                        <RadioGroup
+                          className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+                          value={field.value}
+                          onValueChange={field.onChange}
+                        >
+                          {[
+                            { value: "VEG", label: "Veg", desc: "Vegetarian meals" },
+                            { value: "EGG", label: "Egg", desc: "Eggetarian meals" },
+                            { value: "CHICKEN", label: "Chicken", desc: "Non-Veg (Chicken)" },
+                          ].map((option) => {
+                            const isSelected = field.value === option.value;
+                            return (
+                              <label
+                                key={option.value}
+                                className={cn(
+                                  "flex cursor-pointer flex-col gap-1 rounded-xl border-2 px-4 py-3 transition-all duration-150 hover:border-slate-300 hover:bg-slate-50",
+                                  isSelected
+                                    ? "border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-200"
+                                    : "border-slate-200 bg-white",
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <RadioGroupItem value={option.value} aria-label={option.label} />
+                                  <span className={cn(
+                                    "text-sm font-semibold",
+                                    isSelected ? "text-emerald-700" : "text-slate-700"
+                                  )}>
+                                    {option.label}
+                                  </span>
+                                </div>
+                                <p className={cn(
+                                  "text-xs ml-6",
+                                  isSelected ? "text-emerald-600" : "text-slate-500"
+                                )}>
+                                  {option.desc}
+                                </p>
+                              </label>
+                            );
+                          })}
+                        </RadioGroup>
+                      )}
+                    />
+                  </Field>
+
+                  {/* Shared Payment Checkbox (Req 2.1, 2.8) */}
+                  <div className="rounded-xl border border-slate-200 p-4">
+                    <label className="flex cursor-pointer items-center gap-3 select-none">
+                      <Controller
+                        control={control}
+                        name="isSharedPayment"
+                        render={({ field }) => (
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(checked) => {
+                              const enabled = checked === true;
+                              field.onChange(enabled);
+                              // When toggling shared payment, clear the opposite field
+                              if (enabled) {
+                                setValue("paymentAmount", undefined);
+                              } else {
+                                setValue("paymentHostMobile", "");
+                              }
+                            }}
+                          />
+                        )}
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-slate-700">This is a shared payment</p>
+                        <p className="text-xs text-slate-500">Another guest is paying for this customer&apos;s stay</p>
+                      </div>
+                    </label>
+
+                    {/* Payment Amount — shown when NOT shared payment (Req 1.7, 2.2) */}
+                    {!isSharedPayment && (
+                      <div className="mt-4">
+                        <Field label="Payment amount (₹)" htmlFor="paymentAmount" error={errors.paymentAmount?.message} required>
+                          <Input
+                            id="paymentAmount"
+                            type="number"
+                            inputMode="numeric"
+                            min="1"
+                            max="9999999"
+                            placeholder="e.g. 50000"
+                            aria-invalid={Boolean(errors.paymentAmount)}
+                            className="h-9 max-w-xs"
+                            {...register("paymentAmount", { valueAsNumber: true })}
+                          />
+                          <p className="text-xs text-slate-500">
+                            Total amount inclusive of 18% GST (₹1 – ₹99,99,999).
+                          </p>
+                        </Field>
+                      </div>
+                    )}
+
+                    {/* Payment Host Mobile — shown when shared payment is enabled (Req 2.1) */}
+                    {isSharedPayment && (
+                      <div className="mt-4">
+                        <Field label="Payment host mobile" htmlFor="paymentHostMobile" error={errors.paymentHostMobile?.message} required>
+                          <Input
+                            id="paymentHostMobile"
+                            inputMode="numeric"
+                            placeholder="10-digit mobile of the paying guest"
+                            maxLength={10}
+                            aria-invalid={Boolean(errors.paymentHostMobile)}
+                            className="h-9 max-w-xs"
+                            {...register("paymentHostMobile")}
+                          />
+                          <p className="text-xs text-slate-500">
+                            Must be an existing accommodation customer with an active or pending stay.
+                          </p>
+                        </Field>
+                      </div>
+                    )}
+                  </div>
+                </>
               ) : (
                 <>
                   {/* Subscription Plan dropdown for MEAL category */}
@@ -686,7 +991,7 @@ export function QuickOnboardingForm({
                 </>
               )}
 
-              {primaryCategory !== "KIT" && (
+              {primaryCategory !== "KIT" && primaryCategory !== "ACCOMMODATION" && (
                 <Field label="Subscription start date" htmlFor="startDate" error={errors.startDate?.message} required>
                   {pastDateEnabled ? (
                     <>
@@ -750,6 +1055,7 @@ export function QuickOnboardingForm({
                 </Field>
               )}
 
+              {primaryCategory !== "ACCOMMODATION" && (
               <Field label="Initial meal preference" error={errors.initialMealPreference?.message} required>
                 <Controller
                   control={control}
@@ -801,8 +1107,9 @@ export function QuickOnboardingForm({
                   This sets the default meal type for the entire subscription. Customer can change it later for specific days.
                 </p>
               </Field>
+              )}
 
-              {isAfterCutoff && startDate === tomorrowIST && (
+              {!isAccommodation && isAfterCutoff && startDate === tomorrowIST && (
                 <Alert variant="destructive">
                   <AlertTriangle />
                   <AlertTitle>Past the 5 PM cutoff</AlertTitle>
@@ -815,8 +1122,8 @@ export function QuickOnboardingForm({
             </div>
           )}
 
-          {/* ── STEP 3: Address ── */}
-          {step === 2 && (
+          {/* ── STEP 3: Address ── (hidden for ACCOMMODATION) */}
+          {step === 2 && !isAccommodation && (
             <div className="flex flex-col gap-4">
               <AddressCaptureMap
                 value={address}
@@ -977,6 +1284,26 @@ export function QuickOnboardingForm({
                           </>
                         )}
                       </>
+                    ) : primaryCategory === "ACCOMMODATION" ? (
+                      <>
+                        {/* Accommodation Information */}
+                        <ReviewRow label="Stay type" value={values.stayType} />
+                        <ReviewRow label="Occupancy" value={values.occupancyType} />
+                        <ReviewRow label="Total nights" value={values.totalNights ? `${values.totalNights} nights` : "—"} />
+                        <ReviewRow label="Meal preference" value={values.initialMealPreference} />
+                        {isSharedPayment ? (
+                          <>
+                            <ReviewRow label="Payment" value="Shared payment" />
+                            <ReviewRow label="Payment host" value={values.paymentHostMobile || "—"} />
+                          </>
+                        ) : (
+                          <ReviewRow
+                            label="Amount"
+                            value={values.paymentAmount ? `₹${Number(values.paymentAmount).toLocaleString("en-IN")}` : "—"}
+                            highlight
+                          />
+                        )}
+                      </>
                     ) : (
                       <>
                         {/* MEAL Plan Information */}
@@ -997,6 +1324,7 @@ export function QuickOnboardingForm({
                       value={paymentStatus === "PAID" ? "✓ Paid" : "Pending"}
                       highlight={paymentStatus === "PAID"}
                     />
+                    {!isAccommodation && (
                     <ReviewRow
                       label="Address"
                       value={
@@ -1006,6 +1334,7 @@ export function QuickOnboardingForm({
                       }
                       span
                     />
+                    )}
                     {/* Temp PIN with show/hide toggle */}
                     <div className="flex flex-col gap-0.5">
                       <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Temp PIN</dt>
@@ -1089,7 +1418,7 @@ export function QuickOnboardingForm({
         </Button>
 
         <div className="flex items-center gap-1.5">
-          {STEPS.map((_, i) => (
+          {(isAccommodation ? [0, 1, 3] : [0, 1, 2, 3]).map((i) => (
             <span
               key={i}
               className={cn(
@@ -1104,7 +1433,7 @@ export function QuickOnboardingForm({
           ))}
         </div>
 
-        {step < STEPS.length - 1 ? (
+        {step !== 3 ? (
           <Button type="button" size="sm" onClick={goNext} disabled={isSubmitting} className="gap-1.5">
             Next
             <ArrowRight className="h-4 w-4" />
@@ -1172,14 +1501,18 @@ const STEP_SUBTITLES = [
 // Presentational helpers
 // ---------------------------------------------------------------------------
 
-function Stepper({ current }: { current: number }) {
+function Stepper({ current, steps, icons, isAccommodation }: { current: number; steps: readonly string[]; icons: readonly (typeof User)[]; isAccommodation: boolean }) {
+  // For accommodation, map internal step indices to display indices
+  const stepIndices = isAccommodation ? [0, 1, 3] : Array.from({ length: steps.length }, (_, i) => i);
+
   return (
     <nav aria-label="Onboarding steps">
       <ol className="flex items-center gap-0">
-        {STEPS.map((label, index) => {
+        {steps.map((label, displayIndex) => {
+          const internalIndex = stepIndices[displayIndex];
           const state =
-            index === current ? "active" : index < current ? "done" : "todo";
-          const Icon = STEP_ICONS[index];
+            internalIndex === current ? "active" : internalIndex < current ? "done" : "todo";
+          const Icon = icons[displayIndex];
           return (
             <li key={label} className="flex flex-1 items-center last:flex-none">
               <div className="flex flex-col items-center gap-1.5">
@@ -1215,12 +1548,12 @@ function Stepper({ current }: { current: number }) {
               </div>
 
               {/* Connector */}
-              {index < STEPS.length - 1 && (
+              {displayIndex < steps.length - 1 && (
                 <div className="relative mx-2 h-0.5 flex-1 overflow-hidden rounded-full bg-slate-200">
                   <div
                     className={cn(
                       "absolute inset-y-0 left-0 transition-all duration-500",
-                      index < current ? "w-full bg-emerald-500" : "w-0 bg-primary",
+                      internalIndex < current ? "w-full bg-emerald-500" : "w-0 bg-primary",
                     )}
                   />
                 </div>

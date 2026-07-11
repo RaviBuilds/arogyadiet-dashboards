@@ -91,6 +91,7 @@ import {
 import { CourierForm } from "./CourierForm";
 import { AdminKitTrackerView } from "./kit-tracker/AdminKitTrackerView";
 import { KitEligibilityBadge } from "./KitEligibilityBadge";
+import { AccommodationTab } from "./AccommodationTab";
 import type { ShippingInfo } from "@/types/kitShipping";
 
 const AddressPickerMap = dynamic(
@@ -289,9 +290,10 @@ export function Customer360Dashboard({
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const isKitCustomer = customerCategory === "KIT";
+  const isAccommodationCustomer = customerCategory === "ACCOMMODATION";
   const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(
-    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription"].includes(requestedTab)
+    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription", "Accommodation"].includes(requestedTab)
       ? requestedTab
       : "Profile & Medical",
   );
@@ -549,14 +551,21 @@ export function Customer360Dashboard({
                 "Billing",
                 "User Management",
               ]
-            : [
-                "Profile & Medical",
-                "Add Subscription",
-                "Addresses",
-                "Billing",
-                "Coupons",
-                "User Management",
-              ]
+            : isAccommodationCustomer
+              ? [
+                  "Profile & Medical",
+                  "Accommodation",
+                  "Billing",
+                  "User Management",
+                ]
+              : [
+                  "Profile & Medical",
+                  "Add Subscription",
+                  "Addresses",
+                  "Billing",
+                  "Coupons",
+                  "User Management",
+                ]
         }
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -1045,6 +1054,10 @@ export function Customer360Dashboard({
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === "Accommodation" && (
+          <AccommodationTab customerProfileId={customer.id} />
         )}
 
         {activeTab === "Billing" && (
