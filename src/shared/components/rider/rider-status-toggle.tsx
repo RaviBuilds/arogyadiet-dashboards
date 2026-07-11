@@ -68,7 +68,17 @@ export function RiderStatusToggle({
             return;
           }
 
-          if (location) {
+          // Guard against the plugin's initial resolve, which delivers the
+          // watcher-id object ({ id }) with no coordinates. Only upsert when
+          // we actually have valid numeric lat/lng — otherwise we'd write
+          // null and hit the rider_live_locations NOT NULL constraint (23502).
+          if (
+            location &&
+            typeof location.latitude === "number" &&
+            Number.isFinite(location.latitude) &&
+            typeof location.longitude === "number" &&
+            Number.isFinite(location.longitude)
+          ) {
             // Throttle DB writes: at most one every 3s regardless of how
             // frequently the plugin reports new coordinates.
             const now = Date.now();
@@ -76,15 +86,23 @@ export function RiderStatusToggle({
             lastWriteRef.current = now;
 
             const { latitude, longitude } = location;
-            await supabase.from("rider_live_locations").upsert(
-              {
-                rider_id: riderId,
-                lat: latitude,
-                lng: longitude,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "rider_id" },
-            );
+            const { error: upsertError } = await supabase
+              .from("rider_live_locations")
+              .upsert(
+                {
+                  rider_id: riderId,
+                  lat: latitude,
+                  lng: longitude,
+                  updated_at: new Date().toISOString(),
+                },
+                { onConflict: "rider_id" },
+              );
+            if (upsertError) {
+              console.error(
+                "rider_live_locations upsert failed:",
+                upsertError,
+              );
+            }
           }
         },
       );
