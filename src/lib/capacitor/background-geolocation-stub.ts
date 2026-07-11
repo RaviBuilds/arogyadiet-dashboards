@@ -11,7 +11,7 @@
  * no-ops), the hardened native LocationForegroundService can never be reached
  * from the device — which is exactly the bug we are fixing.
  *
- * `registerPlugin` is safe everywhere:
+ * `registerPlugin` is a safe everywhere:
  *   - On a native device it returns a proxy that bridges to the native
  *     @CapacitorPlugin(name = "BackgroundGeolocation") implementation.
  *   - In a plain web browser it returns a proxy whose method calls reject with
