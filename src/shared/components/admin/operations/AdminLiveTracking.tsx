@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Select,
   SelectContent,
@@ -15,12 +15,15 @@ import {
   Circle,
   Loader2,
   MapPin,
+  Power,
   RefreshCw,
   Truck,
 } from "lucide-react";
+import { toast } from "sonner";
 import { SectionHeader } from "../core/SectionHeader";
 import { AdminLiveTrackingMap } from "./AdminLiveTrackingMap";
 import {
+  adminSetRiderOffDutyAction,
   getAdminLiveTrackingData,
   getLiveTrackingRiders,
   type LiveTrackingPayload,
@@ -37,6 +40,14 @@ import {
 } from "./clinicSelector";
 
 const TRACKING_POLL_MS = 10_000;
+
+/** Active delivery statuses — rider has work in progress when any stop is in one of these. */
+const ACTIVE_STATUSES: readonly string[] = [
+  "OUT_FOR_DELIVERY",
+  "ON_THE_WAY",
+  "REACHING_TO_LOCATION",
+  "PICKED",
+];
 
 export default function AdminLiveTracking({
   scope,
@@ -71,6 +82,81 @@ export default function AdminLiveTracking({
   const [payload, setPayload] = useState<LiveTrackingPayload | null>(null);
   const [isLoadingRiders, setIsLoadingRiders] = useState(!selectorFirst);
   const [isPending, startTransition] = useTransition();
+  const [isMarkingOffDuty, setIsMarkingOffDuty] = useState(false);
+  const offDutyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Determine if the selected rider has active assignments today
+  const hasActiveAssignments = useMemo(() => {
+    if (!payload?.stops) return false;
+    return payload.stops.some((stop) => ACTIVE_STATUSES.includes(stop.status));
+  }, [payload]);
+
+  // Mark Off Duty handler with 10s timeout
+  const handleMarkOffDuty = useCallback(async () => {
+    if (!selectedRiderId || hasActiveAssignments || isMarkingOffDuty) return;
+
+    setIsMarkingOffDuty(true);
+
+    // Race the action against a 10s timeout
+    const timeoutPromise = new Promise<{ success: false; error: "timeout" }>(
+      (resolve) => {
+        offDutyTimeoutRef.current = setTimeout(
+          () => resolve({ success: false, error: "timeout" as const }),
+          10_000,
+        );
+      },
+    );
+
+    try {
+      const result = await Promise.race([
+        adminSetRiderOffDutyAction(selectedRiderId),
+        timeoutPromise,
+      ]);
+
+      // Clear timeout if the action resolved first
+      if (offDutyTimeoutRef.current) {
+        clearTimeout(offDutyTimeoutRef.current);
+        offDutyTimeoutRef.current = null;
+      }
+
+      if (result.success) {
+        toast.success("Rider marked Off Duty");
+        // Update local state to reflect off-duty without navigating
+        setPayload((prev) =>
+          prev
+            ? { ...prev, rider: { ...prev.rider, isOnline: false } }
+            : prev,
+        );
+      } else {
+        const errorMsg =
+          result.error === "unauthorized"
+            ? "You do not have permission to perform this action."
+            : result.error === "not_found"
+              ? "Rider not found."
+              : result.error === "active_assignment"
+                ? "Rider has active assignments and cannot be marked off duty."
+                : "Off-duty action timed out. Please try again.";
+        toast.error(errorMsg);
+      }
+    } catch {
+      if (offDutyTimeoutRef.current) {
+        clearTimeout(offDutyTimeoutRef.current);
+        offDutyTimeoutRef.current = null;
+      }
+      toast.error("Failed to mark rider off duty. Please try again.");
+    } finally {
+      setIsMarkingOffDuty(false);
+    }
+  }, [selectedRiderId, hasActiveAssignments, isMarkingOffDuty]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (offDutyTimeoutRef.current) {
+        clearTimeout(offDutyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const loadRiders = useCallback(async () => {
     // Selector-first gating: load no rider/tracking data until a clinic is
@@ -250,6 +336,31 @@ export default function AdminLiveTracking({
             )}
             <span className="ml-2">Refresh</span>
           </Button>
+
+          {payload?.rider?.isOnline && (
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn(
+                "shrink-0 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800",
+                hasActiveAssignments && "cursor-not-allowed opacity-50",
+              )}
+              onClick={handleMarkOffDuty}
+              disabled={hasActiveAssignments || isMarkingOffDuty}
+              title={
+                hasActiveAssignments
+                  ? "Cannot mark off duty while rider has active deliveries"
+                  : "Mark this rider as Off Duty"
+              }
+            >
+              {isMarkingOffDuty ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Power className="h-4 w-4" />
+              )}
+              <span className="ml-2">Mark Off Duty</span>
+            </Button>
+          )}
         </div>
       )}
 

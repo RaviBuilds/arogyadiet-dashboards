@@ -1,0 +1,50 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service
+            android:name="com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService"
+            android:enabled="true"
+            android:exported="true"
+            android:foregroundServiceType="location" />
+
+        <!-- Foreground Started Service, typed location (Android 14/15 compliance).
+        Fully-qualified class name (the classes live in package
+        com.arogyadiet.rider.location, NOT the module namespace
+        com.equimaps.capacitor_background_geolocation). A relative name would
+        resolve to the wrong package and throw ClassNotFoundException. -->
+        <service
+            android:name="com.arogyadiet.rider.location.LocationForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!-- Boot recovery receiver (gated, policy-safe re-arm). -->
+        <receiver
+            android:name="com.arogyadiet.rider.location.BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Required to keep receiving location while the app/shift is backgrounded. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android SDK 34+ additionally requires the FOREGROUND_SERVICE_LOCATION
+    runtime permission to start a foreground service of type "location". -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Partial WakeLock scoped to the shift (OEM Doze defense-in-depth). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Boot recovery: allows the BootReceiver to observe BOOT_COMPLETED. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Android SDK 33+ requires the POST_NOTIFICATIONS runtime permission to
+    display the foreground service notification. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Durable queue drain / sync worker network access. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-feature android:name="android.hardware.location.gps" />
+</manifest>

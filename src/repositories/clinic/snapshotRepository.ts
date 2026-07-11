@@ -127,6 +127,41 @@ export async function listSnapshotsInRange(
 }
 
 /**
+ * Upsert a workload snapshot — insert if new or UPDATE the counts if a snapshot
+ * already exists for the (clinic, kitchen, target_date) combination. This allows
+ * re-running automations (e.g. dispatch) to refresh the persisted workload data.
+ */
+export async function upsertSnapshot(
+  input: WorkloadSnapshotInput
+): Promise<WorkloadSnapshot> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("workload_snapshots")
+    .upsert(
+      {
+        clinic_id: input.clinic_id,
+        kitchen_id: input.kitchen_id,
+        target_date: input.target_date,
+        veg_count: input.veg_count,
+        non_veg_count: input.non_veg_count,
+        egg_count: input.egg_count,
+        shop_product_counts: input.shop_product_counts,
+      },
+      { onConflict: "clinic_id,kitchen_id,target_date" }
+    )
+    .select(SNAPSHOT_COLUMNS)
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to upsert workload snapshot: ${error.message}`);
+  }
+  if (!data) {
+    throw new Error("Failed to upsert workload snapshot: no row returned");
+  }
+  return data as WorkloadSnapshot;
+}
+
+/**
  * Count the number of snapshots referencing the given clinic. Supports
  * dependency-guarded clinic deletion (Req 14.5, 14.6).
  */

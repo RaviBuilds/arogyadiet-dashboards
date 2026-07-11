@@ -3,6 +3,7 @@ import { runProductLinkingAction } from "@/actions/admin-actions/systemActions";
 import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
 import { getISTDateString } from "@/lib/dates/ist";
 import { notifyAdmins } from "@/lib/notifications";
+import { persistWorkloadSnapshots } from "@/lib/clinic/workload";
 
 /**
  * GET /api/cron/link-products?secret=<CRON_SECRET>&date=YYYY-MM-DD
@@ -59,6 +60,13 @@ export async function GET(request: Request) {
       if (dispatchResult.error) {
         console.error("Dispatch failed after product linking:", dispatchResult.error);
       } else {
+        // Persist workload snapshots after dispatch (finalized counts with products)
+        try {
+          await persistWorkloadSnapshots(targetDate);
+        } catch (snapshotError) {
+          console.error("Workload snapshot error after dispatch:", snapshotError);
+        }
+
         try {
           const stats = dispatchResult.stats as { batchesCreated?: number; ordersAssigned?: number } | undefined;
           const batchesCreated = stats?.batchesCreated ?? 0;

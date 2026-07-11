@@ -1,0 +1,49 @@
+{
+  "name": "@capacitor-community/background-geolocation",
+  "version": "1.2.26-arogyadiet.1",
+  "description": "Project-owned fork of @capacitor-community/background-geolocation for the ArogyaDiet rider app. Preserves the addWatcher/removeWatcher JS contract while allowing the native Android service to be hardened.",
+  "fork": {
+    "upstream": "@capacitor-community/background-geolocation",
+    "upstreamVersion": "1.2.26",
+    "reason": "Fork-and-harden the native Android background location service (see .kiro/specs/android-background-gps-tracking). The JavaScript contract is intentionally unchanged.",
+    "owner": "ArogyaDiet"
+  },
+  "license": "MIT",
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/plugin.cjs.js"
+    }
+  },
+  "files": [
+    "android/build.gradle",
+    "android/gradle.properties",
+    "android/gradle/wrapper/gradle-wrapper.properties",
+    "android/proguard-rules.pro",
+    "android/settings.gradle",
+    "android/src/main/",
+    "dist/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": ">=3.0.0"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  },
+  "keywords": [
+    "capacitor",
+    "plugin",
+    "geolocation",
+    "background",
+    "arogyadiet-fork"
+  ]
+}
