@@ -946,6 +946,20 @@ public class LocationForegroundService extends Service implements LocationEngine
             this.isWebViewBound = true;
         }
 
+        // Purge stale queued fixes that belong to a different (or placeholder)
+        // rider id — e.g. numeric callbackId rows left by earlier builds. These
+        // can never upload (invalid UUID) and would retry forever. Done off the
+        // main thread since it touches SQLite.
+        if (riderId != null && queue != null && syncHandler != null) {
+            final String currentRiderId = riderId;
+            syncHandler.post(() -> {
+                int purged = queue.deleteForRidersOtherThan(currentRiderId);
+                if (purged > 0) {
+                    Log.i(TAG, "Purged " + purged + " stale queued fixes from other rider ids.");
+                }
+            });
+        }
+
         // Use defaults for notification text if missing.
         if (notifTitle == null || notifTitle.trim().isEmpty()) {
             notifTitle = "ArogyaDiet Rider";
