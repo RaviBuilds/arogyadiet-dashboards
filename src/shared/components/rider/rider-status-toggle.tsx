@@ -18,10 +18,15 @@ type RiderStatusToggleProps = {
   riderId: string;
 };
 
-/** Heartbeat interval: re-upsert last known location every 60s to keep
+/** Heartbeat interval: re-upsert last known location periodically to keep
  *  updated_at fresh, preventing the admin dashboard from flagging
- *  "GPS inactive" when the rider is stationary (below distanceFilter). */
-const HEARTBEAT_INTERVAL_MS = 60_000;
+ *  "GPS inactive" when the rider is stationary (below distanceFilter).
+ *
+ *  Set to 30s — comfortably under the dashboard's 90s GPS_STALE_MS threshold,
+ *  giving margin even if the WebView throttles the timer while foregrounded.
+ *  NOTE: this is a foreground mitigation only. True background reliability
+ *  requires the upload to move into the native SyncWorker (see LocationForegroundService TODO). */
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 export function RiderStatusToggle({
   initialStatus,
@@ -39,6 +44,9 @@ export function RiderStatusToggle({
   const lastCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   // Heartbeat interval handle
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Guard so we only handle a fatal location error (services off / permission
+  // denied) once per shift instead of on every repeated error callback.
+  const locationErrorHandledRef = useRef(false);
 
   // Foreground reconcile: when the app returns to the foreground, check if the
   // server has flipped is_online=false (auto-off-duty / admin action) while the
@@ -62,6 +70,9 @@ export function RiderStatusToggle({
   const startBackgroundTracking = useCallback(async (): Promise<boolean> => {
     if (!Capacitor.isNativePlatform()) return true;
 
+    // Reset the fatal-error guard for this fresh shift.
+    locationErrorHandledRef.current = false;
+
     const supabase = createClient();
 
     try {
@@ -80,6 +91,42 @@ export function RiderStatusToggle({
         async (location, error) => {
           if (error) {
             console.error("Background Location Error:", error);
+
+            // Detect a fatal error where tracking can never succeed: device
+            // location services are OFF, or permission was denied. The native
+            // bridge surfaces these via the callback (not a promise reject).
+            const msg = (error.message || "").toLowerCase();
+            const isFatal =
+              error.code === "NOT_AUTHORIZED" ||
+              msg.includes("location services disabled") ||
+              msg.includes("permission");
+
+            if (isFatal && !locationErrorHandledRef.current) {
+              locationErrorHandledRef.current = true;
+
+              // Tear down the (non-functional) watcher + heartbeat.
+              if (heartbeatRef.current) {
+                clearInterval(heartbeatRef.current);
+                heartbeatRef.current = null;
+              }
+              lastCoordsRef.current = null;
+              if (watcherIdRef.current) {
+                BackgroundGeolocation.removeWatcher({
+                  id: watcherIdRef.current,
+                }).catch(() => {});
+                watcherIdRef.current = null;
+              }
+
+              // Flip the rider back off-duty on the server and in the UI —
+              // an untracked rider should not appear On Duty.
+              await setRiderOnlineAction(false);
+              setIsOnDuty(false);
+              disableKeepAwake();
+
+              toast.error(
+                "Location is turned off. Enable device Location/GPS, then toggle On Duty again.",
+              );
+            }
             return;
           }
 
