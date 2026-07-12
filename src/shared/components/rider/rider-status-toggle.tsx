@@ -8,7 +8,6 @@ import { Bike, PowerOff } from "lucide-react";
 import { setRiderOnlineAction } from "@/actions/rider-actions/shiftActions";
 import { BackgroundGeolocation } from "@capacitor-community/background-geolocation";
 import { Capacitor } from "@capacitor/core";
-import { createClient } from "@/lib/supabase/client";
 import { enableKeepAwake, disableKeepAwake } from "@/lib/capacitor/keep-awake";
 import { useOffDutyReconcile } from "@/shared/hooks/useOffDutyReconcile";
 import { toast } from "sonner";
@@ -17,16 +16,6 @@ type RiderStatusToggleProps = {
   initialStatus: boolean;
   riderId: string;
 };
-
-/** Heartbeat interval: re-upsert last known location periodically to keep
- *  updated_at fresh, preventing the admin dashboard from flagging
- *  "GPS inactive" when the rider is stationary (below distanceFilter).
- *
- *  Set to 30s — comfortably under the dashboard's 90s GPS_STALE_MS threshold,
- *  giving margin even if the WebView throttles the timer while foregrounded.
- *  NOTE: this is a foreground mitigation only. True background reliability
- *  requires the upload to move into the native SyncWorker (see LocationForegroundService TODO). */
-const HEARTBEAT_INTERVAL_MS = 30_000;
 
 export function RiderStatusToggle({
   initialStatus,
@@ -38,12 +27,6 @@ export function RiderStatusToggle({
 
   // Background geolocation watcher reference
   const watcherIdRef = useRef<string | null>(null);
-  // Throttle DB writes so a fast GPS stream can't hammer Supabase / the WebView.
-  const lastWriteRef = useRef<number>(0);
-  // Last known good coordinates for heartbeat re-upsert
-  const lastCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
-  // Heartbeat interval handle
-  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Guard so we only handle a fatal location error (services off / permission
   // denied) once per shift instead of on every repeated error callback.
   const locationErrorHandledRef = useRef(false);
@@ -56,11 +39,6 @@ export function RiderStatusToggle({
     riderId,
     getWatcherId: useCallback(() => watcherIdRef.current, []),
     onWatcherCleared: useCallback(() => {
-      if (heartbeatRef.current) {
-        clearInterval(heartbeatRef.current);
-        heartbeatRef.current = null;
-      }
-      lastCoordsRef.current = null;
       watcherIdRef.current = null;
       setIsOnDuty(false);
       disableKeepAwake();
@@ -73,8 +51,6 @@ export function RiderStatusToggle({
     // Reset the fatal-error guard for this fresh shift.
     locationErrorHandledRef.current = false;
 
-    const supabase = createClient();
-
     try {
       const watcherId = await BackgroundGeolocation.addWatcher(
         {
@@ -83,121 +59,53 @@ export function RiderStatusToggle({
           backgroundTitle: "Active Delivery Route",
           requestPermissions: true,
           stale: false,
-          // 10m movement threshold. Lower than the previous 25m to ensure
-          // fixes fire with normal walking movement (~12–15m steps). The
-          // 3s DB-write throttle protects against excessive upserts.
+          // 10m movement threshold — fires on normal walking movement while
+          // filtering GPS drift. The native heartbeat covers the stationary case.
           distanceFilter: 10,
+          // Real rider id so the native service can upload directly to Supabase.
+          riderId,
         },
-        async (location, error) => {
-          if (error) {
-            console.error("Background Location Error:", error);
+        // The native LocationForegroundService now owns the upload pipeline
+        // (it POSTs to Supabase from a background thread, independent of the
+        // WebView). This JS callback is only used to detect fatal errors —
+        // device location off or permission denied — which the bridge surfaces
+        // here rather than as a promise rejection.
+        async (_location, error) => {
+          if (!error) return;
 
-            // Detect a fatal error where tracking can never succeed: device
-            // location services are OFF, or permission was denied. The native
-            // bridge surfaces these via the callback (not a promise reject).
-            const msg = (error.message || "").toLowerCase();
-            const isFatal =
-              error.code === "NOT_AUTHORIZED" ||
-              msg.includes("location services disabled") ||
-              msg.includes("permission");
+          console.error("Background Location Error:", error);
 
-            if (isFatal && !locationErrorHandledRef.current) {
-              locationErrorHandledRef.current = true;
+          const msg = (error.message || "").toLowerCase();
+          const isFatal =
+            error.code === "NOT_AUTHORIZED" ||
+            msg.includes("location services disabled") ||
+            msg.includes("permission");
 
-              // Tear down the (non-functional) watcher + heartbeat.
-              if (heartbeatRef.current) {
-                clearInterval(heartbeatRef.current);
-                heartbeatRef.current = null;
-              }
-              lastCoordsRef.current = null;
-              if (watcherIdRef.current) {
-                BackgroundGeolocation.removeWatcher({
-                  id: watcherIdRef.current,
-                }).catch(() => {});
-                watcherIdRef.current = null;
-              }
+          if (isFatal && !locationErrorHandledRef.current) {
+            locationErrorHandledRef.current = true;
 
-              // Flip the rider back off-duty on the server and in the UI —
-              // an untracked rider should not appear On Duty.
-              await setRiderOnlineAction(false);
-              setIsOnDuty(false);
-              disableKeepAwake();
-
-              toast.error(
-                "Location is turned off. Enable device Location/GPS, then toggle On Duty again.",
-              );
+            // Tear down the non-functional watcher.
+            if (watcherIdRef.current) {
+              BackgroundGeolocation.removeWatcher({
+                id: watcherIdRef.current,
+              }).catch(() => {});
+              watcherIdRef.current = null;
             }
-            return;
-          }
 
-          // Guard against the plugin's initial resolve, which delivers the
-          // watcher-id object ({ id }) with no coordinates. Only upsert when
-          // we actually have valid numeric lat/lng — otherwise we'd write
-          // null and hit the rider_live_locations NOT NULL constraint (23502).
-          if (
-            location &&
-            typeof location.latitude === "number" &&
-            Number.isFinite(location.latitude) &&
-            typeof location.longitude === "number" &&
-            Number.isFinite(location.longitude)
-          ) {
-            // Throttle DB writes: at most one every 3s regardless of how
-            // frequently the plugin reports new coordinates.
-            const now = Date.now();
-            if (now - lastWriteRef.current < 3000) return;
-            lastWriteRef.current = now;
+            // Flip the rider back off-duty on the server and in the UI —
+            // an untracked rider should not appear On Duty.
+            await setRiderOnlineAction(false);
+            setIsOnDuty(false);
+            disableKeepAwake();
 
-            const { latitude, longitude } = location;
-
-            // Store last known good coords for heartbeat re-upsert
-            lastCoordsRef.current = { lat: latitude, lng: longitude };
-
-            const { error: upsertError } = await supabase
-              .from("rider_live_locations")
-              .upsert(
-                {
-                  rider_id: riderId,
-                  lat: latitude,
-                  lng: longitude,
-                  updated_at: new Date().toISOString(),
-                },
-                { onConflict: "rider_id" },
-              );
-            if (upsertError) {
-              console.error(
-                "rider_live_locations upsert failed:",
-                upsertError,
-              );
-            }
+            toast.error(
+              "Location is turned off. Enable device Location/GPS, then toggle On Duty again.",
+            );
           }
         },
       );
 
       watcherIdRef.current = watcherId;
-
-      // Start a heartbeat that re-upserts the last known location every 60s.
-      // This keeps updated_at fresh even when the rider is stationary (below
-      // the distanceFilter threshold), preventing the admin dashboard from
-      // incorrectly marking them as "GPS inactive".
-      heartbeatRef.current = setInterval(async () => {
-        const coords = lastCoordsRef.current;
-        if (!coords) return; // No fix received yet — skip
-        const { error: hbError } = await supabase
-          .from("rider_live_locations")
-          .upsert(
-            {
-              rider_id: riderId,
-              lat: coords.lat,
-              lng: coords.lng,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "rider_id" },
-          );
-        if (hbError) {
-          console.error("Heartbeat upsert failed:", hbError);
-        }
-      }, HEARTBEAT_INTERVAL_MS);
-
       return true;
     } catch (err) {
       console.error("Failed to start background geolocation:", err);
@@ -206,13 +114,6 @@ export function RiderStatusToggle({
   }, [riderId]);
 
   const stopBackgroundTracking = useCallback(async () => {
-    // Clear the heartbeat interval first
-    if (heartbeatRef.current) {
-      clearInterval(heartbeatRef.current);
-      heartbeatRef.current = null;
-    }
-    lastCoordsRef.current = null;
-
     if (watcherIdRef.current) {
       try {
         await BackgroundGeolocation.removeWatcher({
@@ -230,10 +131,6 @@ export function RiderStatusToggle({
   // its location stream don't leak and keep draining battery / firing events.
   useEffect(() => {
     return () => {
-      if (heartbeatRef.current) {
-        clearInterval(heartbeatRef.current);
-        heartbeatRef.current = null;
-      }
       if (watcherIdRef.current) {
         BackgroundGeolocation.removeWatcher({
           id: watcherIdRef.current,

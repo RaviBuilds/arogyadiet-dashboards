@@ -145,10 +145,11 @@ public class BackgroundGeolocation extends Plugin {
         // broadcasts back to the correct saved PluginCall (Req 7.5).
         startIntent.putExtra(LocationConstants.EXTRA_BRIDGE_CALLBACK_ID, call.getCallbackId());
 
-        // Use the callbackId as the rider ID placeholder (the bridge is stateless;
-        // real rider identification is handled at the JS layer via the existing
-        // Supabase upsert path). The service uses this for ShiftState tagging.
-        startIntent.putExtra(LocationConstants.EXTRA_RIDER_ID, call.getCallbackId());
+        // Real rider id (rider_profiles.id) passed from JS. The native service
+        // uses this to upload live location directly to Supabase. Falls back to
+        // the callbackId only if the JS layer didn't provide one.
+        String riderId = call.getString("riderId", call.getCallbackId());
+        startIntent.putExtra(LocationConstants.EXTRA_RIDER_ID, riderId);
 
         // --- Start the foreground service (Req 7.1) ---
         try {
@@ -212,7 +213,8 @@ public class BackgroundGeolocation extends Plugin {
         startIntent.putExtra(LocationConstants.EXTRA_REQUEST_PERMISSIONS, requestPermissions);
         startIntent.putExtra(LocationConstants.EXTRA_STALE, stale);
         startIntent.putExtra(LocationConstants.EXTRA_BRIDGE_CALLBACK_ID, call.getCallbackId());
-        startIntent.putExtra(LocationConstants.EXTRA_RIDER_ID, call.getCallbackId());
+        startIntent.putExtra(LocationConstants.EXTRA_RIDER_ID,
+                call.getString("riderId", call.getCallbackId()));
 
         try {
             ContextCompat.startForegroundService(context, startIntent);
