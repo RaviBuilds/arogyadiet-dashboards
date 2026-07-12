@@ -27,6 +27,9 @@ export interface WatcherOptions {
   requestPermissions?: boolean;
   stale?: boolean;
   distanceFilter?: number;
+  /** Real rider id (rider_profiles.id). Passed to the native service so it can
+   *  upload live location directly to Supabase, independent of the WebView. */
+  riderId?: string;
 }
 
 export interface Location {

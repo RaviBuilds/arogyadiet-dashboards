@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo;
 import android.location.Location;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
@@ -21,9 +22,9 @@ import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 import androidx.core.content.ContextCompat;
-import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import java.util.List;
+import java.util.Random;
 
 /**
  * Started + Foreground Service that owns the shift's location lifecycle
@@ -114,6 +115,33 @@ public class LocationForegroundService extends Service implements LocationEngine
     private SyncWorker syncWorker;
 
     // -------------------------------------------------------------------------
+    // Native upload + background thread
+    // -------------------------------------------------------------------------
+
+    /** Uploads live location directly to Supabase (works regardless of WebView state). */
+    private final SupabaseUploader uploader = new SupabaseUploader();
+
+    /** Dedicated background thread for the SyncWorker drain + all network I/O. */
+    private HandlerThread syncThread;
+
+    /** Handler bound to {@link #syncThread}; runs drains, uploads, and the heartbeat. */
+    private Handler syncHandler;
+
+    /** Heartbeat interval — re-upload cached coordinates so updated_at stays fresh
+     *  while stationary (below the distance filter). 30s is well under the admin
+     *  dashboard's 90s staleness threshold. Uses cached coords, so no GPS cost. */
+    private static final long HEARTBEAT_INTERVAL_MS = 30_000L;
+
+    /** Last accepted fix, cached for the stationary heartbeat re-upload. */
+    private volatile boolean hasLastFix = false;
+    private volatile double lastLat = 0d;
+    private volatile double lastLng = 0d;
+    @Nullable private volatile String lastRiderId = null;
+
+    /** Periodic heartbeat runnable (posted on {@link #syncHandler}). */
+    @Nullable private Runnable heartbeatRunnable;
+
+    // -------------------------------------------------------------------------
     // Live-forwarding state
     // -------------------------------------------------------------------------
 
@@ -175,55 +203,65 @@ public class LocationForegroundService extends Service implements LocationEngine
         // Initialize the retry handler on the main looper (Req 3.6).
         retryHandler = new Handler(Looper.getMainLooper());
 
+        // Dedicated background thread for the drain cycle + network uploads.
+        // All Supabase HTTP calls run here, never on the main thread.
+        syncThread = new HandlerThread("LocationSyncThread");
+        syncThread.start();
+        syncHandler = new Handler(syncThread.getLooper());
+
         // Instantiate collaborators.
         shiftStateStore = new ShiftStateStore(this);
         engine = new LocationEngine(this, this);
         wakeLockManager = new WakeLockManager(this);
         queue = new LocationQueue(this);
 
-        // Create SyncWorker with a bridge-backed DeliveryCallback (Req 4.9)
+        // Create SyncWorker with a native-upload DeliveryCallback (Req 4.9)
         // and a ShiftAuthorityCallback for the authoritative shift-state check
         // (Req 12.3, 12.6, 12.7).
         //
-        // DeliveryCallback: When the WebView is alive, deliver() sends a
-        // LocalBroadcast with the location fix data so the bridge's
-        // ServiceReceiver forwards it to JS (Req 7.5). When the WebView is
-        // dead, delivery is unavailable and fixes stay queued (Req 7.6).
+        // DeliveryCallback: uploads fixes directly to Supabase over HTTP from
+        // the background thread. This is independent of the WebView, so uploads
+        // continue whether the app is foregrounded, backgrounded, or the screen
+        // is off. Network failures are retried by the SyncWorker's backoff.
         DeliveryCallback deliveryCallback = new DeliveryCallback() {
             @Override
             public boolean deliver(@NonNull List<QueuedLocation> fixes) {
-                // Only forward when the WebView is alive (Req 7.5, 7.6).
-                if (!isWebViewBound || bridgeCallbackId == null) {
-                    return false;
+                // Upload directly to Supabase from the native background thread.
+                // This is independent of the WebView, so it works whether the
+                // app is foregrounded, backgrounded, or the screen is off.
+                //
+                // For live location only the freshest point matters, so we pick
+                // the newest fix in the batch and upsert it. On success the whole
+                // batch is marked DELIVERED (older points are stale by definition).
+                if (fixes.isEmpty()) {
+                    return true;
                 }
 
-                // Broadcast each fix to the bridge's ServiceReceiver via
-                // LocalBroadcastManager. The receiver matches on
-                // ACTION_LOCATION_BROADCAST and forwards to the saved PluginCall.
-                LocalBroadcastManager broadcastManager =
-                        LocalBroadcastManager.getInstance(LocationForegroundService.this);
-
+                QueuedLocation newest = fixes.get(0);
                 for (QueuedLocation fix : fixes) {
-                    Intent intent = new Intent(LocationConstants.ACTION_LOCATION_BROADCAST);
-                    intent.putExtra("latitude", fix.getLat());
-                    intent.putExtra("longitude", fix.getLng());
-                    intent.putExtra("accuracy", fix.getAccuracyM());
-                    intent.putExtra("altitude", 0.0); // altitude not stored in queue
-                    intent.putExtra("speed", fix.getSpeedMps() != null ? fix.getSpeedMps() : 0f);
-                    intent.putExtra("hasSpeed", fix.getSpeedMps() != null);
-                    intent.putExtra("bearing", fix.getBearingDeg() != null ? fix.getBearingDeg() : 0f);
-                    intent.putExtra("hasBearing", fix.getBearingDeg() != null);
-                    intent.putExtra("time", fix.getCapturedAtEpoch());
-                    intent.putExtra("callbackId", bridgeCallbackId);
-                    broadcastManager.sendBroadcast(intent);
+                    if (fix.getCapturedAtEpoch() > newest.getCapturedAtEpoch()) {
+                        newest = fix;
+                    }
                 }
 
-                return true;
+                boolean ok = uploader.upsertLocation(
+                        newest.getRiderId(), newest.getLat(), newest.getLng());
+
+                if (ok) {
+                    // Cache for the stationary heartbeat re-upload.
+                    lastRiderId = newest.getRiderId();
+                    lastLat = newest.getLat();
+                    lastLng = newest.getLng();
+                    hasLastFix = true;
+                }
+                return ok;
             }
 
             @Override
             public boolean isAvailable() {
-                return isWebViewBound && bridgeCallbackId != null;
+                // Native HTTP upload is always attemptable; network failures are
+                // handled by the SyncWorker's retry/backoff.
+                return true;
             }
         };
 
@@ -268,7 +306,10 @@ public class LocationForegroundService extends Service implements LocationEngine
             }
         };
 
-        syncWorker = new SyncWorker(queue, deliveryCallback, shiftAuthority, stopAction);
+        // Run the drain cycle (and therefore the network upload in deliver())
+        // on the dedicated background thread, never on the main looper.
+        syncWorker = new SyncWorker(queue, deliveryCallback, shiftAuthority, stopAction,
+                syncHandler, new Random());
 
         // Create notification channel (required for Android O+).
         createNotificationChannel();
@@ -400,6 +441,13 @@ public class LocationForegroundService extends Service implements LocationEngine
     public void onDestroy() {
         Log.i(TAG, "onDestroy() — cleaning up resources.");
 
+        // 0a. Stop the heartbeat and quit the background sync thread.
+        stopHeartbeat();
+        if (syncThread != null) {
+            syncThread.quitSafely();
+            syncThread = null;
+        }
+
         // 0. Cancel any pending redelivery retry callbacks (Req 3.6).
         if (retryHandler != null) {
             retryHandler.removeCallbacks(redeliveryRetryRunnable);
@@ -514,6 +562,12 @@ public class LocationForegroundService extends Service implements LocationEngine
         if (currentState != null) {
             riderId = currentState.getRiderId();
         }
+
+        // Cache the freshest coordinates for the stationary heartbeat re-upload.
+        lastRiderId = riderId;
+        lastLat = location.getLatitude();
+        lastLng = location.getLongitude();
+        hasLastFix = true;
 
         // Build a QueuedLocation from the Location fix (Req 4.1).
         // The localId is 0 (assigned by DB on insert), state is PENDING,
@@ -817,6 +871,53 @@ public class LocationForegroundService extends Service implements LocationEngine
     }
 
     // -------------------------------------------------------------------------
+    // Stationary heartbeat — keeps updated_at fresh without new GPS
+    // -------------------------------------------------------------------------
+
+    /**
+     * Starts the periodic heartbeat that re-uploads the last cached coordinates
+     * every {@link #HEARTBEAT_INTERVAL_MS}. This keeps the rider's
+     * {@code updated_at} fresh while stationary (below the distance filter), so
+     * the admin dashboard doesn't flip to "GPS inactive". Uses cached coords —
+     * no GPS acquisition, so battery cost is negligible.
+     *
+     * <p>Idempotent: cancels any existing heartbeat before scheduling a new one.
+     * Runs on {@link #syncHandler} (background thread) so the HTTP call is safe.
+     */
+    private void startHeartbeat() {
+        if (syncHandler == null) {
+            return;
+        }
+        stopHeartbeat();
+
+        heartbeatRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (hasLastFix && lastRiderId != null) {
+                    boolean ok = uploader.upsertLocation(lastRiderId, lastLat, lastLng);
+                    Log.d(TAG, "Heartbeat re-upload " + (ok ? "OK" : "FAILED")
+                            + " rider=" + lastRiderId);
+                }
+                // Reschedule the next heartbeat.
+                if (syncHandler != null && heartbeatRunnable != null) {
+                    syncHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
+                }
+            }
+        };
+
+        syncHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS);
+        Log.i(TAG, "Heartbeat started (" + HEARTBEAT_INTERVAL_MS + "ms interval).");
+    }
+
+    /** Cancels the stationary heartbeat if running. */
+    private void stopHeartbeat() {
+        if (syncHandler != null && heartbeatRunnable != null) {
+            syncHandler.removeCallbacks(heartbeatRunnable);
+        }
+        heartbeatRunnable = null;
+    }
+
+    // -------------------------------------------------------------------------
     // ACTION_START_TRACKING handler
     // -------------------------------------------------------------------------
 
@@ -916,6 +1017,11 @@ public class LocationForegroundService extends Service implements LocationEngine
             syncWorker.start();
         }
 
+        // 6b. Start the stationary heartbeat so updated_at stays fresh even
+        //     when the rider isn't moving (keeps the dashboard from flipping
+        //     to "GPS inactive").
+        startHeartbeat();
+
         // 7. Persist ShiftState.isActive = true (Req 2.3).
         String watcherId = "watcher_" + System.currentTimeMillis();
         ShiftState state = new ShiftState(
@@ -982,6 +1088,11 @@ public class LocationForegroundService extends Service implements LocationEngine
 
         Log.i(TAG, "stopTracking: performing explicit clean stop (Req 8.1).");
         StringBuilder failedSteps = new StringBuilder();
+
+        // Stop the stationary heartbeat and clear cached coords.
+        stopHeartbeat();
+        hasLastFix = false;
+        lastRiderId = null;
 
         // Cancel any pending Play Services retry (Req 15.2).
         if (retryHandler != null && playServicesRetryRunnable != null) {
@@ -1128,6 +1239,9 @@ public class LocationForegroundService extends Service implements LocationEngine
         if (syncWorker != null) {
             syncWorker.start();
         }
+
+        // Resume the stationary heartbeat.
+        startHeartbeat();
 
         // Re-acquire WakeLock.
         wakeLockManager.acquire();
