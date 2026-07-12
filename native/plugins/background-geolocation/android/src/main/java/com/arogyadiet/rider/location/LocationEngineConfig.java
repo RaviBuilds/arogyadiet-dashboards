@@ -18,8 +18,11 @@ public final class LocationEngineConfig {
     /** Default fastest acceptable interval between fixes (ms). */
     public static final long DEFAULT_FASTEST_INTERVAL_MS = 5_000L;
 
-    /** Default minimum displacement between reported fixes (metres). */
-    public static final float DEFAULT_DISTANCE_FILTER_M = 25.0f;
+    /** Default minimum displacement between reported fixes (metres).
+     *  10m is low enough to capture normal walking (~12–15m strides) while
+     *  still filtering out GPS drift noise. The JS-side heartbeat handles
+     *  the stationary case. */
+    public static final float DEFAULT_DISTANCE_FILTER_M = 10.0f;
 
     /** Default accuracy threshold (metres). Fixes worse than this are discarded. */
     public static final float DEFAULT_ACCURACY_THRESHOLD_M = 100.0f;
