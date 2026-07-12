@@ -304,6 +304,66 @@ public class BackgroundGeolocation extends Plugin {
         call.resolve();
     }
 
+    /**
+     * Returns device manufacturer + whether the app is currently exempt from
+     * standard Android battery optimization (Doze / App Standby).
+     *
+     * <p>This only reflects Google's stock Android battery optimization list
+     * (Settings → Apps → Battery → Unrestricted). It cannot see OEM-specific
+     * power managers (Vivo iManager, MIUI Battery & performance, ColorOS
+     * Battery, etc.) — those have no public API and must be surfaced to the
+     * rider as manual instructions keyed off {@code manufacturer} (Req: rider
+     * onboarding permission screen).
+     */
+    @PluginMethod()
+    public void getBatteryOptimizationStatus(PluginCall call) {
+        Context context = getContext();
+        boolean isIgnoringOptimizations = true; // pre-M devices have no Doze
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            android.os.PowerManager powerManager =
+                    (android.os.PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            isIgnoringOptimizations = powerManager != null
+                    && powerManager.isIgnoringBatteryOptimizations(context.getPackageName());
+        }
+
+        JSObject result = new JSObject();
+        result.put("isIgnoringBatteryOptimizations", isIgnoringOptimizations);
+        result.put("manufacturer", Build.MANUFACTURER);
+        result.put("model", Build.MODEL);
+        result.put("sdkInt", Build.VERSION.SDK_INT);
+        call.resolve(result);
+    }
+
+    /**
+     * Launches the stock Android "Ignore battery optimizations" request
+     * dialog for this app (standard {@code ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS}
+     * system prompt). Requires the {@code REQUEST_IGNORE_BATTERY_OPTIMIZATIONS}
+     * permission (already declared in the module manifest).
+     *
+     * <p>This covers stock Android only. On OEM skins (Vivo/Xiaomi/Oppo/etc.)
+     * the rider must ALSO enable the manufacturer's own power-saver exemption
+     * manually — this method cannot reach that surface. The JS caller should
+     * pair this with {@link #openSettings} and manufacturer-specific
+     * instructions shown in the UI.
+     */
+    @PluginMethod()
+    public void requestIgnoreBatteryOptimizations(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            call.resolve();
+            return;
+        }
+        try {
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            Logger.error("Failed to launch battery optimization request", e);
+            call.reject("Could not open battery optimization prompt.", "REQUEST_FAILED");
+        }
+    }
+
     // Checks if device-wide location services are disabled
     private static Boolean isLocationEnabled(Context context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { RiderStatusToggle } from "@/shared/components/rider/rider-status-toggle";
 import { AutoOffDutyNotice } from "@/shared/components/rider/AutoOffDutyNotice";
+import { BatteryPermissionOnboarding } from "@/shared/components/rider/BatteryPermissionOnboarding";
 import {
   Card,
   CardContent,
@@ -151,6 +152,7 @@ export async function RiderDashboardContent() {
         </p>
       </div>
 
+      <BatteryPermissionOnboarding />
       <RiderStatusToggle initialStatus={isOnDuty} riderId={riderProfile.id} />
       <AutoOffDutyNotice isOnline={isOnDuty} />
 
