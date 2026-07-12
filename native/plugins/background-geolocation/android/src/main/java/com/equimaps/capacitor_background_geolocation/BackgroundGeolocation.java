@@ -162,12 +162,17 @@ public class BackgroundGeolocation extends Plugin {
         }
 
         // --- Register the active watcher (Req 7.3, 7.4) ---
-        activeWatchers.put(watcherId, call.getCallbackId());
+        // Store the callbackId (which is what Capacitor returns to `await addWatcher()`)
+        // as both key AND value, so removeWatcher can find it regardless of which
+        // ID the JS side passes.
+        activeWatchers.put(call.getCallbackId(), call.getCallbackId());
 
-        // --- Return the unique watcher ID to JavaScript (Req 7.1) ---
-        JSObject result = new JSObject();
-        result.put("id", watcherId);
-        call.resolve(result);
+        // NOTE: We do NOT call call.resolve() here. For RETURN_CALLBACK methods,
+        // Capacitor automatically returns the callbackId to the JS `await`. Calling
+        // resolve() would deliver a value to the *callback function* (not the await),
+        // which is what was causing the spurious {id} object to appear as a "location"
+        // event and trigger a null-lat upsert. The callback will only receive real
+        // location events from the LocationServiceReceiver broadcast path.
     }
 
     @PermissionCallback
@@ -218,13 +223,10 @@ public class BackgroundGeolocation extends Plugin {
             return;
         }
 
-        // Register the active watcher.
-        activeWatchers.put(watcherId, call.getCallbackId());
+        // Register the active watcher (same pattern as addWatcher — callbackId as both key and value).
+        activeWatchers.put(call.getCallbackId(), call.getCallbackId());
 
-        // Return watcher ID.
-        JSObject result = new JSObject();
-        result.put("id", watcherId);
-        call.resolve(result);
+        // Do NOT call call.resolve() — see note in addWatcher about RETURN_CALLBACK.
     }
 
     /**
@@ -247,16 +249,29 @@ public class BackgroundGeolocation extends Plugin {
             return;
         }
 
-        // Look up the watcher in activeWatchers (Req 7.3, 7.4).
-        String callbackId = activeWatchers.get(watcherId);
+        // Look up the watcher in activeWatchers. The map is keyed by UUID
+        // (generated in addWatcher), but the JS side may pass either the UUID
+        // OR the Capacitor callbackId (which is what `await addWatcher()` returns
+        // in RETURN_CALLBACK mode). Check both to be robust.
+        String callbackId = activeWatchers.get(watcherId); // try as UUID key first
 
         if (callbackId == null) {
-            // Unknown watcher ID — reject with error, issue NO stop intent (Req 7.4).
-            call.reject("Unknown watcher id: " + watcherId, "WATCHER_NOT_FOUND");
-            return;
+            // Not found by UUID key — check if it matches a callbackId value
+            // (the JS toggle stores the callbackId from await, not the UUID).
+            for (Map.Entry<String, String> entry : activeWatchers.entrySet()) {
+                if (watcherId.equals(entry.getValue())) {
+                    callbackId = entry.getValue();
+                    activeWatchers.remove(entry.getKey());
+                    break;
+                }
+            }
+        } else {
+            activeWatchers.remove(watcherId);
         }
 
-        // Known watcher — send ACTION_STOP_TRACKING intent to the service (Req 7.3).
+        // Always send ACTION_STOP_TRACKING to stop the native service,
+        // even if the watcher ID wasn't in our map (defensive — ensures
+        // tracking stops on Off Duty regardless of ID mismatches).
         Context context = getContext();
         Intent stopIntent = new Intent(context, LocationForegroundService.class);
         stopIntent.setAction(LocationConstants.ACTION_STOP_TRACKING);
@@ -264,15 +279,16 @@ public class BackgroundGeolocation extends Plugin {
         try {
             context.startService(stopIntent);
         } catch (Exception e) {
-            // Log the error but still clean up the watcher — the service may
-            // already be stopped or in a state where the intent can't be delivered.
             Logger.error("Failed to send ACTION_STOP_TRACKING intent", e);
         }
 
-        // Remove from active watchers map.
-        activeWatchers.remove(watcherId);
-
-        // Release the saved PluginCall (frees the keep-alive callback).
+        // Release the saved PluginCall if we found the callbackId.
+        if (callbackId != null) {
+            PluginCall savedCall = getBridge().getSavedCall(callbackId);
+            if (savedCall != null) {
+                savedCall.release(getBridge());
+            }
+        }
         PluginCall savedCall = getBridge().getSavedCall(callbackId);
         if (savedCall != null) {
             savedCall.release(getBridge());
