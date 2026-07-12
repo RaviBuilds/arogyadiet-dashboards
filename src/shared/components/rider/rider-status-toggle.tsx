@@ -18,6 +18,11 @@ type RiderStatusToggleProps = {
   riderId: string;
 };
 
+/** Heartbeat interval: re-upsert last known location every 60s to keep
+ *  updated_at fresh, preventing the admin dashboard from flagging
+ *  "GPS inactive" when the rider is stationary (below distanceFilter). */
+const HEARTBEAT_INTERVAL_MS = 60_000;
+
 export function RiderStatusToggle({
   initialStatus,
   riderId,
@@ -30,6 +35,10 @@ export function RiderStatusToggle({
   const watcherIdRef = useRef<string | null>(null);
   // Throttle DB writes so a fast GPS stream can't hammer Supabase / the WebView.
   const lastWriteRef = useRef<number>(0);
+  // Last known good coordinates for heartbeat re-upsert
+  const lastCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  // Heartbeat interval handle
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Foreground reconcile: when the app returns to the foreground, check if the
   // server has flipped is_online=false (auto-off-duty / admin action) while the
@@ -39,6 +48,11 @@ export function RiderStatusToggle({
     riderId,
     getWatcherId: useCallback(() => watcherIdRef.current, []),
     onWatcherCleared: useCallback(() => {
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
+      lastCoordsRef.current = null;
       watcherIdRef.current = null;
       setIsOnDuty(false);
       disableKeepAwake();
@@ -58,9 +72,10 @@ export function RiderStatusToggle({
           backgroundTitle: "Active Delivery Route",
           requestPermissions: true,
           stale: false,
-          // ~25m movement threshold (was 10m). A tighter filter spams the
-          // bridge with micro-movements and degrades WebView frame rates.
-          distanceFilter: 25,
+          // 10m movement threshold. Lower than the previous 25m to ensure
+          // fixes fire with normal walking movement (~12–15m steps). The
+          // 3s DB-write throttle protects against excessive upserts.
+          distanceFilter: 10,
         },
         async (location, error) => {
           if (error) {
@@ -86,6 +101,10 @@ export function RiderStatusToggle({
             lastWriteRef.current = now;
 
             const { latitude, longitude } = location;
+
+            // Store last known good coords for heartbeat re-upsert
+            lastCoordsRef.current = { lat: latitude, lng: longitude };
+
             const { error: upsertError } = await supabase
               .from("rider_live_locations")
               .upsert(
@@ -108,6 +127,30 @@ export function RiderStatusToggle({
       );
 
       watcherIdRef.current = watcherId;
+
+      // Start a heartbeat that re-upserts the last known location every 60s.
+      // This keeps updated_at fresh even when the rider is stationary (below
+      // the distanceFilter threshold), preventing the admin dashboard from
+      // incorrectly marking them as "GPS inactive".
+      heartbeatRef.current = setInterval(async () => {
+        const coords = lastCoordsRef.current;
+        if (!coords) return; // No fix received yet — skip
+        const { error: hbError } = await supabase
+          .from("rider_live_locations")
+          .upsert(
+            {
+              rider_id: riderId,
+              lat: coords.lat,
+              lng: coords.lng,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "rider_id" },
+          );
+        if (hbError) {
+          console.error("Heartbeat upsert failed:", hbError);
+        }
+      }, HEARTBEAT_INTERVAL_MS);
+
       return true;
     } catch (err) {
       console.error("Failed to start background geolocation:", err);
@@ -116,6 +159,13 @@ export function RiderStatusToggle({
   }, [riderId]);
 
   const stopBackgroundTracking = useCallback(async () => {
+    // Clear the heartbeat interval first
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
+    lastCoordsRef.current = null;
+
     if (watcherIdRef.current) {
       try {
         await BackgroundGeolocation.removeWatcher({
@@ -133,6 +183,10 @@ export function RiderStatusToggle({
   // its location stream don't leak and keep draining battery / firing events.
   useEffect(() => {
     return () => {
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
       if (watcherIdRef.current) {
         BackgroundGeolocation.removeWatcher({
           id: watcherIdRef.current,

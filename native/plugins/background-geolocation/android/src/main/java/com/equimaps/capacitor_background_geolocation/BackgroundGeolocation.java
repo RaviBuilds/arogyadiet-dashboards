@@ -289,10 +289,6 @@ public class BackgroundGeolocation extends Plugin {
                 savedCall.release(getBridge());
             }
         }
-        PluginCall savedCall = getBridge().getSavedCall(callbackId);
-        if (savedCall != null) {
-            savedCall.release(getBridge());
-        }
 
         call.resolve();
     }
