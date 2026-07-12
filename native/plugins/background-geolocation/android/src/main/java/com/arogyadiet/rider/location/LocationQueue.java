@@ -375,6 +375,27 @@ public class LocationQueue {
     }
 
     /**
+     * Deletes all queued fixes that do NOT belong to the given rider.
+     *
+     * <p>Called on shift start to purge stale entries left by earlier builds
+     * (e.g. rows tagged with a numeric callbackId placeholder instead of a real
+     * rider UUID). Such rows can never upload successfully and would otherwise
+     * cycle through retries forever.
+     *
+     * @param riderId the current shift's rider id (rows with any other rider_id
+     *                are deleted)
+     * @return the number of rows deleted
+     */
+    public synchronized int deleteForRidersOtherThan(@NonNull String riderId) {
+        SQLiteDatabase db = dbHelper.getWritableDatabase();
+        return db.delete(
+                TABLE_NAME,
+                COL_RIDER_ID + " <> ?",
+                new String[]{riderId}
+        );
+    }
+
+    /**
      * Returns the current total number of entries in the queue.
      * Useful for diagnostics and testing.
      */
