@@ -48,6 +48,15 @@ export interface CallbackError extends Error {
   code?: string;
 }
 
+export interface BatteryOptimizationStatus {
+  /** True if the app is already exempt from stock Android Doze/App Standby. */
+  isIgnoringBatteryOptimizations: boolean;
+  /** e.g. "vivo", "Xiaomi", "OPPO", "samsung", "OnePlus", "realme", "google". */
+  manufacturer: string;
+  model: string;
+  sdkInt: number;
+}
+
 export interface BackgroundGeolocationPlugin {
   addWatcher(
     options: WatcherOptions,
@@ -55,6 +64,10 @@ export interface BackgroundGeolocationPlugin {
   ): Promise<string>;
   removeWatcher(options: { id: string }): Promise<void>;
   openSettings(): Promise<void>;
+  /** Reads whether stock Android battery optimization is already off for this app. */
+  getBatteryOptimizationStatus(): Promise<BatteryOptimizationStatus>;
+  /** Launches the stock "Ignore battery optimizations" system prompt. */
+  requestIgnoreBatteryOptimizations(): Promise<void>;
 }
 
 /**

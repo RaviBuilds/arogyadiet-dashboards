@@ -38,6 +38,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Partial WakeLock scoped to the shift (OEM Doze defense-in-depth). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Allows launching the stock "Ignore battery optimizations" system
+    prompt so the rider can exempt the app from Doze/App Standby (rider
+    onboarding permission screen). Google Play policy requires this be used
+    only for apps with a core background purpose — live delivery tracking
+    qualifies. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Boot recovery: allows the BootReceiver to observe BOOT_COMPLETED. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android SDK 33+ requires the POST_NOTIFICATIONS runtime permission to
