@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { getISTDateString } from "@/lib/dates/ist";
-import { transitionStays } from "@/services/AccommodationService";
+import { runStayTransitions } from "@/services/FallbackAutomationService";
 
 /**
  * GET /api/cron/transition-stays?secret=<CRON_SECRET>
  *
- * Scheduled daily (via Vercel cron).
+ * Scheduled daily via Supabase pg_cron.
  * Transitions stay statuses:
  * - PENDING → ACTIVE for stays whose date range includes today
  * - ACTIVE → FINISHED for stays past their end date
@@ -23,25 +22,23 @@ export async function GET(request: Request) {
   }
 
   try {
-    const currentDate = getISTDateString(0);
-
-    const { activated, finished } = await transitionStays(currentDate);
+    const { activated, finished } = await runStayTransitions("cron");
 
     return NextResponse.json(
       {
         success: true,
         data: {
-          currentDate,
+          currentDate: new Date().toISOString().split("T")[0],
           activated,
           finished,
         },
       },
       { status: 200 },
     );
-  } catch (error: unknown) {
+  } catch (error: any) {
     console.error("Transition Stays Cron Error:", error);
     return NextResponse.json(
-      { success: false, error: "Internal Server Error" },
+      { success: false, error: error?.message || "Internal Server Error" },
       { status: 500 },
     );
   }

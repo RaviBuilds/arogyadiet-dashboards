@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveOrderClinicStamp } from "@/lib/clinic/order-stamp";
+import { upsertAutomationLog, type AutomationRunSource } from "@/lib/automation/logging";
 
 type GenerateOrdersResult = {
   success: boolean;
@@ -17,11 +18,13 @@ async function logOrderGenerationRun({
   targetDate,
   totalPreferencesFound,
   ordersInserted,
+  source,
 }: {
   supabaseAdmin: ReturnType<typeof createAdminClient>;
   targetDate: string;
   totalPreferencesFound: number;
   ordersInserted: number;
+  source: AutomationRunSource;
 }) {
   const statsPayload = {
     totalPreferencesFound,
@@ -29,46 +32,25 @@ async function logOrderGenerationRun({
     skippedExisting: totalPreferencesFound - ordersInserted,
   };
 
-  try {
-    const { data: existingLog, error: existingLogError } = await supabaseAdmin
-      .from("automation_logs")
-      .select("run_count")
-      .eq("automation_type", "ORDER_GEN")
-      .eq("target_date", targetDate)
-      .maybeSingle();
-
-    if (existingLogError) {
-      console.error("Error fetching order generation log:", existingLogError);
-      return;
-    }
-
-    const { error: upsertError } = await supabaseAdmin
-      .from("automation_logs")
-      .upsert(
-        {
-          automation_type: "ORDER_GEN",
-          target_date: targetDate,
-          run_count: (existingLog?.run_count ?? 0) + 1,
-          last_run_at: new Date().toISOString(),
-          latest_stats: statsPayload,
-        },
-        { onConflict: "automation_type,target_date" },
-      );
-
-    if (upsertError) {
-      console.error("Error upserting order generation log:", upsertError);
-    }
-  } catch (error) {
-    console.error("Unexpected error logging order generation run:", error);
-  }
+  await upsertAutomationLog(supabaseAdmin, {
+    automationType: "ORDER_GEN",
+    targetDate,
+    source,
+    stats: statsPayload,
+  });
 }
 
 /**
  * Creates delivery_orders for active, non-paused subscription preferences on the target date.
  * Mirrors the 5:15 PM order-generation SQL and skips rows that already have an order.
+ *
+ * `source` distinguishes a scheduled Supabase pg_cron run ("cron", default) from
+ * an admin-triggered manual run ("manual") for automation_logs bookkeeping —
+ * both increment independent counters on the same (automation_type, target_date) row.
  */
 export async function generateDailyOrders(
   targetDate: string,
+  source: AutomationRunSource = "cron",
 ): Promise<GenerateOrdersResult> {
   const supabaseAdmin = createAdminClient();
 
@@ -98,6 +80,7 @@ export async function generateDailyOrders(
       targetDate,
       totalPreferencesFound: 0,
       ordersInserted: 0,
+      source,
     });
 
     return { success: true, inserted: 0, skipped: 0, targetDate };
@@ -151,6 +134,7 @@ export async function generateDailyOrders(
       targetDate,
       totalPreferencesFound: preferences.length,
       ordersInserted: 0,
+      source,
     });
 
     return {
@@ -217,6 +201,7 @@ export async function generateDailyOrders(
     targetDate,
     totalPreferencesFound: preferences.length,
     ordersInserted: ordersToInsert.length,
+    source,
   });
 
   return {

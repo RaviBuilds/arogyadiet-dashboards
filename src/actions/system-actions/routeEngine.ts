@@ -16,6 +16,7 @@ import { FRANCHISE_FEATURES_ENABLED } from "@/lib/franchise/constants";
 import { resolveBatchClinicStamp } from "@/lib/clinic/order-stamp";
 import { resolveRatesForClinic } from "@/services/RateConfigService";
 import { DEFAULT_RIDER_PAYOUT_RATE_PER_KM } from "@/lib/delivery/deliveryCharge";
+import { upsertAutomationLog, type AutomationRunSource } from "@/lib/automation/logging";
 
 // Service-role client only: this engine runs from cron/background jobs and must bypass RLS.
 const supabaseAdmin = createAdminClient();
@@ -74,40 +75,14 @@ type RiderDispatchResult = {
 async function logRoutingRun(
   targetDate: string,
   latestStats: Record<string, unknown>,
+  source: AutomationRunSource = "cron",
 ) {
-  try {
-    const { data: existingLog, error: existingLogError } = await supabaseAdmin
-      .from("automation_logs")
-      .select("run_count")
-      .eq("automation_type", "ROUTING")
-      .eq("target_date", targetDate)
-      .maybeSingle();
-
-    if (existingLogError) {
-      console.error("Error fetching routing automation log:", existingLogError);
-      return;
-    }
-
-    const newCount = (existingLog?.run_count || 0) + 1;
-    const { error: upsertError } = await supabaseAdmin
-      .from("automation_logs")
-      .upsert(
-        {
-          automation_type: "ROUTING",
-          target_date: targetDate,
-          run_count: newCount,
-          last_run_at: new Date().toISOString(),
-          latest_stats: latestStats,
-        },
-        { onConflict: "automation_type,target_date" },
-      );
-
-    if (upsertError) {
-      console.error("Error upserting routing automation log:", upsertError);
-    }
-  } catch (error) {
-    console.error("Unexpected error logging routing automation run:", error);
-  }
+  await upsertAutomationLog(supabaseAdmin, {
+    automationType: "ROUTING",
+    targetDate,
+    source,
+    stats: latestStats,
+  });
 }
 
 async function resetPendingRoutingForDate(
@@ -725,6 +700,9 @@ export async function executeAutomatedDispatch(
   // over all scopes, identical to the original behavior. See
   // {@link RoutingScopeSelector}.
   routingScope?: RoutingScopeSelector,
+  // Distinguishes a scheduled Supabase pg_cron run ("cron", default) from an
+  // admin-triggered manual run ("manual") for automation_logs bookkeeping.
+  source: AutomationRunSource = "cron",
 ) {
   // Franchise-targeted routing requires the franchise feature flag; with the
   // flag off there are no franchise scopes to run (Req 20.8). Guarded up front
@@ -1057,7 +1035,7 @@ export async function executeAutomatedDispatch(
   // No orders anywhere → friendly success (matches legacy behavior).
   if (totalOrders === 0) {
     const emptyRunStats = { totalOrders: 0, batchesCreated: 0 };
-    await logRoutingRun(targetDate, emptyRunStats);
+    await logRoutingRun(targetDate, emptyRunStats, source);
     return {
       success: true,
       message: `No pending orders found to route for ${targetDate}.`,
@@ -1104,7 +1082,7 @@ export async function executeAutomatedDispatch(
     })),
   };
 
-  await logRoutingRun(targetDate, resultStatsObject);
+  await logRoutingRun(targetDate, resultStatsObject, source);
 
   revalidatePath("/rider/route");
   revalidatePath("/admin/operations");
