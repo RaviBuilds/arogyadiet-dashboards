@@ -39,12 +39,18 @@ import {
   PhoneCall,
   UserPlus,
   Building2,
+  KeyRound,
+  Mail,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   revalidateRidersPage,
   updateRiderDetails,
   deleteRider,
   onboardRider,
+  adminSetRiderPassword,
+  adminSendRiderPasswordResetEmail,
 } from "@/actions/admin-actions/riderActions";
 import { assignRiderToClinic } from "@/actions/admin-actions/riderClinicActions";
 import { toast } from "sonner";
@@ -57,6 +63,7 @@ import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
 import { AdminSubmenuBar } from "../core/AdminSubmenuBar";
 import ServiceAreaManager from "./ServiceAreaManager";
+import { ForceOffDutyButton } from "./ForceOffDutyButton";
 import {
   Select,
   SelectContent,
@@ -125,6 +132,7 @@ export default function RiderManagement({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(false);
   const [isAssignClinicModalOpen, setIsAssignClinicModalOpen] = useState(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
 
   const [activeRider, setActiveRider] = useState<RiderData | null>(null);
   const [editForm, setEditForm] = useState({
@@ -135,6 +143,11 @@ export default function RiderManagement({
   });
   const [deleteConfirmCode, setDeleteConfirmCode] = useState("");
   const [assignClinicId, setAssignClinicId] = useState<string>("");
+  const [passwordForm, setPasswordForm] = useState({
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
   const [onboardForm, setOnboardForm] = useState({
     fullName: "",
     email: "",
@@ -272,6 +285,51 @@ export default function RiderManagement({
     setActiveRider(rider);
     setAssignClinicId(rider.clinic_id || "");
     setIsAssignClinicModalOpen(true);
+  };
+
+  const openPasswordModal = (rider: RiderData) => {
+    setActiveRider(rider);
+    setPasswordForm({ newPassword: "", confirmPassword: "" });
+    setShowPassword(false);
+    setIsPasswordModalOpen(true);
+  };
+
+  const handlePasswordSubmit = () => {
+    if (!activeRider) return;
+    if (!passwordForm.newPassword || passwordForm.newPassword.length < 6) {
+      return toast.error("Password must be at least 6 characters.");
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      return toast.error("Passwords do not match.");
+    }
+    startTransition(async () => {
+      const res = await adminSetRiderPassword(
+        activeRider.userId,
+        passwordForm.newPassword,
+      );
+      if (res.success) {
+        toast.success(`Password updated for ${activeRider.fullName}`);
+        setIsPasswordModalOpen(false);
+        setPasswordForm({ newPassword: "", confirmPassword: "" });
+      } else {
+        toast.error(res.error || "Failed to update password.");
+      }
+    });
+  };
+
+  const handleSendPasswordResetLink = () => {
+    if (!activeRider) return;
+    if (!activeRider.email || activeRider.email === "N/A") {
+      return toast.error("No email address found for this rider.");
+    }
+    startTransition(async () => {
+      const res = await adminSendRiderPasswordResetEmail(activeRider.email);
+      if (res.success) {
+        toast.success(`Password reset link sent to ${activeRider.email}`);
+      } else {
+        toast.error(res.error || "Failed to send reset link.");
+      }
+    });
   };
 
   const handleEditSubmit = () => {
@@ -489,10 +547,20 @@ export default function RiderManagement({
                           </span>
                         </TableCell>
                         <TableCell>
-                          <StatusBadge
-                            status={rider.is_online ? "Online" : "Offline"}
-                            variant="dot"
-                          />
+                          <div className="flex items-center">
+                            <StatusBadge
+                              status={rider.is_online ? "Online" : "Offline"}
+                              variant="dot"
+                            />
+                            {rider.is_online &&
+                              (rider.todayDeliveryStatus === "No Batch Assigned" ||
+                                rider.todayDeliveryStatus === "DELIVERED") && (
+                                <ForceOffDutyButton
+                                  riderId={rider.id}
+                                  riderName={rider.fullName}
+                                />
+                              )}
+                          </div>
                           <div className="text-[10px] text-muted-foreground mt-0.5 ml-4">
                             {formatTime(rider.status_updated_at)}
                           </div>
@@ -656,6 +724,13 @@ export default function RiderManagement({
                                 {rider.clinic_id
                                   ? "Reassign Clinic"
                                   : "Assign Clinic"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="cursor-pointer font-medium"
+                                onClick={() => openPasswordModal(rider)}
+                              >
+                                <KeyRound className="mr-2 h-4 w-4 text-muted-foreground" />
+                                Manage Password
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -1003,6 +1078,173 @@ export default function RiderManagement({
                 <Trash2 className="mr-2 h-4 w-4" />
               )}{" "}
               Deactivate Rider
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- MANAGE PASSWORD MODAL --- */}
+      <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-primary" />
+              Manage Password
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="text-sm text-muted-foreground mt-1.5">
+                Reset password for{" "}
+                <span className="font-bold text-foreground">
+                  {activeRider?.fullName}
+                </span>{" "}
+                ({activeRider?.email !== "N/A" ? activeRider?.email : "No email"})
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            {/* Section 1: Set New Password */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                  <span className="text-xs font-bold text-primary">1</span>
+                </div>
+                <h4 className="text-sm font-semibold text-foreground">
+                  Set New Password Directly
+                </h4>
+              </div>
+              <div className="ml-8 space-y-3">
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium">New Password</label>
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Minimum 6 characters"
+                      value={passwordForm.newPassword}
+                      onChange={(e) =>
+                        setPasswordForm((prev) => ({
+                          ...prev,
+                          newPassword: e.target.value,
+                        }))
+                      }
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full w-10 hover:bg-transparent"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium">Confirm Password</label>
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Re-enter the password"
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) =>
+                      setPasswordForm((prev) => ({
+                        ...prev,
+                        confirmPassword: e.target.value,
+                      }))
+                    }
+                  />
+                  {passwordForm.confirmPassword &&
+                    passwordForm.newPassword !== passwordForm.confirmPassword && (
+                      <p className="text-xs text-destructive font-medium">
+                        Passwords do not match
+                      </p>
+                    )}
+                </div>
+                <Button
+                  onClick={handlePasswordSubmit}
+                  disabled={
+                    isPending ||
+                    !passwordForm.newPassword ||
+                    passwordForm.newPassword !== passwordForm.confirmPassword
+                  }
+                  className="w-full"
+                >
+                  {isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <KeyRound className="mr-2 h-4 w-4" />
+                  )}
+                  Update Password
+                </Button>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground font-medium">
+                  or
+                </span>
+              </div>
+            </div>
+
+            {/* Section 2: Send Reset Link */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                  <span className="text-xs font-bold text-primary">2</span>
+                </div>
+                <h4 className="text-sm font-semibold text-foreground">
+                  Send Password Reset Link
+                </h4>
+              </div>
+              <div className="ml-8 space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  A password reset link will be sent to the rider&apos;s registered
+                  email address. They can set a new password themselves.
+                </p>
+                {activeRider?.email && activeRider.email !== "N/A" ? (
+                  <div className="flex items-center gap-2 text-sm bg-muted/50 px-3 py-2 rounded-md">
+                    <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="font-medium truncate">{activeRider.email}</span>
+                  </div>
+                ) : (
+                  <div className="text-sm text-destructive/80 bg-destructive/5 px-3 py-2 rounded-md">
+                    No email address available for this rider.
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={handleSendPasswordResetLink}
+                  disabled={
+                    isPending || !activeRider?.email || activeRider.email === "N/A"
+                  }
+                  className="w-full"
+                >
+                  {isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Mail className="mr-2 h-4 w-4" />
+                  )}
+                  Send Reset Link
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setIsPasswordModalOpen(false)}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

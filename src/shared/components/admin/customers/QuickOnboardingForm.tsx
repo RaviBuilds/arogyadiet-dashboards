@@ -23,6 +23,7 @@ import {
   Sparkles,
   Eye,
   EyeOff,
+  Truck,
 } from "lucide-react";
 
 import { TempPinField } from "@/shared/components/admin/TempPinField";
@@ -64,6 +65,7 @@ import { istHourOf, istDateStringOf, addDaysToISODate } from "@/lib/dates/ist";
 import { PastDayStatusPopup } from "@/shared/components/admin/customers/PastDayStatusPopup";
 import { onboardCustomerAction, checkMobileUniqueAction } from "@/actions/admin-actions/onboardingActions";
 import { onboardAccommodationCustomerAction } from "@/actions/accommodationOnboardingActions";
+import { calculateDeliveryChargeForAddressAction } from "@/actions/admin-actions/deliveryChargeActions";
 import { cn } from "@/lib/utils";
 import type { KitProduct } from "@/types/kitProduct";
 import {
@@ -183,6 +185,15 @@ export function QuickOnboardingForm({
   const [tempPinError, setTempPinError] = useState<string | null>(null);
   const [showPin, setShowPin] = useState(false);
 
+  // ─── Delivery Charge State (Req 7.1–7.7) ──────────────────────────────────
+  const [deliveryCharge, setDeliveryCharge] = useState<number | null>(null);
+  const [deliveryChargeInput, setDeliveryChargeInput] = useState<string>("");
+  const [calculatedDeliveryCharge, setCalculatedDeliveryCharge] = useState<number | null>(null);
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [ratePerKm, setRatePerKm] = useState<number | null>(null);
+  const [deliveryChargeError, setDeliveryChargeError] = useState<string | null>(null);
+  const [isCalculatingDelivery, setIsCalculatingDelivery] = useState(false);
+
   const {
     register,
     control,
@@ -286,6 +297,133 @@ export function QuickOnboardingForm({
       setValue("startDate", istToday);
     }
   }, [primaryCategory, istToday, setValue]);
+
+  // ─── Delivery Charge Helpers (Req 7.1–7.7) ────────────────────────────────
+
+  /**
+   * Validates and sets the delivery charge from manual input (Req 7.6, 7.7).
+   * Rejects non-numeric, negative, > 999,999.99, > 2 decimal places
+   */
+  const handleDeliveryChargeInput = (rawValue: string) => {
+    setDeliveryChargeInput(rawValue);
+
+    if (rawValue === "") {
+      setDeliveryCharge(null);
+      setDeliveryChargeError(null);
+      return;
+    }
+
+    const parsed = Number(rawValue);
+    if (isNaN(parsed) || !isFinite(parsed)) {
+      setDeliveryChargeError("Delivery charge must be a valid number");
+      return;
+    }
+
+    if (parsed < 0) {
+      setDeliveryChargeError("Delivery charge cannot be negative");
+      return;
+    }
+
+    if (parsed > 999999.99) {
+      setDeliveryChargeError("Delivery charge cannot exceed ₹999,999.99");
+      return;
+    }
+
+    // Check for > 2 decimal places
+    const decimalParts = rawValue.split(".");
+    if (decimalParts.length === 2 && decimalParts[1].length > 2) {
+      setDeliveryChargeError("Delivery charge cannot have more than 2 decimal places");
+      return;
+    }
+
+    setDeliveryCharge(parsed);
+    setDeliveryChargeError(null);
+  };
+
+  /**
+   * Triggers the delivery charge calculation using the address data (Req 7.2).
+   * Uses the address-based variant since the customer does not exist yet.
+   */
+  const handleCalculateDeliveryCharge = async () => {
+    if (!selectedPlan) {
+      setDeliveryChargeError("Please select a plan first");
+      return;
+    }
+
+    if (!addressResolved || !address.pincode) {
+      setDeliveryChargeError("Please complete the address step first (pincode required)");
+      return;
+    }
+
+    setIsCalculatingDelivery(true);
+    setDeliveryChargeError(null);
+
+    try {
+      const result = await calculateDeliveryChargeForAddressAction({
+        address: {
+          pincode: address.pincode,
+          lat: address.lat,
+          lng: address.lng,
+        },
+        planDays: selectedPlan.durationDays,
+      });
+
+      if (!result.success) {
+        setDeliveryChargeError(result.error);
+        setDistanceKm(null);
+        setRatePerKm(null);
+        return;
+      }
+
+      const outcome = result.outcome;
+
+      if (outcome.ok) {
+        // Success — auto-fill the delivery charge (Req 7.2, 7.3)
+        setDeliveryCharge(outcome.totalDeliveryCharge);
+        setDeliveryChargeInput(outcome.totalDeliveryCharge.toFixed(2));
+        setCalculatedDeliveryCharge(outcome.totalDeliveryCharge);
+        setDistanceKm(outcome.distanceKm);
+        setRatePerKm(outcome.ratePerKm);
+        setDeliveryChargeError(null);
+      } else {
+        // Failure — show user-friendly message, allow manual entry (Req 7.5)
+        let message = "Unable to calculate delivery charge";
+        switch (outcome.reason) {
+          case "missing_pincode":
+            message = "Address pincode is missing. Please update the address.";
+            break;
+          case "unresolved_clinic":
+            message =
+              outcome.clinicResolution === "ambiguous"
+                ? "Multiple clinics found for this pincode (ambiguous)"
+                : "No clinic found for the customer's pincode";
+            break;
+          case "missing_coordinates":
+            message =
+              "Address or clinic coordinates are missing. Please update the address with valid coordinates.";
+            break;
+          case "invalid_coordinates":
+            message = "Address or clinic coordinates are invalid (out of range)";
+            break;
+          case "unresolved_rate":
+            message = "Could not resolve the delivery rate for this clinic";
+            break;
+          case "invalid_input":
+            message = `Invalid input: ${outcome.field}`;
+            break;
+        }
+        setDeliveryChargeError(message);
+        setDistanceKm(null);
+        setRatePerKm(null);
+      }
+    } catch {
+      setDeliveryChargeError("An error occurred while calculating delivery charge");
+      setDistanceKm(null);
+      setRatePerKm(null);
+    } finally {
+      setIsCalculatingDelivery(false);
+    }
+  };
 
   const goNext = async () => {
     const fields = STEP_FIELDS[step];
@@ -481,6 +619,8 @@ export function QuickOnboardingForm({
         lng: address.lng,
       },
       tempPin,
+      deliveryCharge: deliveryCharge ?? 0,
+      calculatedDeliveryCharge: calculatedDeliveryCharge,
     };
 
     startTransition(async () => {
@@ -1235,6 +1375,66 @@ export function QuickOnboardingForm({
                 />
               </div>
 
+              {/* ── Delivery Charge Section (Req 7.1–7.7) ── */}
+              {primaryCategory === "MEAL" && (
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                  <div className="flex items-center gap-2">
+                    <Truck className="h-4 w-4 text-slate-500" />
+                    <p className="text-sm font-semibold text-slate-800">Delivery Charges</p>
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isCalculatingDelivery || !addressResolved}
+                      onClick={handleCalculateDeliveryCharge}
+                    >
+                      {isCalculatingDelivery && (
+                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                      )}
+                      Calculate Delivery Charges
+                    </Button>
+
+                    <div className="flex-1 max-w-xs space-y-1">
+                      <label className="text-xs font-medium text-slate-500">
+                        Delivery Charge (₹)
+                      </label>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        className="h-9"
+                        value={deliveryChargeInput}
+                        onChange={(e) => handleDeliveryChargeInput(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {deliveryChargeError && (
+                    <p className="text-xs text-destructive">{deliveryChargeError}</p>
+                  )}
+
+                  {distanceKm !== null && ratePerKm !== null && (
+                    <p className="text-xs text-muted-foreground">
+                      Distance: {distanceKm.toFixed(2)} km × ₹{ratePerKm.toFixed(2)}/km
+                    </p>
+                  )}
+
+                  {selectedPlan && (
+                    <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                      <p className="text-xs font-medium text-emerald-800">
+                        Total Payable: ₹{(selectedPlan.price + (deliveryCharge ?? 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                      <span className="text-xs text-emerald-600">
+                        (Plan ₹{selectedPlan.price.toLocaleString("en-IN")} + Delivery ₹{(deliveryCharge ?? 0).toFixed(2)})
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Review summary */}
               <div className="rounded-xl border border-slate-200 overflow-hidden">
                 <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
@@ -1315,6 +1515,19 @@ export function QuickOnboardingForm({
                               : "—"
                           }
                         />
+                        {deliveryCharge !== null && deliveryCharge > 0 && (
+                          <ReviewRow
+                            label="Delivery"
+                            value={`₹${deliveryCharge.toFixed(2)}`}
+                          />
+                        )}
+                        {selectedPlan && deliveryCharge !== null && deliveryCharge > 0 && (
+                          <ReviewRow
+                            label="Total"
+                            value={`₹${(selectedPlan.price + deliveryCharge).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            highlight
+                          />
+                        )}
                       </>
                     )}
                     

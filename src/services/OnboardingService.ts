@@ -183,6 +183,17 @@ export interface PinContext {
   isTempPin: boolean;
 }
 
+/**
+ * Optional delivery charge context passed by the server action when a delivery
+ * charge is included in the onboarding (delivery-charges-management, Req 6.1–6.5).
+ */
+export interface DeliveryChargeContext {
+  /** The final delivery charge amount (admin-confirmed or auto-calculated). */
+  deliveryCharge: number;
+  /** The system-calculated delivery charge (null if calculation failed/not attempted). */
+  calculatedDeliveryCharge?: number | null;
+}
+
 // ---------------------------------------------------------------------------
 // onboard — the atomic quick-onboarding write
 // ---------------------------------------------------------------------------
@@ -216,6 +227,7 @@ export async function onboard(
   payload: QuickOnboardingInput,
   admin: AdminContext = {},
   pin?: PinContext,
+  delivery?: DeliveryChargeContext,
 ): Promise<OnboardOutcome> {
   // (1) PAID precondition (Req 8.1/8.2). No customer record is persisted while
   //     Payment_Status is anything other than PAID.
@@ -439,14 +451,16 @@ export async function onboard(
       status: "ACTIVE",
       total_days: category === "MEAL" && plan ? plan.totalDays : (payload.kitDurationDays ?? 0),
       pause_credits_total: category === "MEAL" && plan ? plan.pauseCredits : 0,
+      delivery_charge: delivery?.deliveryCharge ?? 0,
       franchise_id: franchiseId,
       initial_meal_category_id: mealCategoryId,  // For daily preferences generation
     },
     payment: {
-      amount: category === "MEAL" && plan ? plan.totalAmount : (kitProduct?.totalAmount ?? 0),
+      amount: (category === "MEAL" && plan ? plan.totalAmount : (kitProduct?.totalAmount ?? 0)) + (delivery?.deliveryCharge ?? 0),
       base_amount: category === "MEAL" && plan ? plan.baseAmount : (kitProduct?.baseAmount ?? 0),
       tax_percent: category === "MEAL" && plan ? plan.taxPercent : (kitProduct?.taxPercent ?? 5),
       tax_amount: category === "MEAL" && plan ? plan.taxAmount : (kitProduct?.taxAmount ?? 0),
+      delivery_charge: delivery?.deliveryCharge ?? 0,
       paid_at: nowIso,
       payment_method: "COUNTER",
       franchise_id: franchiseId,

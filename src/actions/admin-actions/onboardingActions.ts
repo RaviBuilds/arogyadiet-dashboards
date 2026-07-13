@@ -60,9 +60,11 @@ import {
   onboard as serviceOnboard,
   type ActivateAddOnResult,
   type AddOnActivationPayment,
+  type DeliveryChargeContext,
 } from "@/services/OnboardingService";
 import { isValidPinFormat } from "@/lib/pin/pinUtils";
 import { hashPin } from "@/services/PinService";
+import { logAdminAction } from "@/lib/logger";
 
 // ---------------------------------------------------------------------------
 // Action result types
@@ -311,13 +313,57 @@ export async function onboardCustomerAction(
   }
 
   // (6) Delegate the atomic write to the service (Req 6.1-6.6).
-  const outcome = await serviceOnboard(input, { adminUserId }, { pinHash, isTempPin: true });
+  // Extract delivery charge from the raw payload (not part of Zod schema,
+  // handled like tempPin). Delivery-charges-management Req 6.1–6.5.
+  const rawDeliveryCharge = typeof rawPayload.deliveryCharge === "number"
+    ? rawPayload.deliveryCharge
+    : typeof rawPayload.deliveryCharge === "string"
+      ? Number(rawPayload.deliveryCharge)
+      : 0;
+  const rawCalculatedDeliveryCharge = typeof rawPayload.calculatedDeliveryCharge === "number"
+    ? rawPayload.calculatedDeliveryCharge
+    : typeof rawPayload.calculatedDeliveryCharge === "string"
+      ? Number(rawPayload.calculatedDeliveryCharge)
+      : null;
+
+  const deliveryChargeAmount = isNaN(rawDeliveryCharge) || rawDeliveryCharge < 0
+    ? 0
+    : rawDeliveryCharge;
+
+  const deliveryContext: DeliveryChargeContext | undefined =
+    deliveryChargeAmount > 0
+      ? {
+          deliveryCharge: deliveryChargeAmount,
+          calculatedDeliveryCharge: rawCalculatedDeliveryCharge,
+        }
+      : undefined;
+
+  const outcome = await serviceOnboard(
+    input,
+    { adminUserId },
+    { pinHash, isTempPin: true },
+    deliveryContext,
+  );
   if (!outcome.ok) {
     return {
       success: false,
       error: outcome.message,
       fieldErrors: outcome.fieldErrors,
     };
+  }
+
+  // (6b) Audit: log admin override if the delivery charge differs from the
+  // system-calculated value (delivery-charges-management Req 12.4).
+  if (
+    deliveryContext &&
+    deliveryContext.calculatedDeliveryCharge != null &&
+    deliveryContext.deliveryCharge !== deliveryContext.calculatedDeliveryCharge
+  ) {
+    await logAdminAction("UPDATE", "delivery_charge_override", outcome.ids.subscription_id, {
+      calculatedAmount: deliveryContext.calculatedDeliveryCharge,
+      overriddenAmount: deliveryContext.deliveryCharge,
+      surface: "quick_onboarding",
+    });
   }
 
   // (7) Refresh the Customers dashboard sections (Req 6.9).

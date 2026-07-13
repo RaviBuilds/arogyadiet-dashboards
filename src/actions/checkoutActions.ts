@@ -11,6 +11,8 @@ import {
   applyCouponToBasePrice,
   resolveSubscriptionCoupon,
 } from "@/lib/coupons/resolveSubscriptionCoupon";
+import { computeForCustomer } from "@/services/DeliveryChargeService";
+import { calculateTotalPayable } from "@/lib/delivery/deliveryCharge";
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
   key_secret: process.env.RAZORPAY_KEY_SECRET!,
@@ -63,6 +65,52 @@ export async function validateCouponAction(
   }
 }
 
+// PREVIEW DELIVERY CHARGE (for customer checkout review step)
+// No admin gate — this is called from the customer checkout UI to display
+// the delivery charge before the customer proceeds to pay.
+export async function previewDeliveryChargeAction(
+  customerProfileId: string,
+  planId: string,
+) {
+  try {
+    const { data: plan } = await supabaseAdmin
+      .from("subscription_plans")
+      .select("duration_days")
+      .eq("id", planId)
+      .single();
+    if (!plan) return { success: false as const, error: "Plan not found" };
+
+    const outcome = await computeForCustomer(supabaseAdmin, {
+      customerProfileId,
+      planDays: plan.duration_days,
+    });
+
+    if (outcome.ok) {
+      return {
+        success: true as const,
+        totalDeliveryCharge: outcome.totalDeliveryCharge,
+        perDayCharge: outcome.perDayCharge,
+        distanceKm: outcome.distanceKm,
+        ratePerKm: outcome.ratePerKm,
+      };
+    } else {
+      return {
+        success: false as const,
+        error: "Unable to compute delivery charge",
+        deliveryChargeFailure: {
+          reason: outcome.reason,
+          ...(outcome.reason === "unresolved_clinic"
+            ? { clinicResolution: outcome.clinicResolution }
+            : {}),
+        },
+      };
+    }
+  } catch (error) {
+    console.error("Preview Delivery Charge Error:", error);
+    return { success: false as const, error: "Failed to compute delivery charge" };
+  }
+}
+
 // SECURE ORDER CREATION
 export async function createRazorpayOrderAction(
   planId: string,
@@ -110,7 +158,37 @@ export async function createRazorpayOrderAction(
     const finalGst = hasValidCoupon
       ? finalBasePrice * gstRate
       : originalTaxAmount;
-    const totalAmountINR = finalBasePrice + finalGst;
+    const planAmountINR = finalBasePrice + finalGst;
+
+    // 4. Compute delivery charge server-side (Req 9.1, 9.5, 9.6)
+    let totalDeliveryCharge = 0;
+    let deliveryChargeOutcome: Awaited<ReturnType<typeof computeForCustomer>> | null = null;
+
+    if (customerProfileId) {
+      deliveryChargeOutcome = await computeForCustomer(supabaseAdmin, {
+        customerProfileId,
+        planDays: plan.duration_days,
+      });
+
+      if (deliveryChargeOutcome.ok) {
+        totalDeliveryCharge = deliveryChargeOutcome.totalDeliveryCharge;
+      } else {
+        // If delivery charge cannot be computed, refuse order creation (Req 9.7)
+        return {
+          success: false,
+          error: "Unable to compute delivery charge",
+          deliveryChargeFailure: {
+            reason: deliveryChargeOutcome.reason,
+            ...(deliveryChargeOutcome.reason === "unresolved_clinic"
+              ? { clinicResolution: deliveryChargeOutcome.clinicResolution }
+              : {}),
+          },
+        };
+      }
+    }
+
+    // 5. Calculate Total_Payable = plan amount + delivery charge (Req 6.2)
+    const totalAmountINR = calculateTotalPayable(planAmountINR, totalDeliveryCharge);
 
     const options = {
       amount: Math.round(totalAmountINR * 100), // Razorpay wants paisa
@@ -125,6 +203,7 @@ export async function createRazorpayOrderAction(
       totalAmountINR,
       appliedBasePrice: finalBasePrice,
       appliedGst: finalGst,
+      totalDeliveryCharge,
     };
   } catch (error) {
     console.error("Razorpay Order Error:", error);
@@ -163,6 +242,7 @@ export async function verifyAndActivateSubscriptionAction(
       pausedDates = [],
       mealOverrides = {},
       addressId,
+      deliveryCharge: clientDeliveryCharge,
     } = checkoutData;
 
     const { data: plan } = await supabaseAdmin
@@ -171,6 +251,45 @@ export async function verifyAndActivateSubscriptionAction(
       .eq("id", planId)
       .single();
     if (!plan) throw new Error("Plan not found");
+
+    // --- RECOMPUTE DELIVERY CHARGE SERVER-SIDE (Req 9.5, 9.6) ---
+    let totalDeliveryCharge = 0;
+
+    if (customerProfileId) {
+      const deliveryOutcome = await computeForCustomer(supabaseAdmin, {
+        customerProfileId,
+        planDays: plan.duration_days,
+      });
+
+      if (deliveryOutcome.ok) {
+        totalDeliveryCharge = deliveryOutcome.totalDeliveryCharge;
+      } else {
+        // If delivery charge cannot be computed, refuse subscription creation (Req 9.7, 6.5)
+        return {
+          success: false,
+          error: "Unable to compute delivery charge for subscription activation.",
+          deliveryChargeFailure: {
+            reason: deliveryOutcome.reason,
+            ...(deliveryOutcome.reason === "unresolved_clinic"
+              ? { clinicResolution: deliveryOutcome.clinicResolution }
+              : {}),
+          },
+        };
+      }
+    }
+
+    // Reject any client-supplied delivery charge that differs from server-computed value (Req 9.6)
+    if (
+      clientDeliveryCharge !== undefined &&
+      clientDeliveryCharge !== null &&
+      Number(clientDeliveryCharge) !== totalDeliveryCharge
+    ) {
+      return {
+        success: false,
+        error: "Delivery charge mismatch. The server-computed delivery charge differs from the client-supplied value.",
+      };
+    }
+    // -----------------------------------------------------------
 
     // --- RECALCULATE EXACT AMOUNT FOR ACCURATE INVOICING ---
     let finalBasePrice = plan.base_price;
@@ -202,7 +321,10 @@ export async function verifyAndActivateSubscriptionAction(
     const finalGst = hasValidCoupon
       ? finalBasePrice * gstRate
       : originalTaxAmount;
-    const exactAmountPaid = finalBasePrice + finalGst;
+    const planAmountINR = finalBasePrice + finalGst;
+
+    // Total_Payable = plan amount + delivery charge (Req 6.2)
+    const exactAmountPaid = calculateTotalPayable(planAmountINR, totalDeliveryCharge);
     // ------------------------------------------------------------
 
     // Map UI food types to DB meal_categories seed values
@@ -227,7 +349,7 @@ export async function verifyAndActivateSubscriptionAction(
       .insert({
         customer_profile_id: customerProfileId,
         payment_method: "RAZORPAY",
-        amount: exactAmountPaid,
+        amount: exactAmountPaid, // Total_Payable = plan + delivery (Req 6.2)
         status: "SUCCESS",
         paid_at: new Date().toISOString(),
         base_amount: finalBasePrice,
@@ -237,6 +359,7 @@ export async function verifyAndActivateSubscriptionAction(
           ? Math.max(0, plan.base_price - finalBasePrice)
           : 0,
         invoice_type: "SUBSCRIPTION",
+        delivery_charge: totalDeliveryCharge, // Req 6.1, 6.3 — delivery tax is ₹0.00 (Req 6.4)
       })
       .select("id")
       .single();
@@ -276,6 +399,7 @@ export async function verifyAndActivateSubscriptionAction(
         total_days: baseDuration,
         pause_credits_total: plan.pause_credits,
         pause_credits_used: pausesUsed,
+        delivery_charge: totalDeliveryCharge, // Req 6.1 — persist delivery charge on subscription
       })
       .select("id")
       .single();

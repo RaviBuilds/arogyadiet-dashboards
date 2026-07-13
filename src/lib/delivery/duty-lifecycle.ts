@@ -11,7 +11,7 @@ import { getISTDateString } from "@/lib/dates/ist";
 
 // ─── Grace Period Configuration ─────────────────────────────────────────────────
 
-const DEFAULT_GRACE_MINUTES = 5;
+const DEFAULT_GRACE_MINUTES = 10;
 const MIN_GRACE_MINUTES = 0;
 const MAX_GRACE_MINUTES = 1440;
 

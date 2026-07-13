@@ -506,10 +506,13 @@ export async function updateSystemSettings(settings: {
 }) {
   const supabase = createAdminClient();
 
+  // Strip rider_payout_per_km — payout rates are now managed via Rate Config Store (Req 11.2)
+  const { rider_payout_per_km: _ignored, ...safeSettings } = settings;
+
   const { error } = await supabase
     .from("system_settings")
     .update({
-      ...settings,
+      ...safeSettings,
       updated_at: new Date().toISOString(),
     })
     .eq("id", "global");
