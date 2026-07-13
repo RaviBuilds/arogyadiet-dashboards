@@ -297,6 +297,7 @@ function buildSubscriptionPayload(
     startDate: row.startDate,
     pastDateEnabled: true,
     skipStartDateCheck: true,
+    deliveryCharge: 0,
   };
 
   if (row.mode === "CUSTOM") {
