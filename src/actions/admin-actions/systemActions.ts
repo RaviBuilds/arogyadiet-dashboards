@@ -8,6 +8,7 @@ import { executeAutomatedDispatch } from "@/actions/system-actions/routeEngine";
 import { getISTDateString, getTomorrowISTDateString } from "@/lib/dates/ist";
 import { checkGroupManage } from "@/lib/auth/adminAccess";
 import { persistWorkloadSnapshots } from "@/lib/clinic/workload";
+import { upsertAutomationLog, type AutomationRunSource } from "@/lib/automation/logging";
 
 type ProductLinkingResult =
   | { success: true; count: number; targetDate: string }
@@ -23,49 +24,24 @@ async function logProductLinkingRun({
   supabase,
   targetDate,
   addonsLinked,
+  source,
 }: {
   supabase: ReturnType<typeof createAdminClient>;
   targetDate: string;
   addonsLinked: number;
+  source: AutomationRunSource;
 }) {
-  const statsPayload = {
-    addonsLinked,
-  };
-
-  try {
-    const { data: existingLog, error: existingLogError } = await supabase
-      .from("automation_logs")
-      .select("run_count")
-      .eq("automation_type", "PRODUCT_LINK")
-      .eq("target_date", targetDate)
-      .maybeSingle();
-
-    if (existingLogError) {
-      console.error("Error fetching product linking log:", existingLogError);
-      return;
-    }
-
-    const { error: upsertError } = await supabase.from("automation_logs").upsert(
-      {
-        automation_type: "PRODUCT_LINK",
-        target_date: targetDate,
-        run_count: (existingLog?.run_count ?? 0) + 1,
-        last_run_at: new Date().toISOString(),
-        latest_stats: statsPayload,
-      },
-      { onConflict: "automation_type,target_date" },
-    );
-
-    if (upsertError) {
-      console.error("Error upserting product linking log:", upsertError);
-    }
-  } catch (error) {
-    console.error("Unexpected error logging product linking run:", error);
-  }
+  await upsertAutomationLog(supabase, {
+    automationType: "PRODUCT_LINK",
+    targetDate,
+    source,
+    stats: { addonsLinked },
+  });
 }
 
 export async function runProductLinkingAction(
   targetDate: string,
+  source: AutomationRunSource = "cron",
 ): Promise<ProductLinkingResult> {
   const gate = await checkGroupManage("operations");
   if (!gate.ok) return { success: false, error: gate.error };
@@ -104,6 +80,7 @@ export async function runProductLinkingAction(
         supabase,
         targetDate,
         addonsLinked: 0,
+        source,
       });
 
       revalidatePath("/admin/operations");
@@ -140,6 +117,7 @@ export async function runProductLinkingAction(
       supabase,
       targetDate,
       addonsLinked: updatedCount,
+      source,
     });
 
     revalidatePath("/admin/operations");
@@ -173,7 +151,7 @@ export async function triggerSystemAutomation(
         };
       }
 
-      const result = await executeAutomatedDispatch(targetDate);
+      const result = await executeAutomatedDispatch(targetDate, undefined, "manual");
 
       if ("error" in result && result.error) {
         return { success: false, error: result.error };
@@ -209,7 +187,7 @@ export async function triggerSystemAutomation(
         };
       }
 
-      const result = await generateDailyOrders(targetDate);
+      const result = await generateDailyOrders(targetDate, "manual");
 
       if (!result.success) {
         return {
@@ -243,7 +221,7 @@ export async function triggerSystemAutomation(
     // AUTOMATION 2: Product Linking
     if (automationName === "Product Linking") {
       const targetDate = options?.targetDate ?? getISTDateString(0);
-      return runProductLinkingAction(targetDate);
+      return runProductLinkingAction(targetDate, "manual");
     }
 
     return { success: false, error: "Unknown automation type." };

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { expireEligibleKits } from "@/services/KitLifecycleService";
+import { runKitExpiration } from "@/services/FallbackAutomationService";
 
 /**
  * GET /api/cron/expire-kits?secret=<CRON_SECRET>
  *
- * Scheduled daily at ~18:00 UTC (approximately 23:30 IST) via Vercel cron.
+ * Scheduled daily at ~18:00 UTC (approximately 23:30 IST) via Supabase pg_cron.
  * Identifies all ACTIVE KIT subscriptions past their tracker_end_date
  * and transitions them to EXPIRED atomically.
  *
@@ -21,24 +21,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await expireEligibleKits();
-
-    if (!result.success) {
-      return NextResponse.json(
-        { success: false, error: result.error },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(
-      { success: true, expired: result.expired },
-      { status: 200 }
-    );
-  } catch (error: unknown) {
+    const result = await runKitExpiration("cron");
+    return NextResponse.json({ success: true, expired: result.expired }, { status: 200 });
+  } catch (error: any) {
     console.error("Expire KITs Cron Error:", error);
     return NextResponse.json(
-      { success: false, error: "Internal Server Error" },
-      { status: 500 }
+      { success: false, error: error?.message || "Internal Server Error" },
+      { status: 500 },
     );
   }
 }

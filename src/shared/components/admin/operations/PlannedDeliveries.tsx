@@ -19,6 +19,7 @@ import {
 } from "@/actions/admin-actions/operationsActions";
 import { deletePlannedOrder, updateOrderMeal, getAddressesForOrder, updateOrderAddress } from "@/actions/admin-actions/plannedActions";
 import { runProductLinkingAction, triggerSystemAutomation } from "@/actions/admin-actions/systemActions";
+import { FallbackAutomationsPanel } from "./FallbackAutomationsPanel";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -352,7 +353,7 @@ export default function PlannedDeliveries({
     const automationName = "Product Linking";
     setAutomationStatus(prev => ({ ...prev, [automationName]: { ...prev[automationName], loading: true } }));
 
-    const result = await runProductLinkingAction(targetDate);
+    const result = await runProductLinkingAction(targetDate, "manual");
 
     if (result.success) {
       const count = result.count ?? 0;
@@ -864,6 +865,8 @@ export default function PlannedDeliveries({
             })}
           </div>
         )}
+
+        {systemToggle && <FallbackAutomationsPanel />}
       </div>
       )}
 

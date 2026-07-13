@@ -32,6 +32,9 @@ export type AutomationLogRow = {
   run_count: number | null;
   last_run_at: string | null;
   latest_stats: unknown;
+  manual_run_count: number | null;
+  last_manual_run_at: string | null;
+  latest_manual_stats: unknown;
 };
 
 export type PendingFailureApprovalRow = {
@@ -113,7 +116,9 @@ export async function getAutomationLogs(
 
   const { data, error } = await supabase
     .from("automation_logs")
-    .select("automation_type, target_date, run_count, last_run_at, latest_stats")
+    .select(
+      "automation_type, target_date, run_count, last_run_at, latest_stats",
+    )
     .gte("target_date", startDate)
     .lte("target_date", endDate)
     .order("target_date", { ascending: false })
@@ -124,7 +129,79 @@ export async function getAutomationLogs(
     return [];
   }
 
-  return (data || []) as AutomationLogRow[];
+  return (data || []).map((row) => ({
+    ...row,
+    manual_run_count: (row as any).manual_run_count ?? null,
+    last_manual_run_at: (row as any).last_manual_run_at ?? null,
+    latest_manual_stats: (row as any).latest_manual_stats ?? null,
+  })) as AutomationLogRow[];
+}
+
+/**
+ * Fetches all automation_logs rows for a SINGLE target date, across every
+ * automation_type. Used by the day-wise card view in the Automation Logs tab.
+ * Excludes AUTO_OFF_DUTY (the 5-minute rider sweep is deliberately not shown
+ * in this per-day log — it runs too frequently to be meaningful here).
+ */
+export async function getAutomationLogsForDay(
+  targetDate: string,
+): Promise<AutomationLogRow[]> {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("automation_logs")
+    .select(
+      "automation_type, target_date, run_count, last_run_at, latest_stats",
+    )
+    .eq("target_date", targetDate)
+    .neq("automation_type", "AUTO_OFF_DUTY")
+    .order("automation_type", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching automation logs for day:", error);
+    return [];
+  }
+
+  return (data || []).map((row) => ({
+    ...row,
+    manual_run_count: (row as any).manual_run_count ?? null,
+    last_manual_run_at: (row as any).last_manual_run_at ?? null,
+    latest_manual_stats: (row as any).latest_manual_stats ?? null,
+  })) as AutomationLogRow[];
+}
+
+/**
+ * Returns the earliest and latest target_date present in automation_logs
+ * (excluding AUTO_OFF_DUTY), used to bound the day-navigation prev/next
+ * buttons and the calendar picker in the Automation Logs tab.
+ */
+export async function getAutomationLogsDateBounds(): Promise<{
+  minDate: string | null;
+  maxDate: string | null;
+}> {
+  const supabase = createAdminClient();
+
+  const [{ data: minRow }, { data: maxRow }] = await Promise.all([
+    supabase
+      .from("automation_logs")
+      .select("target_date")
+      .neq("automation_type", "AUTO_OFF_DUTY")
+      .order("target_date", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("automation_logs")
+      .select("target_date")
+      .neq("automation_type", "AUTO_OFF_DUTY")
+      .order("target_date", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  return {
+    minDate: minRow?.target_date ?? null,
+    maxDate: maxRow?.target_date ?? null,
+  };
 }
 
 /**
