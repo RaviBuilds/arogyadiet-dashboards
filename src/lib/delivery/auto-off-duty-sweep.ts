@@ -149,16 +149,6 @@ async function evaluateRider(
 
   const todayOrders = (orders ?? []) as OrderRow[];
 
-  // Req 10.5: If no terminal order exists today, skip (rider has no finished work)
-  const terminalOrders = todayOrders.filter((o) =>
-    (TERMINAL_DELIVERY_STATUSES as readonly string[]).includes(o.status),
-  );
-
-  if (terminalOrders.length === 0) {
-    result.skipped.push(rider.id);
-    return;
-  }
-
   // Req 10.4: If any order is in an active status, skip
   const hasActiveOrder = todayOrders.some((o) =>
     (ACTIVE_DELIVERY_STATUSES as readonly string[]).includes(o.status),
@@ -169,18 +159,55 @@ async function evaluateRider(
     return;
   }
 
-  // Req 10.6: If the most recent terminal transition is within the grace period, skip
-  const mostRecentTerminalTime = getMostRecentTerminalTransition(terminalOrders);
+  const terminalOrders = todayOrders.filter((o) =>
+    (TERMINAL_DELIVERY_STATUSES as readonly string[]).includes(o.status),
+  );
 
-  if (mostRecentTerminalTime) {
-    const graceDeadline = new Date(
-      mostRecentTerminalTime.getTime() + gracePeriodMinutes * 60 * 1000,
-    );
+  // Case A: Rider has NO orders at all today — they should not be online.
+  // Apply the grace period from last_online_at to give them time to check app.
+  if (todayOrders.length === 0) {
+    // Fetch last_online_at to determine grace period start
+    const { data: riderProfile, error: profileError } = await adminClient
+      .from("rider_profiles")
+      .select("last_online_at")
+      .eq("id", rider.id)
+      .maybeSingle();
 
-    if (executionDate < graceDeadline) {
-      // Still within grace period
-      result.skipped.push(rider.id);
-      return;
+    if (profileError || !riderProfile?.last_online_at) {
+      // No last_online_at available — flip immediately (conservative)
+      // Fall through to the flip logic below
+    } else {
+      const onlineSince = new Date(riderProfile.last_online_at);
+      const graceDeadline = new Date(
+        onlineSince.getTime() + gracePeriodMinutes * 60 * 1000,
+      );
+
+      if (executionDate < graceDeadline) {
+        result.skipped.push(rider.id);
+        return;
+      }
+    }
+    // Fall through to flip
+  } else if (terminalOrders.length === 0) {
+    // Case B: Rider has orders but none are terminal yet (e.g. all ORDER_CREATED/ASSIGNED)
+    // These riders still have pending work — skip them
+    result.skipped.push(rider.id);
+    return;
+  } else {
+    // Case C: Rider has terminal orders — check grace period from last terminal
+    // Req 10.6: If the most recent terminal transition is within the grace period, skip
+    const mostRecentTerminalTime = getMostRecentTerminalTransition(terminalOrders);
+
+    if (mostRecentTerminalTime) {
+      const graceDeadline = new Date(
+        mostRecentTerminalTime.getTime() + gracePeriodMinutes * 60 * 1000,
+      );
+
+      if (executionDate < graceDeadline) {
+        // Still within grace period
+        result.skipped.push(rider.id);
+        return;
+      }
     }
   }
 

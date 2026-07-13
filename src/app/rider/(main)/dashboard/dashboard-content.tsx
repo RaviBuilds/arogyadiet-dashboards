@@ -153,7 +153,7 @@ export async function RiderDashboardContent() {
       </div>
 
       <BatteryPermissionOnboarding />
-      <RiderStatusToggle initialStatus={isOnDuty} riderId={riderProfile.id} />
+      <RiderStatusToggle initialStatus={isOnDuty} riderId={riderProfile.id} hasActiveOrders={pendingDrops > 0} />
       <AutoOffDutyNotice isOnline={isOnDuty} />
 
       {!isOnDuty && (

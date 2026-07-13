@@ -88,6 +88,7 @@ export interface OnboardSubscriptionInput {
   status?: string | null;
   total_days?: number | null;
   pause_credits_total?: number | null;
+  delivery_charge?: number | null;
   franchise_id?: string | null;
   initial_meal_category_id?: string | null;  // NEW: For daily preferences generation
 }
@@ -99,6 +100,7 @@ export interface OnboardPaymentInput {
   tax_percent?: number | null;
   tax_amount?: number | null;
   discount_amount?: number | null;
+  delivery_charge?: number | null;
   payment_method?: string | null;
   paid_at?: string | null;
   payment_reference?: string | null;

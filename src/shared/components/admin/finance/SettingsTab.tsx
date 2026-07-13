@@ -5,12 +5,12 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
-import { Save, Loader2, IndianRupee, Clock } from "lucide-react";
+import { Save, Loader2, Clock } from "lucide-react";
 import { updateSystemSettings } from "@/actions/admin-actions/financeActions";
 import { toast } from "sonner";
 
 interface SystemSettings {
-  rider_payout_per_km: number;
+  rider_payout_per_km?: number;
   default_dispatch_time: string;
   updated_at?: string;
 }
@@ -20,9 +20,6 @@ export function SettingsTab({
 }: {
   initialSettings: SystemSettings;
 }) {
-  const [payoutPerKm, setPayoutPerKm] = useState(
-    String(initialSettings.rider_payout_per_km || 16),
-  );
   const [dispatchTime, setDispatchTime] = useState(
     initialSettings.default_dispatch_time || "00:10",
   );
@@ -31,7 +28,6 @@ export function SettingsTab({
   const handleSave = () => {
     startTransition(async () => {
       const result = await updateSystemSettings({
-        rider_payout_per_km: Number(payoutPerKm),
         default_dispatch_time: dispatchTime,
       });
       if (result.success) {
@@ -48,38 +44,14 @@ export function SettingsTab({
         <CardContent className="p-6 space-y-6">
           <div>
             <h3 className="text-base font-semibold text-foreground mb-1">
-              Rider Payout Configuration
+              Dispatch Configuration
             </h3>
             <p className="text-sm text-muted-foreground">
-              These settings apply globally to all rider payout calculations.
+              These settings apply globally to dispatch operations.
             </p>
           </div>
 
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label
-                htmlFor="payout-per-km"
-                className="flex items-center gap-2"
-              >
-                <IndianRupee className="h-4 w-4 text-muted-foreground" />
-                Payout Per Kilometer (₹)
-              </Label>
-              <Input
-                id="payout-per-km"
-                type="number"
-                step="0.5"
-                min="0"
-                value={payoutPerKm}
-                onChange={(e) => setPayoutPerKm(e.target.value)}
-                className="max-w-[200px]"
-                placeholder="16.00"
-              />
-              <p className="text-xs text-muted-foreground">
-                Amount paid to riders per kilometer of delivery distance.
-                Currently ₹{payoutPerKm}/km.
-              </p>
-            </div>
-
             <div className="space-y-2">
               <Label
                 htmlFor="dispatch-time"

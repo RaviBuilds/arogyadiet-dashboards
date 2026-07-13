@@ -10,16 +10,20 @@ import { BackgroundGeolocation } from "@capacitor-community/background-geolocati
 import { Capacitor } from "@capacitor/core";
 import { enableKeepAwake, disableKeepAwake } from "@/lib/capacitor/keep-awake";
 import { useOffDutyReconcile } from "@/shared/hooks/useOffDutyReconcile";
+import { useAutoOffDutyTimer } from "@/shared/hooks/useAutoOffDutyTimer";
 import { toast } from "sonner";
 
 type RiderStatusToggleProps = {
   initialStatus: boolean;
   riderId: string;
+  /** Whether the rider has active (non-terminal) orders today. Defaults to false. */
+  hasActiveOrders?: boolean;
 };
 
 export function RiderStatusToggle({
   initialStatus,
   riderId,
+  hasActiveOrders = false,
 }: RiderStatusToggleProps) {
   const [isOnDuty, setIsOnDuty] = useState(initialStatus);
   const [isPending, startTransition] = useTransition();
@@ -43,6 +47,29 @@ export function RiderStatusToggle({
       setIsOnDuty(false);
       disableKeepAwake();
     }, []),
+  });
+
+  // Auto off-duty timer: marks rider off-duty after 10 minutes of inactivity
+  // when no active orders are assigned. Stops GPS tracking and saves resources.
+  const handleAutoOffDuty = useCallback(async () => {
+    // Stop native tracking
+    if (watcherIdRef.current) {
+      try {
+        await BackgroundGeolocation.removeWatcher({ id: watcherIdRef.current });
+      } catch (err) {
+        console.error("Failed to remove watcher on auto-off-duty:", err);
+      }
+      watcherIdRef.current = null;
+    }
+    await disableKeepAwake();
+    setIsOnDuty(false);
+    router.refresh();
+  }, [router]);
+
+  useAutoOffDutyTimer({
+    isOnDuty,
+    hasActiveOrders,
+    onAutoOffDuty: handleAutoOffDuty,
   });
 
   const startBackgroundTracking = useCallback(async (): Promise<boolean> => {

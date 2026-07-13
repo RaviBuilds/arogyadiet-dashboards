@@ -1,15 +1,16 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { addDays, format, startOfDay } from "date-fns";
 import { useRouter } from "next/navigation";
-import { CalendarIcon, Clock3, IndianRupee, Loader2, PauseCircle, AlertTriangle } from "lucide-react";
+import { CalendarIcon, Clock3, IndianRupee, Loader2, PauseCircle, AlertTriangle, Truck } from "lucide-react";
 
 import { addSubscription } from "@/actions/admin-actions/adminSubscriptionActions";
+import { calculateDeliveryChargeAction } from "@/actions/admin-actions/deliveryChargeActions";
 import { cn } from "@/lib/utils";
 import { earliestStartDate, getPastDateRangeForAddSub, pastDayStatusBoundary, ONBOARDING_CUTOFF_HOUR_IST } from "@/lib/onboarding/cutoff";
 import { hasOverlap, type ExistingSubscription } from "@/lib/subscriptions/overlap";
@@ -168,6 +169,16 @@ export function AdminAddSubscriptionForm({
   const [showPastDayStatusPopup, setShowPastDayStatusPopup] = useState(false);
   const pendingFormDataRef = useRef<FormValues | null>(null);
 
+  // ─── Delivery Charge State (Req 8.1–8.8) ──────────────────────────────────
+  const [deliveryCharge, setDeliveryCharge] = useState<number | null>(null);
+  const [deliveryChargeInput, setDeliveryChargeInput] = useState<string>("");
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [ratePerKm, setRatePerKm] = useState<number | null>(null);
+  const [deliveryChargeError, setDeliveryChargeError] = useState<string | null>(null);
+  const [isCalculatingDelivery, setIsCalculatingDelivery] = useState(false);
+  /** Tracks the system-calculated delivery charge for admin override audit (Req 12.4) */
+  const [autoCalculatedDeliveryCharge, setAutoCalculatedDeliveryCharge] = useState<number | null>(null);
+
   const { activeSubscription, mealCategories, addresses } = initialData;
   const subscriptionPlans = useMemo(
     () =>
@@ -299,6 +310,168 @@ export function AdminAddSubscriptionForm({
     }
   }, [showAutomationAlert, setValue]);
 
+  // ─── Delivery Charge Helpers (Req 8.1–8.8) ────────────────────────────────
+
+  /**
+   * Validates and sets the delivery charge from manual input.
+   * Rejects non-numeric, negative, > 999,999,999.99
+   */
+  const handleDeliveryChargeInput = (rawValue: string) => {
+    setDeliveryChargeInput(rawValue);
+
+    if (rawValue === "") {
+      setDeliveryCharge(null);
+      setDeliveryChargeError(null);
+      return;
+    }
+
+    // Reject non-numeric
+    const parsed = Number(rawValue);
+    if (isNaN(parsed) || !isFinite(parsed)) {
+      setDeliveryChargeError("Delivery charge must be a valid number");
+      return;
+    }
+
+    // Reject negative
+    if (parsed < 0) {
+      setDeliveryChargeError("Delivery charge cannot be negative");
+      return;
+    }
+
+    // Reject > 999,999,999.99
+    if (parsed > 999999999.99) {
+      setDeliveryChargeError("Delivery charge cannot exceed ₹999,999,999.99");
+      return;
+    }
+
+    // Reject > 2 decimal places
+    const parts = rawValue.split(".");
+    if (parts.length === 2 && parts[1].length > 2) {
+      setDeliveryChargeError("Maximum 2 decimal places allowed");
+      return;
+    }
+
+    setDeliveryChargeError(null);
+    setDeliveryCharge(parsed);
+  };
+
+  /**
+   * Get planDays for the "Calculate Delivery Charges" action.
+   * Existing mode: selectedPlan.duration_days
+   * Custom mode: admin-entered duration (computed from start/end dates)
+   */
+  const getDeliveryPlanDays = (): number | null => {
+    if (mode === "existing") {
+      return selectedPlan?.duration_days ?? null;
+    }
+    // Custom mode: duration derived from start and end dates
+    const endDate = form.getValues("endDate");
+    if (startDate && endDate) {
+      return Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    }
+    return null;
+  };
+
+  /**
+   * Triggers the delivery charge calculation via server action.
+   */
+  const handleCalculateDeliveryCharge = async () => {
+    const planDays = getDeliveryPlanDays();
+    if (!planDays || planDays < 1) {
+      setDeliveryChargeError(
+        mode === "existing"
+          ? "Please select a plan first"
+          : "Please set start and end dates first",
+      );
+      return;
+    }
+
+    setIsCalculatingDelivery(true);
+    setDeliveryChargeError(null);
+
+    try {
+      const result = await calculateDeliveryChargeAction({
+        customerProfileId,
+        planDays,
+      });
+
+      if (!result.success) {
+        setDeliveryChargeError(result.error);
+        // Leave field editable for manual entry
+        setDistanceKm(null);
+        setRatePerKm(null);
+        return;
+      }
+
+      const outcome = result.outcome;
+
+      if (outcome.ok) {
+        // Success — auto-fill the delivery charge
+        setDeliveryCharge(outcome.totalDeliveryCharge);
+        setDeliveryChargeInput(outcome.totalDeliveryCharge.toFixed(2));
+        setDistanceKm(outcome.distanceKm);
+        setRatePerKm(outcome.ratePerKm);
+        setDeliveryChargeError(null);
+        setAutoCalculatedDeliveryCharge(outcome.totalDeliveryCharge);
+      } else {
+        // Failure — show user-friendly message, allow manual entry
+        let message = "Unable to calculate delivery charge";
+        switch (outcome.reason) {
+          case "missing_pincode":
+            message = "Customer has no primary address or pincode is missing";
+            break;
+          case "unresolved_clinic":
+            message =
+              outcome.clinicResolution === "ambiguous"
+                ? "Multiple clinics found for this pincode (ambiguous)"
+                : "No clinic found for the customer's pincode";
+            break;
+          case "missing_coordinates":
+            message =
+              "Address or clinic coordinates are missing. Please update the address with valid coordinates.";
+            break;
+          case "invalid_coordinates":
+            message = "Address or clinic coordinates are invalid (out of range)";
+            break;
+          case "unresolved_rate":
+            message = "Could not resolve the delivery rate for this clinic";
+            break;
+          case "invalid_input":
+            message = `Invalid input: ${outcome.field}`;
+            break;
+        }
+        setDeliveryChargeError(message);
+        setDistanceKm(null);
+        setRatePerKm(null);
+      }
+    } catch {
+      setDeliveryChargeError("An error occurred while calculating delivery charge");
+      setDistanceKm(null);
+      setRatePerKm(null);
+    } finally {
+      setIsCalculatingDelivery(false);
+    }
+  };
+
+  // ─── Recompute Total_Payable when delivery charge changes (Req 8.6) ────────
+  useEffect(() => {
+    if (mode === "existing" && selectedPlan) {
+      const planAmount = selectedPlan.price;
+      const total = planAmount + (deliveryCharge ?? 0);
+      setValue("totalAmount", parseFloat(total.toFixed(2)));
+    }
+  }, [deliveryCharge, mode, selectedPlan, setValue]);
+
+  useEffect(() => {
+    if (mode === "custom" && basePrice !== undefined && taxPercent !== undefined) {
+      const tax = parseFloat((basePrice * (taxPercent / 100)).toFixed(2));
+      const planAmount = parseFloat((basePrice + tax).toFixed(2));
+      const total = planAmount + (deliveryCharge ?? 0);
+      setValue("taxAmount", tax);
+      setValue("totalAmount", parseFloat(total.toFixed(2)));
+    }
+  }, [mode, basePrice, taxPercent, deliveryCharge, setValue]);
+
   // Reset start date when pastDateEnabled toggles (valid range changes completely)
   useEffect(() => {
     if (pastDateEnabled) {
@@ -319,21 +492,14 @@ export function AdminAddSubscriptionForm({
       setValue("basePrice", selectedPlan.price);
       setValue("taxPercent", 0);
       setValue("taxAmount", 0);
-      setValue("totalAmount", selectedPlan.price);
+      const total = selectedPlan.price + (deliveryCharge ?? 0);
+      setValue("totalAmount", parseFloat(total.toFixed(2)));
       setValue("pauseCredits", selectedPlan.pause_credits);
       setValue("endDate", addDays(startDate, selectedPlan.duration_days - 1));
     }
-  }, [mode, selectedPlan, startDate, setValue]);
+  }, [mode, selectedPlan, startDate, setValue, deliveryCharge]);
 
-  // Auto-calculate tax & total in custom mode
-  useEffect(() => {
-    if (mode === "custom" && basePrice !== undefined && taxPercent !== undefined) {
-      const tax = parseFloat((basePrice * (taxPercent / 100)).toFixed(2));
-      const total = parseFloat((basePrice + tax).toFixed(2));
-      setValue("taxAmount", tax);
-      setValue("totalAmount", total);
-    }
-  }, [mode, basePrice, taxPercent, setValue]);
+  // (Delivery charge effects handle tax/total recalculation for custom mode)
 
   const onSubmit = (values: FormValues) => {
     // Req 3.1: If pastDateEnabled AND startDate is in the past, open the PastDayStatusPopup
@@ -382,6 +548,9 @@ export function AdminAddSubscriptionForm({
               pastDayStatuses: values.pastDayStatuses,
               skipStartDateCheck: true,
             } : {}),
+            // Delivery charge fields (Req 6.1–6.5, 12.4)
+            deliveryCharge: deliveryCharge ?? 0,
+            autoCalculatedDeliveryCharge: autoCalculatedDeliveryCharge ?? undefined,
           }
         : {
             customerProfileId,
@@ -397,6 +566,9 @@ export function AdminAddSubscriptionForm({
               pastDayStatuses: values.pastDayStatuses,
               skipStartDateCheck: true,
             } : {}),
+            // Delivery charge fields (Req 6.1–6.5, 12.4)
+            deliveryCharge: deliveryCharge ?? 0,
+            autoCalculatedDeliveryCharge: autoCalculatedDeliveryCharge ?? undefined,
           };
 
       const res = await submitAction(payload, isCustom);
@@ -1003,6 +1175,83 @@ export function AdminAddSubscriptionForm({
                 />
               )}
             />
+          </div>
+
+          <Separator />
+
+          {/* ── Delivery Charge Section (Req 8.1–8.8) ── */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Truck className="h-4 w-4 text-muted-foreground" />
+              <Label className="text-sm font-semibold">Delivery Charges</Label>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isCalculatingDelivery}
+                onClick={handleCalculateDeliveryCharge}
+              >
+                {isCalculatingDelivery && (
+                  <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                )}
+                Calculate Delivery Charges
+              </Button>
+
+              <div className="flex-1 max-w-xs space-y-1">
+                <Label className="text-xs text-muted-foreground">
+                  Delivery Charge (₹)
+                </Label>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  className="h-9"
+                  value={deliveryChargeInput}
+                  onChange={(e) => handleDeliveryChargeInput(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {deliveryChargeError && (
+              <p className="text-xs text-destructive">{deliveryChargeError}</p>
+            )}
+
+            {distanceKm !== null && ratePerKm !== null && (
+              <p className="text-xs text-muted-foreground">
+                Distance: {distanceKm.toFixed(2)} km × ₹{ratePerKm.toFixed(2)}/km
+              </p>
+            )}
+
+            {/* Total Payable display */}
+            {(mode === "existing" ? selectedPlan : basePrice !== undefined) && (
+              <Card className="border-border/70 bg-muted/20 shadow-none">
+                <CardContent className="flex items-center gap-3 p-4">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                    <IndianRupee className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Total Payable (Plan + Delivery)
+                    </p>
+                    <p className="text-base font-semibold">
+                      ₹{" "}
+                      {mode === "existing" && selectedPlan
+                        ? (selectedPlan.price + (deliveryCharge ?? 0)).toFixed(2)
+                        : basePrice !== undefined && taxPercent !== undefined
+                          ? (
+                              basePrice +
+                              parseFloat((basePrice * ((taxPercent ?? 0) / 100)).toFixed(2)) +
+                              (deliveryCharge ?? 0)
+                            ).toFixed(2)
+                          : "—"}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <Separator />

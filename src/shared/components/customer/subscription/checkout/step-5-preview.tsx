@@ -31,6 +31,7 @@ import {
   createRazorpayOrderAction,
   verifyAndActivateSubscriptionAction,
   validateCouponAction,
+  previewDeliveryChargeAction,
 } from "@/actions/checkoutActions";
 
 export function OrderPreview({ data, plans, onBack }: any) {
@@ -51,6 +52,11 @@ export function OrderPreview({ data, plans, onBack }: any) {
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [couponError, setCouponError] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+
+  // Delivery charge state (Req 9.1, 9.2, 9.3, 9.7)
+  const [deliveryCharge, setDeliveryCharge] = useState<number | null>(null);
+  const [isLoadingDeliveryCharge, setIsLoadingDeliveryCharge] = useState(true);
+  const [deliveryChargeError, setDeliveryChargeError] = useState<string | null>(null);
 
   const selectedPlan = plans?.find((p: any) => p.id === data.planId);
   const planName = selectedPlan?.name || "Standard Plan";
@@ -74,7 +80,8 @@ export function OrderPreview({ data, plans, onBack }: any) {
   }
 
   const gst = appliedCoupon ? currentBasePrice * gstRate : originalTaxAmount;
-  const totalAmount = currentBasePrice + gst;
+  const planAmount = currentBasePrice + gst;
+  const totalAmount = planAmount + (deliveryCharge ?? 0); // Total_Payable = Plan_Price + Total_Delivery_Charge (Req 4.6)
 
   const maxPauses = selectedPlan?.pause_credits || 7;
   const pausedDatesArray = data.pausedDates || [];
@@ -129,6 +136,53 @@ export function OrderPreview({ data, plans, onBack }: any) {
     }
     fetchAddress();
   }, [data.addressId]);
+
+  // Fetch delivery charge once customerProfileId is available (Req 9.1)
+  useEffect(() => {
+    async function fetchDeliveryCharge() {
+      if (!customerProfileId || !data.planId) {
+        setIsLoadingDeliveryCharge(false);
+        return;
+      }
+      setIsLoadingDeliveryCharge(true);
+      setDeliveryChargeError(null);
+
+      const res = await previewDeliveryChargeAction(customerProfileId, data.planId);
+
+      if (res.success) {
+        setDeliveryCharge(res.totalDeliveryCharge);
+      } else {
+        setDeliveryCharge(null);
+        // Map failure reason to user-friendly message (Req 9.7)
+        if ("deliveryChargeFailure" in res && res.deliveryChargeFailure) {
+          const failure = res.deliveryChargeFailure;
+          if (failure.reason === "unresolved_clinic") {
+            setDeliveryChargeError(
+              "We could not determine the delivery clinic for your area. Please update your delivery address or contact support."
+            );
+          } else if (failure.reason === "missing_coordinates") {
+            setDeliveryChargeError(
+              "Your delivery address is missing location coordinates. Please update your address with a valid location."
+            );
+          } else if (failure.reason === "missing_pincode") {
+            setDeliveryChargeError(
+              "Your delivery address is missing a pincode. Please update your address."
+            );
+          } else {
+            setDeliveryChargeError(
+              "Unable to compute delivery charge. Please update your delivery address or contact support."
+            );
+          }
+        } else {
+          setDeliveryChargeError(
+            "Unable to compute delivery charge. Please try again later or contact support."
+          );
+        }
+      }
+      setIsLoadingDeliveryCharge(false);
+    }
+    fetchDeliveryCharge();
+  }, [customerProfileId, data.planId]);
 
   const handleApplyCoupon = async () => {
     if (!couponInput.trim() || !customerProfileId) return;
@@ -485,9 +539,23 @@ export function OrderPreview({ data, plans, onBack }: any) {
                 </span>
               </div>
 
-              <div className="flex justify-between text-sm text-emerald-600 font-medium">
-                <span>Delivery</span>
-                <span>Free</span>
+              <div className="flex justify-between text-sm text-slate-500">
+                <span>Delivery Charges</span>
+                {isLoadingDeliveryCharge ? (
+                  <span className="h-4 w-16 bg-slate-100 animate-pulse rounded" />
+                ) : deliveryCharge !== null && deliveryCharge > 0 ? (
+                  <span className="font-medium text-slate-900">
+                    ₹
+                    {deliveryCharge.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                ) : deliveryCharge === 0 ? (
+                  <span className="font-medium text-emerald-600">Free</span>
+                ) : (
+                  <span className="font-medium text-red-500 text-xs">Unable to compute</span>
+                )}
               </div>
 
               <hr className="border-slate-200 border-dashed" />
@@ -506,6 +574,22 @@ export function OrderPreview({ data, plans, onBack }: any) {
               </div>
 
               <div className="pt-4 space-y-4">
+                {/* DELIVERY CHARGE FAILURE MESSAGE (Req 9.7) */}
+                {deliveryChargeError && (
+                  <Alert
+                    variant="destructive"
+                    className="bg-amber-50 text-amber-900 border-amber-200 animate-in fade-in slide-in-from-bottom-2"
+                  >
+                    <AlertCircle className="h-4 w-4 stroke-amber-600" />
+                    <AlertTitle className="font-semibold">
+                      Delivery Charge Issue
+                    </AlertTitle>
+                    <AlertDescription className="text-xs mt-1">
+                      {deliveryChargeError}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* MODERN ERROR OVERLAY */}
                 {paymentError && (
                   <Alert
@@ -525,7 +609,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
                 <Button
                   size="lg"
                   disabled={
-                    isProcessing || isLoadingAddress || isLoadingProfile
+                    isProcessing || isLoadingAddress || isLoadingProfile || isLoadingDeliveryCharge || !!deliveryChargeError
                   }
                   onClick={handlePayment}
                   className="w-full h-12 sm:h-14 text-base font-semibold transition-all duration-200 active:scale-95 disabled:opacity-80"

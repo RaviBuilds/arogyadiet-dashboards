@@ -68,6 +68,7 @@
 --     "status":              "<text>",     -- optional, default 'ACTIVE'
 --     "total_days":          <int>,        -- optional
 --     "pause_credits_total": <int>,        -- optional
+--     "delivery_charge":     <numeric>,    -- optional, default 0 (delivery-charges-management)
 --     "franchise_id":        "<uuid>"      -- optional
 --   },
 --   "payment": {
@@ -76,6 +77,7 @@
 --     "tax_percent":       <numeric>,      -- optional
 --     "tax_amount":        <numeric>,      -- optional
 --     "discount_amount":   <numeric>,      -- optional, default 0
+--     "delivery_charge":   <numeric>,      -- optional, default 0 (delivery-charges-management)
 --     "payment_method":    "<text>",       -- optional, default 'MANUAL'
 --     "paid_at":           "<timestamptz>",-- optional, default now() (Req 8.3)
 --     "payment_reference": "<text>",       -- optional
@@ -246,6 +248,7 @@ BEGIN
     pause_credits_total,
     pause_credits_used,
     consumed_days,
+    delivery_charge,
     franchise_id
   )
   VALUES (
@@ -261,6 +264,7 @@ BEGIN
     NULLIF(v_subscription ->> 'pause_credits_total', '')::integer,
     0,
     0,
+    COALESCE(NULLIF(v_subscription ->> 'delivery_charge', '')::numeric, 0),
     NULLIF(v_subscription ->> 'franchise_id', '')::uuid
   )
   RETURNING id INTO v_sub_id;
@@ -277,6 +281,7 @@ BEGIN
     tax_percent,
     tax_amount,
     discount_amount,
+    delivery_charge,
     payment_method,
     status,
     paid_at,
@@ -293,6 +298,7 @@ BEGIN
     NULLIF(v_payment ->> 'tax_percent', '')::numeric,
     NULLIF(v_payment ->> 'tax_amount', '')::numeric,
     COALESCE(NULLIF(v_payment ->> 'discount_amount', '')::numeric, 0),
+    COALESCE(NULLIF(v_payment ->> 'delivery_charge', '')::numeric, 0),
     COALESCE(NULLIF(v_payment ->> 'payment_method', ''), 'MANUAL'),
     'PAID',
     COALESCE(NULLIF(v_payment ->> 'paid_at', '')::timestamptz, now()),

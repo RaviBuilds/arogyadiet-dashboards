@@ -62,6 +62,10 @@ const baseSchema = z.object({
   pastDateEnabled: z.boolean().optional().default(false),
   pastDayStatuses: z.array(pastDayStatusEntrySchema).optional(),
   skipStartDateCheck: z.boolean().optional().default(false),
+  /** Delivery charge for the subscription (Req 6.1–6.5) */
+  deliveryCharge: z.number().min(0).max(999999999.99).optional().default(0),
+  /** The system-calculated delivery charge, used for admin override audit (Req 12.4) */
+  autoCalculatedDeliveryCharge: z.number().min(0).optional(),
 });
 
 // ─── mode-specific extensions ────────────────────────────────────────────────
@@ -127,6 +131,8 @@ export async function addSubscription(
     pastDateEnabled,
     pastDayStatuses,
     skipStartDateCheck,
+    deliveryCharge,
+    autoCalculatedDeliveryCharge,
   } = parsed.data;
 
   try {
@@ -375,6 +381,7 @@ export async function addSubscription(
         pause_credits_total: pauseCreditsTotal,
         pause_credits_used: 0,
         consumed_days: 0,
+        delivery_charge: deliveryCharge,
       })
       .select("id")
       .single();
@@ -511,13 +518,20 @@ export async function addSubscription(
     // status: PAID (collected) or PENDING (not yet collected).
     const isPaid = paymentStatus === "Payment Collected";
 
+    // payments.amount = Total_Payable (plan amount + delivery charge) (Req 6.2)
+    // For existing plans: totalAmount is the plan price (computed server-side), add delivery.
+    // For custom plans: totalAmount from the form already includes delivery charge.
+    const paymentAmount = isCustomPlan
+      ? totalAmount  // custom mode: form's totalAmount already = base + tax + delivery
+      : parseFloat((totalAmount + deliveryCharge).toFixed(2)); // existing: plan price + delivery
+
     const { data: newPayment, error: payErr } = await supabase
       .from("payments")
       .insert({
         customer_profile_id: customerProfileId,
         subscription_id: newSub.id,
         payment_method: "MANUAL",
-        amount: totalAmount,
+        amount: paymentAmount,
         status: isPaid ? "PAID" : "PENDING",
         paid_at: isPaid ? new Date().toISOString() : null,
         // Invoice breakdown columns (added via migration)
@@ -525,6 +539,7 @@ export async function addSubscription(
         tax_percent: taxPercent,
         tax_amount: taxAmount,
         discount_amount: 0,
+        delivery_charge: deliveryCharge,
         invoice_type: "SUBSCRIPTION",
         payment_reference: paymentReference ?? null,
         payment_notes: paymentNotes ?? null,
@@ -576,6 +591,20 @@ export async function addSubscription(
       customer_profile_id: customerProfileId,
       status: subscriptionStatus,
     });
+
+    // Log admin override audit entry if delivery charge was manually edited (Req 12.4)
+    if (
+      autoCalculatedDeliveryCharge !== undefined &&
+      autoCalculatedDeliveryCharge !== null &&
+      deliveryCharge !== autoCalculatedDeliveryCharge
+    ) {
+      await logAdminAction("UPDATE", "delivery_charge_override", newSub.id, {
+        customer_profile_id: customerProfileId,
+        system_calculated_amount: autoCalculatedDeliveryCharge,
+        overridden_amount: deliveryCharge,
+        subscription_id: newSub.id,
+      });
+    }
 
     revalidatePath(`/admin/customers/${customerProfileId}`);
     revalidatePath("/admin/customers");

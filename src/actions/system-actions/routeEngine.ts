@@ -14,6 +14,8 @@ import { computeOpenLoopRoute } from "@/lib/routing/googleRoutes";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { FRANCHISE_FEATURES_ENABLED } from "@/lib/franchise/constants";
 import { resolveBatchClinicStamp } from "@/lib/clinic/order-stamp";
+import { resolveRatesForClinic } from "@/services/RateConfigService";
+import { DEFAULT_RIDER_PAYOUT_RATE_PER_KM } from "@/lib/delivery/deliveryCharge";
 
 // Service-role client only: this engine runs from cron/background jobs and must bypass RLS.
 const supabaseAdmin = createAdminClient();
@@ -371,7 +373,6 @@ type DispatchScope = {
 
 type SharedDispatchConfig = {
   targetDate: string;
-  payoutPerKm: number;
   apiKey: string;
   departureTime?: string;
   customerOverrideMap: Map<string, string>;
@@ -565,12 +566,64 @@ async function dispatchScope(
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Resolve payout rate for this scope via RateConfigService (Req 11.3–11.8).
+  // Core clinics get the Core payout rate; franchise clinics get the franchise
+  // rate with fallback to Core; on timeout (> 5 s) or error use the default
+  // ₹16.00 and log an indication.
+  // ---------------------------------------------------------------------------
+  let payoutPerKm: number;
+  let payoutRateUsedDefault = false;
+
+  if (scope.clinicId) {
+    try {
+      const rateResult = await Promise.race([
+        resolveRatesForClinic(supabaseAdmin, {
+          id: scope.clinicId,
+          franchise_id: scope.franchiseId,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Rate resolution timeout (>5s)")), 5000),
+        ),
+      ]);
+      payoutPerKm = rateResult.riderPayoutRatePerKm;
+
+      if (rateResult.payoutRateSource === "default") {
+        payoutRateUsedDefault = true;
+        console.warn(
+          `[routing:${scope.label}] payout rate fell through to default ₹${DEFAULT_RIDER_PAYOUT_RATE_PER_KM}/km (source: ${rateResult.payoutRateSource})`,
+        );
+      }
+    } catch (err) {
+      payoutPerKm = DEFAULT_RIDER_PAYOUT_RATE_PER_KM;
+      payoutRateUsedDefault = true;
+      console.warn(
+        `[routing:${scope.label}] failed to resolve payout rate, using default ₹${DEFAULT_RIDER_PAYOUT_RATE_PER_KM}/km:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  } else {
+    // No clinic resolved for this scope — use default (Req 11.4)
+    payoutPerKm = DEFAULT_RIDER_PAYOUT_RATE_PER_KM;
+    payoutRateUsedDefault = true;
+    console.warn(
+      `[routing:${scope.label}] no clinic for scope, using default payout rate ₹${DEFAULT_RIDER_PAYOUT_RATE_PER_KM}/km`,
+    );
+  }
+
+  if (payoutRateUsedDefault) {
+    // Record indication that the default rate was applied (Req 11.4, 11.6)
+    console.info(
+      `[routing:${scope.label}] default payout rate indication recorded: ₹${payoutPerKm}/km`,
+    );
+  }
+
   const dispatchCtx: RiderDispatchContext = {
     targetDate: shared.targetDate,
     franchiseId: scope.franchiseId,
     originLat: scope.originLat,
     originLng: scope.originLng,
-    payoutPerKm: shared.payoutPerKm,
+    payoutPerKm,
     apiKey: shared.apiKey,
     departureTime: shared.departureTime,
   };
@@ -702,13 +755,6 @@ export async function executeAutomatedDispatch(
     return { error: `Failed to reset existing routing: ${resetResult.error}` };
   }
 
-  const { data: settings } = await supabaseAdmin
-    .from("system_settings")
-    .select("rider_payout_per_km")
-    .eq("id", "global")
-    .single();
-  const payoutPerKm = settings?.rider_payout_per_km || 16;
-
   const GOOGLE_API_KEY =
     process.env.GOOGLE_MAPS_API_KEY ||
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -748,7 +794,6 @@ export async function executeAutomatedDispatch(
 
   const shared: SharedDispatchConfig = {
     targetDate,
-    payoutPerKm,
     apiKey: GOOGLE_API_KEY,
     departureTime,
     customerOverrideMap,

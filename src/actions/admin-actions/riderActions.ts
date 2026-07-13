@@ -331,3 +331,72 @@ export async function updateAreaAssignment(
     return { success: false, error: "Failed to update rider mapping." };
   }
 }
+
+// ── Rider Password Management ─────────────────────────────────────────────────
+
+/**
+ * Admin action to directly set a new password for a rider.
+ * Resolves the auth_user_id from the users table and uses Supabase Admin API.
+ */
+export async function adminSetRiderPassword(
+  userId: string,
+  newPassword: string,
+) {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  if (!newPassword || newPassword.length < 6) {
+    return { success: false, error: "Password must be at least 6 characters." };
+  }
+
+  const supabaseAdmin = createAdminClient();
+
+  // Resolve auth_user_id from users table
+  const { data: userData, error: userError } = await supabaseAdmin
+    .from("users")
+    .select("auth_user_id")
+    .eq("id", userId)
+    .single();
+
+  if (userError || !userData?.auth_user_id) {
+    return { success: false, error: "Rider auth account not found." };
+  }
+
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(
+    userData.auth_user_id,
+    { password: newPassword },
+  );
+
+  if (error) return { success: false, error: error.message };
+
+  await logAdminAction("UPDATE", "rider", userId, { action: "password_reset" });
+  revalidatePath("/admin/riders");
+  return { success: true };
+}
+
+/**
+ * Admin action to send a password reset email to the rider.
+ * Uses Supabase Admin API generateLink to create a recovery link.
+ */
+export async function adminSendRiderPasswordResetEmail(email: string) {
+  const gate = await checkGroupManage("riders");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  if (!email) {
+    return { success: false, error: "Rider email is required." };
+  }
+
+  const supabaseAdmin = createAdminClient();
+
+  const { error } = await supabaseAdmin.auth.admin.generateLink({
+    type: "recovery",
+    email,
+  });
+
+  if (error) return { success: false, error: error.message };
+
+  await logAdminAction("UPDATE", "rider", email, {
+    action: "password_reset_email_sent",
+  });
+  return { success: true };
+}
