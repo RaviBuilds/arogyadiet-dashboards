@@ -9,30 +9,45 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
+  const tokenHash = searchParams.get("token_hash");
+  const type = searchParams.get("type");
 
   // This route is strictly for recovery, so we safely hardcode the destination
   const next = "/update-password";
 
-  if (!code) {
-    return NextResponse.redirect(`${baseOrigin}/login?error=Invalid_Request`);
-  }
-
   const supabase = await createClient();
 
-  // 2. Exchange the single-use code for an active session
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  // Handle PKCE code-based flow (works when same browser context is maintained)
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
 
-  if (error) {
-    // Log the exact error to your terminal to help with debugging
-    console.error("Auth Recovery Error:", error.message);
-    return NextResponse.redirect(`${baseOrigin}/login?error=Recovery_Failed`);
+    if (error) {
+      console.error("Auth Recovery Error (code exchange):", error.message);
+      return NextResponse.redirect(`${baseOrigin}/login?error=Recovery_Failed`);
+    }
+
+    const finalUrl = new URL(next, baseOrigin);
+    finalUrl.search = "";
+    return NextResponse.redirect(finalUrl);
   }
 
-  // 3. Build the final redirect URL using the verified host header
-  const finalUrl = new URL(next, baseOrigin);
+  // Handle token_hash-based flow (works on mobile / cross-browser / email clients)
+  if (tokenHash && type) {
+    const { error } = await supabase.auth.verifyOtp({
+      type: type as "recovery",
+      token_hash: tokenHash,
+    });
 
-  // Clean the URL search params so the one-time code doesn't linger in the browser bar
-  finalUrl.search = "";
+    if (error) {
+      console.error("Auth Recovery Error (token_hash verify):", error.message);
+      return NextResponse.redirect(`${baseOrigin}/login?error=Recovery_Failed`);
+    }
 
-  return NextResponse.redirect(finalUrl);
+    const finalUrl = new URL(next, baseOrigin);
+    finalUrl.search = "";
+    return NextResponse.redirect(finalUrl);
+  }
+
+  // No valid parameters provided
+  return NextResponse.redirect(`${baseOrigin}/login?error=Invalid_Request`);
 }
