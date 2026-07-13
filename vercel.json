@@ -19,10 +19,6 @@
     {
       "path": "/api/cron/cleanup-dispatch-images?secret=arogyadietcron-123",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/auto-off-duty?secret=arogyadietcron-123",
-      "schedule": "*/5 * * * *"
     }
   ]
 }
