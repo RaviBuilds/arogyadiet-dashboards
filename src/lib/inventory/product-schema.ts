@@ -21,7 +21,7 @@ export const ALLOWED_PURCHASE_ORDER_TYPES = [
   "application/pdf",
 ] as const;
 
-export const INVENTORY_SOURCE_TYPES = ["FARMER", "VENDOR", "OTHER"] as const;
+export const INVENTORY_SOURCE_TYPES = ["FARMER", "VENDOR", "SELF_MADE", "OTHER"] as const;
 
 export type ProductType = (typeof PRODUCT_TYPES)[number];
 export type BaseUom = (typeof BASE_UOMS)[number];
@@ -33,6 +33,7 @@ export type InventorySourceType = (typeof INVENTORY_SOURCE_TYPES)[number];
 export const INVENTORY_SOURCE_LABELS: Record<InventorySourceType, string> = {
   FARMER: "Farmer",
   VENDOR: "Vendor",
+  SELF_MADE: "Self Made",
   OTHER: "Other",
 };
 
