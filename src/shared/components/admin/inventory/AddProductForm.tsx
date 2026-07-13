@@ -13,8 +13,10 @@ import {
   BASE_UOMS,
   MAX_IMAGE_SIZE_BYTES,
   PRODUCT_TYPES,
+  UNCATEGORIZED_LABEL,
   validateInventoryProductImage,
   type AddProductFormValues,
+  type InventoryProductCategory,
 } from "@/lib/inventory/product-schema";
 
 import { Button } from "@/shared/components/ui/button";
@@ -55,7 +57,7 @@ const BASE_UOM_LABELS: Record<(typeof BASE_UOMS)[number], string> = {
 
 const defaultValues: AddProductFormValues = {
   name: "",
-  category: "",
+  category: UNCATEGORIZED_LABEL,
   type: "RAW_MATERIAL",
   baseUom: "KG",
   minStockThreshold: 0,
@@ -64,9 +66,13 @@ const defaultValues: AddProductFormValues = {
 
 interface AddProductFormProps {
   onSuccess?: () => void;
+  categories?: InventoryProductCategory[];
 }
 
-export default function AddProductForm({ onSuccess }: AddProductFormProps) {
+export default function AddProductForm({
+  onSuccess,
+  categories = [],
+}: AddProductFormProps) {
   const [isPending, startTransition] = useTransition();
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -179,9 +185,30 @@ export default function AddProductForm({ onSuccess }: AddProductFormProps) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Category</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Grains, Oils, Ready-Made" {...field} />
-                  </FormControl>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a category" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value={UNCATEGORIZED_LABEL}>
+                        {UNCATEGORIZED_LABEL}
+                      </SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={category.name}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Manage the list with the &quot;Product Categories&quot; button.
+                    Leave as {UNCATEGORIZED_LABEL} if unsure.
+                  </p>
                   <FormMessage />
                 </FormItem>
               )}

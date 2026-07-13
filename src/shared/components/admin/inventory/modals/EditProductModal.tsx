@@ -14,9 +14,11 @@ import {
   BASE_UOMS,
   MAX_IMAGE_SIZE_BYTES,
   PRODUCT_TYPES,
+  UNCATEGORIZED_LABEL,
   validateInventoryProductImage,
   type AddProductFormValues,
   type InventoryCatalogProduct,
+  type InventoryProductCategory,
 } from "@/lib/inventory/product-schema";
 import { Button } from "@/shared/components/ui/button";
 import {
@@ -70,12 +72,14 @@ interface EditProductModalProps {
   product: InventoryCatalogProduct;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  categories?: InventoryProductCategory[];
 }
 
 export default function EditProductModal({
   product,
   open,
   onOpenChange,
+  categories = [],
 }: EditProductModalProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -90,6 +94,23 @@ export default function EditProductModal({
     resolver: zodResolver(addProductFormSchema),
     defaultValues: getDefaultValues(product),
   });
+
+  // Build the dropdown options: Uncategorized + managed categories. If the
+  // product currently holds a legacy category name that is no longer in the
+  // managed list, include it so the current value still renders correctly.
+  const categoryNames = categories.map((category) => category.name);
+  const current = product.category?.trim();
+  const hasCurrentInList =
+    !current ||
+    current === UNCATEGORIZED_LABEL ||
+    categoryNames.some(
+      (name) => name.toLowerCase() === current.toLowerCase(),
+    );
+  const categoryOptions = [
+    UNCATEGORIZED_LABEL,
+    ...categoryNames,
+    ...(hasCurrentInList ? [] : [current]),
+  ];
 
   useEffect(() => {
     if (!open) return;
@@ -199,12 +220,20 @@ export default function EditProductModal({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Category</FormLabel>
-                  <FormControl>
-                    <Input
-                      placeholder="e.g. Grains, Oils, Ready-Made"
-                      {...field}
-                    />
-                  </FormControl>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a category" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {categoryOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { Loader2, PackageOpen } from "lucide-react";
+import { Loader2, PackageOpen, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { dispatchToManufacturingAction } from "@/actions/inventory-actions";
@@ -12,12 +12,7 @@ import {
   type BaseUom,
 } from "@/lib/inventory/product-schema";
 import { Button } from "@/shared/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/shared/components/ui/card";
+import { Card, CardContent } from "@/shared/components/ui/card";
 import { Input } from "@/shared/components/ui/input";
 
 const BASE_UOM_LABELS: Record<BaseUom, string> = {
@@ -70,21 +65,32 @@ export default function SendToProcessingPanel({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Send Raw Material to Processing</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <Card className="border-slate-200 shadow-sm">
+      <CardContent className="space-y-4 p-5">
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <Send className="size-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-[15px] font-semibold leading-snug text-slate-900">
+              Send Raw Material to Processing
+            </p>
+            <p className="text-xs text-slate-500">
+              Dispatch raw material lots into work-in-progress.
+            </p>
+          </div>
+        </div>
+
         {activeLots.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 px-6 py-12 text-center">
-            <PackageOpen className="mb-3 size-10 text-muted-foreground/60" />
-            <p className="font-medium text-foreground">No active raw material lots</p>
-            <p className="mt-1 text-sm text-muted-foreground">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-12 text-center">
+            <PackageOpen className="mb-3 size-10 text-slate-300" />
+            <p className="font-medium text-slate-900">No active raw material lots</p>
+            <p className="mt-1 text-sm text-slate-500">
               Receive stock for raw materials in the Master Catalog first.
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="max-h-[520px] space-y-2.5 overflow-y-auto pr-1">
             {activeLots.map((lot) => {
               const uomLabel = BASE_UOM_LABELS[lot.baseUom];
               const isRowPending = isPending && pendingLotId === lot.id;
@@ -92,21 +98,21 @@ export default function SendToProcessingPanel({
               return (
                 <div
                   key={lot.id}
-                  className="flex flex-col gap-3 rounded-lg border bg-background p-4 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3.5 transition-colors hover:border-slate-300 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <p className="font-semibold text-foreground">
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p className="text-sm font-semibold text-slate-900">
                       {lot.productName}
                     </p>
-                    <p className="text-sm text-muted-foreground">
-                      Batch: {lot.batchNumber}
+                    <p className="text-xs text-slate-500">
+                      Batch {lot.batchNumber} · Expires{" "}
+                      {format(new Date(lot.expiryDate), "d MMM yyyy")}
                     </p>
-                    <p className="text-sm text-muted-foreground">
-                      Remaining: {lot.quantityRemaining} {uomLabel} · Unit cost: ₹
-                      {lot.unitCost.toFixed(2)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Expires: {format(new Date(lot.expiryDate), "PPP")}
+                    <p className="text-xs text-slate-500">
+                      <span className="font-medium text-slate-700">
+                        {lot.quantityRemaining} {uomLabel}
+                      </span>{" "}
+                      remaining · ₹{lot.unitCost.toFixed(2)}/unit
                     </p>
                   </div>
 
@@ -117,7 +123,7 @@ export default function SendToProcessingPanel({
                       max={lot.quantityRemaining}
                       step="0.01"
                       placeholder={`Qty (${uomLabel})`}
-                      className="w-28"
+                      className="w-28 border-slate-200"
                       value={quantities[lot.id] ?? ""}
                       onChange={(e) =>
                         setQuantities((prev) => ({

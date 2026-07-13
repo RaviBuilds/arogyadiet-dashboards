@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PackagePlus } from "lucide-react";
 
+import type { InventoryProductCategory } from "@/lib/inventory/product-schema";
 import AddProductForm from "@/shared/components/admin/inventory/AddProductForm";
 import { Button } from "@/shared/components/ui/button";
 import {
@@ -17,9 +18,12 @@ import {
 
 interface RegisterProductSheetProps {
   basePath?: string;
+  categories?: InventoryProductCategory[];
 }
 
-export default function RegisterProductSheet({}: RegisterProductSheetProps) {
+export default function RegisterProductSheet({
+  categories = [],
+}: RegisterProductSheetProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
@@ -48,7 +52,7 @@ export default function RegisterProductSheet({}: RegisterProductSheetProps) {
           </SheetDescription>
         </SheetHeader>
         <div className="px-4 pb-4">
-          <AddProductForm onSuccess={handleSuccess} />
+          <AddProductForm onSuccess={handleSuccess} categories={categories} />
         </div>
       </SheetContent>
     </Sheet>

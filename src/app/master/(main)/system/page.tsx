@@ -1,9 +1,8 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { MasterPageHeader } from "@/shared/components/master/MasterPageHeader";
-import { Users, DollarSign, ScrollText, Shield, FileBarChart, Hospital } from "lucide-react";
+import { Users, DollarSign, ScrollText, Shield, FileBarChart, Hospital, Gauge } from "lucide-react";
 import { CoreBusinessSection } from "@/shared/components/master/core-business/CoreBusinessSection";
-import { RateConfigCard } from "@/shared/components/master/rates/RateConfigCard";
 
 export const revalidate = 0;
 
@@ -52,6 +51,12 @@ export default function SystemPage() {
           title="Report Engine"
           description="Custom reports, export data, and analytics."
         />
+        <SystemCard
+          href="/rate-config"
+          icon={<Gauge className="h-5 w-5 text-orange-600" />}
+          title="Rate Configuration"
+          description="Per-km delivery and rider payout rates for Core and franchises."
+        />
       </div>
 
       {/* Additive Core Business section — positioned BELOW the existing Core
@@ -63,10 +68,6 @@ export default function SystemPage() {
       >
         <CoreBusinessSection />
       </Suspense>
-
-      {/* Rate Configuration card — delivery and rider payout per-km rates
-          for Core Business and each franchise (Req 10.1, 12.1, 12.2). */}
-      <RateConfigCard />
     </div>
   );
 }

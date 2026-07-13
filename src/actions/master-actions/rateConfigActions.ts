@@ -12,6 +12,7 @@
 import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { MASTER_CARD_MAX_RATE_PER_KM } from "@/lib/delivery/deliveryCharge";
 import {
   listRateConfigs,
@@ -83,8 +84,12 @@ export async function getRateConfigsAction(): Promise<
   if (!auth.ok) return { success: false, error: auth.error };
 
   try {
-    const supabase = await createClient();
-    const data = await listRateConfigs(supabase);
+    // `rate_configs` (and `franchises`) have no RLS grants for the
+    // `authenticated` role — authorization is already enforced above via
+    // assertMasterAdmin, so data access uses the service-role client,
+    // mirroring the pattern in franchiseActions.ts / clinicRepository.ts.
+    const admin = createAdminClient();
+    const data = await listRateConfigs(admin);
     return { success: true, data };
   } catch (err) {
     console.error("getRateConfigsAction error:", err);
@@ -130,9 +135,11 @@ export async function upsertRateAction(input: {
   }
 
   // ─── Persist via RateConfigService ──────────────────────────────────────
+  // Same RLS gap as getRateConfigsAction — use the service-role client for
+  // data access now that authorization has been verified above.
   try {
-    const supabase = await createClient();
-    const result = await upsertRate(supabase, scope, field, value);
+    const admin = createAdminClient();
+    const result = await upsertRate(admin, scope, field, value);
 
     if (!result.ok) {
       return { success: false, error: result.error, field };
@@ -142,7 +149,7 @@ export async function upsertRateAction(input: {
     const scopeType = scope.type === "CORE_BUSINESS" ? "CORE_BUSINESS" : "FRANCHISE";
     const franchiseId = scope.type === "FRANCHISE" ? scope.franchiseId : null;
 
-    const { error: auditError } = await supabase
+    const { error: auditError } = await admin
       .from("rate_config_audit_logs")
       .insert({
         actor_user_id: auth.userId,

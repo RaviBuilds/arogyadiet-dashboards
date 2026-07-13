@@ -3,25 +3,34 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { format, formatDistanceToNow } from "date-fns";
-import { CalendarIcon, Layers, Loader2 } from "lucide-react";
+import { Blend, CalendarIcon, Loader2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { processBatchOutputAction } from "@/actions/inventory-actions";
+import {
+  processBatchOutputAction,
+  revertPendingBatchAction,
+} from "@/actions/inventory-actions";
 import {
   type BaseUom,
   type FinishedGoodOption,
   type ManufacturingBatch,
 } from "@/lib/inventory/product-schema";
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/shared/components/ui/alert-dialog";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import { Calendar } from "@/shared/components/ui/calendar";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/shared/components/ui/card";
+import { Card, CardContent } from "@/shared/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -58,15 +67,23 @@ export default function PendingBatchesPanel({
   batches,
 }: PendingBatchesPanelProps) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Layers className="h-5 w-5" />
-          Pending Batches (Multi-Material)
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
+    <Card className="border-slate-200 shadow-sm">
+      <CardContent className="space-y-4 p-5">
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <Blend className="size-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-[15px] font-semibold leading-snug text-slate-900">
+              Pending Batches (Multi-Material)
+            </p>
+            <p className="text-xs text-slate-500">
+              Combined raw material batches awaiting output.
+            </p>
+          </div>
+        </div>
+
+        <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
           {batches.map((batch) => (
             <BatchCard key={batch.id} batch={batch} />
           ))}
@@ -77,30 +94,143 @@ export default function PendingBatchesPanel({
 }
 
 function BatchCard({ batch }: { batch: ManufacturingBatch }) {
+  const router = useRouter();
+  const [isReverting, startRevertTransition] = useTransition();
+
+  // Group orders by raw product name so a mixture reads as "N raw
+  // materials" even when one ingredient spans multiple batches/lots.
+  const ordersByProduct = useMemo(() => {
+    const groups = new Map<
+      string,
+      { productName: string; baseUom: (typeof batch.orders)[number]["baseUom"]; orders: typeof batch.orders }
+    >();
+
+    for (const order of batch.orders) {
+      const existing = groups.get(order.rawProductName);
+      if (existing) {
+        existing.orders.push(order);
+      } else {
+        groups.set(order.rawProductName, {
+          productName: order.rawProductName,
+          baseUom: order.baseUom,
+          orders: [order],
+        });
+      }
+    }
+
+    return Array.from(groups.values());
+  }, [batch.orders]);
+
+  function handleRevert() {
+    startRevertTransition(async () => {
+      const result = await revertPendingBatchAction(batch.id);
+
+      if (result.success) {
+        toast.success(
+          `${result.itemsReturned} item${result.itemsReturned === 1 ? "" : "s"} returned to stock.`,
+        );
+        router.refresh();
+        return;
+      }
+
+      toast.error(result.error);
+    });
+  }
+
   return (
-    <Card className="border-border/70 shadow-none">
-      <CardContent className="space-y-2 p-4">
-        <p className="font-semibold text-foreground">{batch.name}</p>
-        <div className="flex flex-wrap gap-1">
-          {batch.orders.map((order) => (
-            <Badge key={order.id} variant="secondary" className="text-xs">
-              {order.rawProductName}: {order.quantitySent}{" "}
-              {BASE_UOM_LABELS[order.baseUom]}
-            </Badge>
-          ))}
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{batch.name}</p>
+          <p className="text-xs text-slate-500">
+            {ordersByProduct.length} raw material
+            {ordersByProduct.length !== 1 ? "s" : ""} ·{" "}
+            {formatDistanceToNow(new Date(batch.createdAt), {
+              addSuffix: true,
+            })}
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground">
-          Total Input: {batch.totalInputWeight} · Value: ₹
-          {batch.totalCostValue.toFixed(2)}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {formatDistanceToNow(new Date(batch.createdAt), { addSuffix: true })}
-        </p>
-        <div className="pt-1">
-          <ProcessBatchOutputDialog batch={batch} />
-        </div>
-      </CardContent>
-    </Card>
+        <Badge className="shrink-0 border-0 bg-secondary/15 font-normal text-emerald-800">
+          ₹{batch.totalCostValue.toFixed(2)}
+        </Badge>
+      </div>
+
+      <div className="mt-3 space-y-1.5">
+        {ordersByProduct.map((group) => {
+          const uomLabel = BASE_UOM_LABELS[group.baseUom];
+          const totalQty = group.orders.reduce(
+            (sum, o) => sum + o.quantitySent,
+            0,
+          );
+          return (
+            <div
+              key={group.productName}
+              className="flex items-center justify-between gap-3 rounded-lg bg-slate-50/80 px-3 py-2"
+            >
+              <p className="text-sm font-medium text-slate-800">
+                {group.productName}
+              </p>
+              <p className="text-xs text-slate-500">
+                {totalQty} {uomLabel}
+                {group.orders.length > 1
+                  ? ` · ${group.orders.length} batches`
+                  : ""}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="mt-2.5 text-xs text-slate-500">
+        Total input: {batch.totalInputWeight}
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <ProcessBatchOutputDialog batch={batch} />
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="border-slate-200"
+              disabled={isReverting}
+            >
+              {isReverting ? (
+                <>
+                  <Loader2 className="animate-spin" />
+                  Returning...
+                </>
+              ) : (
+                <>
+                  <Undo2 />
+                  Return to Stock
+                </>
+              )}
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Return batch to stock?</AlertDialogTitle>
+              <AlertDialogDescription>
+                All {batch.orders.length} raw material
+                {batch.orders.length === 1 ? "" : "s"} in this batch will be
+                refunded back to their source lots. This batch will be
+                closed and removed from the pending queue.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isReverting}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction disabled={isReverting} onClick={handleRevert}>
+                Return to Stock
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </div>
   );
 }
 

@@ -19,6 +19,8 @@ import { deleteProductAction } from "@/actions/inventory-actions";
 import {
   type BaseUom,
   type InventoryCatalogProduct,
+  type InventoryProductCategory,
+  type CoreClinicDestination,
   type ProductType,
 } from "@/lib/inventory/product-schema";
 import type { FranchiseDestination } from "@/lib/franchise-inventory/active-destination-filter";
@@ -72,6 +74,10 @@ interface ProductCardProps {
   franchiseMode?: boolean;
   /** Active franchise destinations for the dispatch selector. */
   franchiseDestinations?: FranchiseDestination[];
+  /** Core clinic destinations for the dispatch selector. */
+  coreClinicDestinations?: CoreClinicDestination[];
+  /** Managed product categories for the edit dropdown. */
+  categories?: InventoryProductCategory[];
 }
 
 export default function ProductCard({
@@ -80,6 +86,8 @@ export default function ProductCard({
   stockOperations = true,
   franchiseMode = false,
   franchiseDestinations,
+  coreClinicDestinations = [],
+  categories = [],
 }: ProductCardProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -256,6 +264,7 @@ export default function ProductCard({
               productName={product.name}
               baseUom={product.baseUom}
               franchiseDestinations={franchiseDestinations}
+              coreClinicDestinations={coreClinicDestinations}
               trigger={
                 <Button type="button" size="sm" variant="outline" className="w-full">
                   <Minus className="mr-1 h-4 w-4" />
@@ -273,6 +282,7 @@ export default function ProductCard({
           product={product}
           open={editOpen}
           onOpenChange={setEditOpen}
+          categories={categories}
         />
       )}
 

@@ -35,28 +35,49 @@ export default function ManufacturingHubClient({
   );
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <SendToProcessingPanel activeLots={activeLots} />
-        <PendingOrdersPanel
-          pendingOrders={pendingOrders}
-          finishedGoods={finishedGoods}
-          mappedFinishedGoodsMap={mappedFinishedGoodsMap}
-        />
-      </div>
+    <div className="space-y-8">
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">
+            Single-Material Processing
+          </h2>
+          <p className="text-xs text-slate-500">
+            One raw material lot converts into one or more finished products.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          <SendToProcessingPanel activeLots={activeLots} />
+          <PendingOrdersPanel
+            pendingOrders={pendingOrders}
+            finishedGoods={finishedGoods}
+            mappedFinishedGoodsMap={mappedFinishedGoodsMap}
+          />
+        </div>
+      </section>
 
       {(multiRawMappings.length > 0 || pendingBatches.length > 0) && (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          {multiRawMappings.length > 0 && (
-            <MultiDispatchPanel
-              mappings={multiRawMappings}
-              activeLots={activeLots}
-            />
-          )}
-          {pendingBatches.length > 0 && (
-            <PendingBatchesPanel batches={pendingBatches} />
-          )}
-        </div>
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">
+              Multi-Material Processing
+            </h2>
+            <p className="text-xs text-slate-500">
+              Combine two or more raw materials into a single finished product
+              batch.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            {multiRawMappings.length > 0 && (
+              <MultiDispatchPanel
+                mappings={multiRawMappings}
+                activeLots={activeLots}
+              />
+            )}
+            {pendingBatches.length > 0 && (
+              <PendingBatchesPanel batches={pendingBatches} />
+            )}
+          </div>
+        </section>
       )}
     </div>
   );
