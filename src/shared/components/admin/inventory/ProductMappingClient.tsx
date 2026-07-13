@@ -2,7 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowRight,
+  Combine,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -28,12 +35,7 @@ import {
 } from "@/shared/components/ui/alert-dialog";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/shared/components/ui/card";
+import { Card, CardContent } from "@/shared/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -79,8 +81,11 @@ export default function ProductMappingClient({
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {mappings.length} mapping{mappings.length !== 1 ? "s" : ""} configured
+        <p className="text-sm text-slate-500">
+          <span className="font-semibold text-slate-900">
+            {mappings.length}
+          </span>{" "}
+          mapping{mappings.length !== 1 ? "s" : ""} configured
         </p>
         <MappingFormDialog
           rawProducts={rawProducts}
@@ -89,10 +94,13 @@ export default function ProductMappingClient({
       </div>
 
       {mappings.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center px-6 py-12 text-center">
-            <p className="font-medium text-foreground">No mappings configured</p>
-            <p className="mt-1 text-sm text-muted-foreground">
+        <Card className="border-dashed border-slate-200 shadow-none">
+          <CardContent className="flex flex-col items-center justify-center px-6 py-14 text-center">
+            <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-slate-100">
+              <Combine className="size-5 text-slate-400" />
+            </div>
+            <p className="font-medium text-slate-900">No mappings configured</p>
+            <p className="mt-1 max-w-sm text-sm text-slate-500">
               Create a mapping to define which raw materials can be converted to
               which finished products.
             </p>
@@ -103,11 +111,21 @@ export default function ProductMappingClient({
           {mappings.map((mapping) => {
             const isDeleting = isPending && deletingId === mapping.id;
             return (
-              <Card key={mapping.id} className="shadow-sm">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">{mapping.name}</CardTitle>
-                    <div className="flex gap-1">
+              <Card
+                key={mapping.id}
+                className="border-slate-200 shadow-sm transition-shadow hover:shadow-md"
+              >
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                        <Combine className="size-4 text-primary" />
+                      </div>
+                      <p className="text-[15px] font-semibold leading-snug text-slate-900">
+                        {mapping.name}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-0.5">
                       <MappingFormDialog
                         rawProducts={rawProducts}
                         finishedProducts={finishedProducts}
@@ -118,7 +136,7 @@ export default function ProductMappingClient({
                           <Button
                             size="icon"
                             variant="ghost"
-                            className="h-8 w-8 text-destructive"
+                            className="h-8 w-8 text-slate-500 hover:text-destructive"
                             disabled={isDeleting}
                           >
                             {isDeleting ? (
@@ -150,29 +168,37 @@ export default function ProductMappingClient({
                       </AlertDialog>
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 space-y-1">
-                      <p className="text-xs font-medium uppercase text-muted-foreground">
+
+                  <div className="flex items-stretch gap-3 rounded-xl bg-slate-50/80 p-3.5">
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                         Raw Materials
                       </p>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {mapping.rawProducts.map((p) => (
-                          <Badge key={p.id} variant="secondary">
+                          <Badge
+                            key={p.id}
+                            className="border-0 bg-secondary/15 text-secondary-foreground font-normal text-emerald-800"
+                          >
                             {p.name}
                           </Badge>
                         ))}
                       </div>
                     </div>
-                    <ArrowRight className="h-5 w-5 shrink-0 text-muted-foreground" />
-                    <div className="flex-1 space-y-1">
-                      <p className="text-xs font-medium uppercase text-muted-foreground">
+                    <div className="flex shrink-0 items-center">
+                      <ArrowRight className="size-4 text-slate-400" />
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                         Finished Products
                       </p>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {mapping.finishedProducts.map((p) => (
-                          <Badge key={p.id} variant="outline">
+                          <Badge
+                            key={p.id}
+                            variant="outline"
+                            className="border-slate-300 font-normal text-slate-700"
+                          >
                             {p.name}
                           </Badge>
                         ))}

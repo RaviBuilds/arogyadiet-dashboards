@@ -3,17 +3,20 @@ import InventoryMetrics from "@/shared/components/admin/inventory/InventoryMetri
 import {
   getInventoryMasterCatalog,
   getInventoryMetrics,
+  listCoreClinicsForDispatch,
 } from "@/services/inventoryEngine";
 import { listActiveFranchiseDestinations } from "@/services/franchiseInventoryEngine";
 
 export const revalidate = 0;
 
 export default async function WarehouseInventoryPage() {
-  const [initialProducts, metricsData, franchiseDestinations] = await Promise.all([
-    getInventoryMasterCatalog(),
-    getInventoryMetrics(),
-    listActiveFranchiseDestinations(),
-  ]);
+  const [initialProducts, metricsData, franchiseDestinations, coreClinicDestinations] =
+    await Promise.all([
+      getInventoryMasterCatalog(),
+      getInventoryMetrics(),
+      listActiveFranchiseDestinations(),
+      listCoreClinicsForDispatch(),
+    ]);
 
   return (
     <div className="space-y-6 bg-zinc-100 p-6">
@@ -21,6 +24,7 @@ export default async function WarehouseInventoryPage() {
       <InventoryDashboard
         initialProducts={initialProducts}
         franchiseDestinations={franchiseDestinations}
+        coreClinicDestinations={coreClinicDestinations}
       />
     </div>
   );

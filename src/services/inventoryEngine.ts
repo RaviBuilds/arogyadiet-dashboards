@@ -10,14 +10,18 @@ import {
   type AddProductInput,
   type BulkInboundItem,
   type BulkOutboundItem,
+  type CoreClinicDestination,
+  type CreateInventoryProductCategoryInput,
   type CreateMappingFormValues,
   type DispatchInventoryStockResult,
   type DispatchStockReason,
   type FinishedGoodOption,
   type InventoryCatalogProduct,
+  type InventoryCategoryOverview,
   type InventoryLot,
   type InventoryMetrics,
   type InventoryProduct,
+  type InventoryProductCategory,
   type InventorySourceType,
   type ManufacturingBatch,
   type ManufacturingOrder,
@@ -27,12 +31,15 @@ import {
   type ProcessManufacturingOutputResult,
   type PurchaseOrderExportFile,
   type PurchaseOrderExportFilters,
+  type RevertPendingBatchResult,
   type RevertPendingManufacturingResult,
   type TransactionLedgerEntry,
   type UpdateInventoryProductInput,
+  UNCATEGORIZED_LABEL,
   mapActiveRawMaterialLotRow,
   mapFinishedGoodOptionRow,
   mapInventoryLotRow,
+  mapInventoryProductCategoryRow,
   mapInventoryProductRow,
   mapManufacturingOrderRow,
   mapManufacturingProductMappingRow,
@@ -247,6 +254,33 @@ function resolveInventoryProductImageUrl(path: string | null): string | null {
   return data.publicUrl;
 }
 
+/**
+ * Lists all core (non-franchise) clinics as dispatch destinations. Clinics with
+ * franchise_id = null are the core business's own clinics. This is used to
+ * populate the "Core Clinics" group in the Dispatch Stock selector.
+ *
+ * Clinics that have been deleted will no longer appear here (hard delete), but
+ * any past inventory_transactions.reason text snapshots remain intact in the
+ * ledger.
+ */
+export async function listCoreClinicsForDispatch(): Promise<
+  CoreClinicDestination[]
+> {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("clinics")
+    .select("id, name")
+    .is("franchise_id", null)
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to list core clinics: ${error.message}`);
+  }
+
+  return (data ?? []).map((row) => ({ id: row.id, name: row.name }));
+}
+
 export async function getInventoryMasterCatalog(): Promise<
   InventoryCatalogProduct[]
 > {
@@ -306,6 +340,174 @@ export async function getInventoryMasterCatalog(): Promise<
       activeLots: lotsByProductId.get(product.id) ?? [],
     };
   });
+}
+
+// ─── Managed product categories ───────────────────────────────────────────
+
+/**
+ * Lists all master-managed product categories, ordered by name. Image paths are
+ * resolved to public URLs so the UI can render them directly.
+ */
+export async function listInventoryProductCategories(): Promise<
+  InventoryProductCategory[]
+> {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("inventory_product_categories")
+    .select("id, name, description, image_url, created_at, updated_at")
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((row) => {
+    const category = mapInventoryProductCategoryRow(row);
+    return {
+      ...category,
+      imageUrl: resolveInventoryProductImageUrl(category.imageUrl),
+    };
+  });
+}
+
+/**
+ * Creates a new product category. Enforces the reserved "Uncategorized" name
+ * and case-insensitive uniqueness before insert.
+ */
+export async function createInventoryProductCategory(
+  data: CreateInventoryProductCategoryInput,
+): Promise<InventoryProductCategory> {
+  const supabase = createAdminClient();
+
+  const normalizedName = data.name.trim();
+
+  if (normalizedName.toLowerCase() === UNCATEGORIZED_LABEL.toLowerCase()) {
+    throw new Error(`"${UNCATEGORIZED_LABEL}" is a reserved name.`);
+  }
+
+  const { data: existing, error: dupeError } = await supabase
+    .from("inventory_product_categories")
+    .select("id, name");
+
+  if (dupeError) {
+    throw new Error(dupeError.message);
+  }
+
+  const hasDuplicate = (existing ?? []).some(
+    (row) => row.name.trim().toLowerCase() === normalizedName.toLowerCase(),
+  );
+
+  if (hasDuplicate) {
+    throw new Error("A category with this name already exists.");
+  }
+
+  const { data: row, error } = await supabase
+    .from("inventory_product_categories")
+    .insert({
+      name: normalizedName,
+      description: data.description?.trim() || null,
+      image_url: data.imageUrl?.trim() || null,
+    })
+    .select("id, name, description, image_url, created_at, updated_at")
+    .single();
+
+  if (error || !row) {
+    throw new Error(error?.message ?? "Failed to create category.");
+  }
+
+  const category = mapInventoryProductCategoryRow(row);
+  return {
+    ...category,
+    imageUrl: resolveInventoryProductImageUrl(category.imageUrl),
+  };
+}
+
+/**
+ * Returns each managed category enriched with the number of products assigned
+ * to it and the total active stock across those products. Products whose
+ * category does not match any managed category (including the reserved
+ * "Uncategorized" sentinel) are aggregated into a synthetic "Uncategorized"
+ * bucket which is always returned last.
+ */
+export async function getInventoryCategoryOverview(): Promise<
+  InventoryCategoryOverview[]
+> {
+  const supabase = createAdminClient();
+
+  const [categoriesResult, productsResult, lotsResult] = await Promise.all([
+    supabase
+      .from("inventory_product_categories")
+      .select("id, name, description, image_url, created_at, updated_at")
+      .order("name", { ascending: true }),
+    supabase
+      .from("inventory_products")
+      .select("id, category")
+      .is("deleted_at", null),
+    supabase
+      .from("inventory_lots")
+      .select("product_id, quantity_remaining")
+      .eq("status", "ACTIVE"),
+  ]);
+
+  if (categoriesResult.error) throw new Error(categoriesResult.error.message);
+  if (productsResult.error) throw new Error(productsResult.error.message);
+  if (lotsResult.error) throw new Error(lotsResult.error.message);
+
+  // Sum active stock per product.
+  const stockByProductId = new Map<string, number>();
+  for (const lot of lotsResult.data ?? []) {
+    stockByProductId.set(
+      lot.product_id,
+      (stockByProductId.get(lot.product_id) ?? 0) + Number(lot.quantity_remaining),
+    );
+  }
+
+  const categories = (categoriesResult.data ?? []).map(
+    mapInventoryProductCategoryRow,
+  );
+
+  // Build a lookup of known category names (case-insensitive) → display name.
+  const knownNameByLower = new Map<string, string>();
+  for (const category of categories) {
+    knownNameByLower.set(category.name.trim().toLowerCase(), category.name);
+  }
+
+  // Aggregate product counts + stock per resolved category name.
+  const countByName = new Map<string, number>();
+  const stockByName = new Map<string, number>();
+  const uncategorizedKey = UNCATEGORIZED_LABEL;
+
+  for (const product of productsResult.data ?? []) {
+    const raw = (product.category ?? "").trim();
+    const matchedName = knownNameByLower.get(raw.toLowerCase());
+    const key = matchedName ?? uncategorizedKey;
+    countByName.set(key, (countByName.get(key) ?? 0) + 1);
+    stockByName.set(
+      key,
+      (stockByName.get(key) ?? 0) + (stockByProductId.get(product.id) ?? 0),
+    );
+  }
+
+  const overview: InventoryCategoryOverview[] = categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    description: category.description,
+    imageUrl: resolveInventoryProductImageUrl(category.imageUrl),
+    productCount: countByName.get(category.name) ?? 0,
+    totalStock: stockByName.get(category.name) ?? 0,
+  }));
+
+  overview.push({
+    id: null,
+    name: uncategorizedKey,
+    description: null,
+    imageUrl: null,
+    productCount: countByName.get(uncategorizedKey) ?? 0,
+    totalStock: stockByName.get(uncategorizedKey) ?? 0,
+  });
+
+  return overview;
 }
 
 export async function getInventoryMetrics(): Promise<InventoryMetrics> {
@@ -559,7 +761,7 @@ type LotRollbackState = {
 export async function dispatchInventoryStock(
   productId: string,
   quantityToDispatch: number,
-  reason: DispatchStockReason,
+  reason: string,
 ): Promise<DispatchInventoryStockResult> {
   const supabase = createAdminClient();
 
@@ -1797,4 +1999,149 @@ export async function processBatchOutput(
     batchNumber,
     outputId: batchId,
   };
+}
+
+/**
+ * Reverts a still-PENDING multi-material batch back to stock: every raw
+ * material lot that was consumed by the batch's manufacturing orders gets
+ * its quantity refunded, each order is closed out, and the batch itself is
+ * marked COMPLETED so it drops off the pending queue. Mirrors the
+ * single-material `revertPendingManufacturing` behaviour, applied per order.
+ */
+export async function revertPendingBatch(
+  batchId: string,
+): Promise<RevertPendingBatchResult> {
+  const supabase = createAdminClient();
+
+  const { data: batchRow, error: batchFetchError } = await supabase
+    .from("manufacturing_batches")
+    .select("id, status")
+    .eq("id", batchId)
+    .single();
+
+  if (batchFetchError || !batchRow) {
+    throw new Error(batchFetchError?.message ?? "Batch not found.");
+  }
+
+  if (batchRow.status !== "PENDING") {
+    throw new Error("Only pending batches can be returned to stock.");
+  }
+
+  const { data: orderRows, error: ordersFetchError } = await supabase
+    .from("manufacturing_orders")
+    .select("id, source_lot_id, quantity_sent, status")
+    .eq("batch_id", batchId);
+
+  if (ordersFetchError) {
+    throw new Error(ordersFetchError.message);
+  }
+
+  const pendingOrders = (orderRows ?? []).filter(
+    (order) => order.status === "PENDING",
+  );
+
+  if (pendingOrders.length === 0) {
+    throw new Error("No pending items found in this batch.");
+  }
+
+  // Refund each order's source lot, closing the order as we go. Keep track of
+  // everything applied so far so we can compensate if a later step fails.
+  const appliedLotRefunds: {
+    lotId: string;
+    previousQuantity: number;
+    previousStatus: string;
+  }[] = [];
+  const completedOrderIds: string[] = [];
+
+  try {
+    for (const order of pendingOrders) {
+      const quantitySent = Number(order.quantity_sent);
+      const sourceLotId = order.source_lot_id;
+
+      const { data: lotRow, error: lotFetchError } = await supabase
+        .from("inventory_lots")
+        .select("id, quantity_remaining, unit_cost, status")
+        .eq("id", sourceLotId)
+        .single();
+
+      if (lotFetchError || !lotRow) {
+        throw new Error(
+          lotFetchError?.message ?? "Source lot not found for batch item.",
+        );
+      }
+
+      const previousQuantity = Number(lotRow.quantity_remaining);
+      const previousStatus = lotRow.status;
+      const unitCost = Number(lotRow.unit_cost);
+      const newQuantity = previousQuantity + quantitySent;
+      const newStatus =
+        previousStatus === "DEPLETED" ? "ACTIVE" : previousStatus;
+
+      const { error: lotUpdateError } = await supabase
+        .from("inventory_lots")
+        .update({ quantity_remaining: newQuantity, status: newStatus })
+        .eq("id", sourceLotId);
+
+      if (lotUpdateError) {
+        throw new Error(lotUpdateError.message);
+      }
+
+      appliedLotRefunds.push({ lotId: sourceLotId, previousQuantity, previousStatus });
+
+      const { error: orderUpdateError } = await supabase
+        .from("manufacturing_orders")
+        .update({ status: "COMPLETED", completed_at: new Date().toISOString() })
+        .eq("id", order.id);
+
+      if (orderUpdateError) {
+        throw new Error(orderUpdateError.message);
+      }
+
+      completedOrderIds.push(order.id);
+
+      const { error: transactionError } = await supabase
+        .from("inventory_transactions")
+        .insert({
+          lot_id: sourceLotId,
+          transaction_type: "IN",
+          quantity_changed: quantitySent,
+          financial_value_changed: quantitySent * unitCost,
+        });
+
+      if (transactionError) {
+        throw new Error(transactionError.message);
+      }
+    }
+
+    const { error: batchUpdateError } = await supabase
+      .from("manufacturing_batches")
+      .update({ status: "COMPLETED", completed_at: new Date().toISOString() })
+      .eq("id", batchId);
+
+    if (batchUpdateError) {
+      throw new Error(batchUpdateError.message);
+    }
+
+    return { itemsReturned: pendingOrders.length };
+  } catch (err) {
+    // Compensate anything already applied before re-throwing.
+    for (const orderId of completedOrderIds) {
+      await supabase
+        .from("manufacturing_orders")
+        .update({ status: "PENDING", completed_at: null })
+        .eq("id", orderId);
+    }
+    for (const refund of appliedLotRefunds) {
+      await supabase
+        .from("inventory_lots")
+        .update({
+          quantity_remaining: refund.previousQuantity,
+          status: refund.previousStatus,
+        })
+        .eq("id", refund.lotId);
+    }
+    throw err instanceof Error
+      ? err
+      : new Error("Failed to return batch to stock.");
+  }
 }

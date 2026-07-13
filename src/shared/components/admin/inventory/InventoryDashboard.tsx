@@ -17,11 +17,15 @@ import {
 
 import type {
   InventoryCatalogProduct,
+  InventoryCategoryOverview,
+  InventoryProductCategory,
+  CoreClinicDestination,
   ProductType,
 } from "@/lib/inventory/product-schema";
 import type { FranchiseDestination } from "@/lib/franchise-inventory/active-destination-filter";
 import { cn } from "@/lib/utils";
 import DownloadPurchaseOrdersModal from "@/shared/components/admin/inventory/modals/DownloadPurchaseOrdersModal";
+import ProductCategoriesDialog from "@/shared/components/admin/inventory/ProductCategoriesDialog";
 import ProductCard from "@/shared/components/admin/inventory/ProductCard";
 import RegisterProductSheet from "@/shared/components/admin/inventory/RegisterProductSheet";
 import { Input } from "@/shared/components/ui/input";
@@ -35,10 +39,16 @@ interface InventoryDashboardProps {
   basePath?: string;
   /** Active franchise destinations for the dispatch selector. */
   franchiseDestinations?: FranchiseDestination[];
+  /** Core clinic destinations for the dispatch selector. */
+  coreClinicDestinations?: CoreClinicDestination[];
   /** Show central-kitchen Receive + Dispatch buttons on each card. Default true. */
   stockOperations?: boolean;
   /** Franchise portal mode: franchise hero, no register/raw tabs, single Dispatch button. */
   franchiseMode?: boolean;
+  /** Managed product categories used by the register/edit dropdowns. */
+  categories?: InventoryProductCategory[];
+  /** Category overview stats for the "Product Categories" management dialog. */
+  categoryOverview?: InventoryCategoryOverview[];
 }
 
 function getEmptyStateMessage(
@@ -78,8 +88,11 @@ export default function InventoryDashboard({
   productManagement = false,
   basePath,
   franchiseDestinations,
+  coreClinicDestinations = [],
   stockOperations = true,
   franchiseMode = false,
+  categories: productCategories = [],
+  categoryOverview = [],
 }: InventoryDashboardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
@@ -93,6 +106,19 @@ export default function InventoryDashboard({
     const unique = [...new Set(typeScoped.map((product) => product.category))].sort();
     return ["All", ...unique];
   }, [initialProducts, activeType]);
+
+  // Map managed category name (lowercased, trimmed) -> uploaded image URL, so
+  // the filter chips can render the category's own image instead of a generic
+  // icon when one has been provided.
+  const categoryImageByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const category of productCategories) {
+      if (category.imageUrl) {
+        map.set(category.name.trim().toLowerCase(), category.imageUrl);
+      }
+    }
+    return map;
+  }, [productCategories]);
 
   const filteredProducts = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -135,7 +161,10 @@ export default function InventoryDashboard({
         </p>
         {!franchiseMode && productManagement && (
           <div className="mt-4">
-            <RegisterProductSheet basePath={basePath} />
+            <RegisterProductSheet
+              basePath={basePath}
+              categories={productCategories}
+            />
           </div>
         )}
       </div>
@@ -156,8 +185,16 @@ export default function InventoryDashboard({
           </p>
           {!franchiseMode && (
             <div className="mt-2 flex flex-wrap items-center gap-2 sm:mt-3 [&_button]:h-8 [&_button]:px-2.5 [&_button]:text-xs sm:[&_button]:h-9 sm:[&_button]:px-3 sm:[&_button]:text-sm">
-              {productManagement && <RegisterProductSheet basePath={basePath} />}
+              {productManagement && (
+                <RegisterProductSheet
+                  basePath={basePath}
+                  categories={productCategories}
+                />
+              )}
               <DownloadPurchaseOrdersModal products={initialProducts} />
+              {productManagement && (
+                <ProductCategoriesDialog overview={categoryOverview} />
+              )}
             </div>
           )}
         </div>
@@ -215,6 +252,10 @@ export default function InventoryDashboard({
           const Icon =
             category === "All" ? LayoutGrid : getCategoryIcon(category);
           const isActive = activeCategory === category;
+          const imageUrl =
+            category === "All"
+              ? undefined
+              : categoryImageByName.get(category.trim().toLowerCase());
 
           return (
             <button
@@ -225,18 +266,26 @@ export default function InventoryDashboard({
             >
               <div
                 className={cn(
-                  "flex size-14 items-center justify-center rounded-full border bg-white shadow-sm transition-colors",
+                  "flex size-14 items-center justify-center overflow-hidden rounded-full border bg-white shadow-sm transition-colors",
                   isActive
                     ? "border-orange-300 bg-orange-50"
                     : "border-slate-200 hover:border-slate-300",
                 )}
               >
-                <Icon
-                  className={cn(
-                    "size-6",
-                    isActive ? "text-orange-600" : "text-slate-500",
-                  )}
-                />
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt={category}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <Icon
+                    className={cn(
+                      "size-6",
+                      isActive ? "text-orange-600" : "text-slate-500",
+                    )}
+                  />
+                )}
               </div>
               <span
                 className={cn(
@@ -259,7 +308,10 @@ export default function InventoryDashboard({
           </p>
           {productManagement && (activeType === "RAW_MATERIAL" || activeType === "FINISHED_GOOD") && (
             <div className="mt-4">
-              <RegisterProductSheet basePath={basePath} />
+              <RegisterProductSheet
+                basePath={basePath}
+                categories={productCategories}
+              />
             </div>
           )}
         </div>
@@ -283,6 +335,8 @@ export default function InventoryDashboard({
                   stockOperations={stockOperations}
                   franchiseMode={franchiseMode}
                   franchiseDestinations={franchiseDestinations}
+                  coreClinicDestinations={coreClinicDestinations}
+                  categories={productCategories}
                 />
               ))}
             </div>

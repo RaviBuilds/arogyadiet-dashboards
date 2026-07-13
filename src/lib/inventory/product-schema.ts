@@ -21,7 +21,7 @@ export const ALLOWED_PURCHASE_ORDER_TYPES = [
   "application/pdf",
 ] as const;
 
-export const INVENTORY_SOURCE_TYPES = ["FARMER", "VENDOR", "OTHER"] as const;
+export const INVENTORY_SOURCE_TYPES = ["FARMER", "VENDOR", "SELF_MADE", "OTHER"] as const;
 
 export type ProductType = (typeof PRODUCT_TYPES)[number];
 export type BaseUom = (typeof BASE_UOMS)[number];
@@ -33,8 +33,93 @@ export type InventorySourceType = (typeof INVENTORY_SOURCE_TYPES)[number];
 export const INVENTORY_SOURCE_LABELS: Record<InventorySourceType, string> = {
   FARMER: "Farmer",
   VENDOR: "Vendor",
+  SELF_MADE: "Self Made",
   OTHER: "Other",
 };
+
+// ─── Managed product categories ───────────────────────────────────────────
+
+/**
+ * Reserved sentinel used when a product has no category assigned. Products with
+ * this value are grouped under "Uncategorized" in the catalog. It cannot be
+ * created as a real category by the master admin.
+ */
+export const UNCATEGORIZED_LABEL = "Uncategorized";
+
+export type InventoryProductCategory = {
+  id: string;
+  name: string;
+  description: string | null;
+  imageUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** A category enriched with live product / stock aggregates for the overview UI. */
+export type InventoryCategoryOverview = {
+  /** Null for the synthetic "Uncategorized" bucket. */
+  id: string | null;
+  name: string;
+  description: string | null;
+  imageUrl: string | null;
+  productCount: number;
+  totalStock: number;
+};
+
+export const categoryFormSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Category name is required")
+    .max(100, "Name must be 100 characters or less")
+    .refine(
+      (value) => value.toLowerCase() !== UNCATEGORIZED_LABEL.toLowerCase(),
+      `"${UNCATEGORIZED_LABEL}" is a reserved name.`,
+    ),
+  description: z
+    .string()
+    .trim()
+    .max(500, "Description must be 500 characters or less")
+    .optional()
+    .or(z.literal("")),
+});
+
+export type CategoryFormValues = z.infer<typeof categoryFormSchema>;
+
+export function parseCreateCategoryFormData(formData: FormData) {
+  return categoryFormSchema.safeParse({
+    name: getFormString(formData, "name"),
+    description: getFormString(formData, "description"),
+  });
+}
+
+export type CreateInventoryProductCategoryInput = {
+  name: string;
+  description?: string | null;
+  imageUrl?: string | null;
+};
+
+type InventoryProductCategoryRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function mapInventoryProductCategoryRow(
+  row: InventoryProductCategoryRow,
+): InventoryProductCategory {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    imageUrl: row.image_url,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 export const addProductFormSchema = z.object({
   name: z
@@ -161,24 +246,45 @@ export const receiveStockFormSchema = receiveStockBaseSchema.superRefine(
 
 export type ReceiveStockFormValues = z.infer<typeof receiveStockFormSchema>;
 
-export const DISPATCH_STOCK_REASONS = [
+/**
+ * Fixed, non-entity dispatch reasons (no DB entity backing them).
+ * Clinic-based and franchise-based destinations are dynamic and stored as
+ * plain text snapshots in inventory_transactions.reason.
+ */
+export const STATIC_DISPATCH_REASONS = [
   "Kitchen Consumption",
   "Customer Sale",
   "Spoilage / Damage",
-  "Sent to Gachibowli Branch",
-  "Sent to Madhapur Branch",
-  // TODO(franchise): once the franchise model ships, replace the fixed branch
-  // destinations above with dynamic "Sent to <franchise name>" options.
 ] as const;
 
-export type DispatchStockReason = (typeof DISPATCH_STOCK_REASONS)[number];
+/**
+ * @deprecated Legacy alias retained so the static array still works as a
+ * readonly tuple in any existing consumer that spreads it. New code should
+ * derive available options dynamically (clinics + franchises + static reasons).
+ */
+export const DISPATCH_STOCK_REASONS = STATIC_DISPATCH_REASONS;
+
+/**
+ * Any string stored in inventory_transactions.reason.  The DB column is
+ * unconstrained TEXT (the old CHECK constraint was dropped in
+ * add-franchise-dispatch-to-inventory-transactions.sql).
+ */
+export type DispatchStockReason = string;
+
+/** Prefix applied to clinic-based dispatch values in the Select component. */
+export const CLINIC_DISPATCH_PREFIX = "clinic:";
+
+/** A core-business clinic surfaced as a dispatch destination. */
+export type CoreClinicDestination = {
+  id: string;
+  name: string;
+};
 
 export const dispatchStockFormSchema = z.object({
   productId: z.string().uuid("Invalid product ID"),
   quantity: z.coerce.number().positive("Quantity must be greater than 0"),
-  reason: z.enum(DISPATCH_STOCK_REASONS, {
-    message: "Select a dispatch reason",
-  }),
+  // Plain string — the DB column is unconstrained TEXT.
+  reason: z.string().min(1, "Select a dispatch reason"),
 });
 
 export type DispatchStockFormValues = z.infer<typeof dispatchStockFormSchema>;
@@ -348,6 +454,18 @@ export const revertPendingMfgSchema = z.object({
 });
 
 export type RevertPendingMfgFormValues = z.infer<typeof revertPendingMfgSchema>;
+
+export const revertPendingBatchSchema = z.object({
+  batchId: z.string().uuid("Invalid batch ID"),
+});
+
+export type RevertPendingBatchFormValues = z.infer<
+  typeof revertPendingBatchSchema
+>;
+
+export type RevertPendingBatchResult = {
+  itemsReturned: number;
+};
 
 // --- Manufacturing Product Mappings ---
 

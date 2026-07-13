@@ -21,7 +21,7 @@ import {
 import { type DateRange } from "react-day-picker";
 
 import {
-  DISPATCH_STOCK_REASONS,
+  STATIC_DISPATCH_REASONS,
   INVENTORY_SOURCE_LABELS,
   INVENTORY_SOURCE_TYPES,
   type TransactionLedgerEntry,
@@ -46,8 +46,11 @@ interface SectionConfig {
   exportFileName: string;
   emptyLabel: string;
   /**
-   * Options for the Source / Destination filter shown in the table. Omitted for
-   * sections (manufacturing) where the concept doesn't apply.
+   * Options for the Source / Destination filter. Omitted for sections where
+   * the concept doesn't apply. For the outgoing section this is intentionally
+   * left `undefined` in the static config; the live categories are derived from
+   * distinct `reason` values in the ledger data at render time so that past
+   * entries for deleted clinics / franchises remain filterable.
    */
   categories?: readonly string[];
   /** Column header + filter label for the categories filter. */
@@ -102,7 +105,10 @@ const SECTIONS: SectionConfig[] = [
     types: ["OUT", "EXPIRED"],
     exportFileName: "audit_ledger_outgoing.csv",
     emptyLabel: "No outgoing or expired stock entries recorded yet.",
-    categories: DISPATCH_STOCK_REASONS,
+    // Note: categories are derived dynamically from the distinct reason values
+    // in the actual ledger data so that past entries for deleted clinics /
+    // franchises remain filterable. See LedgerWorkspace render logic below.
+    categories: undefined,
     categoryHeader: "Destination",
     accent: {
       activeButton: "border-rose-300 bg-rose-50/80 ring-1 ring-rose-200",
@@ -259,13 +265,23 @@ const RANGE_PRESETS = [
 
 interface LedgerWorkspaceProps {
   data: TransactionLedgerEntry[];
+  /** Active franchise destinations for the franchise filter in outgoing entries. */
+  franchiseDestinations?: { id: string; name: string }[];
 }
 
-export default function LedgerWorkspace({ data }: LedgerWorkspaceProps) {
+export default function LedgerWorkspace({
+  data,
+  franchiseDestinations = [],
+}: LedgerWorkspaceProps) {
   const [activeId, setActiveId] = useState<SectionId>("incoming");
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
     lastNDays(DEFAULT_RANGE_DAYS),
   );
+  /**
+   * Franchise filter: UUID of the selected franchise, or null = show all.
+   * Only applied to outgoing entries (where franchise_transfer_id exists).
+   */
+  const [franchiseFilter, setFranchiseFilter] = useState<string | null>(null);
 
   // Apply the page-level date filter before anything else, so the section
   // counts, summary metrics and table all reflect the same window.
@@ -334,6 +350,43 @@ export default function LedgerWorkspace({ data }: LedgerWorkspaceProps) {
   const activeData = sectionData.get(activeId) ?? [];
   const activeStats = sectionStats.get(activeId)!;
 
+  /**
+   * For the outgoing section, derive the distinct destination/reason values
+   * actually present in the data (across ALL time, not just the date window)
+   * so the filter includes options for deleted clinics / franchises that have
+   * past entries. Also include the static reasons so they appear even if no
+   * entry exists yet.
+   */
+  const outgoingCategories = useMemo((): readonly string[] => {
+    const outgoingAll = data.filter(
+      (entry) => entry.transactionType === "OUT" || entry.transactionType === "EXPIRED",
+    );
+    const fromData = outgoingAll
+      .map((entry) => entry.reason)
+      .filter((reason): reason is string => !!reason);
+
+    const merged = new Set<string>([...STATIC_DISPATCH_REASONS, ...fromData]);
+    return [...merged].sort();
+  }, [data]);
+
+  /**
+   * When the franchise filter is active (outgoing section), further narrow the
+   * displayed data to entries whose reason text matches the selected franchise
+   * name pattern.
+   */
+  const activeSectionData = useMemo(() => {
+    const base = activeData;
+    if (activeId !== "outgoing" || !franchiseFilter) return base;
+    const selected = franchiseDestinations.find((f) => f.id === franchiseFilter);
+    if (!selected) return base;
+    const matchReason = `Sent to ${selected.name}`;
+    return base.filter((entry) => entry.reason === matchReason || entry.franchiseTransferId !== null);
+  }, [activeData, activeId, franchiseFilter, franchiseDestinations]);
+
+  // Use dynamic outgoing categories for the outgoing section.
+  const activeSectionCategories =
+    activeId === "outgoing" ? outgoingCategories : activeSection.categories;
+
   return (
     <div className="space-y-6">
       {/* Page-level date filter — drives section counts, metrics and table */}
@@ -393,7 +446,10 @@ export default function LedgerWorkspace({ data }: LedgerWorkspaceProps) {
               type="button"
               role="tab"
               aria-selected={isActive}
-              onClick={() => setActiveId(section.id)}
+              onClick={() => {
+                setActiveId(section.id);
+                if (section.id !== "outgoing") setFranchiseFilter(null);
+              }}
               className={cn(
                 "group flex items-center gap-3 rounded-xl border bg-white p-4 text-left transition-all",
                 "hover:border-slate-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
@@ -472,13 +528,51 @@ export default function LedgerWorkspace({ data }: LedgerWorkspaceProps) {
         );
       })()}
 
+      {/* Franchise filter — only shown for outgoing section when franchises exist */}
+      {activeId === "outgoing" && franchiseDestinations.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <span className="text-sm font-medium text-slate-700">Filter by franchise:</span>
+          <button
+            type="button"
+            onClick={() => setFranchiseFilter(null)}
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+              franchiseFilter === null
+                ? "bg-rose-600 text-white"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+            )}
+          >
+            All
+          </button>
+          {franchiseDestinations.map((franchise) => (
+            <button
+              key={franchise.id}
+              type="button"
+              onClick={() =>
+                setFranchiseFilter(
+                  franchiseFilter === franchise.id ? null : franchise.id,
+                )
+              }
+              className={cn(
+                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                franchiseFilter === franchise.id
+                  ? "bg-rose-600 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+              )}
+            >
+              {franchise.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Section-scoped data table. The key remounts the table per section so
           search, sort, type filters and pagination reset cleanly. */}
       <LedgerDataTable
         key={activeId}
-        data={activeData}
+        data={activeSectionData}
         availableTypes={activeSection.types}
-        availableCategories={activeSection.categories}
+        availableCategories={activeSectionCategories}
         categoryHeader={activeSection.categoryHeader}
         title={`${activeSection.label} · Transaction History`}
         description={activeSection.description}

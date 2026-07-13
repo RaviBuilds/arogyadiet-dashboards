@@ -4,8 +4,10 @@ import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 
 import {
-  DISPATCH_STOCK_REASONS,
+  STATIC_DISPATCH_REASONS,
+  CLINIC_DISPATCH_PREFIX,
   type BaseUom,
+  type CoreClinicDestination,
   type DispatchStockReason,
 } from "@/lib/inventory/product-schema";
 import type { FranchiseDestination } from "@/lib/franchise-inventory/active-destination-filter";
@@ -46,6 +48,8 @@ export interface DispatchStockModalProps {
   trigger?: ReactNode;
   /** Active franchise destinations available for dispatch. */
   franchiseDestinations?: FranchiseDestination[];
+  /** Core (non-franchise) clinics available as dispatch destinations. */
+  coreClinicDestinations?: CoreClinicDestination[];
 }
 
 export default function DispatchStockModal({
@@ -54,6 +58,7 @@ export default function DispatchStockModal({
   baseUom,
   trigger,
   franchiseDestinations = [],
+  coreClinicDestinations = [],
 }: DispatchStockModalProps) {
   const addOutboundItem = useInventoryStore((state) => state.addOutboundItem);
   const [open, setOpen] = useState(false);
@@ -63,12 +68,11 @@ export default function DispatchStockModal({
   const uomLabel = BASE_UOM_LABELS[baseUom];
 
   const isFranchiseDestination = destination.startsWith(FRANCHISE_PREFIX);
+  const isClinicDestination = destination.startsWith(CLINIC_DISPATCH_PREFIX);
   // The selector is disabled only when there are zero options total.
-  // DISPATCH_STOCK_REASONS is a fixed const array (always has items), so
-  // hasNoDestinations is effectively never true — but we keep the check
-  // for robustness if the constant is ever emptied.
   const hasNoDestinations =
-    (DISPATCH_STOCK_REASONS as readonly string[]).length === 0 &&
+    (STATIC_DISPATCH_REASONS as readonly string[]).length === 0 &&
+    coreClinicDestinations.length === 0 &&
     franchiseDestinations.length === 0;
 
   function resetForm() {
@@ -111,6 +115,23 @@ export default function DispatchStockModal({
 
       toast.success("Added to Outbound Cart", {
         description: `${qty} ${uomLabel} of "${productName}" → ${franchiseName}`,
+      });
+      resetForm();
+      setOpen(false);
+    } else if (isClinicDestination) {
+      const clinicId = destination.slice(CLINIC_DISPATCH_PREFIX.length);
+      const clinic = coreClinicDestinations.find((c) => c.id === clinicId);
+      const clinicName = clinic?.name ?? "Unknown Clinic";
+      // Stored as a plain text reason snapshot in inventory_transactions.reason
+      addOutboundItem({
+        productId,
+        name: productName,
+        qty,
+        reason: `Sent to ${clinicName}` as DispatchStockReason,
+      });
+
+      toast.success("Added to Outbound Cart", {
+        description: `${qty} ${uomLabel} of "${productName}" → ${clinicName}`,
       });
       resetForm();
       setOpen(false);
@@ -178,17 +199,36 @@ export default function DispatchStockModal({
                   <SelectValue placeholder="Select reason or destination" />
                 </SelectTrigger>
                 <SelectContent>
-                  {/* Existing non-franchise dispatch reasons */}
-                  {DISPATCH_STOCK_REASONS.length > 0 && (
+                  {/* Fixed non-entity dispatch reasons */}
+                  {STATIC_DISPATCH_REASONS.length > 0 && (
                     <SelectGroup>
                       <SelectLabel>Reasons</SelectLabel>
-                      {DISPATCH_STOCK_REASONS.map((option) => (
+                      {STATIC_DISPATCH_REASONS.map((option) => (
                         <SelectItem key={option} value={option}>
                           {option}
                         </SelectItem>
                       ))}
                     </SelectGroup>
                   )}
+
+                  {/* Core clinic destinations — dynamically from clinics table */}
+                  <SelectGroup>
+                    <SelectLabel>Core Clinics</SelectLabel>
+                    {coreClinicDestinations.length > 0 ? (
+                      coreClinicDestinations.map((clinic) => (
+                        <SelectItem
+                          key={clinic.id}
+                          value={`${CLINIC_DISPATCH_PREFIX}${clinic.id}`}
+                        >
+                          {clinic.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="__no_clinics__" disabled>
+                        No core clinics configured
+                      </SelectItem>
+                    )}
+                  </SelectGroup>
 
                   {/* Active franchise destinations */}
                   {franchiseDestinations.length > 0 && (

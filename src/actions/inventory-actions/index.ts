@@ -15,11 +15,13 @@ import {
   deleteMappingSchema,
   multiDispatchFormSchema,
   parseAddProductFormData,
+  parseCreateCategoryFormData,
   parseEditProductFormData,
   parseDispatchStockFormData,
   parseDispatchToManufacturingFormData,
   parseProcessOutputFormData,
   parseReceiveStockFormData,
+  revertPendingBatchSchema,
   revertPendingMfgSchema,
   updateMappingFormSchema,
   validateInventoryProductImage,
@@ -28,6 +30,7 @@ import {
 import {
   BulkInventoryError,
   createInventoryProduct,
+  createInventoryProductCategory,
   createManufacturingMapping,
   deleteInventoryProduct,
   deleteManufacturingMapping,
@@ -37,6 +40,7 @@ import {
   processBulkOutbound,
   processManufacturingOutput,
   receiveInventoryStock,
+  revertPendingBatch,
   revertPendingManufacturing,
   sendMultiToManufacturing,
   sendToManufacturing,
@@ -91,6 +95,10 @@ type ProcessOutputResult =
 
 type RevertPendingMfgResult =
   | { success: true; refundedQuantity: number }
+  | { success: false; error: string };
+
+type RevertPendingBatchResult =
+  | { success: true; itemsReturned: number }
   | { success: false; error: string };
 
 type DispatchStockResult =
@@ -231,6 +239,61 @@ export async function deleteProductAction(
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : "Failed to delete product.";
+    return { success: false, error: message };
+  }
+}
+
+type CreateCategoryResult =
+  | { success: true; categoryId: string }
+  | { success: false; error: string };
+
+export async function createCategoryAction(
+  formData: FormData,
+): Promise<CreateCategoryResult> {
+  const gate = await checkWarehouseAccess("product_management");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  const parsed = parseCreateCategoryFormData(formData);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid category data.",
+    };
+  }
+
+  // Category image is optional.
+  let imageUrl: string | undefined;
+  const file = formData.get("image");
+  if (file instanceof File && file.size > 0) {
+    const imageValidationError = validateInventoryProductImage(file);
+    if (imageValidationError) {
+      return { success: false, error: imageValidationError };
+    }
+
+    try {
+      imageUrl = await uploadInventoryProductImage(file);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to upload category image.";
+      return { success: false, error: message };
+    }
+  }
+
+  try {
+    const category = await createInventoryProductCategory({
+      name: parsed.data.name,
+      description: parsed.data.description || null,
+      imageUrl,
+    });
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog"]);
+    for (const path of targets) revalidatePath(path);
+
+    return { success: true, categoryId: category.id };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "Failed to create category.";
     return { success: false, error: message };
   }
 }
@@ -737,6 +800,37 @@ export async function processBatchOutputAction(
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : "Failed to process batch output.";
+    return { success: false, error: message };
+  }
+}
+
+export async function revertPendingBatchAction(
+  batchId: string,
+): Promise<RevertPendingBatchResult> {
+  const gate = await checkWarehouseAccess("inventory_operations");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  const parsed = revertPendingBatchSchema.safeParse({ batchId });
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid batch ID.",
+    };
+  }
+
+  try {
+    const result = await revertPendingBatch(parsed.data.batchId);
+
+    const portal = await currentPortalContext();
+    const targets = resolveRevalidationTargets(portal, ["catalog", "manufacturing"]);
+    for (const path of targets) revalidatePath(path);
+
+    return { success: true, itemsReturned: result.itemsReturned };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Failed to return batch to stock.";
     return { success: false, error: message };
   }
 }
