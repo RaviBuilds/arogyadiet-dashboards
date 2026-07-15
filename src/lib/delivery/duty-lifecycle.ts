@@ -42,6 +42,45 @@ export function getAutoOffDutyGracePeriodMinutes(): number {
   return parsed;
 }
 
+// ─── Heartbeat Staleness Configuration ──────────────────────────────────────────
+
+const DEFAULT_HEARTBEAT_STALE_MINUTES = 10;
+
+/**
+ * Reads `RIDER_HEARTBEAT_STALE_MINUTES` from the environment.
+ *
+ * This is the connectivity window used by the auto off-duty sweep: an online
+ * rider whose most recent app signal (live-location heartbeat, floored by their
+ * go-online time) is older than this many minutes is considered disconnected
+ * and flipped off-duty — even if they hold assigned orders. This ties the
+ * "Online" indicator to actual app connectivity rather than order assignment.
+ *
+ * Validates as a whole number between 0 and 1440 (inclusive). Falls back to 10
+ * minutes when the variable is unset or invalid. The sweep runs every 5 minutes,
+ * so the default flips a rider ~10-15 minutes after their app stops reporting,
+ * tolerating brief signal gaps without prematurely marking them offline.
+ */
+export function getRiderHeartbeatStaleMinutes(): number {
+  const raw = process.env.RIDER_HEARTBEAT_STALE_MINUTES;
+
+  if (raw == null || raw.trim() === "") {
+    return DEFAULT_HEARTBEAT_STALE_MINUTES;
+  }
+
+  const parsed = Number(raw);
+
+  if (
+    !Number.isFinite(parsed) ||
+    !Number.isInteger(parsed) ||
+    parsed < MIN_GRACE_MINUTES ||
+    parsed > MAX_GRACE_MINUTES
+  ) {
+    return DEFAULT_HEARTBEAT_STALE_MINUTES;
+  }
+
+  return parsed;
+}
+
 // ─── Delivery Status Sets ───────────────────────────────────────────────────────
 
 /**

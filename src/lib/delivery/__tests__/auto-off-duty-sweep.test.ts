@@ -1,11 +1,14 @@
-// Feature: android-background-gps-tracking
-// Property 12: Auto off-duty never fires during an active delivery
+// Feature: connectivity-based auto off-duty
 //
-// **Validates: Requirements 10.4, 10.7**
+// The auto off-duty sweep ties "Online" to actual app connectivity via the
+// rider's live-location heartbeat (rider_live_locations.updated_at), floored by
+// their go-online time (rider_profiles.last_online_at):
 //
-// For any rider with ≥1 active order today, the sweep makes no change
-// (rider stays online). Only riders with ALL orders terminal AND past grace
-// are flipped to offline.
+//   * A rider with a FRESH heartbeat stays online.
+//   * A rider with a STALE heartbeat (app not reporting) is flipped offline,
+//     even if they hold assigned orders.
+//   * A rider with an in-progress (active) delivery is never flipped, tolerating
+//     brief signal gaps mid-delivery.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fc from "fast-check";
@@ -19,8 +22,7 @@ vi.mock("@/lib/delivery/duty-lifecycle", () => ({
     "REACHING_TO_LOCATION",
     "PICKED",
   ] as const,
-  TERMINAL_DELIVERY_STATUSES: ["DELIVERED", "FAILED"] as const,
-  getAutoOffDutyGracePeriodMinutes: () => 5,
+  getRiderHeartbeatStaleMinutes: () => 5,
   getISTToday: () => "2025-01-15",
 }));
 
@@ -35,78 +37,55 @@ const ACTIVE_STATUSES = [
   "PICKED",
 ] as const;
 
-const TERMINAL_STATUSES = ["DELIVERED", "FAILED"] as const;
+/** Statuses that do NOT protect a rider from being flipped (no active delivery). */
+const NON_ACTIVE_STATUSES = [
+  "ORDER_CREATED",
+  "ASSIGNED",
+  "DELIVERED",
+  "FAILED",
+] as const;
+
+const STALE_TS = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30 min ago
+const FRESH_TS = new Date(Date.now() - 1 * 60 * 1000).toISOString(); // 1 min ago
 
 // ─── Generators ──────────────────────────────────────────────────────────────
 
-/** Generate a unique rider ID */
 const riderIdArb = fc.uuid();
-
-/** Generate an active delivery status */
 const activeStatusArb = fc.constantFrom(...ACTIVE_STATUSES);
+const nonActiveStatusArb = fc.constantFrom(...NON_ACTIVE_STATUSES);
 
-/** Generate a terminal delivery status */
-const terminalStatusArb = fc.constantFrom(...TERMINAL_STATUSES);
-
-/**
- * Generate a timestamp that is well past the grace period (> 5 min ago).
- * We use a time 30 minutes before the execution time.
- */
-const pastGraceTimestampArb = fc.constant(
-  new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-);
-
-/** Generate at least 1 active order (possibly mixed with terminal orders) */
+/** At least 1 active order (optionally mixed with non-active orders). */
 const activeOrdersArb = fc
   .tuple(
-    // At least 1 active order
     fc.array(activeStatusArb, { minLength: 1, maxLength: 5 }),
-    // Optionally some terminal orders too
-    fc.array(terminalStatusArb, { minLength: 0, maxLength: 5 }),
+    fc.array(nonActiveStatusArb, { minLength: 0, maxLength: 5 }),
   )
-  .map(([activeStatuses, terminalStatuses]) => [
-    ...activeStatuses.map((status, i) => ({
-      id: `active-order-${i}`,
-      status,
-      updated_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    })),
-    ...terminalStatuses.map((status, i) => ({
-      id: `terminal-order-${i}`,
-      status,
-      updated_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    })),
-  ]);
-
-/** Generate all-terminal orders that are past the grace period */
-const allTerminalPastGraceOrdersArb = fc
-  .array(terminalStatusArb, { minLength: 1, maxLength: 5 })
-  .map((statuses) =>
-    statuses.map((status, i) => ({
-      id: `terminal-order-${i}`,
-      status,
-      // All terminal transitions > 5 minutes ago (well past grace)
-      updated_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    })),
+  .map(([active, nonActive]) =>
+    [...active, ...nonActive].map((status) => ({ status })),
   );
+
+/** Zero or more orders, NONE of which are active (assigned/created/terminal). */
+const nonActiveOrdersArb = fc
+  .array(nonActiveStatusArb, { minLength: 0, maxLength: 5 })
+  .map((statuses) => statuses.map((status) => ({ status })));
 
 // ─── Mock Supabase Client Factory ────────────────────────────────────────────
 
 interface MockOrder {
-  id: string;
   status: string;
-  updated_at: string;
 }
 
+type MockLocation = { updated_at: string } | null;
+
 /**
- * Creates a mock Supabase admin client that returns controlled data.
- *
- * @param riders - Array of rider rows returned by the rider_profiles query
- * @param ordersByRider - Map of riderId → orders for the delivery_orders query
- * @param updateTracker - Tracks which riders get update calls
+ * Creates a mock Supabase admin client that returns controlled data for the
+ * three tables the sweep reads/writes: rider_profiles, delivery_orders,
+ * rider_live_locations.
  */
 function createMockSupabaseClient(
-  riders: Array<{ id: string; is_online: boolean }>,
+  riders: Array<{ id: string; is_online: boolean; last_online_at: string | null }>,
   ordersByRider: Map<string, MockOrder[]>,
+  locationByRider: Map<string, MockLocation>,
   updateTracker: Map<string, Record<string, unknown>>,
 ) {
   return {
@@ -116,10 +95,7 @@ function createMockSupabaseClient(
           select: () => ({
             eq: (field: string, value: unknown) => {
               if (field === "is_online" && value === true) {
-                return {
-                  data: riders.filter((r) => r.is_online),
-                  error: null,
-                };
+                return { data: riders.filter((r) => r.is_online), error: null };
               }
               return { data: [], error: null };
             },
@@ -135,7 +111,7 @@ function createMockSupabaseClient(
                   },
                 };
               }
-              return { error: null };
+              return { eq: () => ({ error: null }) };
             },
           }),
         };
@@ -148,19 +124,24 @@ function createMockSupabaseClient(
               if (field === "assigned_rider_id") {
                 const riderId = value as string;
                 const orders = ordersByRider.get(riderId) ?? [];
-                return {
-                  eq: () => ({
-                    data: orders,
-                    error: null,
-                  }),
-                };
+                return { eq: () => ({ data: orders, error: null }) };
               }
-              return {
-                eq: () => ({
-                  data: [],
-                  error: null,
-                }),
-              };
+              return { eq: () => ({ data: [], error: null }) };
+            },
+          }),
+        };
+      }
+
+      if (table === "rider_live_locations") {
+        return {
+          select: () => ({
+            eq: (field: string, value: unknown) => {
+              if (field === "rider_id") {
+                const riderId = value as string;
+                const loc = locationByRider.get(riderId) ?? null;
+                return { maybeSingle: () => ({ data: loc, error: null }) };
+              }
+              return { maybeSingle: () => ({ data: null, error: null }) };
             },
           }),
         };
@@ -176,43 +157,36 @@ function createMockSupabaseClient(
 
 // ─── Property Tests ──────────────────────────────────────────────────────────
 
-describe("Auto Off-Duty Sweep — Property 12: Never fires during active delivery", () => {
+describe("Auto Off-Duty Sweep — connectivity-based", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it(
-    "NEVER flips a rider who has at least 1 active order today",
+    "NEVER flips a rider who has an active (in-progress) delivery, even with a stale heartbeat",
     async () => {
       await fc.assert(
-        fc.asyncProperty(
-          riderIdArb,
-          activeOrdersArb,
-          async (riderId, orders) => {
-            const riders = [{ id: riderId, is_online: true }];
-            const ordersByRider = new Map<string, MockOrder[]>();
-            ordersByRider.set(riderId, orders);
-            const updateTracker = new Map<string, Record<string, unknown>>();
+        fc.asyncProperty(riderIdArb, activeOrdersArb, async (riderId, orders) => {
+          const riders = [{ id: riderId, is_online: true, last_online_at: STALE_TS }];
+          const ordersByRider = new Map<string, MockOrder[]>([[riderId, orders]]);
+          const locationByRider = new Map<string, MockLocation>([
+            [riderId, { updated_at: STALE_TS }],
+          ]);
+          const updateTracker = new Map<string, Record<string, unknown>>();
 
-            const client = createMockSupabaseClient(
-              riders,
-              ordersByRider,
-              updateTracker,
-            );
+          const client = createMockSupabaseClient(
+            riders,
+            ordersByRider,
+            locationByRider,
+            updateTracker,
+          );
 
-            const result = await runAutoOffDutySweep(
-              client as any,
-              new Date().toISOString(),
-            );
+          const result = await runAutoOffDutySweep(client as any, new Date().toISOString());
 
-            // The rider must NOT be flipped
-            expect(result.flipped).not.toContain(riderId);
-            // The rider must be skipped
-            expect(result.skipped).toContain(riderId);
-            // No update should be tracked for this rider
-            expect(updateTracker.has(riderId)).toBe(false);
-          },
-        ),
+          expect(result.flipped).not.toContain(riderId);
+          expect(result.skipped).toContain(riderId);
+          expect(updateTracker.has(riderId)).toBe(false);
+        }),
         { numRuns: 50 },
       );
     },
@@ -220,37 +194,31 @@ describe("Auto Off-Duty Sweep — Property 12: Never fires during active deliver
   );
 
   it(
-    "ONLY flips riders whose orders are ALL terminal AND past grace period",
+    "flips a rider with a STALE heartbeat and no active delivery (even if they hold assigned orders)",
     async () => {
       await fc.assert(
-        fc.asyncProperty(
-          riderIdArb,
-          allTerminalPastGraceOrdersArb,
-          async (riderId, orders) => {
-            const riders = [{ id: riderId, is_online: true }];
-            const ordersByRider = new Map<string, MockOrder[]>();
-            ordersByRider.set(riderId, orders);
-            const updateTracker = new Map<string, Record<string, unknown>>();
+        fc.asyncProperty(riderIdArb, nonActiveOrdersArb, async (riderId, orders) => {
+          const riders = [{ id: riderId, is_online: true, last_online_at: STALE_TS }];
+          const ordersByRider = new Map<string, MockOrder[]>([[riderId, orders]]);
+          const locationByRider = new Map<string, MockLocation>([
+            [riderId, { updated_at: STALE_TS }],
+          ]);
+          const updateTracker = new Map<string, Record<string, unknown>>();
 
-            const client = createMockSupabaseClient(
-              riders,
-              ordersByRider,
-              updateTracker,
-            );
+          const client = createMockSupabaseClient(
+            riders,
+            ordersByRider,
+            locationByRider,
+            updateTracker,
+          );
 
-            const result = await runAutoOffDutySweep(
-              client as any,
-              new Date().toISOString(),
-            );
+          const result = await runAutoOffDutySweep(client as any, new Date().toISOString());
 
-            // The rider SHOULD be flipped (all terminal, past grace)
-            expect(result.flipped).toContain(riderId);
-            // The update should set is_online to false
-            expect(updateTracker.has(riderId)).toBe(true);
-            expect(updateTracker.get(riderId)!.is_online).toBe(false);
-            expect(updateTracker.get(riderId)!.last_offline_at).toBeDefined();
-          },
-        ),
+          expect(result.flipped).toContain(riderId);
+          expect(updateTracker.has(riderId)).toBe(true);
+          expect(updateTracker.get(riderId)!.is_online).toBe(false);
+          expect(updateTracker.get(riderId)!.last_offline_at).toBeDefined();
+        }),
         { numRuns: 50 },
       );
     },
@@ -258,46 +226,109 @@ describe("Auto Off-Duty Sweep — Property 12: Never fires during active deliver
   );
 
   it(
-    "with mixed riders: active-order riders are never flipped while terminal-past-grace riders are",
+    "NEVER flips a rider with a FRESH heartbeat (app is connected)",
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(riderIdArb, nonActiveOrdersArb, async (riderId, orders) => {
+          const riders = [{ id: riderId, is_online: true, last_online_at: STALE_TS }];
+          const ordersByRider = new Map<string, MockOrder[]>([[riderId, orders]]);
+          // Fresh heartbeat — the app is reporting right now.
+          const locationByRider = new Map<string, MockLocation>([
+            [riderId, { updated_at: FRESH_TS }],
+          ]);
+          const updateTracker = new Map<string, Record<string, unknown>>();
+
+          const client = createMockSupabaseClient(
+            riders,
+            ordersByRider,
+            locationByRider,
+            updateTracker,
+          );
+
+          const result = await runAutoOffDutySweep(client as any, new Date().toISOString());
+
+          expect(result.flipped).not.toContain(riderId);
+          expect(result.skipped).toContain(riderId);
+          expect(updateTracker.has(riderId)).toBe(false);
+        }),
+        { numRuns: 50 },
+      );
+    },
+    30_000,
+  );
+
+  it(
+    "does not flip a freshly-online rider with no heartbeat yet (grace floor via last_online_at)",
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(riderIdArb, async (riderId) => {
+          // Just toggled online; native service hasn't sent its first ping.
+          const riders = [{ id: riderId, is_online: true, last_online_at: FRESH_TS }];
+          const ordersByRider = new Map<string, MockOrder[]>([[riderId, []]]);
+          const locationByRider = new Map<string, MockLocation>([[riderId, null]]);
+          const updateTracker = new Map<string, Record<string, unknown>>();
+
+          const client = createMockSupabaseClient(
+            riders,
+            ordersByRider,
+            locationByRider,
+            updateTracker,
+          );
+
+          const result = await runAutoOffDutySweep(client as any, new Date().toISOString());
+
+          expect(result.flipped).not.toContain(riderId);
+          expect(result.skipped).toContain(riderId);
+        }),
+        { numRuns: 30 },
+      );
+    },
+    30_000,
+  );
+
+  it(
+    "mixed: fresh/active riders stay online while stale riders are flipped",
     async () => {
       await fc.assert(
         fc.asyncProperty(
           riderIdArb,
           riderIdArb,
-          activeOrdersArb,
-          allTerminalPastGraceOrdersArb,
-          async (activeRiderId, eligibleRiderId, activeOrders, terminalOrders) => {
-            // Ensure distinct rider IDs
-            fc.pre(activeRiderId !== eligibleRiderId);
+          nonActiveOrdersArb,
+          nonActiveOrdersArb,
+          async (freshRiderId, staleRiderId, freshOrders, staleOrders) => {
+            fc.pre(freshRiderId !== staleRiderId);
 
             const riders = [
-              { id: activeRiderId, is_online: true },
-              { id: eligibleRiderId, is_online: true },
+              { id: freshRiderId, is_online: true, last_online_at: STALE_TS },
+              { id: staleRiderId, is_online: true, last_online_at: STALE_TS },
             ];
-            const ordersByRider = new Map<string, MockOrder[]>();
-            ordersByRider.set(activeRiderId, activeOrders);
-            ordersByRider.set(eligibleRiderId, terminalOrders);
+            const ordersByRider = new Map<string, MockOrder[]>([
+              [freshRiderId, freshOrders],
+              [staleRiderId, staleOrders],
+            ]);
+            const locationByRider = new Map<string, MockLocation>([
+              [freshRiderId, { updated_at: FRESH_TS }],
+              [staleRiderId, { updated_at: STALE_TS }],
+            ]);
             const updateTracker = new Map<string, Record<string, unknown>>();
 
             const client = createMockSupabaseClient(
               riders,
               ordersByRider,
+              locationByRider,
               updateTracker,
             );
 
-            const result = await runAutoOffDutySweep(
-              client as any,
-              new Date().toISOString(),
-            );
+            const result = await runAutoOffDutySweep(client as any, new Date().toISOString());
 
-            // Active rider must NOT be flipped
-            expect(result.flipped).not.toContain(activeRiderId);
-            expect(result.skipped).toContain(activeRiderId);
-            expect(updateTracker.has(activeRiderId)).toBe(false);
+            // Fresh rider stays online
+            expect(result.flipped).not.toContain(freshRiderId);
+            expect(result.skipped).toContain(freshRiderId);
+            expect(updateTracker.has(freshRiderId)).toBe(false);
 
-            // Eligible rider (all terminal, past grace) SHOULD be flipped
-            expect(result.flipped).toContain(eligibleRiderId);
-            expect(updateTracker.has(eligibleRiderId)).toBe(true);
+            // Stale rider is flipped offline
+            expect(result.flipped).toContain(staleRiderId);
+            expect(updateTracker.has(staleRiderId)).toBe(true);
           },
         ),
         { numRuns: 50 },

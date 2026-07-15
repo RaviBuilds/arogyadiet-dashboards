@@ -117,7 +117,7 @@ export async function getAutomationLogs(
   const { data, error } = await supabase
     .from("automation_logs")
     .select(
-      "automation_type, target_date, run_count, last_run_at, latest_stats",
+      "automation_type, target_date, run_count, last_run_at, latest_stats, manual_run_count, last_manual_run_at, latest_manual_stats",
     )
     .gte("target_date", startDate)
     .lte("target_date", endDate)
@@ -151,7 +151,7 @@ export async function getAutomationLogsForDay(
   const { data, error } = await supabase
     .from("automation_logs")
     .select(
-      "automation_type, target_date, run_count, last_run_at, latest_stats",
+      "automation_type, target_date, run_count, last_run_at, latest_stats, manual_run_count, last_manual_run_at, latest_manual_stats",
     )
     .eq("target_date", targetDate)
     .neq("automation_type", "AUTO_OFF_DUTY")
