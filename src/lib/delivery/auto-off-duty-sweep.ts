@@ -1,23 +1,29 @@
 /**
- * Auto Off-Duty Sweep — detection and execution logic.
+ * Auto Off-Duty Sweep — connectivity-based detection and execution logic.
  *
- * Evaluates each `is_online = true` rider against today's `delivery_orders`,
- * determines eligibility for auto off-duty, and performs the write
- * (`is_online = false`, `last_offline_at = now()`) for eligible riders.
+ * Evaluates each `is_online = true` rider against their live-location heartbeat
+ * and flips them off-duty (`is_online = false`, `last_offline_at = now()`) when
+ * their app is no longer reporting — i.e. the rider closed/killed the app.
+ *
+ * "Online" reflects ACTUAL app connectivity, not order assignment. A rider who
+ * holds assigned orders but whose app is not reporting is flipped offline. The
+ * only guard is an in-progress delivery: a rider actively out for delivery is
+ * never flipped mid-delivery, tolerating brief signal gaps.
+ *
+ * Heartbeat source: `rider_live_locations.updated_at` — the native foreground
+ * service uploads location (including a stationary heartbeat) directly to
+ * Supabase while the app runs; the pings stop when the app is closed/killed.
  *
  * Design principles:
- *  - Per-rider failures are isolated and recorded (Req 10.9).
- *  - Idempotent: riders already `is_online = false` are skipped (Req 10.10).
+ *  - Per-rider failures are isolated and recorded.
+ *  - Idempotent: riders already `is_online = false` are skipped.
  *  - Pure function over the Supabase admin client — testable in isolation.
- *
- * Requirements: 10.4, 10.5, 10.6, 10.7, 10.9, 10.10
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   ACTIVE_DELIVERY_STATUSES,
-  TERMINAL_DELIVERY_STATUSES,
-  getAutoOffDutyGracePeriodMinutes,
+  getRiderHeartbeatStaleMinutes,
   getISTToday,
 } from "./duty-lifecycle";
 
@@ -31,7 +37,7 @@ export interface SweepError {
 export interface SweepResult {
   /** Rider IDs that were flipped from is_online=true to is_online=false */
   flipped: string[];
-  /** Rider IDs that were evaluated but not eligible (active order, within grace, no terminal, etc.) */
+  /** Rider IDs that were evaluated but not eligible (fresh heartbeat, active delivery, etc.) */
   skipped: string[];
   /** Per-rider evaluation or write errors — isolated, did not stop the sweep */
   errors: SweepError[];
@@ -42,12 +48,13 @@ export interface SweepResult {
 interface RiderRow {
   id: string;
   is_online: boolean;
+  /** When the rider last toggled online. Acts as a grace floor so a freshly
+   *  online rider isn't flipped before the native service's first ping. */
+  last_online_at: string | null;
 }
 
-interface OrderRow {
-  id: string;
+interface OrderStatusRow {
   status: string;
-  updated_at: string;
 }
 
 // ─── Sweep Function ─────────────────────────────────────────────────────────────
@@ -56,9 +63,9 @@ interface OrderRow {
  * Runs the auto off-duty sweep.
  *
  * 1. Queries all riders with `is_online = true`.
- * 2. For each rider, queries today's `delivery_orders`.
- * 3. Evaluates eligibility per the requirements.
- * 4. Writes `is_online = false` + `last_offline_at` for eligible riders.
+ * 2. For each rider, protects those with an in-progress delivery today.
+ * 3. Reads the rider's live-location heartbeat and flips them off-duty when it
+ *    (floored by their go-online time) is older than the staleness threshold.
  *
  * @param adminClient - A Supabase admin (service-role) client.
  * @param now - Optional override for "now" (ISO string). Defaults to current time.
@@ -76,13 +83,13 @@ export async function runAutoOffDutySweep(
 
   const executionTime = now ?? new Date().toISOString();
   const executionDate = new Date(executionTime);
-  const gracePeriodMinutes = getAutoOffDutyGracePeriodMinutes();
+  const staleThresholdMinutes = getRiderHeartbeatStaleMinutes();
   const todayIST = getISTToday();
 
-  // Step 1: Fetch all online riders
+  // Step 1: Fetch all online riders (with their go-online time for the grace floor)
   const { data: onlineRiders, error: ridersError } = await adminClient
     .from("rider_profiles")
-    .select("id, is_online")
+    .select("id, is_online, last_online_at")
     .eq("is_online", true);
 
   if (ridersError) {
@@ -105,12 +112,12 @@ export async function runAutoOffDutySweep(
         rider,
         todayIST,
         executionDate,
-        gracePeriodMinutes,
+        staleThresholdMinutes,
         executionTime,
         result,
       );
     } catch (err: unknown) {
-      // Per-rider failures are isolated (Req 10.9)
+      // Per-rider failures are isolated
       const message = err instanceof Error ? err.message : String(err);
       result.errors.push({ riderId: rider.id, error: message });
     }
@@ -126,20 +133,21 @@ async function evaluateRider(
   rider: RiderRow,
   todayIST: string,
   executionDate: Date,
-  gracePeriodMinutes: number,
+  staleThresholdMinutes: number,
   executionTime: string,
   result: SweepResult,
 ): Promise<void> {
-  // Idempotent guard: if already offline, skip (Req 10.10)
+  // Idempotent guard: if already offline, skip
   if (!rider.is_online) {
     result.skipped.push(rider.id);
     return;
   }
 
-  // Fetch today's delivery orders for this rider
+  // Guard: never flip a rider who is actively out for delivery. An in-progress
+  // delivery presumes the rider is working; tolerate brief signal gaps.
   const { data: orders, error: ordersError } = await adminClient
     .from("delivery_orders")
-    .select("id, status, updated_at")
+    .select("status")
     .eq("assigned_rider_id", rider.id)
     .eq("delivery_date", todayIST);
 
@@ -147,10 +155,7 @@ async function evaluateRider(
     throw new Error(`Failed to fetch orders: ${ordersError.message}`);
   }
 
-  const todayOrders = (orders ?? []) as OrderRow[];
-
-  // Req 10.4: If any order is in an active status, skip
-  const hasActiveOrder = todayOrders.some((o) =>
+  const hasActiveOrder = ((orders ?? []) as OrderStatusRow[]).some((o) =>
     (ACTIVE_DELIVERY_STATUSES as readonly string[]).includes(o.status),
   );
 
@@ -159,59 +164,35 @@ async function evaluateRider(
     return;
   }
 
-  const terminalOrders = todayOrders.filter((o) =>
-    (TERMINAL_DELIVERY_STATUSES as readonly string[]).includes(o.status),
+  // Heartbeat: the live-location ping is the app-connectivity signal.
+  const { data: location, error: locationError } = await adminClient
+    .from("rider_live_locations")
+    .select("updated_at")
+    .eq("rider_id", rider.id)
+    .maybeSingle();
+
+  if (locationError) {
+    throw new Error(`Failed to fetch live location: ${locationError.message}`);
+  }
+
+  // Effective last-seen = most recent of the heartbeat ping and the go-online
+  // time. last_online_at is a grace floor so a rider who just toggled online is
+  // not flipped before the native service emits its first location ping.
+  const lastSeenMs = mostRecentSignalMs(
+    (location as { updated_at?: string | null } | null)?.updated_at ?? null,
+    rider.last_online_at,
   );
 
-  // Case A: Rider has NO orders at all today — they should not be online.
-  // Apply the grace period from last_online_at to give them time to check app.
-  if (todayOrders.length === 0) {
-    // Fetch last_online_at to determine grace period start
-    const { data: riderProfile, error: profileError } = await adminClient
-      .from("rider_profiles")
-      .select("last_online_at")
-      .eq("id", rider.id)
-      .maybeSingle();
-
-    if (profileError || !riderProfile?.last_online_at) {
-      // No last_online_at available — flip immediately (conservative)
-      // Fall through to the flip logic below
-    } else {
-      const onlineSince = new Date(riderProfile.last_online_at);
-      const graceDeadline = new Date(
-        onlineSince.getTime() + gracePeriodMinutes * 60 * 1000,
-      );
-
-      if (executionDate < graceDeadline) {
-        result.skipped.push(rider.id);
-        return;
-      }
-    }
-    // Fall through to flip
-  } else if (terminalOrders.length === 0) {
-    // Case B: Rider has orders but none are terminal yet (e.g. all ORDER_CREATED/ASSIGNED)
-    // These riders still have pending work — skip them
-    result.skipped.push(rider.id);
-    return;
-  } else {
-    // Case C: Rider has terminal orders — check grace period from last terminal
-    // Req 10.6: If the most recent terminal transition is within the grace period, skip
-    const mostRecentTerminalTime = getMostRecentTerminalTransition(terminalOrders);
-
-    if (mostRecentTerminalTime) {
-      const graceDeadline = new Date(
-        mostRecentTerminalTime.getTime() + gracePeriodMinutes * 60 * 1000,
-      );
-
-      if (executionDate < graceDeadline) {
-        // Still within grace period
-        result.skipped.push(rider.id);
-        return;
-      }
+  // A fresh heartbeat means the app is connected — keep the rider online.
+  if (lastSeenMs !== null) {
+    const staleDeadline = lastSeenMs + staleThresholdMinutes * 60 * 1000;
+    if (executionDate.getTime() < staleDeadline) {
+      result.skipped.push(rider.id);
+      return;
     }
   }
 
-  // Req 10.7: Rider is eligible — flip to off-duty
+  // Stale (or no signal at all) → the app is not reporting → flip off-duty.
   const { error: updateError } = await adminClient
     .from("rider_profiles")
     .update({
@@ -231,21 +212,21 @@ async function evaluateRider(
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
- * Returns the most recent terminal transition time from a set of terminal orders.
- * Uses `updated_at` as the proxy for when the terminal status was set.
+ * Returns the most recent of the two signal timestamps in epoch milliseconds,
+ * ignoring null/unparseable values. Returns null when neither is usable.
  */
-function getMostRecentTerminalTransition(
-  terminalOrders: OrderRow[],
-): Date | null {
-  if (terminalOrders.length === 0) return null;
+function mostRecentSignalMs(
+  heartbeatAt: string | null,
+  lastOnlineAt: string | null,
+): number | null {
+  let latest: number | null = null;
 
-  let latest: Date | null = null;
-
-  for (const order of terminalOrders) {
-    if (!order.updated_at) continue;
-    const t = new Date(order.updated_at);
-    if (!latest || t > latest) {
-      latest = t;
+  for (const value of [heartbeatAt, lastOnlineAt]) {
+    if (!value) continue;
+    const ms = new Date(value).getTime();
+    if (Number.isNaN(ms)) continue;
+    if (latest === null || ms > latest) {
+      latest = ms;
     }
   }
 
