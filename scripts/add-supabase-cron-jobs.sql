@@ -35,7 +35,10 @@ SELECT cron.schedule(
 SELECT cron.schedule(
   'activate-subscriptions',
   '30 8 * * *',
-  $$ SELECT net.http_get('https://admin.arogyadiet.com/api/cron/activate-subscriptions?secret=arogyadietcron-123') AS request_id; $$
+  $$ SELECT net.http_get(
+       url := 'https://admin.arogyadiet.com/api/cron/activate-subscriptions?secret=arogyadietcron-123',
+       timeout_milliseconds := 30000
+     ) AS request_id; $$
 );
 
 -- generate-orders: daily at 11:45 UTC (5:15 PM IST).
@@ -54,7 +57,10 @@ SELECT cron.schedule(
 SELECT cron.schedule(
   'expire-kits',
   '0 18 * * *',
-  $$ SELECT net.http_get('https://admin.arogyadiet.com/api/cron/expire-kits?secret=arogyadietcron-123') AS request_id; $$
+  $$ SELECT net.http_get(
+       url := 'https://admin.arogyadiet.com/api/cron/expire-kits?secret=arogyadietcron-123',
+       timeout_milliseconds := 30000
+     ) AS request_id; $$
 );
 
 -- link-products: daily at 18:25 UTC (11:55 PM IST).
@@ -74,7 +80,10 @@ SELECT cron.schedule(
 SELECT cron.schedule(
   'transition-stays',
   '30 19 * * *',
-  $$ SELECT net.http_get('https://admin.arogyadiet.com/api/cron/transition-stays?secret=arogyadietcron-123') AS request_id; $$
+  $$ SELECT net.http_get(
+       url := 'https://admin.arogyadiet.com/api/cron/transition-stays?secret=arogyadietcron-123',
+       timeout_milliseconds := 30000
+     ) AS request_id; $$
 );
 
 -- cleanup-dispatch-images: daily at 03:00 UTC (8:30 AM IST).
@@ -82,7 +91,10 @@ SELECT cron.schedule(
 SELECT cron.schedule(
   'cleanup-dispatch-images',
   '0 3 * * *',
-  $$ SELECT net.http_get('https://admin.arogyadiet.com/api/cron/cleanup-dispatch-images?secret=arogyadietcron-123') AS request_id; $$
+  $$ SELECT net.http_get(
+       url := 'https://admin.arogyadiet.com/api/cron/cleanup-dispatch-images?secret=arogyadietcron-123',
+       timeout_milliseconds := 30000
+     ) AS request_id; $$
 );
 
 -- cleanup-old-po: monthly on the 1st at 22:30 UTC (4:00 AM IST on the 2nd).
@@ -90,7 +102,10 @@ SELECT cron.schedule(
 SELECT cron.schedule(
   'cleanup-old-po',
   '30 22 1 * *',
-  $$ SELECT net.http_get('https://admin.arogyadiet.com/api/cron/cleanup-old-po?secret=arogyadietcron-123') AS request_id; $$
+  $$ SELECT net.http_get(
+       url := 'https://admin.arogyadiet.com/api/cron/cleanup-old-po?secret=arogyadietcron-123',
+       timeout_milliseconds := 30000
+     ) AS request_id; $$
 );
 
 -- ============================================================================
