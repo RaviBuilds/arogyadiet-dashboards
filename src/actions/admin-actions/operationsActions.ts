@@ -26,16 +26,55 @@ import { checkGroupManage } from "@/lib/auth/adminAccess";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
+export type AutomationSubTaskState = {
+  status: "pending" | "success" | "failed" | "skipped";
+  at?: string;
+  error?: string;
+  info?: string;
+};
+
 export type AutomationLogRow = {
   automation_type: string;
   target_date: string;
+  /** IST date the automation actually ran. Dashboard groups by this. */
+  run_date: string | null;
   run_count: number | null;
   last_run_at: string | null;
   latest_stats: unknown;
+  /** Status of the main task for the cron run. */
+  main_status: string | null;
+  /** Follow-up pipeline step statuses for the cron run. */
+  sub_tasks: Record<string, AutomationSubTaskState> | null;
   manual_run_count: number | null;
   last_manual_run_at: string | null;
   latest_manual_stats: unknown;
+  manual_main_status: string | null;
+  manual_sub_tasks: Record<string, AutomationSubTaskState> | null;
 };
+
+// Shared column list for automation_logs reads (keeps the new run-tracking /
+// sub-task columns in one place).
+const AUTOMATION_LOG_COLUMNS =
+  "automation_type, target_date, run_date, run_count, last_run_at, latest_stats, main_status, sub_tasks, manual_run_count, last_manual_run_at, latest_manual_stats, manual_main_status, manual_sub_tasks";
+
+function normalizeAutomationLogRow(row: Record<string, unknown>): AutomationLogRow {
+  return {
+    automation_type: row.automation_type as string,
+    target_date: row.target_date as string,
+    run_date: (row.run_date as string) ?? null,
+    run_count: (row.run_count as number) ?? null,
+    last_run_at: (row.last_run_at as string) ?? null,
+    latest_stats: row.latest_stats ?? null,
+    main_status: (row.main_status as string) ?? null,
+    sub_tasks: (row.sub_tasks as Record<string, AutomationSubTaskState>) ?? null,
+    manual_run_count: (row.manual_run_count as number) ?? null,
+    last_manual_run_at: (row.last_manual_run_at as string) ?? null,
+    latest_manual_stats: row.latest_manual_stats ?? null,
+    manual_main_status: (row.manual_main_status as string) ?? null,
+    manual_sub_tasks:
+      (row.manual_sub_tasks as Record<string, AutomationSubTaskState>) ?? null,
+  };
+}
 
 export type PendingFailureApprovalRow = {
   orderId: string;
@@ -116,9 +155,7 @@ export async function getAutomationLogs(
 
   const { data, error } = await supabase
     .from("automation_logs")
-    .select(
-      "automation_type, target_date, run_count, last_run_at, latest_stats, manual_run_count, last_manual_run_at, latest_manual_stats",
-    )
+    .select(AUTOMATION_LOG_COLUMNS)
     .gte("target_date", startDate)
     .lte("target_date", endDate)
     .order("target_date", { ascending: false })
@@ -129,31 +166,27 @@ export async function getAutomationLogs(
     return [];
   }
 
-  return (data || []).map((row) => ({
-    ...row,
-    manual_run_count: (row as any).manual_run_count ?? null,
-    last_manual_run_at: (row as any).last_manual_run_at ?? null,
-    latest_manual_stats: (row as any).latest_manual_stats ?? null,
-  })) as AutomationLogRow[];
+  return (data || []).map((row) => normalizeAutomationLogRow(row as Record<string, unknown>));
 }
 
 /**
- * Fetches all automation_logs rows for a SINGLE target date, across every
- * automation_type. Used by the day-wise card view in the Automation Logs tab.
+ * Fetches all automation_logs rows that RAN on a single IST calendar date
+ * (run_date), across every automation_type. Used by the day-wise card view in
+ * the Automation Logs tab — so an automation shows on the day it actually ran,
+ * regardless of which delivery/target date it ran for (e.g. the 5:15 PM order
+ * creation shows today even though it targets tomorrow's delivery).
  * Excludes AUTO_OFF_DUTY (the 5-minute rider sweep is deliberately not shown
  * in this per-day log — it runs too frequently to be meaningful here).
  */
 export async function getAutomationLogsForDay(
-  targetDate: string,
+  runDate: string,
 ): Promise<AutomationLogRow[]> {
   const supabase = createAdminClient();
 
   const { data, error } = await supabase
     .from("automation_logs")
-    .select(
-      "automation_type, target_date, run_count, last_run_at, latest_stats, manual_run_count, last_manual_run_at, latest_manual_stats",
-    )
-    .eq("target_date", targetDate)
+    .select(AUTOMATION_LOG_COLUMNS)
+    .eq("run_date", runDate)
     .neq("automation_type", "AUTO_OFF_DUTY")
     .order("automation_type", { ascending: true });
 
@@ -162,16 +195,11 @@ export async function getAutomationLogsForDay(
     return [];
   }
 
-  return (data || []).map((row) => ({
-    ...row,
-    manual_run_count: (row as any).manual_run_count ?? null,
-    last_manual_run_at: (row as any).last_manual_run_at ?? null,
-    latest_manual_stats: (row as any).latest_manual_stats ?? null,
-  })) as AutomationLogRow[];
+  return (data || []).map((row) => normalizeAutomationLogRow(row as Record<string, unknown>));
 }
 
 /**
- * Returns the earliest and latest target_date present in automation_logs
+ * Returns the earliest and latest run_date present in automation_logs
  * (excluding AUTO_OFF_DUTY), used to bound the day-navigation prev/next
  * buttons and the calendar picker in the Automation Logs tab.
  */
@@ -184,23 +212,25 @@ export async function getAutomationLogsDateBounds(): Promise<{
   const [{ data: minRow }, { data: maxRow }] = await Promise.all([
     supabase
       .from("automation_logs")
-      .select("target_date")
+      .select("run_date")
       .neq("automation_type", "AUTO_OFF_DUTY")
-      .order("target_date", { ascending: true })
+      .not("run_date", "is", null)
+      .order("run_date", { ascending: true })
       .limit(1)
       .maybeSingle(),
     supabase
       .from("automation_logs")
-      .select("target_date")
+      .select("run_date")
       .neq("automation_type", "AUTO_OFF_DUTY")
-      .order("target_date", { ascending: false })
+      .not("run_date", "is", null)
+      .order("run_date", { ascending: false })
       .limit(1)
       .maybeSingle(),
   ]);
 
   return {
-    minDate: minRow?.target_date ?? null,
-    maxDate: maxRow?.target_date ?? null,
+    minDate: (minRow as { run_date?: string } | null)?.run_date ?? null,
+    maxDate: (maxRow as { run_date?: string } | null)?.run_date ?? null,
   };
 }
 

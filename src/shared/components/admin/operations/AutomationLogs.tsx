@@ -18,7 +18,14 @@ import {
   CircleSlash,
   Bot,
   UserCog,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  MinusCircle,
 } from "lucide-react";
+import type {
+  AutomationSubTaskState,
+} from "@/actions/admin-actions/operationsActions";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Card } from "@/shared/components/ui/card";
@@ -82,6 +89,14 @@ function formatTimeIST(dateStr: string | null) {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+/** Formats a YYYY-MM-DD string as a short human date (e.g. "16 Jul"). */
+function formatDateLabel(dateStr: string | null) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (!y || !m || !d) return dateStr;
+  return format(new Date(y, m - 1, d), "dd MMM");
 }
 
 function escapeCsvValue(value: unknown) {
@@ -201,6 +216,73 @@ function StatsPills({ stats }: { stats: unknown }) {
   );
 }
 
+// ─── Main-task status + follow-up sub-tasks ──────────────────────────────────
+
+const SUB_TASK_STYLE: Record<
+  string,
+  { icon: typeof CheckCircle2; className: string; label: string }
+> = {
+  success: { icon: CheckCircle2, className: "text-green-600 border-green-200 bg-green-50", label: "Done" },
+  failed: { icon: XCircle, className: "text-red-600 border-red-200 bg-red-50", label: "Failed" },
+  pending: { icon: Loader2, className: "text-amber-600 border-amber-200 bg-amber-50", label: "In progress" },
+  skipped: { icon: MinusCircle, className: "text-slate-500 border-slate-200 bg-slate-50", label: "Skipped" },
+};
+
+function MainStatusBadge({ status }: { status: string | null }) {
+  if (!status) return null;
+  const failed = status === "failed";
+  const running = status === "running" || status === "pending";
+  const Icon = failed ? XCircle : running ? Loader2 : CheckCircle2;
+  const cls = failed
+    ? "text-red-600 border-red-200 bg-red-50"
+    : running
+      ? "text-amber-600 border-amber-200 bg-amber-50"
+      : "text-green-600 border-green-200 bg-green-50";
+  const label = failed ? "Main task failed" : running ? "Running" : "Main task OK";
+  return (
+    <Badge variant="outline" className={cn("h-5 gap-1 text-[10px] font-medium", cls)}>
+      <Icon className={cn("h-3 w-3", running && "animate-spin")} />
+      {label}
+    </Badge>
+  );
+}
+
+function SubTasksList({
+  subTasks,
+}: {
+  subTasks: Record<string, AutomationSubTaskState> | null | undefined;
+}) {
+  const entries = Object.entries(subTasks ?? {});
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="mt-1 space-y-1 border-t border-border/40 pt-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+        Follow-up pipeline
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {entries.map(([key, state]) => {
+          const style = SUB_TASK_STYLE[state?.status] ?? SUB_TASK_STYLE.pending;
+          const Icon = style.icon;
+          const title = state?.error || state?.info || style.label;
+          return (
+            <Badge
+              key={key}
+              variant="outline"
+              className={cn("h-5 gap-1 text-[10px] font-normal", style.className)}
+              title={title}
+            >
+              <Icon className={cn("h-3 w-3", state?.status === "pending" && "animate-spin")} />
+              {formatStatLabel(key)}
+              {state?.info ? `: ${state.info}` : ""}
+            </Badge>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Run Sub-Card (Cron or Manual) ───────────────────────────────────────────
 
 function RunSourceBlock({
@@ -209,6 +291,8 @@ function RunSourceBlock({
   runCount,
   lastRunAt,
   stats,
+  mainStatus,
+  subTasks,
   emptyMessage,
 }: {
   sourceLabel: string;
@@ -216,13 +300,15 @@ function RunSourceBlock({
   runCount: number;
   lastRunAt: string | null;
   stats: unknown;
+  mainStatus?: string | null;
+  subTasks?: Record<string, AutomationSubTaskState> | null;
   emptyMessage: string;
 }) {
   const hasRun = runCount > 0 && lastRunAt;
 
   return (
     <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <SourceIcon className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -238,8 +324,12 @@ function RunSourceBlock({
 
       {hasRun ? (
         <div className="space-y-1.5">
-          <p className="text-[11px] text-muted-foreground">{formatTimeIST(lastRunAt)} IST</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] text-muted-foreground">{formatTimeIST(lastRunAt)} IST</p>
+            <MainStatusBadge status={mainStatus ?? null} />
+          </div>
           <StatsPills stats={stats} />
+          <SubTasksList subTasks={subTasks} />
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">{emptyMessage}</p>
@@ -265,7 +355,14 @@ function AutomationCard({ log }: { log: AutomationLogRow }) {
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-foreground">{meta.label}</p>
-          <p className="font-mono text-[10px] text-muted-foreground">{log.automation_type}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="font-mono text-[10px] text-muted-foreground">{log.automation_type}</span>
+            {log.target_date && log.target_date !== log.run_date && (
+              <span className="text-[10px] text-muted-foreground">
+                for {formatDateLabel(log.target_date)}
+              </span>
+            )}
+          </div>
         </div>
         {!cronRan && !manualRan && (
           <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
@@ -282,7 +379,9 @@ function AutomationCard({ log }: { log: AutomationLogRow }) {
           runCount={log.run_count ?? 0}
           lastRunAt={log.last_run_at}
           stats={log.latest_stats}
-          emptyMessage="Not triggered by the scheduler for this date."
+          mainStatus={log.main_status}
+          subTasks={log.sub_tasks}
+          emptyMessage="Not triggered by the scheduler on this day."
         />
         <RunSourceBlock
           sourceLabel="Manual (Admin)"
@@ -290,7 +389,9 @@ function AutomationCard({ log }: { log: AutomationLogRow }) {
           runCount={log.manual_run_count ?? 0}
           lastRunAt={log.last_manual_run_at}
           stats={log.latest_manual_stats}
-          emptyMessage="Not manually re-run by an admin for this date."
+          mainStatus={log.manual_main_status}
+          subTasks={log.manual_sub_tasks}
+          emptyMessage="Not manually re-run by an admin on this day."
         />
       </div>
     </Card>
@@ -312,7 +413,10 @@ export default function AutomationLogs({
   // Seed the first render from initialLogs (already fetched server-side) so
   // there's no loading flash when the tab first opens on today's date.
   const seededLogs = useMemo(
-    () => initialLogs.filter((log) => log.target_date === (initialDate || todayIST)),
+    () =>
+      initialLogs.filter(
+        (log) => (log.run_date ?? log.target_date) === (initialDate || todayIST),
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -372,13 +476,18 @@ export default function AutomationLogs({
   const handleExportCsv = () => {
     const exportRows = logs.map((log) => ({
       "Automation Type": log.automation_type,
+      "Run Date": log.run_date ?? "N/A",
       "Target Date": log.target_date,
       "Cron Run Count": log.run_count ?? 0,
+      "Cron Main Status": log.main_status ?? "N/A",
       "Cron Last Run (IST)": formatTimeIST(log.last_run_at) ?? "N/A",
       "Cron Stats": JSON.stringify(normalizeStats(log.latest_stats)),
+      "Cron Follow-ups": JSON.stringify(log.sub_tasks ?? {}),
       "Manual Run Count": log.manual_run_count ?? 0,
+      "Manual Main Status": log.manual_main_status ?? "N/A",
       "Manual Last Run (IST)": formatTimeIST(log.last_manual_run_at) ?? "N/A",
       "Manual Stats": JSON.stringify(normalizeStats(log.latest_manual_stats)),
+      "Manual Follow-ups": JSON.stringify(log.manual_sub_tasks ?? {}),
     }));
     downloadCsv(`Automation_Logs_${selectedDate}.csv`, exportRows);
   };
@@ -464,7 +573,10 @@ export default function AutomationLogs({
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {logs.map((log) => (
-            <AutomationCard key={`${log.automation_type}-${log.target_date}`} log={log} />
+            <AutomationCard
+              key={`${log.automation_type}-${log.run_date ?? log.target_date}`}
+              log={log}
+            />
           ))}
         </div>
       )}
