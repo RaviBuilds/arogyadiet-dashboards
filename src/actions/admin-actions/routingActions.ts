@@ -10,6 +10,109 @@ import { computeOpenLoopHaversineRoute } from "@/lib/distance";
 import { computeOpenLoopRoute } from "@/lib/routing/googleRoutes";
 import { applyOperationsScope, isFranchiseScope, type OperationsScope } from "@/lib/franchise/scope";
 import { checkGroupManage } from "@/lib/auth/adminAccess";
+import { resolveRatesForClinic } from "@/services/RateConfigService";
+
+/**
+ * Per-rider routing context. Origin is the rider's linked CLINIC coordinate
+ * (never the kitchen) and the payout rate is resolved from `rate_configs`
+ * (franchise → core → default) — matching the daily auto-router so manual
+ * re-routes and automated routing always agree.
+ */
+type RiderRouteContext = {
+  originLat: number;
+  originLng: number;
+  ratePerKm: number;
+  clinicId: string | null;
+};
+
+/**
+ * Resolves each rider's clinic origin + payout rate. Falls back to the given
+ * origin/rate only when a rider has no linked clinic or the clinic is missing
+ * coordinates (routing must never hard-fail on a missing clinic geo).
+ */
+async function resolveRiderRouteContexts(
+  supabaseAdmin: SupabaseClient,
+  riderIds: string[],
+  fallback: { lat: number; lng: number; ratePerKm: number },
+): Promise<Map<string, RiderRouteContext>> {
+  const ctxByRider = new Map<string, RiderRouteContext>();
+  if (riderIds.length === 0) return ctxByRider;
+
+  const { data: riderRows } = await supabaseAdmin
+    .from("rider_profiles")
+    .select("id, clinic_id")
+    .in("id", riderIds);
+
+  const clinicIds = [
+    ...new Set(
+      (riderRows || []).map((r) => r.clinic_id).filter(Boolean) as string[],
+    ),
+  ];
+
+  const clinicById = new Map<
+    string,
+    { id: string; franchise_id: string | null; latitude: number | null; longitude: number | null }
+  >();
+  if (clinicIds.length > 0) {
+    const { data: clinics } = await supabaseAdmin
+      .from("clinics")
+      .select("id, franchise_id, latitude, longitude")
+      .in("id", clinicIds);
+    for (const c of clinics || []) clinicById.set(c.id, c as any);
+  }
+
+  // Resolve the payout rate once per clinic (rate_configs: franchise → core).
+  const rateByClinic = new Map<string, number>();
+  for (const clinicId of clinicIds) {
+    const clinic = clinicById.get(clinicId);
+    if (!clinic) continue;
+    try {
+      const rates = await resolveRatesForClinic(supabaseAdmin, {
+        id: clinic.id,
+        franchise_id: clinic.franchise_id,
+      });
+      rateByClinic.set(clinicId, rates.riderPayoutRatePerKm);
+    } catch (e) {
+      console.warn(`[routing] rate resolve failed for clinic ${clinicId}`, e);
+    }
+  }
+
+  for (const r of riderRows || []) {
+    const clinic = r.clinic_id ? clinicById.get(r.clinic_id) : null;
+    const lat = clinic?.latitude != null ? Number(clinic.latitude) : NaN;
+    const lng = clinic?.longitude != null ? Number(clinic.longitude) : NaN;
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    const rate =
+      (r.clinic_id ? rateByClinic.get(r.clinic_id) : undefined) ??
+      fallback.ratePerKm;
+
+    if (!hasCoords) {
+      console.warn(
+        `[routing] rider ${r.id}: clinic ${r.clinic_id ?? "none"} missing coordinates; falling back to kitchen origin`,
+      );
+    }
+
+    ctxByRider.set(r.id, {
+      originLat: hasCoords ? lat : fallback.lat,
+      originLng: hasCoords ? lng : fallback.lng,
+      ratePerKm: rate,
+      clinicId: r.clinic_id ?? null,
+    });
+  }
+
+  for (const id of riderIds) {
+    if (!ctxByRider.has(id)) {
+      ctxByRider.set(id, {
+        originLat: fallback.lat,
+        originLng: fallback.lng,
+        ratePerKm: fallback.ratePerKm,
+        clinicId: null,
+      });
+    }
+  }
+
+  return ctxByRider;
+}
 
 function getISTDateString(offsetDays = 0) {
   const date = new Date();
@@ -86,26 +189,48 @@ export async function getRoutingData(scope?: OperationsScope) {
 
   if (ridersError) console.error("Error fetching routing riders:", ridersError);
 
-  // Per-rider, per-date pickup status. A rider whose batch for a given date is
-  // no longer PENDING has already picked up and is out for delivery — that
-  // rider/date is frozen and must not receive re-routes.
+  // Per-rider, per-date pickup status. A rider/date is frozen (already out for
+  // delivery) and must not receive re-routes. Detected from two independent
+  // signals since batch status can lag order status:
+  //   1. The batch for that date has left PENDING.
+  //   2. ANY order for that rider/date is already dispatched.
+  const pickedUpDatesByRider = new Map<string, Set<string>>();
+  const markPickedUp = (riderId: string | null, date: string | null) => {
+    if (!riderId || !date) return;
+    if (!pickedUpDatesByRider.has(riderId)) {
+      pickedUpDatesByRider.set(riderId, new Set());
+    }
+    pickedUpDatesByRider.get(riderId)!.add(date);
+  };
+
   let batchesQuery = supabase
     .from("delivery_batches")
     .select("assigned_rider_id, delivery_date, status")
     .in("delivery_date", [today, tomorrow]);
-
   batchesQuery = applyOperationsScope(batchesQuery, scope);
-
   const { data: batchesData } = await batchesQuery;
-
-  const pickedUpDatesByRider = new Map<string, Set<string>>();
   (batchesData || []).forEach((b: any) => {
-    if (!b.assigned_rider_id) return;
-    if (String(b.status).toUpperCase() === "PENDING") return;
-    if (!pickedUpDatesByRider.has(b.assigned_rider_id)) {
-      pickedUpDatesByRider.set(b.assigned_rider_id, new Set());
+    if (String(b.status).toUpperCase() !== "PENDING") {
+      markPickedUp(b.assigned_rider_id, b.delivery_date);
     }
-    pickedUpDatesByRider.get(b.assigned_rider_id)!.add(b.delivery_date);
+  });
+
+  let dispatchedQuery = supabase
+    .from("delivery_orders")
+    .select("assigned_rider_id, delivery_date")
+    .in("delivery_date", [today, tomorrow])
+    .in("status", [
+      "OUT_FOR_DELIVERY",
+      "REACHING_TO_LOCATION",
+      "DELIVERED",
+      "FAILED",
+      "PENDING_FAILURE_APPROVAL",
+    ])
+    .not("assigned_rider_id", "is", null);
+  dispatchedQuery = applyOperationsScope(dispatchedQuery, scope);
+  const { data: dispatchedData } = await dispatchedQuery;
+  (dispatchedData || []).forEach((o: any) => {
+    markPickedUp(o.assigned_rider_id, o.delivery_date);
   });
 
   const riders = (ridersData || []).map((r: any) => ({
@@ -134,12 +259,13 @@ async function commitRiderRouteForDate(
     addresses: { lat: number | null; lng: number | null } | { lat: number | null; lng: number | null }[] | null;
   }[],
   existingBatches: { id: string; assigned_rider_id: string }[] | null,
-  kitchenLat: number,
-  kitchenLng: number,
+  originLat: number,
+  originLng: number,
   ratePerKm: number,
   apiKey: string | undefined,
   departureTime: string | undefined,
   batchFranchiseId: string | null,
+  clinicId: string | null,
 ) {
   let batchId = existingBatches?.find((b) => b.assigned_rider_id === riderId)?.id;
 
@@ -175,8 +301,8 @@ async function commitRiderRouteForDate(
     let route =
       apiKey != null
         ? await computeOpenLoopRoute(
-            kitchenLat,
-            kitchenLng,
+            originLat,
+            originLng,
             routableStops,
             apiKey,
             ratePerKm,
@@ -187,8 +313,8 @@ async function commitRiderRouteForDate(
     if (!route) {
       route = computeOpenLoopHaversineRoute(
         routableStops,
-        kitchenLat,
-        kitchenLng,
+        originLat,
+        originLng,
         ratePerKm,
       );
     }
@@ -230,6 +356,7 @@ async function commitRiderRouteForDate(
         total_distance_km: totalBatchDistance,
         expected_payout: totalBatchPayout,
         franchise_id: batchFranchiseId,
+        clinic_id: clinicId,
       })
       .select("id")
       .single();
@@ -275,9 +402,7 @@ async function commitRouteChangesForDate(
   supabaseAdmin: SupabaseClient,
   targetDate: string,
   movesMap: Map<string, string | null | undefined>,
-  ratePerKm: number,
-  kitchenLat: number,
-  kitchenLng: number,
+  fallback: { lat: number; lng: number; ratePerKm: number },
   apiKey: string | undefined,
   departureTime: string | undefined,
   scope: OperationsScope,
@@ -309,15 +434,29 @@ async function commitRouteChangesForDate(
 
   if (fetchBatchesErr) throw fetchBatchesErr;
 
-  // A rider is FROZEN for this date once their batch leaves PENDING (i.e. the
-  // rider tapped "Mark Batch Picked Up" and is now out for delivery). Frozen
+  // A rider is FROZEN for this date once they are out for delivery. Frozen
   // riders can neither receive new orders, lose orders, nor have their existing
   // route sequence recomputed.
-  const frozenRiderIds = new Set(
-    (existingBatches || [])
-      .filter((b) => String(b.status).toUpperCase() !== "PENDING")
-      .map((b) => b.assigned_rider_id),
-  );
+  //
+  // We detect this from TWO independent signals, because batch status is not
+  // always reliable (batches can remain PENDING even after their orders are
+  // dispatched — e.g. when orders are moved to OUT_FOR_DELIVERY individually):
+  //   1. The rider's batch has left PENDING (they tapped "Mark Batch Picked Up").
+  //   2. ANY of the rider's orders for this date is already dispatched.
+  const frozenRiderIds = new Set<string>();
+  for (const b of existingBatches || []) {
+    if (b.assigned_rider_id && String(b.status).toUpperCase() !== "PENDING") {
+      frozenRiderIds.add(b.assigned_rider_id);
+    }
+  }
+  for (const o of allCurrentOrders) {
+    if (
+      o.assigned_rider_id &&
+      DISPATCHED_ORDER_STATUSES.has(String(o.status).toUpperCase())
+    ) {
+      frozenRiderIds.add(o.assigned_rider_id);
+    }
+  }
 
   const orderById = new Map(allCurrentOrders.map((o) => [o.id, o]));
 
@@ -387,25 +526,35 @@ async function commitRouteChangesForDate(
     riderOrdersMap.set(riderId, orderIds);
   }
 
+  // Resolve each affected rider's clinic origin + rate_configs payout rate.
+  const ridersToRoute = Array.from(riderOrdersMap.entries()).filter(
+    ([, orderIds]) => orderIds.length > 0,
+  );
+  const riderContexts = await resolveRiderRouteContexts(
+    supabaseAdmin,
+    ridersToRoute.map(([riderId]) => riderId),
+    fallback,
+  );
+
   await Promise.all(
-    Array.from(riderOrdersMap.entries())
-      .filter(([, orderIds]) => orderIds.length > 0)
-      .map(([riderId, orderIds]) =>
-        commitRiderRouteForDate(
-          supabaseAdmin,
-          targetDate,
-          riderId,
-          orderIds,
-          allCurrentOrders,
-          existingBatches,
-          kitchenLat,
-          kitchenLng,
-          ratePerKm,
-          apiKey,
-          departureTime,
-          batchFranchiseId,
-        ),
-      ),
+    ridersToRoute.map(([riderId, orderIds]) => {
+      const ctx = riderContexts.get(riderId)!;
+      return commitRiderRouteForDate(
+        supabaseAdmin,
+        targetDate,
+        riderId,
+        orderIds,
+        allCurrentOrders,
+        existingBatches,
+        ctx.originLat,
+        ctx.originLng,
+        ctx.ratePerKm,
+        apiKey,
+        departureTime,
+        batchFranchiseId,
+        ctx.clinicId,
+      );
+    }),
   );
 
   if (unassignedOrderIds.length > 0) {
@@ -457,12 +606,20 @@ export async function commitRouteChanges(
   );
 
   try {
-    const { data: settings } = await supabaseAdmin.from("system_settings").select("rider_payout_per_km").eq("id", "global").single();
-    const ratePerKm = Number(settings?.rider_payout_per_km || 16.00);
+    // Payout rate comes exclusively from rate_configs (master Rate
+    // Configuration), resolved per-rider by clinic. The core rate is the
+    // fallback for riders with no linked clinic.
+    const coreRates = await resolveRatesForClinic(supabaseAdmin, {
+      id: "",
+      franchise_id: null,
+    });
+    const fallbackRatePerKm = coreRates.riderPayoutRatePerKm;
 
+    // Kitchen coordinate is ONLY a fallback origin for riders whose clinic has
+    // no coordinates; the real origin is each rider's clinic.
     const { data: kitchen } = await supabaseAdmin.from("kitchens").select("lat, lng").eq("is_active", true).limit(1).single();
-    const kitchenLat = kitchen?.lat ? Number(kitchen.lat) : 17.3850;
-    const kitchenLng = kitchen?.lng ? Number(kitchen.lng) : 78.4867;
+    const fallbackLat = kitchen?.lat ? Number(kitchen.lat) : 17.3850;
+    const fallbackLng = kitchen?.lng ? Number(kitchen.lng) : 78.4867;
 
     const apiKey =
       process.env.GOOGLE_MAPS_API_KEY ||
@@ -491,9 +648,7 @@ export async function commitRouteChanges(
         supabaseAdmin,
         targetDate,
         movesMap,
-        ratePerKm,
-        kitchenLat,
-        kitchenLng,
+        { lat: fallbackLat, lng: fallbackLng, ratePerKm: fallbackRatePerKm },
         apiKey,
         departureTime,
         scope,

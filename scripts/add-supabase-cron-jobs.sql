@@ -12,6 +12,12 @@
 -- The `secret` query param is validated against the CRON_SECRET env var in each
 -- route. All schedules are in UTC. IST = UTC + 5:30.
 --
+-- TIMEOUT: net.http_get defaults to a 5000ms timeout. Endpoints now return HTTP
+-- 200 as soon as their MAIN task finishes (order creation, product linking)
+-- and run follow-up work (notifications, dispatch) AFTER the response via
+-- Next's after(). Even so, we pass timeout_milliseconds := 30000 on the heavier
+-- jobs so a slow cold start / main task never records a false pg_net timeout.
+--
 -- cron.schedule(jobname, ...) is idempotent by name: re-running this script
 -- UPDATES the existing job of the same name rather than creating duplicates.
 -- ============================================================================
@@ -37,7 +43,10 @@ SELECT cron.schedule(
 SELECT cron.schedule(
   'generate-orders',
   '45 11 * * *',
-  $$ SELECT net.http_get('https://admin.arogyadiet.com/api/cron/generate-orders?secret=arogyadietcron-123') AS request_id; $$
+  $$ SELECT net.http_get(
+       url := 'https://admin.arogyadiet.com/api/cron/generate-orders?secret=arogyadietcron-123',
+       timeout_milliseconds := 30000
+     ) AS request_id; $$
 );
 
 -- expire-kits: daily at 18:00 UTC (11:30 PM IST).
@@ -54,7 +63,10 @@ SELECT cron.schedule(
 SELECT cron.schedule(
   'link-products',
   '25 18 * * *',
-  $$ SELECT net.http_get('https://admin.arogyadiet.com/api/cron/link-products?secret=arogyadietcron-123') AS request_id; $$
+  $$ SELECT net.http_get(
+       url := 'https://admin.arogyadiet.com/api/cron/link-products?secret=arogyadietcron-123',
+       timeout_milliseconds := 30000
+     ) AS request_id; $$
 );
 
 -- transition-stays: daily at 19:30 UTC (1:00 AM IST next day).
