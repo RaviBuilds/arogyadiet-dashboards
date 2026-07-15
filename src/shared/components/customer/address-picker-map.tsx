@@ -12,6 +12,9 @@ const HYDERABAD_CENTER = { lat: 17.385, lng: 78.4867 };
 const LOCATION_ERROR_MESSAGE =
   "Please activate location services on your device and grant permission to locate your current address.";
 
+const LOCATION_PERMISSION_DENIED_MESSAGE =
+  "Location permission is blocked. Please enable it for this app in your device Settings, then try again.";
+
 const mapContainerStyle = {
   width: "100%",
   height: "100%",
@@ -67,9 +70,15 @@ function getBrowserPosition(): Promise<GeolocationPosition> {
 
 async function getCurrentPosition(): Promise<{ latitude: number; longitude: number }> {
   if (Capacitor.isNativePlatform()) {
-    const permissions = await Geolocation.requestPermissions();
+    let permissions = await Geolocation.checkPermissions();
     if (permissions.location !== "granted") {
-      throw new Error("permission_denied");
+      permissions = await Geolocation.requestPermissions();
+    }
+    if (permissions.location !== "granted") {
+      // "denied" here means the user has permanently blocked the prompt
+      // (Android 13+ won't re-prompt after two denials) — request a Settings visit.
+      const permanentlyDenied = permissions.location === "denied";
+      throw new Error(permanentlyDenied ? "permission_blocked" : "permission_denied");
     }
   }
 
@@ -164,8 +173,12 @@ export function AddressPickerMap({
       }
 
       applyCoordinates(latitude, longitude);
-    } catch {
-      toast.error(LOCATION_ERROR_MESSAGE);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message === "permission_blocked"
+          ? LOCATION_PERMISSION_DENIED_MESSAGE
+          : LOCATION_ERROR_MESSAGE;
+      toast.error(message);
     } finally {
       setIsLocating(false);
     }

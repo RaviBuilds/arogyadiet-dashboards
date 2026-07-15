@@ -193,6 +193,7 @@ export async function processStandaloneCheckout(items: CartItem[]) {
       amount: amountInPaisa,
       currency: "INR",
       receipt: `rcpt_${payment.id}`.substring(0, 40),
+      notes: { payment_id: payment.id, checkout_type: "ADDON" },
     });
 
     return {
@@ -484,6 +485,7 @@ export async function createAddonCheckoutOrder(
       amount: amountInPaisa,
       currency: "INR",
       receipt: `rcpt_${payment.id}`.substring(0, 40),
+      notes: { payment_id: payment.id, checkout_type: "ADDON" },
     });
 
     return {
@@ -648,6 +650,48 @@ export async function updateAddonOrderDeliveryDate(
   }
 }
 
+// Reconciliation path for the Android app-switch case: if the Checkout.js
+// `handler` callback never fires (WebView backgrounded/killed during a UPI
+// app-switch), the client calls this once it resumes. It asks Razorpay's API
+// directly (server-to-server) whether the order was actually paid, instead of
+// trusting a client-supplied signature.
+export async function checkAndReconcileAddonPaymentAction(
+  paymentId: string,
+  razorpayOrderId: string,
+) {
+  try {
+    const supabase = await createClient();
+
+    const { data: existingTx } = await supabase
+      .from("razorpay_transactions")
+      .select("id")
+      .eq("razorpay_order_id", razorpayOrderId)
+      .maybeSingle();
+
+    if (existingTx) {
+      return { success: true, alreadyProcessed: true };
+    }
+
+    const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
+    const capturedPayment = payments.items?.find(
+      (p: any) => p.status === "captured" || p.status === "authorized",
+    );
+
+    if (!capturedPayment) {
+      return { success: false, pending: true, error: "Payment not yet captured" };
+    }
+
+    return verifyAddonPayment(paymentId, {
+      razorpay_order_id: razorpayOrderId,
+      razorpay_payment_id: capturedPayment.id,
+      razorpay_signature: "server-verified-via-razorpay-api",
+    });
+  } catch (error) {
+    console.error("Reconcile Addon Payment Error:", error);
+    return { success: false, error: "Failed to reconcile payment status." };
+  }
+}
+
 export async function verifyAddonPayment(
   paymentId: string,
   razorpayResponse: {
@@ -661,14 +705,20 @@ export async function verifyAddonPayment(
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
       razorpayResponse;
 
-    const body = `${razorpay_order_id}|${razorpay_payment_id}`;
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
-      .update(body)
-      .digest("hex");
+    // "server-verified-via-razorpay-api" marks calls arriving from
+    // checkAndReconcileAddonPaymentAction, which already confirmed the
+    // payment directly against Razorpay's API (server-to-server) — there is
+    // no client-supplied signature to check in that path.
+    if (razorpay_signature !== "server-verified-via-razorpay-api") {
+      const body = `${razorpay_order_id}|${razorpay_payment_id}`;
+      const expectedSignature = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
+        .update(body)
+        .digest("hex");
 
-    if (expectedSignature !== razorpay_signature) {
-      throw new Error("Invalid payment signature.");
+      if (expectedSignature !== razorpay_signature) {
+        throw new Error("Invalid payment signature.");
+      }
     }
 
     // STRICT SEQUENCE (fail-fast):

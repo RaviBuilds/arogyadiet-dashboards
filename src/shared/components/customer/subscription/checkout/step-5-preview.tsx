@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { format, addDays } from "date-fns";
 import {
@@ -26,10 +26,13 @@ import {
 } from "@/shared/components/ui/alert";
 import { createClient } from "@/lib/supabase/client";
 import { CONTENT_STAGES } from "./content-stages";
+import { Capacitor } from "@capacitor/core";
+import { App } from "@capacitor/app";
 
 import {
   createRazorpayOrderAction,
   verifyAndActivateSubscriptionAction,
+  checkAndReconcileSubscriptionPaymentAction,
   validateCouponAction,
   previewDeliveryChargeAction,
 } from "@/actions/checkoutActions";
@@ -37,6 +40,17 @@ import {
 export function OrderPreview({ data, plans, onBack }: any) {
   const router = useRouter();
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Tracks the in-flight Razorpay order while a payment is open, so that if
+  // the WebView is backgrounded/killed during a UPI app-switch and the
+  // Checkout.js `handler` callback never fires, resuming the app can
+  // reconcile the payment status directly against Razorpay instead of
+  // leaving the subscription unactivated.
+  const pendingPaymentRef = useRef<null | {
+    razorpayOrderId: string;
+    checkoutData: any;
+    couponCode?: string;
+  }>(null);
 
   // NEW: Modern Error State instead of alerts
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -89,6 +103,32 @@ export function OrderPreview({ data, plans, onBack }: any) {
   const endDate = data.startDate
     ? addDays(new Date(data.startDate), baseDuration + pausesUsed - 1)
     : null;
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const listenerPromise = App.addListener("appStateChange", async ({ isActive }) => {
+      if (!isActive || !pendingPaymentRef.current) return;
+
+      const { razorpayOrderId, checkoutData, couponCode } = pendingPaymentRef.current;
+      const result = await checkAndReconcileSubscriptionPaymentAction(
+        razorpayOrderId,
+        checkoutData,
+        couponCode,
+      );
+
+      if (result.success) {
+        pendingPaymentRef.current = null;
+        router.push("/subscription/success");
+      }
+      // If not yet captured (`result.pending`), leave pendingPaymentRef set —
+      // the Checkout.js handler or a later resume may still resolve it.
+    });
+
+    return () => {
+      listenerPromise.then((handle) => handle.remove());
+    };
+  }, [router]);
 
   useEffect(() => {
     async function fetchProfile() {
@@ -253,6 +293,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
         theme: { color: "#ea580c" },
         handler: async function (response: any) {
           // Keep processing state true while we verify with the DB
+          pendingPaymentRef.current = null;
           setIsProcessing(true);
           const finalCheckoutData = { ...data, customerProfileId };
           const verifyRes = await verifyAndActivateSubscriptionAction(
@@ -272,8 +313,15 @@ export function OrderPreview({ data, plans, onBack }: any) {
         },
         modal: {
           ondismiss: function () {
-            setPaymentError("Payment window was closed.");
-            setIsProcessing(false);
+            // On Android, `ondismiss` also fires when the WebView regains
+            // focus after a UPI app-switch without the `handler` callback
+            // having run — don't clear pendingPaymentRef or show a
+            // cancellation error if we're still waiting on a reconciliation
+            // check for this order.
+            if (!pendingPaymentRef.current) {
+              setPaymentError("Payment window was closed.");
+              setIsProcessing(false);
+            }
           },
         },
         prefill: {
@@ -283,9 +331,19 @@ export function OrderPreview({ data, plans, onBack }: any) {
         },
       };
 
+      // Track this order so the appStateChange listener can reconcile it
+      // if the app is backgrounded/killed mid-payment (e.g. a UPI app-switch)
+      // and the `handler` callback above never runs.
+      pendingPaymentRef.current = {
+        razorpayOrderId: orderRes.order.id,
+        checkoutData: { ...data, customerProfileId },
+        couponCode: appliedCoupon?.code,
+      };
+
       const paymentObject = new (window as any).Razorpay(options);
 
       paymentObject.on("payment.failed", (response: any) => {
+        pendingPaymentRef.current = null;
         setIsProcessing(false);
         setPaymentError(
           response.error.description ||
