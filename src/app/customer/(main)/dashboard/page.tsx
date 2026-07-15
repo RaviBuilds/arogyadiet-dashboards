@@ -1,17 +1,21 @@
 import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
-import { format, parseISO, addDays, isToday, isTomorrow } from "date-fns";
+import {
+  format,
+  parseISO,
+  addDays,
+  isToday,
+  differenceInCalendarDays,
+} from "date-fns";
 import Link from "next/link";
-import Image from "next/image";
 import {
   CalendarDays,
   Utensils,
   PauseCircle,
   CheckCircle2,
+  CalendarCheck,
   ArrowRight,
-  ShieldCheck,
   AlertCircle,
-  MapPin,
   ShoppingBag,
 } from "lucide-react";
 
@@ -37,19 +41,26 @@ import {
 } from "@/shared/components/customer/ProfileCompletionDialog";
 import { KitDashboard } from "./KitDashboard";
 import { AccommodationDashboard } from "./AccommodationDashboard";
+import { JourneyHeader } from "@/shared/components/customer/dashboard/JourneyHeader";
+import {
+  TodayFocusCard,
+  type TodayFocusState,
+} from "@/shared/components/customer/dashboard/TodayFocusCard";
+import {
+  MomentumStrip,
+  type MomentumStat,
+} from "@/shared/components/customer/dashboard/MomentumStrip";
+import { TransformationSpotlight } from "@/shared/components/customer/dashboard/TransformationSpotlight";
+import {
+  UpcomingDeliveries,
+  type DeliveryItem,
+} from "@/shared/components/customer/dashboard/UpcomingDeliveries";
+import { MEAL_THEMES } from "@/shared/components/customer/dashboard/meal-theme";
 import { getShippingInfoAction } from "@/actions/admin-actions/shippingActions";
 import { getActiveStayAction } from "@/actions/stayActions";
 import * as kitLifecycleRepo from "@/repositories/kitLifecycleRepository";
 
 export const revalidate = 0;
-
-// --- DYNAMIC MEAL THEMES ---
-type MealTheme = {
-  bg: string;
-  border: string;
-  text: string;
-  label: string;
-};
 
 /** Shape of a row from the upcoming `subscription_daily_preferences` query.
  *  Supabase returns embedded relations as either an object or an array. */
@@ -64,33 +75,6 @@ type UpcomingMeal = {
   is_paused: boolean;
   meal_categories: UpcomingMealCategory | UpcomingMealCategory[] | null;
   addresses: UpcomingMealAddress | UpcomingMealAddress[] | null;
-};
-
-const MEAL_THEMES: Record<string, MealTheme> = {
-  VEG: {
-    bg: "bg-green-50",
-    border: "border-green-200",
-    text: "text-green-700",
-    label: "Veg",
-  },
-  CHICKEN: {
-    bg: "bg-red-50",
-    border: "border-red-200",
-    text: "text-red-700",
-    label: "Chicken",
-  },
-  EGG: {
-    bg: "bg-amber-50",
-    border: "border-amber-200",
-    text: "text-amber-700",
-    label: "Egg",
-  },
-  MIXED: {
-    bg: "bg-purple-50",
-    border: "border-purple-200",
-    text: "text-purple-700",
-    label: "Mixed",
-  },
 };
 
 export default async function CustomerDashboard() {
@@ -177,9 +161,15 @@ export default async function CustomerDashboard() {
       const plan = Array.isArray(dialogSub.subscription_plans)
         ? dialogSub.subscription_plans[0]
         : dialogSub.subscription_plans;
-      const kitProduct = Array.isArray((dialogSub as any).kit_products)
-        ? (dialogSub as any).kit_products[0]
-        : (dialogSub as any).kit_products;
+      const dialogSubKit = dialogSub as typeof dialogSub & {
+        kit_products?:
+          | { name: string | null }
+          | { name: string | null }[]
+          | null;
+      };
+      const kitProduct = Array.isArray(dialogSubKit.kit_products)
+        ? dialogSubKit.kit_products[0]
+        : dialogSubKit.kit_products;
       
       // For KIT subscriptions, show the kit product name as the plan name
       const planName = dialogSub.customer_category === "KIT"
@@ -493,20 +483,126 @@ export default async function CustomerDashboard() {
     activeSub.pause_credits_total - pauseCreditsUsed,
   );
 
+  // --- Zone 1: Journey math (derived purely from existing subscription fields) ---
+  const journeyStart = activeSub.starts_on ? parseISO(activeSub.starts_on) : null;
+  const journeyEnd = activeSub.effective_end_on
+    ? parseISO(activeSub.effective_end_on)
+    : null;
+  const now = new Date();
+  const totalJourneyDays =
+    journeyStart && journeyEnd
+      ? Math.max(1, differenceInCalendarDays(journeyEnd, journeyStart) + 1)
+      : activeSub.total_days || 1;
+  const rawJourneyDay = journeyStart
+    ? differenceInCalendarDays(now, journeyStart) + 1
+    : 1;
+  const journeyDay = Math.max(1, Math.min(rawJourneyDay, totalJourneyDays));
+  const journeyProgress = Math.round((journeyDay / totalJourneyDays) * 100);
+  const daysCompleted = Math.max(0, journeyDay - 1);
+  const daysRemaining = Math.max(0, totalJourneyDays - journeyDay);
+  const firstName = appUser.full_name?.trim().split(/\s+/)[0] || null;
+  const greetingHour = now.getHours();
+  const timeGreeting =
+    greetingHour < 12
+      ? "Good morning"
+      : greetingHour < 17
+        ? "Good afternoon"
+        : "Good evening";
+  const journeyGreeting = firstName
+    ? `${timeGreeting}, ${firstName}`
+    : timeGreeting;
+
+  const journeyMotivation =
+    journeyProgress < 15
+      ? "Every healthy choice you make today is building a stronger, healthier you."
+      : journeyProgress < 50
+        ? "You're building real momentum. Keep going, one nourishing meal at a time."
+        : journeyProgress < 85
+          ? "You're past the halfway mark — your consistency is truly paying off."
+          : "You're in the final stretch of this journey. Finish strong!";
+
+  // --- Zone 2: Today's focus (from the existing 7-day preferences query) ---
+  const todayMeal = upcomingMeals?.find((m: UpcomingMeal) =>
+    isToday(parseISO(m.preference_date)),
+  );
+  let todayState: TodayFocusState = "empty";
+  let todayTagLabel: string | null = null;
+  let todayTagClass = "";
+  let todayAddressTag: string | null = null;
+  let todayAddressLine: string | null = null;
+  if (todayMeal) {
+    if (todayMeal.is_paused) {
+      todayState = "paused";
+    } else {
+      todayState = "active";
+      const cat = Array.isArray(todayMeal.meal_categories)
+        ? todayMeal.meal_categories[0]
+        : todayMeal.meal_categories;
+      const addr = Array.isArray(todayMeal.addresses)
+        ? todayMeal.addresses[0]
+        : todayMeal.addresses;
+      const theme = MEAL_THEMES[cat?.code || "VEG"] || MEAL_THEMES.VEG;
+      todayTagLabel = theme.label;
+      todayTagClass = cn(theme.bg, theme.text, theme.border);
+      todayAddressTag = addr?.tag ?? null;
+      todayAddressLine = addr?.street_1 ?? null;
+    }
+  }
+
+  // --- Zone 3: Momentum stats (all from data already loaded above) ---
+  const momentumStats: MomentumStat[] = [
+    {
+      icon: CalendarCheck,
+      value: daysCompleted,
+      label: "days nourished",
+      tone: "green",
+    },
+    {
+      icon: Utensils,
+      value: activeSub.total_days ?? totalJourneyDays,
+      label: "meals in your plan",
+      tone: "coral",
+    },
+    {
+      icon: PauseCircle,
+      value: pauseCreditsRemaining,
+      label: "pauses in reserve",
+      tone: "amber",
+    },
+  ];
+
+  // --- Delivery roster (Zone 5): flatten for the schedule component ---
+  const deliveryItems: DeliveryItem[] = (upcomingMeals ?? []).map(
+    (m: UpcomingMeal) => {
+      const cat = Array.isArray(m.meal_categories)
+        ? m.meal_categories[0]
+        : m.meal_categories;
+      const addr = Array.isArray(m.addresses) ? m.addresses[0] : m.addresses;
+      return {
+        date: m.preference_date,
+        isPaused: m.is_paused,
+        mealCode: cat?.code ?? null,
+        addressTag: addr?.tag ?? null,
+        addressLine: addr?.street_1 ?? null,
+      };
+    },
+  );
+
   return (
-    <div className="relative z-10 max-w-5xl mx-auto space-y-10">
+    <div className="relative z-10 mx-auto max-w-5xl space-y-6 sm:space-y-8">
       {profileDialog}
-      <div className="relative w-full h-40 sm:h-48 md:h-56 rounded-xl overflow-hidden border border-slate-200 shadow-sm">
-        <Image
-          src="/banner.jpg"
-          alt="Your Healthy Journey Starts Now"
-          fill
-          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 90vw, 1024px"
-          className="object-cover object-center"
-          priority={true}
-        />
-        <div className="absolute inset-0 bg-linear-to-t from-slate-900/10 to-transparent pointer-events-none" />
-      </div>
+
+      {/* ZONE 1 — Wellness journey */}
+      <JourneyHeader
+        greeting={journeyGreeting}
+        planName={planName}
+        dayCurrent={journeyDay}
+        dayTotal={totalJourneyDays}
+        progress={journeyProgress}
+        daysRemaining={daysRemaining}
+        motivation={journeyMotivation}
+        code={activeSub.subscription_code}
+      />
 
       {activeAddonOrders.length > 0 && (
         <Link href="/meals" className="block transition-all duration-200">
@@ -531,32 +627,49 @@ export default async function CustomerDashboard() {
         </Link>
       )}
 
-      <div className="space-y-8">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 tracking-tight">
-              My Subscription
-            </h1>
-            <p className="text-sm text-slate-500 mt-1 flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-green-600" /> ID:{" "}
-              <span className="font-mono text-slate-700 font-medium">
-                {activeSub.subscription_code}
-              </span>
-            </p>
-          </div>
-          <Badge
-            variant="outline"
-            className="shrink-0 rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700"
-          >
-            <CheckCircle2 className="h-3.5 w-3.5" /> ACTIVE
-          </Badge>
+      {/* ZONE 2 — Today's focus */}
+      <TodayFocusCard
+        state={todayState}
+        dateLabel={format(now, "EEEE, dd MMM")}
+        title="Today's meal"
+        tagLabel={todayTagLabel}
+        tagClassName={todayTagClass}
+        addressTag={todayAddressTag}
+        addressLine={todayAddressLine}
+        imageSrc="/banner.jpg"
+        ctaHref="/meals"
+        ctaLabel="View meal plan"
+      />
+
+      {/* ZONE 3 — Momentum */}
+      <MomentumStrip
+        stats={momentumStats}
+        caption={`You've stayed nourished for ${daysCompleted} ${daysCompleted === 1 ? "day" : "days"} — every meal is a step forward.`}
+      />
+
+      {/* ZONE 4 — Motivation */}
+      <TransformationSpotlight
+        imageSrc="/Transformation%20image.jpeg"
+        headline="Real people. Real transformations."
+        subtext="Thousands have transformed their health with ArogyaDiet. Your journey is one of them — keep going."
+      />
+
+      {/* ZONE 5 — Manage your plan */}
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold tracking-tight text-slate-900">
+            Manage your plan
+          </h2>
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Active
+          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-2 border border-slate-200 bg-white shadow-sm">
-          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-6 py-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <Card className="md:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <CardHeader className="border-b border-slate-100 bg-emerald-50/40 px-6 py-4">
             <CardTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-primary" />
+              <CalendarDays className="h-5 w-5 text-emerald-600" />
               Plan Timeline
             </CardTitle>
           </CardHeader>
@@ -612,31 +725,31 @@ export default async function CustomerDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="border border-slate-200 bg-white shadow-sm flex flex-col">
-          <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-6 py-4">
+        <Card className="rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
+          <CardHeader className="border-b border-slate-100 bg-emerald-50/40 px-6 py-4">
             <CardTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
-              <PauseCircle className="h-5 w-5 text-blue-600" />
-              Pause Credits
+              <PauseCircle className="h-5 w-5 text-emerald-600" />
+              Flexibility
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6 flex-1 flex flex-col justify-center">
-            <div className="flex justify-between items-end mb-2">
+            <div className="flex items-end justify-between mb-2">
               <span className="text-3xl font-semibold text-slate-900">
-                {pauseCreditsUsed}
+                {pauseCreditsRemaining}
               </span>
-              <span className="text-sm font-semibold text-slate-500 mb-1">
-                / {activeSub.pause_credits_total} Used
+              <span className="mb-1 text-sm font-semibold text-slate-500">
+                of {activeSub.pause_credits_total} pauses left
               </span>
             </div>
-            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden mt-4">
+            <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
               <div
-                className={`h-full rounded-full transition-all duration-500 ${pausePercentage >= 100 ? "bg-red-500" : "bg-blue-500"}`}
-                style={{ width: `${Math.min(pausePercentage, 100)}%` }}
+                className={`h-full rounded-full transition-all duration-500 ${pauseCreditsRemaining === 0 ? "bg-amber-400" : "bg-emerald-500"}`}
+                style={{ width: `${Math.max(100 - pausePercentage, 0)}%` }}
               />
             </div>
-            <p className="text-xs text-slate-500 mt-4 leading-relaxed">
-              {pauseCreditsRemaining} credits remaining. Pausing a delivery
-              automatically extends your end date.
+            <p className="mt-4 text-xs leading-relaxed text-slate-500">
+              Life happens. Pause any delivery and we&apos;ll extend your end
+              date automatically — your meals are never lost.
             </p>
           </CardContent>
         </Card>
@@ -712,141 +825,21 @@ export default async function CustomerDashboard() {
         </section>
       )}
 
-      {/* NEW: Next 7 Days Roster - Upgraded to Premium Grid */}
-      <div className="pt-8">
-        <div className="mb-6 flex items-center gap-3">
+      {/* Next 7 Days delivery roster */}
+      <div>
+        <div className="mb-5 flex items-center gap-3">
           <h3 className="text-lg font-semibold text-slate-900 tracking-tight">
             Upcoming Deliveries
           </h3>
           <Badge
             variant="secondary"
-            className="border border-slate-200 bg-slate-100 text-slate-600"
+            className="border border-emerald-200 bg-emerald-50 text-emerald-700"
           >
             Next 7 Days
           </Badge>
         </div>
 
-        {upcomingMeals?.length === 0 ? (
-          <Card className="border border-slate-200 shadow-sm">
-            <CardContent className="p-8 text-center text-sm text-slate-500">
-              No upcoming deliveries found.
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
-            {upcomingMeals?.map((meal: UpcomingMeal, idx: number) => {
-              const date = parseISO(meal.preference_date);
-              const isPaused = meal.is_paused;
-
-              const address = Array.isArray(meal.addresses)
-                ? meal.addresses[0]
-                : meal.addresses;
-              const category = Array.isArray(meal.meal_categories)
-                ? meal.meal_categories[0]
-                : meal.meal_categories;
-
-              const mealCode = category?.code || "VEG";
-              const theme = MEAL_THEMES[mealCode] || MEAL_THEMES["VEG"];
-
-              // Temporal Context Badges
-              const showToday = isToday(date);
-              const showTomorrow = isTomorrow(date);
-
-              return (
-                <Card
-                  key={idx}
-                  className={cn(
-                    "overflow-hidden transition-all duration-200",
-                    isPaused
-                      ? "border border-dashed border-slate-200 bg-slate-50/80 shadow-none"
-                      : "border border-slate-200 bg-white shadow-sm hover:shadow-md hover:-translate-y-0.5",
-                    !isPaused && theme.border,
-                  )}
-                >
-                  <CardContent className="flex flex-col p-6 relative">
-                  {/* Top Header: Date & Status Badge */}
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                        {format(date, "EEEE")}
-                      </p>
-                      <p
-                        className={cn(
-                          "text-xl font-semibold",
-                          isPaused ? "text-slate-500" : "text-slate-900",
-                        )}
-                      >
-                        {format(date, "dd MMM")}
-                      </p>
-                    </div>
-
-                    {!isPaused && showToday && (
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-blue-200 bg-blue-50 text-blue-700 text-[10px] font-semibold uppercase tracking-wider"
-                      >
-                        Today
-                      </Badge>
-                    )}
-                    {!isPaused && showTomorrow && (
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-indigo-200 bg-indigo-50 text-indigo-700 text-[10px] font-semibold uppercase tracking-wider"
-                      >
-                        Tomorrow
-                      </Badge>
-                    )}
-                  </div>
-
-                  {/* Middle: Meal Details or Paused State */}
-                  <div className="grow flex flex-col justify-center py-2">
-                    {isPaused ? (
-                      <div className="flex items-center gap-2 text-slate-400">
-                        <AlertCircle className="h-5 w-5" />
-                        <span className="text-sm font-semibold">Delivery Paused</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={cn(
-                            "px-3 py-1.5 rounded-full border font-semibold text-sm tracking-wide",
-                            theme.bg,
-                            theme.text,
-                            theme.border,
-                          )}
-                        >
-                          {theme.label}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Bottom: Address Details */}
-                  <div className="mt-4 pt-4 border-t border-slate-100">
-                    {isPaused ? (
-                      <p className="text-sm text-slate-400">
-                        No meal will be prepared.
-                      </p>
-                    ) : (
-                      <div className="flex items-start gap-2">
-                        <MapPin className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                        <div className="overflow-hidden">
-                          <p className="text-xs font-semibold text-slate-700 truncate">
-                            {address?.tag || "Delivery Address"}
-                          </p>
-                          <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                            {address?.street_1 || "Address pending"}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+        <UpcomingDeliveries items={deliveryItems} />
       </div>
     </div>
   );

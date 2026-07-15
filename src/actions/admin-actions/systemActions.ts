@@ -43,8 +43,15 @@ export async function runProductLinkingAction(
   targetDate: string,
   source: AutomationRunSource = "cron",
 ): Promise<ProductLinkingResult> {
-  const gate = await checkGroupManage("operations");
-  if (!gate.ok) return { success: false, error: gate.error };
+  // Scheduled (cron) runs are authenticated by CRON_SECRET at the route level
+  // and carry no admin session — gating them with checkGroupManage made the
+  // nightly product-linking cron fail with a 400 permission error (so routing
+  // never ran and riders were never assigned). Only gate admin-triggered manual
+  // runs; the sole manual caller (triggerSystemAutomation) passes source="manual".
+  if (source === "manual") {
+    const gate = await checkGroupManage("operations");
+    if (!gate.ok) return { success: false, error: gate.error };
+  }
   const today = getISTDateString(0);
   const tomorrow = getISTDateString(1);
 
