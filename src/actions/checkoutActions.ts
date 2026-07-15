@@ -196,7 +196,10 @@ export async function createRazorpayOrderAction(
       receipt: `rcpt_${Date.now()}`,
     };
 
-    const order = await razorpay.orders.create(options);
+    const order = await razorpay.orders.create({
+      ...options,
+      notes: { checkout_type: "SUBSCRIPTION" },
+    });
     return {
       success: true,
       order,
@@ -218,22 +221,83 @@ export async function verifyAndActivateSubscriptionAction(
   checkoutData: any,
   couponCode?: string,
 ) {
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+    paymentResponse;
+  const body = razorpay_order_id + "|" + razorpay_payment_id;
+
+  // Verify Razorpay Signature Cryptographically
+  const expectedSignature = crypto
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
+    .update(body.toString())
+    .digest("hex");
+
+  if (expectedSignature !== razorpay_signature) {
+    return { success: false, error: "Invalid payment signature" };
+  }
+
+  return activateSubscription(
+    razorpay_order_id,
+    razorpay_payment_id,
+    razorpay_signature,
+    checkoutData,
+    couponCode,
+  );
+}
+
+// Reconciliation path for the Android app-switch case: if the Checkout.js
+// `handler` callback never fires (WebView backgrounded/killed during a UPI
+// app-switch), the client calls this once it resumes. Instead of trusting a
+// client-supplied signature, it asks Razorpay's API directly (server-to-server,
+// authenticated with our secret key) whether the order was actually paid.
+export async function checkAndReconcileSubscriptionPaymentAction(
+  razorpayOrderId: string,
+  checkoutData: any,
+  couponCode?: string,
+) {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
-      paymentResponse;
-    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    // Skip if this order was already activated (avoids duplicate subscriptions
+    // if the client's own `handler` callback also completes independently).
+    const { data: existingTx } = await supabaseAdmin
+      .from("razorpay_transactions")
+      .select("id")
+      .eq("razorpay_order_id", razorpayOrderId)
+      .maybeSingle();
 
-    // 1. Verify Razorpay Signature Cryptographically
-    const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
-      .update(body.toString())
-      .digest("hex");
-
-    if (expectedSignature !== razorpay_signature) {
-      throw new Error("Invalid payment signature");
+    if (existingTx) {
+      return { success: true, alreadyProcessed: true };
     }
 
-    // 2. Fetch required data
+    const payments = await razorpay.orders.fetchPayments(razorpayOrderId);
+    const capturedPayment = payments.items?.find(
+      (p: any) => p.status === "captured" || p.status === "authorized",
+    );
+
+    if (!capturedPayment) {
+      return { success: false, pending: true, error: "Payment not yet captured" };
+    }
+
+    return activateSubscription(
+      razorpayOrderId,
+      capturedPayment.id,
+      "server-verified-via-razorpay-api",
+      checkoutData,
+      couponCode,
+    );
+  } catch (error) {
+    console.error("Reconcile Subscription Payment Error:", error);
+    return { success: false, error: "Failed to reconcile payment status." };
+  }
+}
+
+async function activateSubscription(
+  razorpay_order_id: string,
+  razorpay_payment_id: string,
+  razorpay_signature: string,
+  checkoutData: any,
+  couponCode?: string,
+) {
+  try {
+    // 1. Fetch required data
     const {
       planId,
       customerProfileId,

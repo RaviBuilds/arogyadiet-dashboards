@@ -196,6 +196,60 @@ function getAutomationMeta(type: string) {
   );
 }
 
+// Every automation we always want a card for, in daily-operational order.
+// AUTO_OFF_DUTY (the 5-minute rider sweep) is intentionally excluded. If a
+// given automation has no log row for the selected day, we still render its
+// card as "not run" so admins can confirm at a glance whether it ran.
+const DISPLAY_AUTOMATION_ORDER = [
+  "SUB_ACTIVATE",
+  "ORDER_GEN",
+  "PRODUCT_LINK",
+  "ROUTING",
+  "KIT_EXPIRE",
+  "STAY_TRANSITION",
+  "IMG_CLEANUP",
+  "PO_CLEANUP",
+];
+
+/** Synthesizes an empty "not run" row for an automation with no log that day. */
+function makePlaceholderLog(type: string, runDate: string): AutomationLogRow {
+  return {
+    automation_type: type,
+    target_date: runDate,
+    run_date: runDate,
+    run_count: 0,
+    last_run_at: null,
+    latest_stats: null,
+    main_status: null,
+    sub_tasks: null,
+    manual_run_count: 0,
+    last_manual_run_at: null,
+    latest_manual_stats: null,
+    manual_main_status: null,
+    manual_sub_tasks: null,
+  };
+}
+
+/**
+ * Merges the fetched logs with the canonical automation list so every
+ * automation shows a card. Real rows win; missing ones become "not run"
+ * placeholders. Any fetched type not in the canonical list is appended.
+ */
+function buildDisplayLogs(logs: AutomationLogRow[], runDate: string): AutomationLogRow[] {
+  const byType = new Map(logs.map((log) => [log.automation_type, log]));
+  const ordered: AutomationLogRow[] = [];
+
+  for (const type of DISPLAY_AUTOMATION_ORDER) {
+    ordered.push(byType.get(type) ?? makePlaceholderLog(type, runDate));
+    byType.delete(type);
+  }
+  // Append any extra types the query returned that aren't in the canonical list.
+  for (const log of byType.values()) {
+    if (log.automation_type !== "AUTO_OFF_DUTY") ordered.push(log);
+  }
+  return ordered;
+}
+
 // ─── Stats Pills ─────────────────────────────────────────────────────────────
 
 function StatsPills({ stats }: { stats: unknown }) {
@@ -459,6 +513,12 @@ export default function AutomationLogs({
   const selectedDateObj = useMemo(() => parseISODateString(selectedDate), [selectedDate]);
   const today = useMemo(() => getISTDateString(0), []);
 
+  // Always show a card for every automation, "not run" when there's no row.
+  const displayLogs = useMemo(
+    () => buildDisplayLogs(logs, selectedDate),
+    [logs, selectedDate],
+  );
+
   const canGoPrev = !dateBounds.minDate || selectedDate > dateBounds.minDate;
   const canGoNext = selectedDate < today;
 
@@ -474,7 +534,7 @@ export default function AutomationLogs({
   };
 
   const handleExportCsv = () => {
-    const exportRows = logs.map((log) => ({
+    const exportRows = displayLogs.map((log) => ({
       "Automation Type": log.automation_type,
       "Run Date": log.run_date ?? "N/A",
       "Target Date": log.target_date,
@@ -564,15 +624,9 @@ export default function AutomationLogs({
             />
           ))}
         </div>
-      ) : logs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center text-muted-foreground">
-          <FileClock className="mb-3 h-10 w-10 opacity-40" />
-          <p className="font-medium">No automation activity logged for this date.</p>
-          <p className="mt-1 text-sm">Try navigating to a different day.</p>
-        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {logs.map((log) => (
+          {displayLogs.map((log) => (
             <AutomationCard
               key={`${log.automation_type}-${log.run_date ?? log.target_date}`}
               log={log}

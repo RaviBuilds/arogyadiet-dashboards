@@ -20,6 +20,7 @@ import { checkGroupManage } from "@/lib/auth/adminAccess";
 import { logAdminAction } from "@/lib/logger";
 import {
   runSubscriptionActivation,
+  sendSubscriptionActivationNotifications,
   runKitExpiration,
   runDispatchImageCleanup,
   runStayTransitions,
@@ -49,6 +50,9 @@ export async function runFallbackAutomation(
     switch (key) {
       case "SUB_ACTIVATE": {
         const r = await runSubscriptionActivation("manual");
+        // Notifications are decoupled from the main task; on the manual path we
+        // await them so the admin sees the full run complete.
+        await sendSubscriptionActivationNotifications(r.activatedSubs, r.stoppedSubs);
         summary = `${r.activated} subscription(s) activated, ${r.stopped} expired.`;
         break;
       }

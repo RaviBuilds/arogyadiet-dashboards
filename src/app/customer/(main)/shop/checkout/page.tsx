@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { useCartStore } from "@/store/useCartStore";
 import { useSyncCartStockFromServer } from "@/shared/hooks/use-sync-cart-stock";
 import { createClient } from "@/lib/supabase/client";
+import { Capacitor } from "@capacitor/core";
+import { App } from "@capacitor/app";
 import {
   createAddonCheckoutOrder,
   validateCouponCode,
   verifyAddonPayment,
+  checkAndReconcileAddonPaymentAction,
 } from "@/actions/shop-actions";
 import { Button } from "@/shared/components/ui/button";
 import {
@@ -61,6 +64,40 @@ export default function ShopCheckoutPage() {
     type: "PERCENTAGE" | "FLAT" | null;
     value: number;
   }>({ type: null, value: 0 });
+
+  // Tracks the in-flight Razorpay order while a payment is open, so that if
+  // the WebView is backgrounded/killed during a UPI app-switch and the
+  // Checkout.js `handler` callback never fires, resuming the app can
+  // reconcile the payment status directly against Razorpay instead of
+  // leaving the order stuck as unpaid.
+  const pendingPaymentRef = useRef<null | { paymentId: string; razorpayOrderId: string }>(null);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const listenerPromise = App.addListener("appStateChange", async ({ isActive }) => {
+      if (!isActive || !pendingPaymentRef.current) return;
+
+      const { paymentId, razorpayOrderId } = pendingPaymentRef.current;
+      const result = await checkAndReconcileAddonPaymentAction(paymentId, razorpayOrderId);
+
+      if (result.success) {
+        pendingPaymentRef.current = null;
+        setIsPaying(false);
+        toast.success(
+          "Payment successful! Add-ons will be delivered with your next meal.",
+        );
+        clearCart();
+        router.push("/dashboard");
+      }
+      // If not yet captured (`result.pending`), leave pendingPaymentRef set —
+      // the Checkout.js handler or a later resume may still resolve it.
+    });
+
+    return () => {
+      listenerPromise.then((handle) => handle.remove());
+    };
+  }, [clearCart, router]);
 
   useEffect(() => {
     if (items.length === 0) {
@@ -237,6 +274,7 @@ export default function ShopCheckoutPage() {
           name: name || "Customer",
         },
         handler: async function (response: any) {
+          pendingPaymentRef.current = null;
           const verifyRes = await verifyAddonPayment(
             orderResponse.paymentId,
             response,
@@ -250,24 +288,43 @@ export default function ShopCheckoutPage() {
           } else {
             toast.error(verifyRes.error || "Payment verification failed.");
           }
+          setIsProcessing(false);
         },
         modal: {
           ondismiss: function () {
-            toast.error("Payment was cancelled.");
+            // On Android, `ondismiss` also fires when the WebView regains
+            // focus after a UPI app-switch without the `handler` callback
+            // having run — don't clear pendingPaymentRef or show a
+            // cancellation toast if we're still waiting on a reconciliation
+            // check for this order.
+            if (!pendingPaymentRef.current) {
+              toast.error("Payment was cancelled.");
+              setIsProcessing(false);
+            }
           },
         },
+      };
+
+      // Track this order so the appStateChange listener can reconcile it
+      // if the app is backgrounded/killed mid-payment (e.g. a UPI app-switch)
+      // and the `handler` callback above never runs.
+      pendingPaymentRef.current = {
+        paymentId: orderResponse.paymentId,
+        razorpayOrderId: orderResponse.razorpayOrderId,
       };
 
       const rzp = new (window as any).Razorpay(options);
 
       // Catch payment failures
       rzp.on("payment.failed", function (response: any) {
+        pendingPaymentRef.current = null;
         console.error("Razorpay Payment Failed:", response.error);
         toast.error(`Payment Failed: ${response.error.description}`);
         setIsProcessing(false); // Stop the loading spinner
       });
 
       rzp.open();
+      return;
     } catch (error) {
       console.error("Payment Flow Error:", error);
       toast.error(

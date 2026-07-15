@@ -30,13 +30,29 @@ const PO_STORAGE_BUCKET = "purchase-orders";
 
 // ─── 1. Subscription Activation / Expiry ────────────────────────────────────
 
+export type SubRef = { id: string; customer_profile_id: string };
+
 export type SubActivateResult = {
   today: string;
   tomorrow: string;
   activated: number;
   stopped: number;
+  /** Records needed to send the follow-up notifications (deferred). */
+  activatedSubs: SubRef[];
+  stoppedSubs: SubRef[];
 };
 
+/**
+ * MAIN TASK: activate PENDING subscriptions starting tomorrow and expire ACTIVE
+ * subscriptions past their end date, then log the SUB_ACTIVATE result.
+ *
+ * This intentionally does NOT send notifications — those are slow (external
+ * push/email) and previously ran inline BEFORE the log write, which caused the
+ * cron's pg_net call to time out at 5s and the SUB_ACTIVATE log to never be
+ * written. Notifications are now run separately via
+ * `sendSubscriptionActivationNotifications` (from the cron route's `after()`
+ * pipeline, or awaited directly on the manual path).
+ */
 export async function runSubscriptionActivation(
   source: AutomationRunSource = "cron",
 ): Promise<SubActivateResult> {
@@ -55,34 +71,6 @@ export async function runSubscriptionActivation(
     throw new Error(activateError.message);
   }
 
-  if (activated?.length) {
-    for (const sub of activated) {
-      const { data: profile } = await supabaseAdmin
-        .from("customer_profiles")
-        .select("user_id")
-        .eq("id", sub.customer_profile_id)
-        .maybeSingle();
-
-      if (profile?.user_id) {
-        await sendNotificationToUser(profile.user_id, {
-          title: "Subscription Activated!",
-          message: "Your upcoming pending subscription has been activated. See more info.",
-          actionUrl: "/customer/dashboard",
-          sendEmail: false,
-        });
-      }
-
-      const customerName = await getCustomerNameByProfileId(sub.customer_profile_id);
-
-      await notifyAdmins({
-        title: "Pending Subscription Activated!",
-        message: `Hi Admin, Pending subscription has been activated for the customer ${customerName}.`,
-        actionUrl: "/admin/customers",
-        sendEmail: false,
-      });
-    }
-  }
-
   const { data: stopped, error: stopError } = await supabaseAdmin
     .from("subscriptions")
     .update({ status: "EXPIRED" })
@@ -94,13 +82,7 @@ export async function runSubscriptionActivation(
     throw new Error(stopError.message);
   }
 
-  if (stopped?.length) {
-    for (const sub of stopped) {
-      await notifySubscriptionExpired(sub.customer_profile_id, sub.id);
-    }
-  }
-
-  // Gather customer names for logging
+  // Gather customer names for logging (quick reads; no external calls).
   const activatedNames: string[] = [];
   for (const sub of activated ?? []) {
     const { data: cp } = await supabaseAdmin
@@ -138,7 +120,71 @@ export async function runSubscriptionActivation(
     tomorrow,
     activated: activated?.length ?? 0,
     stopped: stopped?.length ?? 0,
+    activatedSubs: (activated ?? []).map((s) => ({
+      id: s.id,
+      customer_profile_id: s.customer_profile_id,
+    })),
+    stoppedSubs: (stopped ?? []).map((s) => ({
+      id: s.id,
+      customer_profile_id: s.customer_profile_id,
+    })),
   };
+}
+
+/**
+ * FOLLOW-UP: notify customers/admins about newly-activated subscriptions.
+ * Safe to run after the main task and its log have been recorded.
+ */
+export async function notifyActivatedSubscriptions(activatedSubs: SubRef[]): Promise<void> {
+  if (!activatedSubs.length) return;
+  const supabaseAdmin = createAdminClient();
+
+  for (const sub of activatedSubs) {
+    const { data: profile } = await supabaseAdmin
+      .from("customer_profiles")
+      .select("user_id")
+      .eq("id", sub.customer_profile_id)
+      .maybeSingle();
+
+    if (profile?.user_id) {
+      await sendNotificationToUser(profile.user_id, {
+        title: "Subscription Activated!",
+        message: "Your upcoming pending subscription has been activated. See more info.",
+        actionUrl: "/customer/dashboard",
+        sendEmail: false,
+      });
+    }
+
+    const customerName = await getCustomerNameByProfileId(sub.customer_profile_id);
+
+    await notifyAdmins({
+      title: "Pending Subscription Activated!",
+      message: `Hi Admin, Pending subscription has been activated for the customer ${customerName}.`,
+      actionUrl: "/admin/customers",
+      sendEmail: false,
+    });
+  }
+}
+
+/**
+ * FOLLOW-UP: notify customers about expired subscriptions.
+ */
+export async function notifyExpiredSubscriptions(stoppedSubs: SubRef[]): Promise<void> {
+  for (const sub of stoppedSubs) {
+    await notifySubscriptionExpired(sub.customer_profile_id, sub.id);
+  }
+}
+
+/**
+ * Convenience wrapper that runs both notification passes. Used by the manual
+ * "Run Script" path where the whole operation is awaited synchronously.
+ */
+export async function sendSubscriptionActivationNotifications(
+  activatedSubs: SubRef[],
+  stoppedSubs: SubRef[],
+): Promise<void> {
+  await notifyActivatedSubscriptions(activatedSubs);
+  await notifyExpiredSubscriptions(stoppedSubs);
 }
 
 // ─── 2. KIT Expiration ───────────────────────────────────────────────────────

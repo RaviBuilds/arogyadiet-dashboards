@@ -42,15 +42,24 @@ COMMENT ON COLUMN public.automation_logs.manual_main_status IS
 COMMENT ON COLUMN public.automation_logs.manual_sub_tasks IS
   'Per-step status map for follow-up pipeline tasks of the last manual run.';
 
--- Backfill run_date for existing rows.
--- ORDER_GEN runs the evening before its delivery/target date; every other
--- automation runs on its target date.
+-- Backfill run_date from the ACTUAL run timestamp (IST calendar date), which is
+-- the true "day it ran". This is more accurate than deriving from target_date:
+-- e.g. product linking for tomorrow's delivery runs late tonight, so its run
+-- day is today — not the delivery date. Falls back to a target-date heuristic
+-- only when no timestamp exists (should not happen — upsert always sets one).
+--
+-- Idempotent: recomputes every row from its timestamps, so it is safe to re-run
+-- even after an earlier target-date-based backfill.
 UPDATE public.automation_logs
-SET run_date = CASE
-  WHEN automation_type = 'ORDER_GEN' THEN target_date - INTERVAL '1 day'
-  ELSE target_date
-END
-WHERE run_date IS NULL;
+SET run_date = COALESCE(
+  (COALESCE(last_run_at, last_manual_run_at) AT TIME ZONE 'Asia/Kolkata')::date,
+  CASE
+    WHEN automation_type = 'ORDER_GEN' THEN target_date - INTERVAL '1 day'
+    ELSE target_date
+  END
+)
+WHERE COALESCE(last_run_at, last_manual_run_at) IS NOT NULL
+   OR run_date IS NULL;
 
 -- Backfill main_status from prior run activity (all historical rows that ran
 -- are treated as succeeded since only successful runs were logged).
