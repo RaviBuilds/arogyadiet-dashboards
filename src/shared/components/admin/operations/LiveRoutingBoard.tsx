@@ -102,6 +102,11 @@ export interface RoutingRider {
   assignedPincodes: string[];
   /** Rider's linked Clinic — drives clinic-selector-first gating (Req 17). */
   clinic_id: string | null;
+  /**
+   * Delivery dates this rider has already picked up (batch left PENDING).
+   * A rider is frozen for those dates: no re-assignment or re-sequencing.
+   */
+  pickedUpDates?: string[];
 }
 
 type FixedAssignmentsInjectedProps = {
@@ -238,6 +243,40 @@ export default function LiveRoutingBoard({
     e.preventDefault();
     if (!draggedOrderId) return;
 
+    const draggedOrder = orders.find((o) => o.id === draggedOrderId);
+    if (!draggedOrder) return;
+
+    // Guard: block reassigning any order to a rider who has already picked up
+    // their batch for that delivery date (frozen route). Mirrors the
+    // server-side enforcement in commitRouteChanges.
+    const targetRider = riders.find((r) => r.id === targetRiderId);
+    if (
+      targetRider?.pickedUpDates?.includes(draggedOrder.deliveryDate) &&
+      draggedOrder.assigned_rider_id !== targetRiderId
+    ) {
+      toast.error(
+        `${targetRider.fullName} has already picked up ${getDayLabel(
+          draggedOrder.deliveryDate,
+        ).toLowerCase()}'s batch. Their route is locked and can't take new orders.`,
+      );
+      return;
+    }
+
+    // Guard: block pulling an order away from a rider who is already out for
+    // delivery on that date.
+    const sourceRider = riders.find(
+      (r) => r.id === draggedOrder.assigned_rider_id,
+    );
+    if (
+      sourceRider?.pickedUpDates?.includes(draggedOrder.deliveryDate) &&
+      draggedOrder.assigned_rider_id !== targetRiderId
+    ) {
+      toast.error(
+        `${sourceRider.fullName} is already out for delivery. Their existing route is locked.`,
+      );
+      return;
+    }
+
     setOrders((prev) =>
       prev.map((order) =>
         order.id === draggedOrderId
@@ -325,9 +364,23 @@ export default function LiveRoutingBoard({
               <span className="text-xs font-mono text-muted-foreground">
                 {rider.employeeCode}
               </span>
-              <Badge variant="secondary" className="bg-primary/10 text-primary">
-                {riderOrders.length} Orders
-              </Badge>
+              <div className="flex items-center gap-2">
+                {rider.pickedUpDates && rider.pickedUpDates.length > 0 && (
+                  <Badge
+                    variant="secondary"
+                    className="bg-amber-100 text-amber-700 border-amber-200 gap-1"
+                    title={`Batch picked up for: ${rider.pickedUpDates
+                      .map(getDayLabel)
+                      .join(", ")}. Route locked for those days.`}
+                  >
+                    <Pin className="h-3 w-3" />
+                    Locked ({rider.pickedUpDates.map(getDayLabel).join(", ")})
+                  </Badge>
+                )}
+                <Badge variant="secondary" className="bg-primary/10 text-primary">
+                  {riderOrders.length} Orders
+                </Badge>
+              </div>
             </div>
           )}
         </div>

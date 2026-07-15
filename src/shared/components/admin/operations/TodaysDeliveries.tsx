@@ -165,7 +165,29 @@ export default function TodaysDeliveries({
       );
     }
 
-    return result;
+    // Present rows in the exact order the rider delivers them: group by day,
+    // then by rider, then by the batch's route_sequence (nulls/unassigned last).
+    // This keeps the admin Dispatch Board's "Seq." column readable top-to-bottom
+    // and consistent with the rider app + Live Tracking view.
+    const todayStr = getISTDateString();
+    const seqOf = (row: (typeof result)[number]) =>
+      typeof row.route_sequence === "number"
+        ? row.route_sequence
+        : Number.MAX_SAFE_INTEGER;
+    const riderNameOf = (row: (typeof result)[number]) =>
+      row.rider_profiles?.users?.full_name || "\uffff"; // unassigned sorts last
+
+    return [...result].sort((a, b) => {
+      // Today before Tomorrow.
+      const aToday = a.delivery_date === todayStr ? 0 : 1;
+      const bToday = b.delivery_date === todayStr ? 0 : 1;
+      if (aToday !== bToday) return aToday - bToday;
+
+      const riderCompare = riderNameOf(a).localeCompare(riderNameOf(b));
+      if (riderCompare !== 0) return riderCompare;
+
+      return seqOf(a) - seqOf(b);
+    });
   }, [data, searchTerm, searchColumn, filterDay, filterRiders, filterStatuses]);
 
   // --- ACTIVE BATCHES LOGIC ---

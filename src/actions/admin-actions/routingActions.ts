@@ -86,13 +86,37 @@ export async function getRoutingData(scope?: OperationsScope) {
 
   if (ridersError) console.error("Error fetching routing riders:", ridersError);
 
+  // Per-rider, per-date pickup status. A rider whose batch for a given date is
+  // no longer PENDING has already picked up and is out for delivery — that
+  // rider/date is frozen and must not receive re-routes.
+  let batchesQuery = supabase
+    .from("delivery_batches")
+    .select("assigned_rider_id, delivery_date, status")
+    .in("delivery_date", [today, tomorrow]);
+
+  batchesQuery = applyOperationsScope(batchesQuery, scope);
+
+  const { data: batchesData } = await batchesQuery;
+
+  const pickedUpDatesByRider = new Map<string, Set<string>>();
+  (batchesData || []).forEach((b: any) => {
+    if (!b.assigned_rider_id) return;
+    if (String(b.status).toUpperCase() === "PENDING") return;
+    if (!pickedUpDatesByRider.has(b.assigned_rider_id)) {
+      pickedUpDatesByRider.set(b.assigned_rider_id, new Set());
+    }
+    pickedUpDatesByRider.get(b.assigned_rider_id)!.add(b.delivery_date);
+  });
+
   const riders = (ridersData || []).map((r: any) => ({
     id: r.id,
     fullName: r.users?.full_name || "Unknown",
     employeeCode: r.employee_code || "N/A",
     // Rider's linked Clinic — drives clinic-selector-first gating (Req 17).
     clinic_id: r.clinic_id ?? null,
-    assignedPincodes: r.rider_service_areas?.map((a: any) => a.pincode) || []
+    assignedPincodes: r.rider_service_areas?.map((a: any) => a.pincode) || [],
+    // Dates for which this rider has already picked up (frozen for re-routing).
+    pickedUpDates: Array.from(pickedUpDatesByRider.get(r.id) || []),
   }));
 
   return { orders, riders };
@@ -237,6 +261,16 @@ async function commitRiderRouteForDate(
   }
 }
 
+// Order statuses that mean the parcel has already left the kitchen. Once an
+// order reaches any of these, its route is locked and cannot be re-routed.
+const DISPATCHED_ORDER_STATUSES = new Set([
+  "OUT_FOR_DELIVERY",
+  "REACHING_TO_LOCATION",
+  "PENDING_FAILURE_APPROVAL",
+  "DELIVERED",
+  "FAILED",
+]);
+
 async function commitRouteChangesForDate(
   supabaseAdmin: SupabaseClient,
   targetDate: string,
@@ -250,7 +284,7 @@ async function commitRouteChangesForDate(
 ) {
   let ordersQuery = supabaseAdmin
     .from("delivery_orders")
-    .select("id, assigned_rider_id, batch_id, addresses!delivery_address_id (lat, lng)")
+    .select("id, assigned_rider_id, batch_id, status, addresses!delivery_address_id (lat, lng)")
     .eq("delivery_date", targetDate);
 
   ordersQuery = applyOperationsScope(ordersQuery, scope);
@@ -264,24 +298,9 @@ async function commitRouteChangesForDate(
   // batches stay attributed and core batches remain unchanged.
   const batchFranchiseId = isFranchiseScope(scope) ? scope : null;
 
-  const riderOrdersMap = new Map<string, string[]>();
-  const unassignedOrderIds: string[] = [];
-
-  allCurrentOrders.forEach((order) => {
-    const finalRiderId = movesMap.has(order.id)
-      ? movesMap.get(order.id)
-      : order.assigned_rider_id;
-    if (finalRiderId) {
-      if (!riderOrdersMap.has(finalRiderId)) riderOrdersMap.set(finalRiderId, []);
-      riderOrdersMap.get(finalRiderId)!.push(order.id);
-    } else {
-      unassignedOrderIds.push(order.id);
-    }
-  });
-
   let batchesQuery = supabaseAdmin
     .from("delivery_batches")
-    .select("id, assigned_rider_id")
+    .select("id, assigned_rider_id, status")
     .eq("delivery_date", targetDate);
 
   batchesQuery = applyOperationsScope(batchesQuery, scope);
@@ -290,23 +309,103 @@ async function commitRouteChangesForDate(
 
   if (fetchBatchesErr) throw fetchBatchesErr;
 
+  // A rider is FROZEN for this date once their batch leaves PENDING (i.e. the
+  // rider tapped "Mark Batch Picked Up" and is now out for delivery). Frozen
+  // riders can neither receive new orders, lose orders, nor have their existing
+  // route sequence recomputed.
+  const frozenRiderIds = new Set(
+    (existingBatches || [])
+      .filter((b) => String(b.status).toUpperCase() !== "PENDING")
+      .map((b) => b.assigned_rider_id),
+  );
+
+  const orderById = new Map(allCurrentOrders.map((o) => [o.id, o]));
+
+  // Only the orders explicitly moved in this commit define which riders we
+  // touch. Every other rider on this date keeps their route sequence + payout
+  // exactly as-is (Req: re-route only the rider who received the change).
+  const affectedRiderIds = new Set<string>();
+  const unassignedOrderIds: string[] = [];
+
+  for (const [orderId, rawNewRiderId] of movesMap.entries()) {
+    const order = orderById.get(orderId);
+    // Moves targeting an order on a different date/scope are ignored here.
+    if (!order) continue;
+
+    const newRiderId = rawNewRiderId || null;
+    const srcRiderId = order.assigned_rider_id || null;
+
+    // No-op guard (assigned to the same rider) — nothing to validate or move.
+    if (newRiderId === srcRiderId) continue;
+
+    // The order itself must not have already left the kitchen.
+    if (DISPATCHED_ORDER_STATUSES.has(String(order.status).toUpperCase())) {
+      throw new Error(
+        "This delivery is already out for delivery and can no longer be re-routed.",
+      );
+    }
+
+    // Cannot pull an order away from a rider who already picked up their batch.
+    if (srcRiderId && frozenRiderIds.has(srcRiderId)) {
+      throw new Error(
+        "Cannot change this route: the current rider has already picked up their batch and is out for delivery.",
+      );
+    }
+
+    // Cannot assign an order to a rider who already picked up their batch.
+    if (newRiderId && frozenRiderIds.has(newRiderId)) {
+      throw new Error(
+        "Cannot assign to this rider: their batch is already picked up and out for delivery.",
+      );
+    }
+
+    if (srcRiderId) affectedRiderIds.add(srcRiderId);
+    if (newRiderId) {
+      affectedRiderIds.add(newRiderId);
+    } else {
+      unassignedOrderIds.push(orderId);
+    }
+  }
+
+  // Recompute the route ONLY for affected, non-frozen riders. Each rider's set
+  // is built from their final (post-move) NON-dispatched orders so anything
+  // already out for delivery keeps its committed sequence.
+  const riderOrdersMap = new Map<string, string[]>();
+  for (const riderId of affectedRiderIds) {
+    if (frozenRiderIds.has(riderId)) continue;
+    const orderIds = allCurrentOrders
+      .filter((o) => {
+        const finalRider = movesMap.has(o.id)
+          ? movesMap.get(o.id) || null
+          : o.assigned_rider_id;
+        return (
+          finalRider === riderId &&
+          !DISPATCHED_ORDER_STATUSES.has(String(o.status).toUpperCase())
+        );
+      })
+      .map((o) => o.id);
+    riderOrdersMap.set(riderId, orderIds);
+  }
+
   await Promise.all(
-    Array.from(riderOrdersMap.entries()).map(([riderId, orderIds]) =>
-      commitRiderRouteForDate(
-        supabaseAdmin,
-        targetDate,
-        riderId,
-        orderIds,
-        allCurrentOrders,
-        existingBatches,
-        kitchenLat,
-        kitchenLng,
-        ratePerKm,
-        apiKey,
-        departureTime,
-        batchFranchiseId,
+    Array.from(riderOrdersMap.entries())
+      .filter(([, orderIds]) => orderIds.length > 0)
+      .map(([riderId, orderIds]) =>
+        commitRiderRouteForDate(
+          supabaseAdmin,
+          targetDate,
+          riderId,
+          orderIds,
+          allCurrentOrders,
+          existingBatches,
+          kitchenLat,
+          kitchenLng,
+          ratePerKm,
+          apiKey,
+          departureTime,
+          batchFranchiseId,
+        ),
       ),
-    ),
   );
 
   if (unassignedOrderIds.length > 0) {
@@ -323,18 +422,24 @@ async function commitRouteChangesForDate(
     if (unassignErr) throw unassignErr;
   }
 
-  const { data: postRemainingOrders } = await supabaseAdmin
-    .from("delivery_orders")
-    .select("batch_id")
-    .eq("delivery_date", targetDate)
-    .not("batch_id", "is", null);
+  // Clean up only the affected riders' batches if they were emptied by moves.
+  // Untouched riders' batches are never inspected or deleted.
+  const affectedBatchIds = (existingBatches || [])
+    .filter((b) => affectedRiderIds.has(b.assigned_rider_id))
+    .map((b) => b.id);
 
-  const activeBatchIds = new Set(postRemainingOrders?.map((o) => o.batch_id) || []);
+  if (affectedBatchIds.length > 0) {
+    const { data: remainingOrders } = await supabaseAdmin
+      .from("delivery_orders")
+      .select("batch_id")
+      .eq("delivery_date", targetDate)
+      .in("batch_id", affectedBatchIds);
 
-  if (existingBatches) {
-    for (const batch of existingBatches) {
-      if (!activeBatchIds.has(batch.id)) {
-        await supabaseAdmin.from("delivery_batches").delete().eq("id", batch.id);
+    const activeBatchIds = new Set(remainingOrders?.map((o) => o.batch_id) || []);
+
+    for (const batchId of affectedBatchIds) {
+      if (!activeBatchIds.has(batchId)) {
+        await supabaseAdmin.from("delivery_batches").delete().eq("id", batchId);
       }
     }
   }
