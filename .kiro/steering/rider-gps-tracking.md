@@ -130,3 +130,25 @@ Since the fix is proven but depends on a manual per-device OEM permission the ri
 - User has a Gemini agent inside Android Studio for native-side operations (builds, syncs, manifest checks) — provide it explicit copy-paste-able prompts rather than assuming it has this conversation's context.
 - User's rider-mobile-app project root: `E:\Local Clients\Next.js\rider-mobile-app` (outside this workspace, not directly accessible to the assistant).
 - Signing key used for release builds: `rider_alias` (per Android Studio's Generate Signed Bundle dialog) — flagged as "not registered by a verified developer," which is expected/non-blocking for sideloaded test APKs (Play Integrity notice only).
+
+---
+
+## 9. Regression found & fixed (2026-07-15): `LiveLocationTracker` was a second, conflicting watcher
+
+**Symptom (reported):** Rider marks On Duty → bike icon + "Live GPS" show correctly for a short time → then admin map flips to "Rider is online but GPS is inactive", and the rider's own `/route` page shows "Acquiring GPS..." forever. Happens for all riders, and specifically **starts right after marking batch pickup**.
+
+**DB ground truth (via `mcp_postgres_readonly_query`):** Test rider (`b762fea6...`) went on-duty `02:24:01`, last `rider_live_locations.updated_at` `02:25:32` (~90s later), then dead 15+ min. Every online rider stale by hours/days. Classic WebView-JS-throttled-in-background death — the native 30s heartbeat was NOT running, meaning the native service had been stopped/clobbered.
+
+**Root cause:** Section 3.8 claimed the JS-side upload was removed, but `src/shared/components/rider/LiveLocationTracker.tsx` was NOT cleaned up. It was still mounted on `/route` (via `RouteGpsIndicator`) and `/route/[orderId]`, and it:
+1. started a **second** `BackgroundGeolocation.addWatcher` — with **no `riderId`** and `distanceFilter: 25`, conflicting with the single native watcher owned by `rider-status-toggle.tsx`;
+2. uploaded to `rider_live_locations` from **WebView JS** (the original architectural bug — dies under Doze/background throttling), overwriting `tracker_session_id` with its own random id;
+3. called `removeWatcher` on cleanup/unmount → **stopped the native foreground service** that the On Duty toggle had started.
+
+It only mounts once `isGpsActive` is true, which is when orders flip to `OUT_FOR_DELIVERY` — i.e. **immediately after batch pickup**. That's the trigger.
+
+**Fix (web/JS only — deploys via Vercel, no APK rebuild):**
+- Rewrote `LiveLocationTracker.tsx` as a **read-only status reader**: no `addWatcher`, no `removeWatcher`, no upsert. It polls `rider_live_locations.updated_at` every 5s and reports `active` if fresh within `GPS_STALE_MS` (90s, matching `AdminLiveTrackingMap`), else `acquiring`. The native service started by the On Duty toggle is now the sole owner of the watcher and upload pipeline.
+- Updated `RouteGpsIndicator.tsx` comment/branches to match (dropped the obsolete `error` branch).
+- `rider-status-toggle.tsx` unchanged — it remains the single `addWatcher` owner.
+
+**Verify after deploy:** on-duty a rider, mark batch pickup, confirm `rider_live_locations.updated_at` keeps advancing (native 30s heartbeat) and the admin map stays on "Live GPS". Note: pre-existing stale rows for riders who never got the new build will still show inactive until they run a build that never starts the JS watcher (i.e. after this web deploy, since the web bundle loads remotely).
