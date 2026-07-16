@@ -4,24 +4,25 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Switch } from "@/components/ui/switch";
+import { Switch } from "@/shared/components/ui/switch";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+} from "@/shared/components/ui/dialog";
+import { Button } from "@/shared/components/ui/button";
+import { Input } from "@/shared/components/ui/input";
+import { Label } from "@/shared/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { MapPin, Loader2, CheckCircle2, Navigation } from "lucide-react";
+} from "@/shared/components/ui/select";
+import { MapPin, Loader2, CheckCircle2, Navigation, Home } from "lucide-react";
 import { saveAddressAction } from "@/actions/addressActions";
 import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
 import { createAddressSchema } from "@/validations/addressSchema";
@@ -35,7 +36,7 @@ const AddressPickerMap = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[220px] w-full bg-zinc-100 animate-pulse rounded-lg flex items-center justify-center text-xs text-zinc-400 font-medium">
+      <div className="flex h-[220px] w-full items-center justify-center rounded-xl bg-slate-100 text-xs font-medium text-slate-400 animate-pulse">
         Loading map...
       </div>
     ),
@@ -47,6 +48,25 @@ interface AddressFormModalProps {
   onClose: () => void;
   onSuccess?: () => void;
   initialData?: Address | null;
+}
+
+/**
+ * Small numbered eyebrow used to visually group the dialog into a "guided
+ * setup" feel (Location → Address Details → Delivery Preferences) without
+ * turning it into an actual multi-step wizard — same section-label pattern
+ * used elsewhere in profile-ui (uppercase, tracked, slate-400).
+ */
+function FormGroupLabel({ step, children }: { step: number; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-500">
+        {step}
+      </span>
+      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+        {children}
+      </p>
+    </div>
+  );
 }
 
 export function AddressFormModal({
@@ -253,179 +273,198 @@ export function AddressFormModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
+            <Home className="h-4 w-4 text-primary" />
             {initialData ? "Edit Address" : "Add Delivery Address"}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-sm text-slate-500">
             Enter the details for your daily diet deliveries.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
-          {/* GPS Location Banner with Fallback */}
-          <div className="bg-zinc-50 border rounded-xl p-4 flex flex-col gap-3">
-            <div className="flex items-start justify-between">
-              <div>
-                <h4 className="text-sm font-bold text-zinc-900 flex items-center gap-1.5">
-                  <MapPin className="h-4 w-4 text-primary" /> Delivery
-                  Coordinates
-                </h4>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  We need your exact location for accurate routing.
-                </p>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 py-2">
+          {/* Group 1 — Location */}
+          <div className="space-y-3">
+            <FormGroupLabel step={1}>Location</FormGroupLabel>
+
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                    <MapPin className="h-4 w-4 text-primary" /> Delivery
+                    Coordinates
+                  </h4>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    We need your exact location for accurate routing.
+                  </p>
+                </div>
+
+                {locationStatus === "success" ? (
+                  <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Captured
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 border-primary/20 bg-primary/5 text-xs font-semibold text-primary hover:bg-primary/10"
+                    onClick={handleDetectLocation}
+                    disabled={locationStatus === "loading" || skipLocation}
+                  >
+                    {locationStatus === "loading" ? (
+                      <>
+                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                        Detecting...
+                      </>
+                    ) : (
+                      <>
+                        <Navigation className="mr-1.5 h-3 w-3" /> Detect
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
 
-              {locationStatus === "success" ? (
-                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Captured
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 border-blue-200"
-                  onClick={handleDetectLocation}
-                  disabled={locationStatus === "loading" || skipLocation}
-                >
-                  {locationStatus === "loading" ? (
-                    <>
-                      <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />{" "}
-                      Detecting...
-                    </>
-                  ) : (
-                    <>
-                      <Navigation className="h-3 w-3 mr-1.5" /> Detect Location
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-
-            {!skipLocation && (
-              <AddressPickerMap
-                lat={form.watch("lat") ?? null}
-                lng={form.watch("lng") ?? null}
-                disabled={skipLocation}
-                onCoordinatesChange={handleCoordinatesChange}
-              />
-            )}
-
-            {locationStatus === "error" && !skipLocation && (
-              <p className="text-xs font-medium text-red-500 bg-red-50 p-2 rounded">
-                {locationErrorMsg}
-              </p>
-            )}
-
-            {/* THE FALLBACK OPTION */}
-            {locationStatus !== "success" && (
-              <label className="flex items-start gap-2 mt-2 pt-3 border-t border-zinc-200 border-dashed cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  className="rounded border-zinc-300 text-primary focus:ring-primary h-4 w-4 mt-0.5"
-                  checked={skipLocation}
-                  onChange={(e) => {
-                    setSkipLocation(e.target.checked);
-                    if (e.target.checked) setServerError(null); // Clear error if they choose to skip
-                  }}
+              {!skipLocation && (
+                <AddressPickerMap
+                  lat={form.watch("lat") ?? null}
+                  lng={form.watch("lng") ?? null}
+                  disabled={skipLocation}
+                  onCoordinatesChange={handleCoordinatesChange}
                 />
-                <span className="text-xs font-medium text-zinc-600 leading-tight">
-                  I am not currently at this address.
-                  <br />
-                  <span className="text-[10px] text-zinc-400 font-normal">
-                    Skip location detection for now.
-                  </span>
-                </span>
-              </label>
-            )}
-          </div>
+              )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Tag</label>
-              <Select
-                onValueChange={(val: string) =>
-                  form.setValue("tag", val as "Home" | "Work" | "Other")
-                }
-                defaultValue={form.getValues("tag")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a tag" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Home">Home</SelectItem>
-                  <SelectItem value="Work">Work</SelectItem>
-                  <SelectItem value="Other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Pincode</label>
-              <Input placeholder="500028" {...form.register("pincode")} />
-              {form.formState.errors.pincode && (
-                <p className="text-xs text-red-500">
-                  {form.formState.errors.pincode.message}
+              {locationStatus === "error" && !skipLocation && (
+                <p className="rounded-lg bg-red-50 p-2 text-xs font-medium text-red-500">
+                  {locationErrorMsg}
                 </p>
               )}
+
+              {/* THE FALLBACK OPTION */}
+              {locationStatus !== "success" && (
+                <label className="mt-1 flex items-start gap-2 border-t border-dashed border-slate-200 pt-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                    checked={skipLocation}
+                    onChange={(e) => {
+                      setSkipLocation(e.target.checked);
+                      if (e.target.checked) setServerError(null); // Clear error if they choose to skip
+                    }}
+                  />
+                  <span className="text-xs font-medium leading-tight text-slate-600">
+                    I am not currently at this address.
+                    <br />
+                    <span className="text-[10px] font-normal text-slate-400">
+                      Skip location detection for now.
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">
-              Flat / House No / Building
-            </label>
-            <Input
-              placeholder="Apt 4B, Emerald Heights"
-              {...form.register("street_1")}
-            />
-            {form.formState.errors.street_1 && (
-              <p className="text-xs text-red-500">
-                {form.formState.errors.street_1.message}
-              </p>
-            )}
-          </div>
+          {/* Group 2 — Address Details */}
+          <div className="space-y-3">
+            <FormGroupLabel step={2}>Address Details</FormGroupLabel>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">
-              Area / Street / Sector (Optional)
-            </label>
-            <Input placeholder="Jubilee Hills" {...form.register("street_2")} />
-          </div>
+            <div className="space-y-4 rounded-2xl border border-slate-200 p-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-600">Tag</Label>
+                  <Select
+                    onValueChange={(val: string) =>
+                      form.setValue("tag", val as "Home" | "Work" | "Other")
+                    }
+                    defaultValue={form.getValues("tag")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a tag" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Home">Home</SelectItem>
+                      <SelectItem value="Work">Work</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-600">Pincode</Label>
+                  <Input placeholder="500028" {...form.register("pincode")} />
+                  {form.formState.errors.pincode && (
+                    <p className="text-xs text-red-500">
+                      {form.formState.errors.pincode.message}
+                    </p>
+                  )}
+                </div>
+              </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Landmark (Optional)</label>
-            <Input
-              placeholder="Near Apollo Hospital"
-              {...form.register("landmark")}
-            />
-          </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-slate-600">
+                  Flat / House No / Building
+                </Label>
+                <Input
+                  placeholder="Apt 4B, Emerald Heights"
+                  {...form.register("street_1")}
+                />
+                {form.formState.errors.street_1 && (
+                  <p className="text-xs text-red-500">
+                    {form.formState.errors.street_1.message}
+                  </p>
+                )}
+              </div>
 
-          <div className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm mt-4 bg-white">
-            <div className="space-y-0.5">
-              <label className="text-sm font-medium">
-                Set as default address
-              </label>
-              <p className="text-xs text-muted-foreground">
-                Your diet meals will be delivered here by default.
-              </p>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-slate-600">
+                  Area / Street / Sector (Optional)
+                </Label>
+                <Input placeholder="Jubilee Hills" {...form.register("street_2")} />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-slate-600">
+                  Landmark (Optional)
+                </Label>
+                <Input
+                  placeholder="Near Apollo Hospital"
+                  {...form.register("landmark")}
+                />
+              </div>
             </div>
-            <Switch
-              checked={form.watch("is_primary")}
-              onCheckedChange={(checked) =>
-                form.setValue("is_primary", checked)
-              }
-            />
+          </div>
+
+          {/* Group 3 — Delivery Preferences */}
+          <div className="space-y-3">
+            <FormGroupLabel step={3}>Delivery Preferences</FormGroupLabel>
+
+            <div className="flex flex-row items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium text-slate-800">
+                  Set as default address
+                </Label>
+                <p className="text-xs text-slate-500">
+                  Your diet meals will be delivered here by default.
+                </p>
+              </div>
+              <Switch
+                checked={form.watch("is_primary")}
+                onCheckedChange={(checked) =>
+                  form.setValue("is_primary", checked)
+                }
+              />
+            </div>
           </div>
 
           {serverError && (
-            <div className="text-sm text-red-500 text-center font-medium bg-red-50 p-2 rounded border border-red-200">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-center text-sm font-medium text-red-500">
               {serverError}
             </div>
           )}
 
-          <div className="pt-4 flex justify-end space-x-2">
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
             <Button
               type="button"
               variant="outline"
@@ -434,7 +473,11 @@ export function AddressFormModal({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isPending} className="font-bold">
+            <Button
+              type="submit"
+              disabled={isPending}
+              className="font-semibold active:scale-[0.98]"
+            >
               {isPending ? "Saving..." : "Save Address"}
             </Button>
           </div>

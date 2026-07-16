@@ -49,10 +49,12 @@ export function TransformationSpotlight({
   const embedSrc = `https://www.youtube.com/embed/${youtubeId}?start=${youtubeStart}&autoplay=1&rel=0&modestbranding=1`;
 
   return (
-    // Closes the opening cascade — arrives last so the sequence reads as one
-    // unified welcome (hero → today → momentum → transformation) rather than
-    // four sections popping in at once.
-    <section className="overflow-hidden rounded-3xl border border-emerald-900/10 bg-gradient-to-br from-emerald-50/70 via-white to-white shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-500 fill-mode-both">
+    // Closes the reveal cascade — arrives last so the opening reads as one
+    // unified welcome (hero → today → momentum → transformation).
+    <section
+      className="reveal-rise overflow-hidden rounded-3xl border border-emerald-900/10 bg-gradient-to-br from-emerald-50/70 via-white to-white shadow-sm"
+      style={{ ["--reveal-delay" as string]: "1450ms" }}
+    >
       {/* Supporting copy + CTA (kept off the image so it's never obscured) */}
       <div className="relative overflow-hidden">
         {/* Extremely subtle botanical line art so this intro never feels like

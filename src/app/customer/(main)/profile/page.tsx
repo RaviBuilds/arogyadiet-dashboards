@@ -5,10 +5,9 @@ import { ProfileForm } from "@/shared/components/customer/profile-form";
 import { displayableEmailOrNull } from "@/lib/onboarding/testEmail";
 import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
-import {
-  Card,
-  CardContent,
-} from "@/shared/components/ui/card";
+import { CheckCircle2, HeartHandshake } from "lucide-react";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
+import { StatusPill } from "@/shared/components/customer/profile-ui/StatusPill";
 
 export default async function CustomerProfilePage() {
   const { supabase, user, profile, customerProfileId, error } =
@@ -102,45 +101,67 @@ export default async function CustomerProfilePage() {
     ),
   };
 
+  // Profile completeness — derived only from fields already fetched above,
+  // never invented. Kept as a simple fraction, not shown as a ring unless it
+  // reads meaningfully (avoids a hero that just repeats "0% complete").
+  const completableFields = [
+    initialProfileData.full_name,
+    displayEmail,
+    initialProfileData.phone,
+    initialProfileData.gender,
+    initialProfileData.date_of_birth,
+    initialProfileData.allergies,
+  ];
+  const filledCount = completableFields.filter((v) => Boolean(v && String(v).trim())).length;
+  const isMedicalAssessed =
+    initialProfileData.has_medical_history ||
+    initialProfileData.no_medical_history_confirmed;
+  const completenessLabel = isMedicalAssessed
+    ? `${filledCount}/${completableFields.length} details added · Medical profile completed`
+    : `${filledCount}/${completableFields.length} details added`;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 animate-in fade-in slide-in-from-bottom-4">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 sm:gap-8">
+      {/* Light welcoming hero — not a big brand-color card, just an anchor */}
+      <div
+        className="reveal-rise flex items-start gap-3"
+        style={{ ["--reveal-delay" as string]: "150ms" }}
+      >
+        <IconChip icon={HeartHandshake} tone="coral" size="lg" />
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            My Profile
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-[2rem]">
+            My Health Profile
           </h1>
-          <p className="text-sm text-slate-500">
-            Manage your profile information and dietary preferences.
+          <p className="mt-1 text-sm leading-relaxed text-slate-500">
+            Keep your personal information, dietary preferences and delivery
+            details up to date so we can serve you better.
           </p>
+          <StatusPill
+            icon={isMedicalAssessed ? CheckCircle2 : undefined}
+            tone={isMedicalAssessed ? "green" : "slate"}
+            className="mt-2.5"
+          >
+            {completenessLabel}
+          </StatusPill>
         </div>
-        <CustomerLogoutButton className="md:hidden" />
       </div>
 
-      <Card className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <CardContent className="p-6">
-          <ProfileForm
-            initialData={initialProfileData}
-            initialDocuments={documentsWithUrls}
-          />
-        </CardContent>
-      </Card>
+      <ProfileForm
+        initialData={initialProfileData}
+        initialDocuments={documentsWithUrls}
+      />
 
-      {/* PIN Change Section */}
-      <div className="border-t border-slate-200 pt-10">
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold tracking-tight text-slate-900">
-            Security Settings
-          </h2>
-          <p className="text-sm text-slate-500">
-            Manage your account security and login PIN.
-          </p>
-        </div>
-        <PinChangeForm />
-      </div>
+      <PinChangeForm />
 
-      <div className="border-t border-slate-200 pt-10">
-        <AddressList addresses={addresses} />
+      <AddressList addresses={addresses} />
+
+      {/* Logout — a quiet exit action at the bottom, not the second thing
+          users see on the page. */}
+      <div
+        className="reveal-rise pt-2"
+        style={{ ["--reveal-delay" as string]: "750ms" }}
+      >
+        <CustomerLogoutButton className="w-full sm:w-auto" />
       </div>
     </div>
   );
