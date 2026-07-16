@@ -61,10 +61,12 @@ export function TodayFocusCard({
   const showImage = state === "active" && !!images && images.length > 0;
 
   return (
-    // A deliberate 150ms delay so this card arrives as the next beat after the
-    // hero settles — the same moment the journey ring/bar begin drawing —
-    // rather than popping in simultaneously with it.
-    <section className="relative overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-150 fill-mode-both">
+    // Arrives as the next beat after the hero settles during the reveal
+    // cascade (see the reveal system in globals.css).
+    <section
+      className="reveal-rise relative overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-sm"
+      style={{ ["--reveal-delay" as string]: "200ms" }}
+    >
       {showImage ? (
         // Appetising two-panel layout: food photo + details.
         <div className="flex flex-col sm:flex-row">

@@ -57,7 +57,7 @@ export function JourneyHeader({
   return (
     <section
       className={cn(
-        "relative overflow-hidden rounded-3xl border border-emerald-900/10 shadow-md animate-in fade-in slide-in-from-bottom-2 duration-500",
+        "reveal-rise relative overflow-hidden rounded-3xl border border-emerald-900/10 shadow-md",
         "bg-gradient-to-br from-[#0f5230] via-[#1f7d49] to-[#37a862]",
       )}
     >

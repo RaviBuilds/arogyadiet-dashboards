@@ -132,51 +132,42 @@
   }
 }
 
-/* Progress ring: gentle one-time "draw" from empty to its value on mount.
-   Only a `from` is defined so the animation settles on the element's own
-   inline stroke-dashoffset (its real value). Calm, not playful. */
+/* =======================================================================
+   ArogyaDiet reveal system
+   -----------------------------------------------------------------------
+   The signature (progress ring, journey bar, hero light sweep, play pulse)
+   and the section entrances are GATED behind `.app-revealed`, which the
+   AppLoaderOverlay adds to <html> once the branded loader has covered the
+   first paint and the page is ready. This is what makes the signature
+   actually *perceived*: it begins as the loader dissolves, never underneath
+   it, and every animation shares one clock so the opening reads as a single
+   continuous welcome.
+
+   The default (before reveal, or if JS never runs / reduced motion) is that
+   every element simply rests in its final, fully-visible state — the page is
+   always safe and never stuck hidden.
+   ======================================================================= */
+
 @keyframes progress-ring-fill {
   from {
     stroke-dashoffset: var(--ring-circ);
   }
 }
-
-.progress-ring-anim {
-  /* Starts just as the hero card settles (150ms), so it reads as the next
-     beat of one welcome moment rather than an independent effect. */
-  animation: progress-ring-fill 900ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .progress-ring-anim {
-    animation: none;
-  }
-}
-
-/* Journey bar: the same "draw from empty" technique as the ring, so the two
-   progress indicators fill together instead of the bar sitting static.
-   Only `from` is defined — the bar settles on its own inline width (its real
-   value), matching how the ring settles on its own stroke-dashoffset. */
 @keyframes journey-bar-fill {
   from {
     width: 0%;
   }
 }
-
-.journey-bar-anim {
-  /* Same delay, duration and easing as the ring — they represent the same
-     progress, so they should visibly move together. */
-  animation: journey-bar-fill 900ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .journey-bar-anim {
-    animation: none;
+@keyframes reveal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
-
-/* Transformation play button: a single, gentle "breath" shortly after load to
-   hint the banner is playable. Runs once, then rests. */
 @keyframes play-pulse-once {
   0%,
   100% {
@@ -186,23 +177,6 @@
     transform: scale(1.06);
   }
 }
-
-.play-pulse-once {
-  /* Starts just after the Transformation section has fully faded in
-     (500ms mount delay + 500ms fade = 1000ms), so the pulse is never spent
-     while the card itself is still arriving. */
-  animation: play-pulse-once 1500ms ease-in-out 1050ms 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .play-pulse-once {
-    animation: none;
-  }
-}
-
-/* ArogyaDiet signature: a single, calm "morning light" sweep across the hero
-   shortly after the dashboard opens — like sunrise crossing the journey.
-   Subtle, once, GPU-cheap (transform + opacity only). */
 @keyframes hero-sheen {
   0% {
     transform: translateX(-160%) skewX(-12deg);
@@ -217,16 +191,116 @@
   }
 }
 
+/* Resting states (before reveal / no JS): visible; the sheen strip is hidden. */
+.reveal-rise {
+  opacity: 1;
+}
 .hero-sheen {
-  /* Timed to arrive right as the ring + journey bar finish drawing (150ms
-     delay + 900ms fill = 1050ms), so the light feels like it is *revealing*
-     the completed progress rather than sweeping independently of it. */
-  animation: hero-sheen 1500ms cubic-bezier(0.22, 1, 0.36, 1) 1050ms 1 both;
+  opacity: 0;
+}
+
+/* On reveal, one choreographed welcome. Section delays are set per-element via
+   --reveal-delay; the hero's ring/bar/sweep are timed to fill together and let
+   the light cross as they complete. */
+.app-revealed .reveal-rise {
+  animation: reveal-rise 600ms cubic-bezier(0.22, 1, 0.36, 1)
+    var(--reveal-delay, 0ms) both;
+}
+.app-revealed .progress-ring-anim {
+  animation: progress-ring-fill 900ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
+}
+.app-revealed .journey-bar-anim {
+  animation: journey-bar-fill 900ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
+}
+.app-revealed .hero-sheen {
+  animation: hero-sheen 1500ms cubic-bezier(0.22, 1, 0.36, 1) 700ms 1 both;
   will-change: transform, opacity;
+}
+.app-revealed .play-pulse-once {
+  animation: play-pulse-once 1500ms ease-in-out 1200ms 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero-sheen {
+  .app-revealed .reveal-rise,
+  .app-revealed .progress-ring-anim,
+  .app-revealed .journey-bar-anim,
+  .app-revealed .hero-sheen,
+  .app-revealed .play-pulse-once {
+    animation: none;
+  }
+}
+
+/* =======================================================================
+   Branded app loader (AppLoader / AppLoaderOverlay)
+   ======================================================================= */
+@keyframes logo-breathe {
+  0%,
+  100% {
+    transform: scale(0.98);
+  }
+  50% {
+    transform: scale(1);
+  }
+}
+@keyframes leaf-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.08);
+  }
+}
+@keyframes loader-line {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(320%);
+    opacity: 0;
+  }
+}
+@keyframes app-loader-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app-loader-logo {
+  animation: logo-breathe 3200ms ease-in-out infinite;
+  will-change: transform;
+}
+.app-loader-glow {
+  animation: leaf-glow 3200ms ease-in-out infinite;
+  will-change: opacity, transform;
+}
+.app-loader-line {
+  animation: loader-line 1700ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform, opacity;
+}
+.app-loader-fadein {
+  animation: app-loader-in 400ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loader-logo,
+  .app-loader-glow,
+  .app-loader-line,
+  .app-loader-fadein {
     animation: none;
   }
 }

@@ -32,9 +32,11 @@ export function MomentumStrip({
   caption?: string;
 }) {
   return (
-    // Arrives one beat after the Today card, continuing the same opening
-    // cascade rather than fading in at the same instant as everything else.
-    <div className="overflow-hidden rounded-3xl border border-emerald-900/10 bg-gradient-to-br from-emerald-50/80 via-white to-white shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-300 fill-mode-both">
+    // Arrives one beat after the Today card, continuing the reveal cascade.
+    <div
+      className="reveal-rise overflow-hidden rounded-3xl border border-emerald-900/10 bg-gradient-to-br from-emerald-50/80 via-white to-white shadow-sm"
+      style={{ ["--reveal-delay" as string]: "350ms" }}
+    >
       {/* Encouragement leads; the numbers below quietly back it up. */}
       {caption ? (
         <div className="flex items-center gap-2 px-4 pt-4 pb-3">
