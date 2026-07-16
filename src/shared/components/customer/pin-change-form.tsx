@@ -24,6 +24,22 @@ const pinChangeSchema = z.object({
 
 type PinChangeFormValues = z.infer<typeof pinChangeSchema>;
 
+/**
+ * Shared field style for the three PIN inputs.
+ *
+ * Native settings-screen calibration: a comfortable 44px tap target with calm
+ * padding and a soft emerald focus ring. The *entered* PIN reads as a spaced
+ * 16px monospace value (clear, never oversized), while the *placeholder* is
+ * deliberately quieter — 14px, sans, normal tracking, muted — so the hint no
+ * longer shouts louder than the label. iOS won't zoom on focus (value stays
+ * 16px).
+ */
+const PIN_INPUT_CLASS =
+  "h-11 rounded-xl px-4 text-center font-mono text-base tracking-[0.3em] text-slate-900 " +
+  "transition-colors placeholder:font-sans placeholder:text-sm placeholder:font-normal " +
+  "placeholder:tracking-normal placeholder:text-slate-400 " +
+  "focus-visible:border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500/20";
+
 export function PinChangeForm() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -116,10 +132,12 @@ export function PinChangeForm() {
                     type="text"
                     inputMode="numeric"
                     maxLength={6}
-                    placeholder="Enter your current 6-digit PIN"
+                    placeholder="Enter current PIN"
                     className={cn(
-                      "transition-colors font-mono text-center text-lg tracking-widest",
-                      errors.currentPin ? "border-red-300 focus:ring-red-500" : ""
+                      PIN_INPUT_CLASS,
+                      errors.currentPin
+                        ? "border-red-300 focus-visible:border-red-400 focus-visible:ring-red-500/20"
+                        : "",
                     )}
                     {...register("currentPin")}
                   />
@@ -137,10 +155,12 @@ export function PinChangeForm() {
                     type="text"
                     inputMode="numeric"
                     maxLength={6}
-                    placeholder="Enter your new 6-digit PIN"
+                    placeholder="Enter new PIN"
                     className={cn(
-                      "transition-colors font-mono text-center text-lg tracking-widest",
-                      errors.newPin ? "border-red-300 focus:ring-red-500" : ""
+                      PIN_INPUT_CLASS,
+                      errors.newPin
+                        ? "border-red-300 focus-visible:border-red-400 focus-visible:ring-red-500/20"
+                        : "",
                     )}
                     {...register("newPin")}
                   />
@@ -162,10 +182,12 @@ export function PinChangeForm() {
                     type="text"
                     inputMode="numeric"
                     maxLength={6}
-                    placeholder="Re-enter your new 6-digit PIN"
+                    placeholder="Re-enter new PIN"
                     className={cn(
-                      "transition-colors font-mono text-center text-lg tracking-widest",
-                      errors.confirmPin ? "border-red-300 focus:ring-red-500" : ""
+                      PIN_INPUT_CLASS,
+                      errors.confirmPin
+                        ? "border-red-300 focus-visible:border-red-400 focus-visible:ring-red-500/20"
+                        : "",
                     )}
                     {...register("confirmPin")}
                   />

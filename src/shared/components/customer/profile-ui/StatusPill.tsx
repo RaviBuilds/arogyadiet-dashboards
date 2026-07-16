@@ -7,13 +7,25 @@ import { cn } from "@/lib/utils";
  * can be reused for "Primary" address badges, PIN security status, and the
  * medical-history confirmation success state.
  */
-export type StatusPillTone = "green" | "coral" | "amber" | "slate";
+export type StatusPillTone =
+  | "green"
+  | "coral"
+  | "amber"
+  | "slate"
+  | "blue"
+  | "purple"
+  | "red"
+  | "orange";
 
 const TONES: Record<StatusPillTone, string> = {
   green: "border-emerald-200 bg-emerald-50 text-emerald-700",
   coral: "border-primary/20 bg-primary/10 text-primary",
   amber: "border-amber-200 bg-amber-100/80 text-amber-700",
   slate: "border-slate-200 bg-slate-100 text-slate-600",
+  blue: "border-blue-200 bg-blue-50 text-blue-700",
+  purple: "border-purple-200 bg-purple-50 text-purple-700",
+  red: "border-red-200 bg-red-50 text-red-700",
+  orange: "border-orange-200 bg-orange-50 text-orange-700",
 };
 
 export function StatusPill({
