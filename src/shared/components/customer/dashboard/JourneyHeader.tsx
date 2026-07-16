@@ -60,6 +60,7 @@ export function JourneyHeader({
         "reveal-rise relative overflow-hidden rounded-3xl border border-emerald-900/10 shadow-md",
         "bg-gradient-to-br from-[#0f5230] via-[#1f7d49] to-[#37a862]",
       )}
+      style={{ ["--reveal-delay" as string]: "150ms" }}
     >
       {/* Depth is built from layered light rather than illustration — closer to
           how Apple builds dimension into wallpapers than to decorative art. */}

@@ -65,7 +65,7 @@ export function TodayFocusCard({
     // cascade (see the reveal system in globals.css).
     <section
       className="reveal-rise relative overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-sm"
-      style={{ ["--reveal-delay" as string]: "200ms" }}
+      style={{ ["--reveal-delay" as string]: "1100ms" }}
     >
       {showImage ? (
         // Appetising two-panel layout: food photo + details.

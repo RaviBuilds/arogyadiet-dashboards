@@ -670,7 +670,10 @@ export default async function CustomerDashboard() {
       />
 
       {/* ZONE 5 — Your week ahead (compact delivery schedule) */}
-      <div>
+      <div
+        className="reveal-rise"
+        style={{ ["--reveal-delay" as string]: "1600ms" }}
+      >
         <div className="mb-3 flex items-center gap-3">
           <h2 className="text-lg font-semibold tracking-tight text-slate-900">
             Your week ahead
@@ -683,7 +686,10 @@ export default async function CustomerDashboard() {
       </div>
 
       {/* ZONE 6 — Manage your plan */}
-      <div className="space-y-4">
+      <div
+        className="reveal-rise space-y-4"
+        style={{ ["--reveal-delay" as string]: "1750ms" }}
+      >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold tracking-tight text-slate-900">
             Manage your plan

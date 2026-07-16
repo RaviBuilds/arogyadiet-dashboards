@@ -53,7 +53,7 @@ export function TransformationSpotlight({
     // unified welcome (hero → today → momentum → transformation).
     <section
       className="reveal-rise overflow-hidden rounded-3xl border border-emerald-900/10 bg-gradient-to-br from-emerald-50/70 via-white to-white shadow-sm"
-      style={{ ["--reveal-delay" as string]: "500ms" }}
+      style={{ ["--reveal-delay" as string]: "1450ms" }}
     >
       {/* Supporting copy + CTA (kept off the image so it's never obscured) */}
       <div className="relative overflow-hidden">

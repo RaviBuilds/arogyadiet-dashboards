@@ -35,7 +35,7 @@ export function MomentumStrip({
     // Arrives one beat after the Today card, continuing the reveal cascade.
     <div
       className="reveal-rise overflow-hidden rounded-3xl border border-emerald-900/10 bg-gradient-to-br from-emerald-50/80 via-white to-white shadow-sm"
-      style={{ ["--reveal-delay" as string]: "350ms" }}
+      style={{ ["--reveal-delay" as string]: "1300ms" }}
     >
       {/* Encouragement leads; the numbers below quietly back it up. */}
       {caption ? (

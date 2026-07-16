@@ -11,16 +11,18 @@ import { AppLoader } from "./AppLoader";
  * first paint, keeps it visible for at least MIN_VISIBLE_MS so it always feels
  * intentional rather than flashing, then fades it away once the page is ready.
  *
- * At the moment the fade begins it adds `.app-revealed` to <html>, which is the
- * single signal that gates every reveal/signature animation on the page. This
- * guarantees the dashboard's signature interaction is *perceived* — it starts
+ * At the moment the fade begins it adds `.app-intro` to <html>, which is the
+ * single signal that gates the one-time opening choreography (and is removed
+ * once it completes). This guarantees the signature is *perceived* — it starts
  * as the loader dissolves, never underneath it.
  *
  * Mounted once in the customer layout, so it plays each time the app is opened
  * (a full load) but not on client-side navigations between pages, which use
  * their own branded loading fallbacks.
  */
-const MIN_VISIBLE_MS = 800;
+// Held long enough for the orbiting leaf to complete a clear revolution
+// (~1.3s) so the opening reads as animated and intentional, never a flash.
+const MIN_VISIBLE_MS = 1400;
 const MAX_VISIBLE_MS = 5000;
 const FADE_MS = 500;
 
@@ -42,8 +44,11 @@ export function AppLoaderOverlay({
     const reveal = () => {
       if (revealed) return;
       revealed = true;
-      // The one signal that starts every gated reveal/signature animation.
-      document.documentElement.classList.add("app-revealed");
+      // Starts the one-time opening choreography. Removed once the sequence
+      // has finished so later in-app navigations don't replay it.
+      const root = document.documentElement;
+      root.classList.add("app-intro");
+      window.setTimeout(() => root.classList.remove("app-intro"), 3600);
       setPhase("leaving");
       fadeTimer = setTimeout(() => setPhase("gone"), FADE_MS);
     };

@@ -1,14 +1,16 @@
 import Image from "next/image";
+import { Leaf } from "lucide-react";
 
 /**
  * AppLoader — the branded loading centrepiece for the whole ArogyaDiet app.
  *
  * Presentational only (no state): the wordmark logo (sized to its true 776×321
  * aspect so it never squishes) resting over a smooth layered leaf-light halo,
- * a calm indeterminate flowing line (a soft segment rather than a fake
- * 0→100% bar), and a short line of reassuring copy. Reused by the initial-load
- * overlay and by per-page loading fallbacks so every screen feels like the
- * same product.
+ * a short line of reassuring copy, and — instead of a generic bar or spinner —
+ * a signature "orbiting leaf": a small leaf glides slowly around a soft ring
+ * (staying upright as it travels). It's unmistakably ArogyaDiet, echoes the
+ * dashboard's circular journey ring rather than duplicating its horizontal
+ * bar, and stays calm rather than busy.
  *
  * All motion is CSS and GPU-friendly (transform / opacity) and is disabled
  * under prefers-reduced-motion. Nudged to optical centre (slightly above true
@@ -53,9 +55,31 @@ export function AppLoader({
         {message}
       </p>
 
-      {/* Calm indeterminate progress line */}
-      <div className="relative mt-5 h-1.5 w-44 overflow-hidden rounded-full bg-emerald-100">
-        <div className="app-loader-line absolute inset-y-0 left-0 w-2/5 rounded-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-lime-400 shadow-[0_0_8px_rgba(16,185,129,0.35)]" />
+      {/* Signature indeterminate indicator: a leaf orbiting a soft ring */}
+      <div className="relative mt-7 h-12 w-12">
+        {/* Soft breathing halo */}
+        <span
+          aria-hidden="true"
+          className="app-orbit-pulse absolute inset-0 rounded-full bg-emerald-400/10"
+        />
+        {/* Faint track the leaf travels along */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-[6px] rounded-full border border-emerald-200/70"
+        />
+        {/* Orbiting layer */}
+        <span
+          aria-hidden="true"
+          className="app-orbit absolute inset-0 flex items-center justify-center"
+        >
+          {/* Radius offset — this point orbits the centre */}
+          <span className="block -translate-y-[18px]">
+            {/* Counter-rotation keeps the leaf token upright as it travels */}
+            <span className="app-orbit-counter flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white shadow-[0_1px_5px_rgba(16,185,129,0.45)]">
+              <Leaf className="h-2.5 w-2.5 fill-emerald-500/20 text-emerald-600" />
+            </span>
+          </span>
+        </span>
       </div>
     </div>
   );

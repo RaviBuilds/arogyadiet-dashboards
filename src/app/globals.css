@@ -136,7 +136,7 @@
    ArogyaDiet reveal system
    -----------------------------------------------------------------------
    The signature (progress ring, journey bar, hero light sweep, play pulse)
-   and the section entrances are GATED behind `.app-revealed`, which the
+   and the section entrances are GATED behind `.app-intro`, which the
    AppLoaderOverlay adds to <html> once the branded loader has covered the
    first paint and the page is ready. This is what makes the signature
    actually *perceived*: it begins as the loader dissolves, never underneath
@@ -191,6 +191,17 @@
   }
 }
 
+@keyframes reveal-page {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Resting states (before reveal / no JS): visible; the sheen strip is hidden. */
 .reveal-rise {
   opacity: 1;
@@ -199,33 +210,48 @@
   opacity: 0;
 }
 
-/* On reveal, one choreographed welcome. Section delays are set per-element via
-   --reveal-delay; the hero's ring/bar/sweep are timed to fill together and let
-   the light cross as they complete. */
-.app-revealed .reveal-rise {
+/* The one-time opening choreography plays only while `.app-intro` is present
+   (added by AppLoaderOverlay at reveal, removed once the sequence finishes).
+   This makes the app-open feel like a single continuous story, while repeat
+   in-app navigations use the lighter `.reveal-page` transition instead of
+   replaying the full cascade — better perceived performance.
+
+   Timeline (relative to the dashboard fading in):
+     150ms  hero settles
+     250ms  progress ring + journey bar draw together (complete ~900ms)
+     900ms  morning light sweep crosses the hero as they complete
+     1100+  Today → Momentum → Transformation → Week Ahead → Manage cascade */
+.app-intro .reveal-rise {
   animation: reveal-rise 600ms cubic-bezier(0.22, 1, 0.36, 1)
     var(--reveal-delay, 0ms) both;
 }
-.app-revealed .progress-ring-anim {
-  animation: progress-ring-fill 900ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
+.app-intro .progress-ring-anim {
+  animation: progress-ring-fill 650ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
 }
-.app-revealed .journey-bar-anim {
-  animation: journey-bar-fill 900ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
+.app-intro .journey-bar-anim {
+  animation: journey-bar-fill 650ms cubic-bezier(0.22, 1, 0.36, 1) 250ms both;
 }
-.app-revealed .hero-sheen {
-  animation: hero-sheen 1500ms cubic-bezier(0.22, 1, 0.36, 1) 700ms 1 both;
+.app-intro .hero-sheen {
+  animation: hero-sheen 1400ms cubic-bezier(0.22, 1, 0.36, 1) 900ms 1 both;
   will-change: transform, opacity;
 }
-.app-revealed .play-pulse-once {
-  animation: play-pulse-once 1500ms ease-in-out 1200ms 1;
+.app-intro .play-pulse-once {
+  animation: play-pulse-once 1300ms ease-in-out 1900ms 1;
+}
+
+/* Calm, reusable page transition applied by the customer template on every
+   navigation (fade + tiny lift). */
+.reveal-page {
+  animation: reveal-page 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-revealed .reveal-rise,
-  .app-revealed .progress-ring-anim,
-  .app-revealed .journey-bar-anim,
-  .app-revealed .hero-sheen,
-  .app-revealed .play-pulse-once {
+  .app-intro .reveal-rise,
+  .app-intro .progress-ring-anim,
+  .app-intro .journey-bar-anim,
+  .app-intro .hero-sheen,
+  .app-intro .play-pulse-once,
+  .reveal-page {
     animation: none;
   }
 }
@@ -236,10 +262,10 @@
 @keyframes logo-breathe {
   0%,
   100% {
-    transform: scale(0.98);
+    transform: scale(0.96);
   }
   50% {
-    transform: scale(1);
+    transform: scale(1.03);
   }
 }
 @keyframes leaf-glow {
@@ -253,20 +279,25 @@
     transform: scale(1.08);
   }
 }
-@keyframes loader-line {
-  0% {
-    transform: translateX(-120%);
-    opacity: 0;
+@keyframes app-orbit-spin {
+  to {
+    transform: rotate(360deg);
   }
-  20% {
-    opacity: 1;
+}
+@keyframes app-orbit-spin-rev {
+  to {
+    transform: rotate(-360deg);
   }
-  80% {
-    opacity: 1;
-  }
+}
+@keyframes app-orbit-pulse {
+  0%,
   100% {
-    transform: translateX(320%);
-    opacity: 0;
+    transform: scale(0.9);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.85;
   }
 }
 @keyframes app-loader-in {
@@ -281,15 +312,23 @@
 }
 
 .app-loader-logo {
-  animation: logo-breathe 3200ms ease-in-out infinite;
+  animation: logo-breathe 2600ms ease-in-out infinite;
   will-change: transform;
 }
 .app-loader-glow {
-  animation: leaf-glow 3200ms ease-in-out infinite;
+  animation: leaf-glow 2600ms ease-in-out infinite;
   will-change: opacity, transform;
 }
-.app-loader-line {
-  animation: loader-line 1700ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+.app-orbit {
+  animation: app-orbit-spin 1300ms linear infinite;
+  will-change: transform;
+}
+.app-orbit-counter {
+  animation: app-orbit-spin-rev 1300ms linear infinite;
+  will-change: transform;
+}
+.app-orbit-pulse {
+  animation: app-orbit-pulse 1600ms ease-in-out infinite;
   will-change: transform, opacity;
 }
 .app-loader-fadein {
@@ -299,7 +338,9 @@
 @media (prefers-reduced-motion: reduce) {
   .app-loader-logo,
   .app-loader-glow,
-  .app-loader-line,
+  .app-orbit,
+  .app-orbit-counter,
+  .app-orbit-pulse,
   .app-loader-fadein {
     animation: none;
   }
