@@ -112,7 +112,7 @@ export default function SendToProcessingPanel({
                       <span className="font-medium text-slate-700">
                         {lot.quantityRemaining} {uomLabel}
                       </span>{" "}
-                      remaining · ₹{lot.unitCost.toFixed(2)}/unit
+                      remaining
                     </p>
                   </div>
 

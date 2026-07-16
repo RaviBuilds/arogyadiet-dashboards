@@ -4,7 +4,6 @@ import { useState } from "react";
 import {
   AlertTriangle,
   Clock,
-  IndianRupee,
   Package,
   type LucideIcon,
 } from "lucide-react";
@@ -18,12 +17,6 @@ import { Card, CardContent } from "@/shared/components/ui/card";
 import InventoryInsights, {
   type InsightTab,
 } from "@/shared/components/admin/inventory/InventoryInsights";
-
-function formatINR(amount: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 function MetricCard({
   icon: Icon,
@@ -137,14 +130,7 @@ export default function InventoryMetrics({
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <MetricCard
-          icon={IndianRupee}
-          label="Total Warehouse Value"
-          value={`₹${formatINR(data.totalWarehouseValue)}`}
-          iconBg="bg-emerald-50"
-          iconColor="text-emerald-600"
-        />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <MetricCard
           icon={Package}
           label="Total Unique Items"

@@ -27,7 +27,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/shared/components/ui/alert-dialog";
-import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import { Calendar } from "@/shared/components/ui/calendar";
 import { Card, CardContent } from "@/shared/components/ui/card";
@@ -150,9 +149,6 @@ function BatchCard({ batch }: { batch: ManufacturingBatch }) {
             })}
           </p>
         </div>
-        <Badge className="shrink-0 border-0 bg-secondary/15 font-normal text-emerald-800">
-          ₹{batch.totalCostValue.toFixed(2)}
-        </Badge>
       </div>
 
       <div className="mt-3 space-y-1.5">

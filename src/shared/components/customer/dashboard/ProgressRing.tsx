@@ -69,9 +69,9 @@ export function ProgressRing({
           strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={dashOffset}
-          className={progressClassName}
+          className={cn("progress-ring-anim", progressClassName)}
           stroke="currentColor"
-          style={{ transition: "stroke-dashoffset 700ms ease-out" }}
+          style={{ ["--ring-circ" as string]: `${circumference}` }}
         />
       </svg>
       {children ? (

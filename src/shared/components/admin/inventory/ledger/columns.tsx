@@ -111,11 +111,6 @@ function formatQuantity(value: number, baseUom: BaseUom): string {
   return `${sign}${absValue} ${BASE_UOM_LABELS[baseUom]}`;
 }
 
-function formatFinancialImpact(value: number): string {
-  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-  return `${sign}₹${Math.abs(value).toLocaleString("en-IN")}`;
-}
-
 function SortableHeader({
   label,
   column,
@@ -171,7 +166,6 @@ export function formatLedgerRowForExport(entry: TransactionLedgerEntry) {
     Batch: entry.batchNumber,
     "Source / Destination": sourceOrDestination || "—",
     Quantity: formatQuantity(entry.quantityChanged, entry.baseUom),
-    "Financial Impact": formatFinancialImpact(entry.financialValueChanged),
   };
 }
 
@@ -248,30 +242,5 @@ export const ledgerColumns: ColumnDef<TransactionLedgerEntry>[] = [
         {formatQuantity(row.original.quantityChanged, row.original.baseUom)}
       </div>
     ),
-  },
-  {
-    accessorKey: "financialValueChanged",
-    id: "financialValueChanged",
-    header: ({ column }) => (
-      <div className="text-right">
-        <SortableHeader label="Financial Impact" column={column} />
-      </div>
-    ),
-    cell: ({ row }) => {
-      const value = row.original.financialValueChanged;
-      return (
-        <div
-          className={`text-right font-semibold ${
-            value > 0
-              ? "text-green-700"
-              : value < 0
-                ? "text-red-600"
-                : ""
-          }`}
-        >
-          {formatFinancialImpact(value)}
-        </div>
-      );
-    },
   },
 ];

@@ -222,14 +222,14 @@ export default function ExecutiveDashboard({
         )}
         {canShow("inventory") && (
           <KpiCard
-            title="Warehouse Value"
-            value={formatINR(kpis.warehouseValue.value)}
-            changePercent={kpis.warehouseValue.changePercent}
+            title="Inventory Items"
+            value={kpis.inventoryItems.value.toString()}
+            changePercent={kpis.inventoryItems.changePercent}
             icon={Package}
             iconClassName="bg-orange-50 text-orange-600"
             footnote={
-              kpis.warehouseValue.lowStockCount > 0
-                ? `${kpis.warehouseValue.lowStockCount} low-stock alert${kpis.warehouseValue.lowStockCount === 1 ? "" : "s"}`
+              kpis.inventoryItems.lowStockCount > 0
+                ? `${kpis.inventoryItems.lowStockCount} low-stock alert${kpis.inventoryItems.lowStockCount === 1 ? "" : "s"}`
                 : undefined
             }
           />

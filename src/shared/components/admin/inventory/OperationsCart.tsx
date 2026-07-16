@@ -28,7 +28,6 @@ import {
 } from "@/shared/components/ui/tabs";
 import {
   selectHasFranchiseItems,
-  selectInboundBatchCost,
   selectTotalCartCount,
   useInventoryStore,
 } from "@/shared/stores/useInventoryStore";
@@ -103,7 +102,6 @@ export default function OperationsCart() {
   );
 
   const totalCartCount = useInventoryStore(selectTotalCartCount);
-  const inboundBatchCost = useInventoryStore(selectInboundBatchCost);
   const hasFranchiseItems = useInventoryStore(selectHasFranchiseItems);
 
   useEffect(() => {
@@ -122,11 +120,10 @@ export default function OperationsCart() {
     startInboundTransition(async () => {
       const formData = new FormData();
       const payload = inboundCart.map(
-        ({ productId, name, qty, cost, expiry, sourceType, sourceName }) => ({
+        ({ productId, name, qty, expiry, sourceType, sourceName }) => ({
           productId,
           name,
           quantity: qty,
-          totalCost: cost,
           expiryDate: expiry,
           sourceType,
           sourceName,
@@ -292,7 +289,7 @@ export default function OperationsCart() {
                         <StagingCartItem
                           key={item.id}
                           name={item.name}
-                          details={`Qty: ${item.qty} · Cost: ₹${item.cost.toLocaleString("en-IN")}${item.expiry ? ` · Exp: ${item.expiry}` : ""} · Src: ${item.sourceType === "OTHER" && item.sourceName ? item.sourceName : INVENTORY_SOURCE_LABELS[item.sourceType]}${item.purchaseOrderFile ? " · PO attached" : ""}`}
+                          details={`Qty: ${item.qty}${item.expiry ? ` · Exp: ${item.expiry}` : ""} · Src: ${item.sourceType === "OTHER" && item.sourceName ? item.sourceName : INVENTORY_SOURCE_LABELS[item.sourceType]}${item.purchaseOrderFile ? " · PO attached" : ""}`}
                           onRemove={() => removeInboundItem(item.id)}
                         />
                       ))}
@@ -303,10 +300,10 @@ export default function OperationsCart() {
                 <div className="mt-auto border-t bg-background px-6 pt-4 pb-6">
                   <div className="mb-4 flex items-center justify-between">
                     <span className="text-sm font-medium text-muted-foreground">
-                      Total Batch Value
+                      Items Staged
                     </span>
                     <span className="text-xl font-bold">
-                      ₹{inboundBatchCost.toLocaleString("en-IN")}
+                      {inboundCart.length}
                     </span>
                   </div>
                   <Button

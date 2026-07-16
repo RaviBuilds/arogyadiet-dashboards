@@ -571,6 +571,16 @@ export default async function CustomerDashboard() {
     },
   ];
 
+  // Real ArogyaDiet meal photography for the Today's Focus rotation. The card
+  // cross-fades gently between these every few seconds.
+  const mealImages = [
+    "/food%20image1.jpg",
+    "/food%20image2.jpg",
+    "/food%20image3.jpg",
+    "/food%20image4.jpg",
+    "/food%20image5.jpg",
+  ];
+
   // --- Delivery roster (Zone 5): flatten for the schedule component ---
   const deliveryItems: DeliveryItem[] = (upcomingMeals ?? []).map(
     (m: UpcomingMeal) => {
@@ -606,7 +616,7 @@ export default async function CustomerDashboard() {
 
       {activeAddonOrders.length > 0 && (
         <Link href="/meals" className="block transition-all duration-200">
-          <Card className="border border-amber-200 bg-amber-50/50 shadow-sm hover:shadow-md hover:border-amber-300 transition-all duration-200">
+          <Card className="rounded-2xl border border-amber-200 bg-amber-50/50 shadow-sm transition-all duration-200 hover:border-amber-300 hover:shadow-md">
             <CardContent className="p-6 flex items-center gap-4">
               <div className="rounded-full bg-amber-100 text-amber-700 p-3 shrink-0">
                 <ShoppingBag className="h-5 w-5" />
@@ -636,7 +646,7 @@ export default async function CustomerDashboard() {
         tagClassName={todayTagClass}
         addressTag={todayAddressTag}
         addressLine={todayAddressLine}
-        imageSrc="/banner.jpg"
+        images={mealImages}
         ctaHref="/meals"
         ctaLabel="View meal plan"
       />
@@ -647,15 +657,33 @@ export default async function CustomerDashboard() {
         caption={`You've stayed nourished for ${daysCompleted} ${daysCompleted === 1 ? "day" : "days"} — every meal is a step forward.`}
       />
 
-      {/* ZONE 4 — Motivation */}
+      {/* ZONE 4 — Real transformation (aspiration, right after momentum) */}
       <TransformationSpotlight
         imageSrc="/Transformation%20image.jpeg"
-        headline="Real people. Real transformations."
-        subtext="Thousands have transformed their health with ArogyaDiet. Your journey is one of them — keep going."
+        imageWidth={1200}
+        imageHeight={450}
+        headline="Real people. Real results."
+        subtext="Thousands have transformed their lives through ArogyaDiet. Your journey is one of them."
+        ctaLabel="Watch Full Journey"
+        youtubeId="yzqZ-yTll8M"
+        youtubeStart={8}
       />
 
-      {/* ZONE 5 — Manage your plan */}
-      <div className="space-y-5">
+      {/* ZONE 5 — Your week ahead (compact delivery schedule) */}
+      <div>
+        <div className="mb-3 flex items-center gap-3">
+          <h2 className="text-lg font-semibold tracking-tight text-slate-900">
+            Your week ahead
+          </h2>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+            Next 7 days
+          </span>
+        </div>
+        <UpcomingDeliveries items={deliveryItems} />
+      </div>
+
+      {/* ZONE 6 — Manage your plan */}
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold tracking-tight text-slate-900">
             Manage your plan
@@ -665,7 +693,7 @@ export default async function CustomerDashboard() {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
         <Card className="md:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm">
           <CardHeader className="border-b border-slate-100 bg-emerald-50/40 px-6 py-4">
             <CardTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
@@ -775,7 +803,7 @@ export default async function CustomerDashboard() {
               return (
                 <Card
                   key={sub.id}
-                  className="border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:shadow-md"
+                  className="rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:shadow-md"
                 >
                   <CardContent className="p-6">
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -824,23 +852,6 @@ export default async function CustomerDashboard() {
           </div>
         </section>
       )}
-
-      {/* Next 7 Days delivery roster */}
-      <div>
-        <div className="mb-5 flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-slate-900 tracking-tight">
-            Upcoming Deliveries
-          </h3>
-          <Badge
-            variant="secondary"
-            className="border border-emerald-200 bg-emerald-50 text-emerald-700"
-          >
-            Next 7 Days
-          </Badge>
-        </div>
-
-        <UpcomingDeliveries items={deliveryItems} />
-      </div>
     </div>
   );
 }

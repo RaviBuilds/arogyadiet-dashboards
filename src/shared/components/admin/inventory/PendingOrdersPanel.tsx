@@ -111,8 +111,7 @@ export default function PendingOrdersPanel({
                         {order.rawProductName}
                       </p>
                       <p className="text-xs text-slate-500">
-                        Batch {order.batchNumber} · ₹
-                        {order.totalCostValue.toFixed(2)} ·{" "}
+                        Batch {order.batchNumber} ·{" "}
                         {formatDistanceToNow(new Date(order.sentAt), {
                           addSuffix: true,
                         })}
