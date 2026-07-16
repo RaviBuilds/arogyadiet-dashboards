@@ -62,7 +62,6 @@ export default function ReceiveStockModal({
   const addInboundItem = useInventoryStore((state) => state.addInboundItem);
   const [open, setOpen] = useState(false);
   const [quantity, setQuantity] = useState("");
-  const [totalCost, setTotalCost] = useState("");
   const [expiryDate, setExpiryDate] = useState<Date | undefined>();
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [sourceType, setSourceType] = useState<InventorySourceType | "">("");
@@ -76,7 +75,6 @@ export default function ReceiveStockModal({
 
   function resetForm() {
     setQuantity("");
-    setTotalCost("");
     setExpiryDate(undefined);
     setIsCalendarOpen(false);
     setSourceType("");
@@ -136,7 +134,6 @@ export default function ReceiveStockModal({
       productId,
       name: productName,
       qty: Number(quantity),
-      cost: Number(totalCost),
       expiry: expiryDate ? format(expiryDate, "yyyy-MM-dd") : undefined,
       sourceType,
       sourceName: sourceType === "OTHER" ? sourceName.trim() : undefined,
@@ -175,22 +172,6 @@ export default function ReceiveStockModal({
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               placeholder={`Enter quantity in ${uomLabel}`}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor={`totalCost-${productId}`}>
-              Total Purchase Cost (INR)
-            </Label>
-            <Input
-              id={`totalCost-${productId}`}
-              type="number"
-              min={0}
-              step="0.01"
-              required
-              value={totalCost}
-              onChange={(e) => setTotalCost(e.target.value)}
-              placeholder="Enter total purchase cost"
             />
           </div>
 

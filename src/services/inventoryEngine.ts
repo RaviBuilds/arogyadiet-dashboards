@@ -523,7 +523,7 @@ export async function getInventoryMetrics(): Promise<InventoryMetrics> {
     supabase
       .from("inventory_lots")
       .select(
-        "id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status",
+        "id, product_id, batch_number, quantity_remaining, expiry_date, status",
       )
       .eq("status", "ACTIVE"),
   ]);
@@ -551,12 +551,9 @@ export async function getInventoryMetrics(): Promise<InventoryMetrics> {
   );
 
   const quantityByProductId = new Map<string, number>();
-  let totalWarehouseValue = 0;
 
   for (const lot of activeLots) {
     const quantityRemaining = Number(lot.quantity_remaining);
-    const unitCost = Number(lot.unit_cost);
-    totalWarehouseValue += quantityRemaining * unitCost;
     quantityByProductId.set(
       lot.product_id,
       (quantityByProductId.get(lot.product_id) ?? 0) + quantityRemaining,
@@ -601,7 +598,6 @@ export async function getInventoryMetrics(): Promise<InventoryMetrics> {
     );
 
   return {
-    totalWarehouseValue,
     totalUniqueItems: products.length,
     lowStockAlerts,
     expiringLots,
@@ -620,7 +616,6 @@ export async function getTransactionLedger(
       id,
       transaction_type,
       quantity_changed,
-      financial_value_changed,
       timestamp,
       reason,
       franchise_transfer_id,
@@ -701,12 +696,10 @@ export type ReceiveStockSourceInfo = {
 export async function receiveInventoryStock(
   productId: string,
   quantity: number,
-  totalCost: number,
   customExpiry?: Date,
   source?: ReceiveStockSourceInfo,
 ): Promise<InventoryLot> {
   const supabase = createAdminClient();
-  const unitCost = totalCost / quantity;
   const batchNumber = `LOT-${Date.now()}`;
   const expiryDate = await resolveExpiryDate(supabase, productId, customExpiry);
 
@@ -716,7 +709,6 @@ export async function receiveInventoryStock(
       product_id: productId,
       batch_number: batchNumber,
       quantity_remaining: quantity,
-      unit_cost: unitCost,
       expiry_date: expiryDate.toISOString(),
       status: "ACTIVE",
       source_type: source?.sourceType ?? null,
@@ -727,7 +719,7 @@ export async function receiveInventoryStock(
       purchase_order_path: source?.purchaseOrderPath ?? null,
     })
     .select(
-      "id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status, created_at",
+      "id, product_id, batch_number, quantity_remaining, expiry_date, status, created_at",
     )
     .single();
 
@@ -741,7 +733,6 @@ export async function receiveInventoryStock(
       lot_id: lotRow.id,
       transaction_type: "IN",
       quantity_changed: quantity,
-      financial_value_changed: totalCost,
     });
 
   if (transactionError) {
@@ -767,7 +758,7 @@ export async function dispatchInventoryStock(
 
   const { data: lotRows, error: lotsFetchError } = await supabase
     .from("inventory_lots")
-    .select("id, quantity_remaining, unit_cost, status, expiry_date")
+    .select("id, quantity_remaining, status, expiry_date")
     .eq("product_id", productId)
     .eq("status", "ACTIVE")
     .order("expiry_date", { ascending: true });
@@ -820,7 +811,6 @@ export async function dispatchInventoryStock(
     }
 
     const deduct = Math.min(quantityRemaining, remaining);
-    const unitCost = Number(lotRow.unit_cost);
     const newQuantity = quantityRemaining - deduct;
     const newStatus = newQuantity === 0 ? "DEPLETED" : "ACTIVE";
 
@@ -849,7 +839,6 @@ export async function dispatchInventoryStock(
         lot_id: lotRow.id,
         transaction_type: "OUT",
         quantity_changed: -deduct,
-        financial_value_changed: -(deduct * unitCost),
         reason,
       })
       .select("id")
@@ -902,7 +891,6 @@ export async function processBulkInbound(
       const lot = await receiveInventoryStock(
         item.productId,
         item.quantity,
-        item.totalCost,
         customExpiry,
         {
           sourceType: item.sourceType,
@@ -1012,7 +1000,7 @@ export async function getActiveRawMaterialLots(): Promise<ActiveRawMaterialLot[]
   const { data, error } = await supabase
     .from("inventory_lots")
     .select(
-      "id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status, created_at, inventory_products!inner(name, base_uom, type, deleted_at)",
+      "id, product_id, batch_number, quantity_remaining, expiry_date, status, created_at, inventory_products!inner(name, base_uom, type, deleted_at)",
     )
     .eq("status", "ACTIVE")
     .eq("inventory_products.type", "RAW_MATERIAL")
@@ -1034,7 +1022,7 @@ export async function getPendingManufacturingOrders(): Promise<
   const { data, error } = await supabase
     .from("manufacturing_orders")
     .select(
-      "id, raw_product_id, source_lot_id, quantity_sent, total_cost_value, status, sent_at, completed_at, inventory_products!raw_product_id(name, base_uom), inventory_lots!source_lot_id(batch_number), manufacturing_outputs(package_size, package_count)",
+      "id, raw_product_id, source_lot_id, quantity_sent, status, sent_at, completed_at, inventory_products!raw_product_id(name, base_uom), inventory_lots!source_lot_id(batch_number), manufacturing_outputs(package_size, package_count)",
     )
     .eq("status", "PENDING")
     .order("sent_at", { ascending: false });
@@ -1055,7 +1043,7 @@ export async function sendToManufacturing(
   const { data: lotRow, error: lotFetchError } = await supabase
     .from("inventory_lots")
     .select(
-      "id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status, created_at",
+      "id, product_id, batch_number, quantity_remaining, expiry_date, status, created_at",
     )
     .eq("id", lotId)
     .single();
@@ -1076,7 +1064,6 @@ export async function sendToManufacturing(
     );
   }
 
-  const totalCostValue = quantityToSend * lot.unitCost;
   const newRemaining = lot.quantityRemaining - quantityToSend;
   const newStatus = newRemaining === 0 ? "DEPLETED" : "ACTIVE";
 
@@ -1086,11 +1073,10 @@ export async function sendToManufacturing(
       raw_product_id: lot.productId,
       source_lot_id: lotId,
       quantity_sent: quantityToSend,
-      total_cost_value: totalCostValue,
       status: "PENDING",
     })
     .select(
-      "id, raw_product_id, source_lot_id, quantity_sent, total_cost_value, status, sent_at, completed_at, inventory_products!raw_product_id(name, base_uom), inventory_lots!source_lot_id(batch_number)",
+      "id, raw_product_id, source_lot_id, quantity_sent, status, sent_at, completed_at, inventory_products!raw_product_id(name, base_uom), inventory_lots!source_lot_id(batch_number)",
     )
     .single();
 
@@ -1117,7 +1103,6 @@ export async function sendToManufacturing(
       lot_id: lotId,
       transaction_type: "SENT_TO_MFG",
       quantity_changed: -quantityToSend,
-      financial_value_changed: -totalCostValue,
     });
 
   if (transactionError) {
@@ -1164,7 +1149,7 @@ export async function processManufacturingOutput(
   const { data: orderRow, error: orderFetchError } = await supabase
     .from("manufacturing_orders")
     .select(
-      "id, raw_product_id, source_lot_id, quantity_sent, total_cost_value, status, sent_at, completed_at",
+      "id, raw_product_id, source_lot_id, quantity_sent, status, sent_at, completed_at",
     )
     .eq("id", mfgOrderId)
     .single();
@@ -1178,7 +1163,6 @@ export async function processManufacturingOutput(
   }
 
   const quantitySent = Number(orderRow.quantity_sent);
-  const totalCostValue = Number(orderRow.total_cost_value);
   const currentOutputWeight = packageSize * packageCount;
 
   const { data: existingOutputs, error: outputsFetchError } = await supabase
@@ -1203,9 +1187,6 @@ export async function processManufacturingOutput(
     );
   }
 
-  const rawCostPerUnit = totalCostValue / quantitySent;
-  const costTransferred = rawCostPerUnit * currentOutputWeight;
-
   const { data: productRow, error: productError } = await supabase
     .from("inventory_products")
     .select("id, type")
@@ -1220,7 +1201,6 @@ export async function processManufacturingOutput(
     throw new Error("Selected product must be a finished good.");
   }
 
-  const newUnitCost = costTransferred / packageCount;
   const batchNumber = `LOT-${Date.now()}`;
   const isFullyProcessed =
     alreadyProcessed + currentOutputWeight >= quantitySent;
@@ -1231,7 +1211,6 @@ export async function processManufacturingOutput(
       product_id: finishedProductId,
       batch_number: batchNumber,
       quantity_remaining: packageCount,
-      unit_cost: newUnitCost,
       expiry_date: expiryDate.toISOString(),
       status: "ACTIVE",
     })
@@ -1284,7 +1263,6 @@ export async function processManufacturingOutput(
       lot_id: lotRow.id,
       transaction_type: "RECEIVED_FROM_MFG",
       quantity_changed: packageCount,
-      financial_value_changed: costTransferred,
     });
 
   if (transactionError) {
@@ -1353,7 +1331,7 @@ export async function revertPendingManufacturing(
 
   const { data: lotRow, error: lotFetchError } = await supabase
     .from("inventory_lots")
-    .select("id, quantity_remaining, unit_cost, status")
+    .select("id, quantity_remaining, status")
     .eq("id", sourceLotId)
     .single();
 
@@ -1362,11 +1340,9 @@ export async function revertPendingManufacturing(
   }
 
   const previousQuantity = Number(lotRow.quantity_remaining);
-  const unitCost = Number(lotRow.unit_cost);
   const previousStatus = lotRow.status;
   const newQuantity = previousQuantity + remainingQuantity;
   const newStatus = previousStatus === "DEPLETED" ? "ACTIVE" : previousStatus;
-  const financialValue = remainingQuantity * unitCost;
 
   const { error: lotUpdateError } = await supabase
     .from("inventory_lots")
@@ -1405,7 +1381,6 @@ export async function revertPendingManufacturing(
       lot_id: sourceLotId,
       transaction_type: "IN",
       quantity_changed: remainingQuantity,
-      financial_value_changed: financialValue,
     });
 
   if (transactionError) {
@@ -1693,7 +1668,7 @@ export async function sendMultiToManufacturing(
   const lotIds = input.items.map((item) => item.lotId);
   const { data: lotRows, error: lotsFetchError } = await supabase
     .from("inventory_lots")
-    .select("id, product_id, batch_number, quantity_remaining, unit_cost, expiry_date, status, created_at")
+    .select("id, product_id, batch_number, quantity_remaining, expiry_date, status, created_at")
     .in("id", lotIds)
     .eq("status", "ACTIVE");
 
@@ -1709,7 +1684,6 @@ export async function sendMultiToManufacturing(
 
   // Calculate totals
   let totalInputWeight = 0;
-  let totalCostValue = 0;
 
   for (const item of input.items) {
     const lotRow = lotMap.get(item.lotId);
@@ -1723,7 +1697,6 @@ export async function sendMultiToManufacturing(
     }
 
     totalInputWeight += item.quantityToSend;
-    totalCostValue += item.quantityToSend * Number(lotRow.unit_cost);
   }
 
   // Create the batch
@@ -1734,7 +1707,6 @@ export async function sendMultiToManufacturing(
       mapping_id: input.mappingId,
       status: "PENDING",
       total_input_weight: totalInputWeight,
-      total_cost_value: totalCostValue,
     })
     .select("id")
     .single();
@@ -1746,8 +1718,6 @@ export async function sendMultiToManufacturing(
   // Create individual manufacturing orders for each lot, linked to the batch
   for (const item of input.items) {
     const lotRow = lotMap.get(item.lotId)!;
-    const unitCost = Number(lotRow.unit_cost);
-    const itemCost = item.quantityToSend * unitCost;
 
     const { data: orderRow, error: orderError } = await supabase
       .from("manufacturing_orders")
@@ -1755,7 +1725,6 @@ export async function sendMultiToManufacturing(
         raw_product_id: lotRow.product_id,
         source_lot_id: item.lotId,
         quantity_sent: item.quantityToSend,
-        total_cost_value: itemCost,
         status: "PENDING",
         batch_id: batchRow.id,
       })
@@ -1795,7 +1764,6 @@ export async function sendMultiToManufacturing(
         lot_id: item.lotId,
         transaction_type: "SENT_TO_MFG",
         quantity_changed: -item.quantityToSend,
-        financial_value_changed: -itemCost,
       });
 
     if (transactionError) {
@@ -1818,7 +1786,7 @@ export async function getPendingManufacturingBatches(): Promise<ManufacturingBat
 
   const { data: batches, error } = await supabase
     .from("manufacturing_batches")
-    .select("id, name, mapping_id, status, total_input_weight, total_cost_value, created_at, completed_at")
+    .select("id, name, mapping_id, status, total_input_weight, created_at, completed_at")
     .eq("status", "PENDING")
     .order("created_at", { ascending: false });
 
@@ -1869,7 +1837,6 @@ export async function getPendingManufacturingBatches(): Promise<ManufacturingBat
       mappingId: batch.mapping_id,
       status: batch.status as "PENDING" | "COMPLETED",
       totalInputWeight: Number(batch.total_input_weight),
-      totalCostValue: Number(batch.total_cost_value),
       createdAt: batch.created_at,
       completedAt: batch.completed_at,
       orders,
@@ -1892,7 +1859,7 @@ export async function processBatchOutput(
   // Get the batch
   const { data: batch, error: batchError } = await supabase
     .from("manufacturing_batches")
-    .select("id, status, total_input_weight, total_cost_value")
+    .select("id, status, total_input_weight")
     .eq("id", batchId)
     .single();
 
@@ -1905,7 +1872,6 @@ export async function processBatchOutput(
   }
 
   const totalInputWeight = Number(batch.total_input_weight);
-  const totalCostValue = Number(batch.total_cost_value);
   const currentOutputWeight = packageSize * packageCount;
 
   if (currentOutputWeight > totalInputWeight) {
@@ -1929,10 +1895,6 @@ export async function processBatchOutput(
     throw new Error("Selected product must be a finished good.");
   }
 
-  // Calculate cost proportionally
-  const costPerUnit = totalCostValue / totalInputWeight;
-  const costTransferred = costPerUnit * currentOutputWeight;
-  const newUnitCost = costTransferred / packageCount;
   const batchNumber = `LOT-${Date.now()}`;
 
   // Create finished good lot
@@ -1942,7 +1904,6 @@ export async function processBatchOutput(
       product_id: finishedProductId,
       batch_number: batchNumber,
       quantity_remaining: packageCount,
-      unit_cost: newUnitCost,
       expiry_date: expiryDate.toISOString(),
       status: "ACTIVE",
     })
@@ -1986,7 +1947,6 @@ export async function processBatchOutput(
       lot_id: lotRow.id,
       transaction_type: "RECEIVED_FROM_MFG",
       quantity_changed: packageCount,
-      financial_value_changed: costTransferred,
     });
 
   if (transactionError) {
@@ -2060,7 +2020,7 @@ export async function revertPendingBatch(
 
       const { data: lotRow, error: lotFetchError } = await supabase
         .from("inventory_lots")
-        .select("id, quantity_remaining, unit_cost, status")
+        .select("id, quantity_remaining, status")
         .eq("id", sourceLotId)
         .single();
 
@@ -2072,7 +2032,6 @@ export async function revertPendingBatch(
 
       const previousQuantity = Number(lotRow.quantity_remaining);
       const previousStatus = lotRow.status;
-      const unitCost = Number(lotRow.unit_cost);
       const newQuantity = previousQuantity + quantitySent;
       const newStatus =
         previousStatus === "DEPLETED" ? "ACTIVE" : previousStatus;
@@ -2105,7 +2064,6 @@ export async function revertPendingBatch(
           lot_id: sourceLotId,
           transaction_type: "IN",
           quantity_changed: quantitySent,
-          financial_value_changed: quantitySent * unitCost,
         });
 
       if (transactionError) {

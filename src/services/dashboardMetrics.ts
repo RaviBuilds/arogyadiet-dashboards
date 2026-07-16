@@ -40,7 +40,7 @@ export type ExecutiveSummary = {
     activeCustomers: KpiTrend;
     activeSubscriptions: KpiTrend;
     pendingOperations: KpiTrend;
-    warehouseValue: KpiTrend & { lowStockCount: number };
+    inventoryItems: KpiTrend & { lowStockCount: number };
   };
   revenueTrend: RevenueTrendPoint[];
   customerDistribution: CustomerDistributionSlice[];
@@ -125,7 +125,7 @@ function emptyExecutiveSummary(): ExecutiveSummary {
       activeCustomers: zero,
       activeSubscriptions: zero,
       pendingOperations: zero,
-      warehouseValue: { ...zero, lowStockCount: 0 },
+      inventoryItems: { ...zero, lowStockCount: 0 },
     },
     revenueTrend: [],
     customerDistribution: [],
@@ -227,7 +227,7 @@ export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
   const activeCustomers = activeCustomersResult.count ?? 0;
   const activeSubscriptions = activeSubscriptionsResult.count ?? 0;
   const pendingOperations = pendingOperationsResult.count ?? 0;
-  const warehouseValue = Math.round(inventoryMetrics.totalWarehouseValue);
+  const uniqueInventoryItems = inventoryMetrics.totalUniqueItems;
   const lowStockCount = inventoryMetrics.lowStockAlerts.length;
 
   const needsAttention: AttentionItem[] = [];
@@ -319,12 +319,12 @@ export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
           Math.max(pendingOperations + 3, 1),
         ),
       },
-      warehouseValue: {
-        value: warehouseValue,
+      inventoryItems: {
+        value: uniqueInventoryItems,
         lowStockCount,
         changePercent: computeTrendPercent(
-          warehouseValue,
-          Math.max(warehouseValue * 0.94, 1),
+          uniqueInventoryItems,
+          Math.max(uniqueInventoryItems - 2, 1),
         ),
       },
     },

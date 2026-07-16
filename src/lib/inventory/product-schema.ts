@@ -188,7 +188,6 @@ export type InventoryLot = {
   productId: string;
   batchNumber: string;
   quantityRemaining: number;
-  unitCost: number;
   expiryDate: string;
   status: LotStatus;
   createdAt: string;
@@ -212,7 +211,6 @@ export type ExpiringLotAlert = {
 };
 
 export type InventoryMetrics = {
-  totalWarehouseValue: number;
   totalUniqueItems: number;
   lowStockAlerts: LowStockAlert[];
   expiringLots: ExpiringLotAlert[];
@@ -221,7 +219,6 @@ export type InventoryMetrics = {
 export const receiveStockBaseSchema = z.object({
   productId: z.string().uuid("Invalid product ID"),
   quantity: z.coerce.number().positive("Quantity must be greater than 0"),
-  totalCost: z.coerce.number().min(0, "Total cost must be 0 or greater"),
   expiryDate: z.string().optional(),
   sourceType: z.enum(INVENTORY_SOURCE_TYPES, {
     message: "Select a source",
@@ -364,7 +361,6 @@ export type TransactionLedgerEntry = {
   batchNumber: string;
   baseUom: BaseUom;
   quantityChanged: number;
-  financialValueChanged: number;
   /** Incoming entries only — where the stock came from. */
   sourceType: InventorySourceType | null;
   /** Free-text supplier name, captured when sourceType is OTHER. */
@@ -395,7 +391,6 @@ export type ManufacturingOrder = {
   quantitySent: number;
   quantityProcessed: number;
   remainingToPackage: number;
-  totalCostValue: number;
   status: MfgOrderStatus;
   sentAt: string;
   completedAt: string | null;
@@ -555,7 +550,6 @@ export type ManufacturingBatch = {
   mappingId: string | null;
   status: MfgOrderStatus;
   totalInputWeight: number;
-  totalCostValue: number;
   createdAt: string;
   completedAt: string | null;
   orders: ManufacturingOrder[];
@@ -674,7 +668,6 @@ type InventoryLotRow = {
   product_id: string;
   batch_number: string;
   quantity_remaining: string | number;
-  unit_cost: string | number;
   expiry_date: string;
   status: LotStatus;
   created_at: string;
@@ -687,7 +680,6 @@ export function parseReceiveStockFormData(formData: FormData) {
   return receiveStockFormSchema.safeParse({
     productId: getFormString(formData, "productId"),
     quantity: getFormString(formData, "quantity"),
-    totalCost: getFormString(formData, "totalCost"),
     expiryDate: expiryDate || undefined,
     sourceType: getFormString(formData, "sourceType"),
     sourceName: sourceName || undefined,
@@ -726,7 +718,6 @@ type ManufacturingOrderRow = {
   raw_product_id: string;
   source_lot_id: string;
   quantity_sent: string | number;
-  total_cost_value: string | number;
   status: MfgOrderStatus;
   sent_at: string;
   completed_at: string | null;
@@ -814,7 +805,6 @@ export function mapManufacturingOrderRow(
     quantitySent,
     quantityProcessed,
     remainingToPackage: quantitySent - quantityProcessed,
-    totalCostValue: Number(row.total_cost_value),
     status: row.status,
     sentAt: row.sent_at,
     completedAt: row.completed_at,
@@ -827,7 +817,6 @@ export function mapInventoryLotRow(row: InventoryLotRow): InventoryLot {
     productId: row.product_id,
     batchNumber: row.batch_number,
     quantityRemaining: Number(row.quantity_remaining),
-    unitCost: Number(row.unit_cost),
     expiryDate: row.expiry_date,
     status: row.status,
     createdAt: row.created_at,
@@ -845,7 +834,6 @@ type TransactionLedgerRow = {
   id: string;
   transaction_type: TransactionType;
   quantity_changed: string | number;
-  financial_value_changed: string | number;
   timestamp: string;
   reason: DispatchStockReason | null;
   franchise_transfer_id: string | null;
@@ -866,7 +854,6 @@ export function mapTransactionLedgerRow(
     batchNumber: lot.batch_number,
     baseUom: product.base_uom,
     quantityChanged: Number(row.quantity_changed),
-    financialValueChanged: Number(row.financial_value_changed),
     sourceType: lot.source_type ?? null,
     sourceName: lot.source_name ?? null,
     reason: row.reason ?? null,

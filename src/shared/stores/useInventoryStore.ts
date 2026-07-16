@@ -10,7 +10,6 @@ export type InboundCartItem = {
   productId: string;
   name: string;
   qty: number;
-  cost: number;
   expiry?: string;
   sourceType: InventorySourceType;
   sourceName?: string;
@@ -94,10 +93,6 @@ export const useInventoryStore = create<InventoryStore>((set) => ({
 
 export function selectTotalCartCount(state: InventoryStore): number {
   return state.inboundCart.length + state.outboundCart.length;
-}
-
-export function selectInboundBatchCost(state: InventoryStore): number {
-  return state.inboundCart.reduce((sum, item) => sum + item.cost, 0);
 }
 
 export function selectHasFranchiseItems(state: InventoryStore): boolean {

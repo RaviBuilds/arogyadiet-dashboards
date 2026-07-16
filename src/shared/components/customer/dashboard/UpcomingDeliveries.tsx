@@ -16,131 +16,130 @@ export type DeliveryItem = {
 };
 
 /**
- * UpcomingDeliveries — a calm weekly schedule rather than a wall of repeated
- * cards. Repetition is reduced by only surfacing the delivery address when it
- * changes from the previous day, so the eye follows the rhythm of the week.
+ * UpcomingDeliveries — a full-width week view in the spirit of Apple Fitness /
+ * Google Fit: seven evenly-distributed day columns that use the entire card.
+ *
+ * Each day is self-labelled with its meal (colour dot + name) so the week is
+ * scannable in two seconds without guessing. Today is emphasised (filled date +
+ * soft tint), Tomorrow is secondary, and later days gently lighten. A small pin
+ * folds in only on days whose delivery address differs from the usual one, so
+ * nothing repeats and the whole schedule stays a single compact band.
  */
 export function UpcomingDeliveries({ items }: { items: DeliveryItem[] }) {
   if (!items || items.length === 0) {
     return (
-      <div className="rounded-3xl border border-slate-200 bg-white/90 p-8 text-center text-sm text-slate-500 shadow-sm">
+      <div className="rounded-3xl border border-slate-200 bg-white/95 p-6 text-center text-sm text-slate-500 shadow-sm">
         No upcoming deliveries scheduled yet.
       </div>
     );
   }
 
+  // Show a clean seven-day week to match the "Next 7 days" framing.
+  const week = items.slice(0, 7);
+
   const addressKeyOf = (item: DeliveryItem) =>
     item.isPaused ? null : `${item.addressTag ?? ""}|${item.addressLine ?? ""}`;
 
+  // The usual address = the first scheduled day's; only deviations are flagged.
+  const baseKey = (() => {
+    for (const it of week) {
+      const k = addressKeyOf(it);
+      if (k !== null) return k;
+    }
+    return null;
+  })();
+
   return (
-    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white/90 shadow-sm">
-      <ul className="divide-y divide-slate-100">
-        {items.map((item, idx) => {
+    <div className="rounded-3xl border border-slate-200 bg-white/95 p-3 shadow-sm sm:p-4">
+      <ol className="flex items-stretch">
+        {week.map((item, idx) => {
           const date = parseISO(item.date);
           const theme = MEAL_THEMES[item.mealCode || "VEG"] || MEAL_THEMES.VEG;
-          const showToday = isToday(date);
-          const showTomorrow = isTomorrow(date);
-
-          // Only render the address when it differs from the most recent
-          // scheduled (non-paused) day — pure backward scan, no shared state.
-          const addressKey = addressKeyOf(item);
-          let prevKey: string | null = null;
-          for (let j = idx - 1; j >= 0; j--) {
-            const k = addressKeyOf(items[j]);
-            if (k !== null) {
-              prevKey = k;
-              break;
-            }
-          }
+          const today = isToday(date);
+          const tomorrow = isTomorrow(date);
+          const emphasized = today || tomorrow;
           const addressChanged =
-            addressKey !== null && addressKey !== prevKey;
+            !item.isPaused && addressKeyOf(item) !== baseKey;
+
+          // Later days gently recede (never below readable).
+          const opacity = emphasized
+            ? 1
+            : Math.max(0.62, 1 - (idx - 1) * 0.06);
 
           return (
             <li
               key={idx}
               className={cn(
-                "flex items-center gap-4 px-4 py-3.5 transition-colors sm:px-5",
-                item.isPaused ? "bg-slate-50/60" : "hover:bg-emerald-50/40",
+                "flex flex-1 flex-col items-center gap-2 rounded-2xl px-0.5 py-1.5",
+                // Today anchors the eye with a soft wash; Tomorrow gets a
+                // lighter secondary wash. Later days carry no wash, so weight
+                // falls away naturally without any change in row height.
+                today && "bg-emerald-50",
+                tomorrow && "bg-amber-50/60",
               )}
+              style={{ opacity }}
             >
-              {/* Date tile */}
-              <div
+              <span
                 className={cn(
-                  "flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl border text-center leading-none",
-                  item.isPaused
-                    ? "border-slate-200 bg-white text-slate-400"
-                    : "border-emerald-100 bg-emerald-50 text-emerald-700",
+                  "text-[10px] font-semibold uppercase tracking-wide transition-all",
+                  today
+                    ? "text-emerald-700"
+                    : tomorrow
+                      ? "text-amber-700"
+                      : "text-slate-400",
                 )}
               >
-                <span className="text-[10px] font-semibold uppercase tracking-wide">
-                  {format(date, "EEE")}
-                </span>
-                <span className="text-lg font-semibold">
-                  {format(date, "dd")}
-                </span>
-              </div>
+                {format(date, "EEE")}
+              </span>
 
-              {/* Meal + temporal context */}
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  {item.isPaused ? (
-                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-400">
-                      <Moon className="h-3.5 w-3.5" />
-                      Rest day
-                    </span>
-                  ) : (
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold",
-                        theme.bg,
-                        theme.text,
-                        theme.border,
-                      )}
-                    >
-                      <span
-                        className={cn("h-1.5 w-1.5 rounded-full", theme.accent)}
-                      />
-                      {theme.label}
-                    </span>
-                  )}
-
-                  {!item.isPaused && showToday && (
-                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
-                      Today
-                    </span>
-                  )}
-                  {!item.isPaused && showTomorrow && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700">
-                      Tomorrow
-                    </span>
-                  )}
-                </div>
-
-                {/* Address only when it changes */}
-                {addressChanged ? (
-                  <p className="flex items-center gap-1.5 truncate text-xs text-slate-500">
-                    <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
-                    <span className="truncate">
-                      <span className="font-medium text-slate-600">
-                        {item.addressTag || "Delivery"}
-                      </span>
-                      {item.addressLine ? ` · ${item.addressLine}` : ""}
-                    </span>
-                  </p>
-                ) : (
-                  <p className="text-xs text-slate-400">
-                    {item.isPaused ? "No meal will be prepared" : "Same address"}
-                  </p>
+              <span
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold tabular-nums transition-all",
+                  today
+                    ? "bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-100"
+                    : tomorrow
+                      ? "text-slate-800 ring-1 ring-inset ring-amber-300"
+                      : "text-slate-700",
                 )}
-              </div>
+              >
+                {format(date, "d")}
+              </span>
 
-              <span className="shrink-0 text-xs font-medium text-slate-400">
-                {format(date, "MMM")}
+              {/* Meal indicator + self-label */}
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  item.isPaused ? "bg-slate-300" : theme.accent,
+                )}
+              />
+              <span
+                className={cn(
+                  "flex max-w-full items-center gap-0.5 text-[10px] font-medium leading-none transition-all",
+                  item.isPaused
+                    ? "text-slate-400"
+                    : today
+                      ? "font-semibold text-emerald-800"
+                      : theme.text,
+                )}
+              >
+                {item.isPaused ? (
+                  <>
+                    <Moon className="h-2.5 w-2.5 shrink-0" />
+                    <span className="truncate">Rest</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="truncate">{theme.label}</span>
+                    {addressChanged ? (
+                      <MapPin className="h-2.5 w-2.5 shrink-0 text-emerald-500" />
+                    ) : null}
+                  </>
+                )}
               </span>
             </li>
           );
         })}
-      </ul>
+      </ol>
     </div>
   );
 }

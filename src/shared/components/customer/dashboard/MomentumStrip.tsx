@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils";
 /**
  * MomentumStrip — proof of progress ("am I moving toward my goal?").
  *
- * Presented as a single warm companion card with softly divided segments
- * rather than separate KPI boxes, so the dashboard feels encouraging instead
- * of analytical. Reusable for any customer type by passing a different set of
- * stats and heading.
+ * Rendered as a single unified band (rather than separate KPI boxes) with a
+ * warm caption, so it reads as an encouraging summary of the customer's
+ * journey rather than a dashboard of metrics. Reusable for any customer type
+ * by passing a different set of stats and caption.
  */
 export type MomentumStat = {
   icon: LucideIcon;
@@ -18,46 +18,53 @@ export type MomentumStat = {
 };
 
 const TONES: Record<NonNullable<MomentumStat["tone"]>, string> = {
-  green: "bg-emerald-100 text-emerald-600",
+  green: "bg-emerald-100/80 text-emerald-700",
   coral: "bg-primary/10 text-primary",
-  amber: "bg-amber-100 text-amber-600",
+  amber: "bg-amber-100/80 text-amber-700",
   brown: "bg-[#5d4037]/10 text-[#5d4037]",
 };
 
 export function MomentumStrip({
   stats,
-  heading = "Your progress so far",
   caption,
 }: {
   stats: MomentumStat[];
-  heading?: string;
-  /** Optional warm, human sentence shown beneath the stats. */
   caption?: string;
 }) {
   return (
-    <div className="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50/70 via-white to-white p-5 shadow-sm sm:p-6">
-      <p className="text-sm font-semibold text-slate-700">{heading}</p>
+    // Arrives one beat after the Today card, continuing the same opening
+    // cascade rather than fading in at the same instant as everything else.
+    <div className="overflow-hidden rounded-3xl border border-emerald-900/10 bg-gradient-to-br from-emerald-50/80 via-white to-white shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-300 fill-mode-both">
+      {/* Encouragement leads; the numbers below quietly back it up. */}
+      {caption ? (
+        <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+          <p className="text-sm font-medium leading-snug text-emerald-800">
+            {caption}
+          </p>
+        </div>
+      ) : null}
 
-      <div className="mt-4 grid grid-cols-3 divide-x divide-slate-200/70">
+      <div className="grid grid-cols-3 divide-x divide-emerald-900/10 border-t border-emerald-900/10">
         {stats.map((stat, idx) => {
           const Icon = stat.icon;
           return (
             <div
               key={idx}
-              className="flex flex-col items-center gap-2 px-2 text-center"
+              className="flex flex-col items-center gap-1.5 px-2 py-4 text-center"
             >
               <div
                 className={cn(
-                  "flex h-9 w-9 items-center justify-center rounded-full",
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
                   TONES[stat.tone ?? "green"],
                 )}
               >
-                <Icon className="h-5 w-5" />
+                <Icon className="h-4 w-4" />
               </div>
-              <p className="text-2xl font-semibold leading-none text-slate-900">
+              <p className="text-lg font-semibold leading-none text-slate-900">
                 {stat.value}
               </p>
-              <p className="text-[11px] font-medium leading-tight text-slate-500 sm:text-xs">
+              <p className="text-[11px] font-medium leading-tight text-slate-500">
                 {stat.label}
               </p>
             </div>

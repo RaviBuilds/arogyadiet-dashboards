@@ -335,11 +335,11 @@ export default function LedgerWorkspace({
 
       const stats = statsMap.get(section.id)!;
       stats.count += 1;
-      stats.netValue += entry.financialValueChanged;
-      if (entry.financialValueChanged > 0) {
-        stats.inflowValue += entry.financialValueChanged;
-      } else if (entry.financialValueChanged < 0) {
-        stats.outflowValue += entry.financialValueChanged;
+      stats.netValue += entry.quantityChanged;
+      if (entry.quantityChanged > 0) {
+        stats.inflowValue += entry.quantityChanged;
+      } else if (entry.quantityChanged < 0) {
+        stats.outflowValue += entry.quantityChanged;
       }
     }
 

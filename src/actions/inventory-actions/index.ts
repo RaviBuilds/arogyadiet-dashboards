@@ -339,7 +339,6 @@ export async function receiveStockAction(
     const lot = await receiveInventoryStock(
       parsed.data.productId,
       parsed.data.quantity,
-      parsed.data.totalCost,
       customExpiry,
       {
         sourceType: parsed.data.sourceType,
