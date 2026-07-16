@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { CheckCircle2, HeartHandshake } from "lucide-react";
 import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
 import { StatusPill } from "@/shared/components/customer/profile-ui/StatusPill";
+import { AppReadyBeacon } from "@/shared/components/loader/AppReadyBeacon";
 
 export default async function CustomerProfilePage() {
   const { supabase, user, profile, customerProfileId, error } =
@@ -163,6 +164,10 @@ export default async function CustomerProfilePage() {
       >
         <CustomerLogoutButton className="w-full sm:w-auto" />
       </div>
+
+      {/* Signals the loader that the full profile is mounted, so a cold-land
+          on this page dissolves into real, present content — never a skeleton. */}
+      <AppReadyBeacon />
     </div>
   );
 }

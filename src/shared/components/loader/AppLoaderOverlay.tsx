@@ -8,24 +8,29 @@ import { APP_READY_EVENT } from "./AppReadyBeacon";
 /**
  * AppLoaderOverlay — the branded "opening the app" experience.
  *
- * Covers the very first paint, then dissolves once the page's real content is
- * ready (signalled by AppReadyBeacon) — not on a blind timer. At the moment
- * the dissolve begins it adds `.app-intro` to <html>, which starts the one-time
- * opening choreography. Because the content is already mounted when this fires,
- * the whole hero → sections sequence plays over real elements, perfectly in
- * sync, and the loader dissolves *as* the hero settles: the handoff is felt as
- * "I entered my dashboard", never "the loader finished".
+ * Covers the very first paint of a COLD app launch, then dissolves once the
+ * page's real content has actually mounted (signalled by AppReadyBeacon) —
+ * never on a blind timer. Because the content is already present when this
+ * fires, the loader hands off directly to the real dashboard: the user only
+ * ever perceives Loader → Dashboard, never Loader → Skeleton.
  *
- * `.app-intro` is removed once the sequence completes so later in-app
- * navigations use the lighter page transition instead of replaying it.
+ * At the moment the dissolve begins it adds `.app-intro` to <html>, starting
+ * the one-time opening choreography (hero → ring → cards …) over the real,
+ * present elements — perfectly in sync — then removes it once the sequence
+ * completes so later in-app navigations use the lighter page transition.
+ *
+ * Determinism:
+ *   - This overlay mounts with the customer layout, which mounts only on a
+ *     cold launch. Internal navigations reuse the persistent layout, so the
+ *     overlay never re-appears — those get the light `.reveal-page` transition.
+ *   - It dissolves ONLY when real content signals readiness (or the hard
+ *     safety cap), so it can never uncover an intermediate loading state.
  *
  * Timing:
- *   MIN_VISIBLE_MS — floor so it never flashes, even on instant loads.
- *   FALLBACK_MS    — reveal anyway if no readiness signal (non-beacon pages).
- *   MAX_VISIBLE_MS — hard safety cap.
+ *   MIN_VISIBLE_MS — floor so the branded moment is always felt, never a flash.
+ *   MAX_VISIBLE_MS — hard safety cap in case a readiness signal never arrives.
  */
-const MIN_VISIBLE_MS = 1000;
-const FALLBACK_MS = 1800;
+const MIN_VISIBLE_MS = 900;
 const MAX_VISIBLE_MS = 6000;
 const FADE_MS = 650;
 
@@ -55,28 +60,28 @@ export function AppLoaderOverlay({ message }: { message?: string }) {
       fadeTimer = setTimeout(() => setPhase("gone"), FADE_MS);
     };
 
-    // Reveal respecting the minimum visible floor. The `revealed` guard makes
-    // any later triggers no-ops.
+    // Reveal only when real content is ready, honouring the minimum floor so
+    // the branded moment is always felt. The `revealed` guard makes any later
+    // trigger a no-op.
     const scheduleReveal = () => {
       const wait = Math.max(0, MIN_VISIBLE_MS - (now() - start));
       window.setTimeout(reveal, wait);
     };
 
-    // Primary: wait for the page's content-ready beacon.
+    // Primary (and only meaningful) trigger: the page's content-ready beacon.
     if (window.__arogyaReady) {
       scheduleReveal();
     } else {
       window.addEventListener(APP_READY_EVENT, scheduleReveal, { once: true });
     }
 
-    // Fallbacks: pages without a beacon, or a stalled load.
-    const fallbackTimer = setTimeout(scheduleReveal, FALLBACK_MS);
+    // Safety net only: if readiness never signals (e.g. a JS error on a
+    // beacon-less page), reveal anyway so the app is never trapped behind it.
     const maxTimer = setTimeout(reveal, MAX_VISIBLE_MS);
 
     return () => {
       window.removeEventListener(APP_READY_EVENT, scheduleReveal);
       if (fadeTimer) clearTimeout(fadeTimer);
-      clearTimeout(fallbackTimer);
       clearTimeout(maxTimer);
     };
   }, []);
