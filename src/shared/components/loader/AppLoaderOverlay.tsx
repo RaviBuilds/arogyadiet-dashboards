@@ -3,76 +3,81 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { AppLoader } from "./AppLoader";
+import { APP_READY_EVENT } from "./AppReadyBeacon";
 
 /**
- * AppLoaderOverlay — the initial-load "opening the app" experience.
+ * AppLoaderOverlay — the branded "opening the app" experience.
  *
- * Renders a full-screen branded overlay (above the page and its skeletons) on
- * first paint, keeps it visible for at least MIN_VISIBLE_MS so it always feels
- * intentional rather than flashing, then fades it away once the page is ready.
+ * Covers the very first paint, then dissolves once the page's real content is
+ * ready (signalled by AppReadyBeacon) — not on a blind timer. At the moment
+ * the dissolve begins it adds `.app-intro` to <html>, which starts the one-time
+ * opening choreography. Because the content is already mounted when this fires,
+ * the whole hero → sections sequence plays over real elements, perfectly in
+ * sync, and the loader dissolves *as* the hero settles: the handoff is felt as
+ * "I entered my dashboard", never "the loader finished".
  *
- * At the moment the fade begins it adds `.app-intro` to <html>, which is the
- * single signal that gates the one-time opening choreography (and is removed
- * once it completes). This guarantees the signature is *perceived* — it starts
- * as the loader dissolves, never underneath it.
+ * `.app-intro` is removed once the sequence completes so later in-app
+ * navigations use the lighter page transition instead of replaying it.
  *
- * Mounted once in the customer layout, so it plays each time the app is opened
- * (a full load) but not on client-side navigations between pages, which use
- * their own branded loading fallbacks.
+ * Timing:
+ *   MIN_VISIBLE_MS — floor so it never flashes, even on instant loads.
+ *   FALLBACK_MS    — reveal anyway if no readiness signal (non-beacon pages).
+ *   MAX_VISIBLE_MS — hard safety cap.
  */
-// Held long enough for the orbiting leaf to complete a clear revolution
-// (~1.3s) so the opening reads as animated and intentional, never a flash.
-const MIN_VISIBLE_MS = 1400;
-const MAX_VISIBLE_MS = 5000;
-const FADE_MS = 500;
+const MIN_VISIBLE_MS = 1000;
+const FALLBACK_MS = 1800;
+const MAX_VISIBLE_MS = 6000;
+const FADE_MS = 650;
 
 type Phase = "visible" | "leaving" | "gone";
 
-export function AppLoaderOverlay({
-  message,
-}: {
-  message?: string;
-}) {
+export function AppLoaderOverlay({ message }: { message?: string }) {
   const [phase, setPhase] = useState<Phase>("visible");
 
   useEffect(() => {
-    const start =
+    const now = () =>
       typeof performance !== "undefined" ? performance.now() : Date.now();
+    const start = now();
     let revealed = false;
     let fadeTimer: ReturnType<typeof setTimeout> | undefined;
 
     const reveal = () => {
       if (revealed) return;
       revealed = true;
-      // Starts the one-time opening choreography. Removed once the sequence
-      // has finished so later in-app navigations don't replay it.
+
+      // Start the one-time opening choreography over the now-present content,
+      // and remove it once the sequence has finished.
       const root = document.documentElement;
       root.classList.add("app-intro");
       window.setTimeout(() => root.classList.remove("app-intro"), 3600);
+
       setPhase("leaving");
       fadeTimer = setTimeout(() => setPhase("gone"), FADE_MS);
     };
 
-    const schedule = () => {
-      const now =
-        typeof performance !== "undefined" ? performance.now() : Date.now();
-      const wait = Math.max(0, MIN_VISIBLE_MS - (now - start));
+    // Reveal respecting the minimum visible floor. The `revealed` guard makes
+    // any later triggers no-ops.
+    const scheduleReveal = () => {
+      const wait = Math.max(0, MIN_VISIBLE_MS - (now() - start));
       window.setTimeout(reveal, wait);
     };
 
-    if (document.readyState === "complete") {
-      schedule();
+    // Primary: wait for the page's content-ready beacon.
+    if (window.__arogyaReady) {
+      scheduleReveal();
     } else {
-      window.addEventListener("load", schedule, { once: true });
+      window.addEventListener(APP_READY_EVENT, scheduleReveal, { once: true });
     }
 
-    // Safety net: never let the overlay outstay its welcome on a stalled load.
+    // Fallbacks: pages without a beacon, or a stalled load.
+    const fallbackTimer = setTimeout(scheduleReveal, FALLBACK_MS);
     const maxTimer = setTimeout(reveal, MAX_VISIBLE_MS);
 
     return () => {
-      window.removeEventListener("load", schedule);
-      clearTimeout(maxTimer);
+      window.removeEventListener(APP_READY_EVENT, scheduleReveal);
       if (fadeTimer) clearTimeout(fadeTimer);
+      clearTimeout(fallbackTimer);
+      clearTimeout(maxTimer);
     };
   }, []);
 
@@ -86,11 +91,8 @@ export function AppLoaderOverlay({
         phase === "leaving" ? "opacity-0" : "opacity-100",
       )}
       style={{
-        // Sit above any third-party floating widgets (chat launchers, etc.)
-        // so nothing punches through the branded opening.
         zIndex: 2147483647,
         transitionDuration: `${FADE_MS}ms`,
-        // Smooth vertical light: soft green at the base rising to clean white.
         backgroundImage:
           "radial-gradient(120% 80% at 50% 118%, rgba(16,185,129,0.10) 0%, rgba(16,185,129,0) 55%), linear-gradient(to bottom, #ffffff 0%, #f4fbf6 100%)",
       }}

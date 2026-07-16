@@ -51,6 +51,7 @@ import {
   type MomentumStat,
 } from "@/shared/components/customer/dashboard/MomentumStrip";
 import { TransformationSpotlight } from "@/shared/components/customer/dashboard/TransformationSpotlight";
+import { AppReadyBeacon } from "@/shared/components/loader/AppReadyBeacon";
 import {
   UpcomingDeliveries,
   type DeliveryItem,
@@ -439,28 +440,40 @@ export default async function CustomerDashboard() {
   const todayStr = format(new Date(), "yyyy-MM-dd");
   const nextWeekStr = format(addDays(new Date(), 7), "yyyy-MM-dd");
 
-  const [{ count: initialPauseCount }, { data: upcomingMeals }] =
-    await Promise.all([
-      supabase
-        .from("subscription_daily_preferences")
-        .select("*", { count: "exact", head: true })
-        .eq("subscription_id", activeSub.id)
-        .eq("is_paused", true),
-      supabase
-        .from("subscription_daily_preferences")
-        .select(
-          `
+  const [
+    { count: initialPauseCount },
+    { data: upcomingMeals },
+    { data: todaysDeliveryOrder },
+  ] = await Promise.all([
+    supabase
+      .from("subscription_daily_preferences")
+      .select("*", { count: "exact", head: true })
+      .eq("subscription_id", activeSub.id)
+      .eq("is_paused", true),
+    supabase
+      .from("subscription_daily_preferences")
+      .select(
+        `
       preference_date,
       is_paused,
       meal_categories ( code ),
       addresses ( tag, street_1, city )
     `,
-        )
-        .eq("subscription_id", activeSub.id)
-        .gte("preference_date", todayStr)
-        .lte("preference_date", nextWeekStr)
-        .order("preference_date", { ascending: true }),
-    ]);
+      )
+      .eq("subscription_id", activeSub.id)
+      .gte("preference_date", todayStr)
+      .lte("preference_date", nextWeekStr)
+      .order("preference_date", { ascending: true }),
+    // Today's real delivery order — drives the status-aware Today's Meal
+    // card (see delivery-status.ts) so it never shows stale "on its way"
+    // copy once the meal has already been delivered.
+    supabase
+      .from("delivery_orders")
+      .select("id, status")
+      .eq("customer_profile_id", customerProfileId)
+      .eq("delivery_date", todayStr)
+      .maybeSingle(),
+  ]);
 
   let actualPauseCreditsUsed = initialPauseCount;
 
@@ -646,6 +659,10 @@ export default async function CustomerDashboard() {
         tagClassName={todayTagClass}
         addressTag={todayAddressTag}
         addressLine={todayAddressLine}
+        deliveryStatus={
+          todayState === "active" ? todaysDeliveryOrder?.status ?? null : undefined
+        }
+        orderId={todaysDeliveryOrder?.id ?? null}
         images={mealImages}
         ctaHref="/meals"
         ctaLabel="View meal plan"
@@ -858,6 +875,10 @@ export default async function CustomerDashboard() {
           </div>
         </section>
       )}
+
+      {/* Signals the loader that the full dashboard is mounted, so it dissolves
+          into a real, present page and the choreography plays in sync. */}
+      <AppReadyBeacon />
     </div>
   );
 }

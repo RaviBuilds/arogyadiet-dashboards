@@ -279,25 +279,17 @@
     transform: scale(1.08);
   }
 }
-@keyframes app-orbit-spin {
-  to {
-    transform: rotate(360deg);
+@keyframes app-halo {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
   }
-}
-@keyframes app-orbit-spin-rev {
-  to {
-    transform: rotate(-360deg);
+  30% {
+    opacity: 0.5;
   }
-}
-@keyframes app-orbit-pulse {
-  0%,
   100% {
-    transform: scale(0.9);
-    opacity: 0.45;
-  }
-  50% {
-    transform: scale(1.08);
-    opacity: 0.85;
+    transform: scale(1.7);
+    opacity: 0;
   }
 }
 @keyframes app-loader-in {
@@ -319,17 +311,15 @@
   animation: leaf-glow 2600ms ease-in-out infinite;
   will-change: opacity, transform;
 }
-.app-orbit {
-  animation: app-orbit-spin 1300ms linear infinite;
-  will-change: transform;
-}
-.app-orbit-counter {
-  animation: app-orbit-spin-rev 1300ms linear infinite;
-  will-change: transform;
-}
-.app-orbit-pulse {
-  animation: app-orbit-pulse 1600ms ease-in-out infinite;
+/* Expanding "morning halo" — the loader's single, cohesive ambient signal:
+   soft rings breathe outward from the mark, staggered, so the logo feels
+   alive and radiant rather than "loading". */
+.app-halo {
+  animation: app-halo 3000ms ease-out infinite;
   will-change: transform, opacity;
+}
+.app-halo-delayed {
+  animation-delay: 1500ms;
 }
 .app-loader-fadein {
   animation: app-loader-in 400ms ease-out both;
@@ -338,9 +328,7 @@
 @media (prefers-reduced-motion: reduce) {
   .app-loader-logo,
   .app-loader-glow,
-  .app-orbit,
-  .app-orbit-counter,
-  .app-orbit-pulse,
+  .app-halo,
   .app-loader-fadein {
     animation: none;
   }
