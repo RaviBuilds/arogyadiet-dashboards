@@ -335,3 +335,137 @@
     animation: none;
   }
 }
+
+/* =======================================================================
+   Today's Meal Journey — quiet idle scene motion.
+
+   Unlike the reveal-rise/hero-sheen system above (which plays once on app
+   open, gated by `.app-intro`), these loop continuously for as long as the
+   illustration is on screen — they're what makes the kitchen/delivery
+   scenes feel alive rather than a still photo. Kept deliberately slow and
+   low-amplitude (premium, not busy) and — same as the app loader above —
+   disabled outright under reduced motion, resting on the keyframe's base
+   frame which is always a valid, fully visible pose.
+   ======================================================================= */
+@keyframes journey-steam-rise {
+  0% {
+    transform: translateY(0) scaleY(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateY(-3px) scaleY(1.05);
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateY(-6px) scaleY(1.1);
+    opacity: 0;
+  }
+}
+@keyframes journey-wheel-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes journey-cloud-drift {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(6px);
+  }
+}
+@keyframes journey-pin-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+@keyframes journey-sparkle-twinkle {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+@keyframes journey-glow-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.06);
+  }
+}
+@keyframes journey-leaf-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(3deg);
+  }
+}
+
+.journey-steam-1 {
+  animation: journey-steam-rise 3200ms ease-in-out infinite;
+  transform-origin: bottom center;
+}
+.journey-steam-2 {
+  animation: journey-steam-rise 3200ms ease-in-out 900ms infinite;
+  transform-origin: bottom center;
+}
+.journey-wheel-spin {
+  animation: journey-wheel-spin 1400ms linear infinite;
+  transform-origin: center;
+}
+.journey-cloud-drift {
+  animation: journey-cloud-drift 6000ms ease-in-out infinite alternate;
+}
+.journey-pin-pulse {
+  animation: journey-pin-pulse 1800ms ease-in-out infinite;
+  transform-origin: center;
+}
+.journey-sparkle-1 {
+  animation: journey-sparkle-twinkle 2400ms ease-in-out infinite;
+  transform-origin: center;
+}
+.journey-sparkle-2 {
+  animation: journey-sparkle-twinkle 2400ms ease-in-out 800ms infinite;
+  transform-origin: center;
+}
+.journey-glow-breathe {
+  animation: journey-glow-breathe 3400ms ease-in-out infinite;
+  transform-origin: center;
+}
+.journey-leaf-float {
+  animation: journey-leaf-float 4200ms ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-steam-1,
+  .journey-steam-2,
+  .journey-wheel-spin,
+  .journey-cloud-drift,
+  .journey-pin-pulse,
+  .journey-sparkle-1,
+  .journey-sparkle-2,
+  .journey-glow-breathe,
+  .journey-leaf-float {
+    animation: none;
+  }
+}

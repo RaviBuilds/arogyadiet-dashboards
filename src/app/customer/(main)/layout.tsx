@@ -71,7 +71,14 @@ export default async function CustomerLayout({
           customerCategory={customerCategory}
         />
         <main className="flex-1 p-4 md:p-6 lg:p-8 w-full min-w-0 print:p-0">
-          {children}
+          {/* Single content Suspense boundary for every customer page. Its
+              fallback is empty on purpose — no per-route skeletons. The branded
+              GlobalLoader overlay covers this empty frame during navigation and
+              cold launch, and the <AppReadyBeacon /> rendered inside the
+              template (which lives within this boundary) fires only once the
+              page's real content resolves, so the loader hands off straight to
+              content: Loader → Content. */}
+          <Suspense fallback={null}>{children}</Suspense>
         </main>
       </div>
     </div>

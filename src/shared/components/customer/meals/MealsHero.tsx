@@ -46,7 +46,7 @@ export function MealsHero({
       {/* ── Depth layer 2: botanical line art, Apple-wallpaper faint ──────── */}
       <BotanicalBackdrop />
 
-      {/* ── Depth layer 3: the breakfast-bowl illustration, bleeding off the
+      {/* ── Depth layer 3: the meal-bowl illustration, bleeding off the
              bottom-right edge at low opacity so it blends into the hero
              rather than sitting on top like clipart. ──────────────────────── */}
       <BreakfastBowlIllustration />

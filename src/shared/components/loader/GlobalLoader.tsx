@@ -45,8 +45,32 @@ import { armSplashSafetyHide, hideNativeSplash } from "@/lib/capacitor/splash-sc
 // readiness signals — DOMContentLoaded on cold launch, route commit on
 // navigation — always fire on a normal load), set high so a slow `await` is
 // never cut short.
-const COLD = { min: 1300, max: 15000 };
+const COLD = { min: 1000, max: 15000 };
 const NAV = { min: 1000, max: 15000 };
+
+// Every customer app page emits an <AppReadyBeacon /> centrally, via the
+// customer (main) template which sits inside a single empty Suspense boundary
+// (see app/customer/(main)/template.tsx and layout.tsx). The template re-mounts
+// on every navigation and is withheld until the page's real content resolves,
+// so the beacon reliably fires for those routes — the loader waits for it
+// (genuine "content is present") rather than the premature route commit.
+//
+// Auth/entry routes (login, signup, …) render OUTSIDE that (main) template and
+// therefore emit no beacon; for them the loader falls back to releasing on the
+// route commit, so it can never hang.
+const NON_BEACON_PREFIXES = [
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/update-password",
+  "/auth",
+];
+
+function isBeaconRoute(pathname: string) {
+  return !NON_BEACON_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
 const FADE_MS = 500;
 const INTRO_MS = 3600; // matches the .app-intro choreography window in globals.css
 const STARTUP_TRACE_ENABLED = process.env.NEXT_PUBLIC_STARTUP_TRACE === "1";
@@ -178,6 +202,13 @@ export function GlobalLoader({ message }: { message?: string }) {
       setPhase("showing");
       syncTraceBadge(false, false);
 
+      // On a client navigation, invalidate the previous page's readiness latch
+      // so this session waits for the DESTINATION page's beacon, never a stale
+      // "ready" left over from the page we're leaving.
+      if (nextMode === "nav" && typeof window !== "undefined") {
+        window.__arogyaReady = false;
+      }
+
       const { min, max } = nextMode === "cold" ? COLD : NAV;
       startupTrace("loader-begin", { mode: nextMode, min, max });
       addTimer(() => {
@@ -240,15 +271,16 @@ export function GlobalLoader({ message }: { message?: string }) {
     // beacon (both signals are always at-or-after content, never premature).
     const onAppReady = () => markReady("app-ready-event");
     const onWindowLoad = () => markReady("window-load");
+    // Persistent (not `once`): every page's <AppReadyBeacon /> re-dispatches
+    // this event when it mounts, so the SAME listener also delivers readiness
+    // for the destination page on later client navigations.
+    window.addEventListener(APP_READY_EVENT, onAppReady);
     if (window.__arogyaReady) {
       markReady("existing-ready-latch");
+    } else if (document.readyState === "complete") {
+      markReady("document-already-complete");
     } else {
-      window.addEventListener(APP_READY_EVENT, onAppReady, { once: true });
-      if (document.readyState === "complete") {
-        markReady("document-already-complete");
-      } else {
-        window.addEventListener("load", onWindowLoad, { once: true });
-      }
+      window.addEventListener("load", onWindowLoad, { once: true });
     }
 
     return () => {
@@ -280,8 +312,11 @@ export function GlobalLoader({ message }: { message?: string }) {
         return;
       }
       if (url.origin !== window.location.origin) return;
-      // Only for real navigations to another customer page.
-      if (!url.pathname.startsWith("/customer")) return;
+      // GlobalLoader is mounted only inside the customer portal, so every
+      // same-origin internal link here IS a customer navigation. NOTE: on the
+      // customer subdomain the visible paths are bare ("/dashboard",
+      // "/profile", …) — the "/customer" prefix is an internal middleware
+      // rewrite and never appears in the browser URL, so we must NOT require it.
       if (
         url.pathname + url.search ===
         window.location.pathname + window.location.search
@@ -296,17 +331,32 @@ export function GlobalLoader({ message }: { message?: string }) {
       begin("nav");
     };
 
-    document.addEventListener("click", onClick);
-    return () => document.removeEventListener("click", onClick);
+    // CAPTURE phase (the `true` below) is essential: Next.js's <Link> handles
+    // the click at React's root and calls preventDefault() to run client-side
+    // navigation. A bubble-phase document listener would therefore always see
+    // event.defaultPrevented === true and bail. Capturing at the document runs
+    // BEFORE React's handlers, so we detect the navigation intent first and can
+    // start the loader, while Link still performs the actual navigation.
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
   }, [begin]);
 
-  // ── Navigation readiness: the destination route has committed ────────────
+  // ── Navigation readiness ─────────────────────────────────────────────────
   useEffect(() => {
     if (firstCommitRef.current) {
       firstCommitRef.current = false; // cold launch handled on mount
       return;
     }
-    // One frame after commit so the destination has painted before we reveal it.
+    // The route commit fires immediately — before the destination's content
+    // resolves — so we deliberately do NOT release on it. Readiness comes from
+    // the destination's <AppReadyBeacon /> (delivered by the persistent
+    // APP_READY_EVENT listener), held to at least NAV.min and capped by NAV.max.
+    if (isBeaconRoute(pathname)) {
+      startupTrace("navigation-awaiting-beacon", { pathname });
+      return;
+    }
+    // Fallback for any route that does not emit a beacon: release one frame
+    // after commit so the destination has painted before we reveal it.
     startupTrace("navigation-pathname-committed", { pathname });
     const id = requestAnimationFrame(() => {
       startupTrace("navigation-pathname-ready-raf", { pathname });
