@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   PauseCircle,
   CalendarClock,
+  Clock,
   type LucideIcon,
 } from "lucide-react";
 import type { StatusPillTone } from "@/shared/components/customer/profile-ui/StatusPill";
@@ -55,6 +56,8 @@ export function getHistoryStatusVisual(
       return { label: "Out for delivery", tone: "orange", icon: Truck };
     case "REACHING_TO_LOCATION":
       return { label: "Reaching", tone: "amber", icon: Navigation };
+    case "PENDING_FAILURE_APPROVAL":
+      return { label: "Reviewing", tone: "slate", icon: Clock };
     case "DELIVERED":
       return { label: "Delivered", tone: "green", icon: CheckCircle2 };
     case "FAILED":

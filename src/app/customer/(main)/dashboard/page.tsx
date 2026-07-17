@@ -876,8 +876,9 @@ export default async function CustomerDashboard() {
         </section>
       )}
 
-      {/* Signals the loader that the full dashboard is mounted, so it dissolves
-          into a real, present page and the choreography plays in sync. */}
+      {/* Fires once the full dashboard has mounted — the signal GlobalLoader
+          waits for before crossfading, so the loader never dissolves onto a
+          blank page. */}
       <AppReadyBeacon />
     </div>
   );

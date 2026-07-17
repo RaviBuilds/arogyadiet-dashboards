@@ -165,8 +165,8 @@ export default async function CustomerProfilePage() {
         <CustomerLogoutButton className="w-full sm:w-auto" />
       </div>
 
-      {/* Signals the loader that the full profile is mounted, so a cold-land
-          on this page dissolves into real, present content — never a skeleton. */}
+      {/* Fires once the full profile has mounted — the readiness signal the
+          loader waits for before crossfading. */}
       <AppReadyBeacon />
     </div>
   );

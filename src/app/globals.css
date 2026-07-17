@@ -202,6 +202,8 @@
   }
 }
 
+
+
 /* Resting states (before reveal / no JS): visible; the sheen strip is hidden. */
 .reveal-rise {
   opacity: 1;
