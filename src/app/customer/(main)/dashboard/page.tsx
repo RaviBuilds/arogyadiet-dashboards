@@ -51,7 +51,6 @@ import {
   type MomentumStat,
 } from "@/shared/components/customer/dashboard/MomentumStrip";
 import { TransformationSpotlight } from "@/shared/components/customer/dashboard/TransformationSpotlight";
-import { AppReadyBeacon } from "@/shared/components/loader/AppReadyBeacon";
 import {
   UpcomingDeliveries,
   type DeliveryItem,
@@ -875,11 +874,6 @@ export default async function CustomerDashboard() {
           </div>
         </section>
       )}
-
-      {/* Fires once the full dashboard has mounted — the signal GlobalLoader
-          waits for before crossfading, so the loader never dissolves onto a
-          blank page. */}
-      <AppReadyBeacon />
     </div>
   );
 }

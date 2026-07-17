@@ -3,22 +3,27 @@ import { ArrowRight, PauseCircle, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusPill } from "@/shared/components/customer/profile-ui/StatusPill";
 import { JourneyIllustration } from "./journey-illustrations";
-import { getMealJourneyVisual } from "./meal-journey-status";
+import {
+  getMealJourneyStageIndex,
+  getMealJourneyVisual,
+} from "./meal-journey-status";
+import { MealJourneyStepper } from "./MealJourneyStepper";
+import { MealDetailsToggle } from "./MealDetailsToggle";
 import type { AddonProductLine } from "./SubscriptionTimeline";
 
 /**
- * TodayMealJourneyCard — the hero of My Meals.
+ * TodayMealJourneyCard — the emotional highlight of My Meals.
  *
- * Design intent: the backend `delivery_orders.status` value must never be
- * the hero. Every real status resolves (via meal-journey-status.ts) to a
- * human headline + reassuring body copy + a full-bleed illustration scene;
- * the raw status is demoted to a small secondary pill in the corner —
+ * Answers one question: "where is my breakmealfast right now?" Every real
+ * status resolves (via meal-journey-status.ts) to a human headline +
+ * reassuring body copy + a full-bleed illustrated scene + a quiet stage
+ * indicator; the raw backend status is demoted to a small secondary pill —
  * supporting the story, never telling it.
  *
- * Craftsmanship pass: the illustration panel is now a full-height gradient
- * scene (not a bare icon in a flat rectangle) and takes a full 45% of the
- * card on desktop / a tall band on mobile, so this reads as the strongest
- * visual moment on the page rather than its thinnest.
+ * The illustration and the text share one continuous background wash
+ * (rather than a hard-edged icon panel butted against a plain white text
+ * panel) so the two halves read as a single composition — the scene bleeds
+ * its tone in behind the copy instead of stopping dead at a border.
  */
 export function TodayMealJourneyCard({
   isPaused,
@@ -84,20 +89,30 @@ export function TodayMealJourneyCard({
 
   const visual = getMealJourneyVisual(status);
   const cta = visual.cta?.({ orderId }) ?? null;
+  const stageIndex = getMealJourneyStageIndex(status);
 
   const borderTone =
     visual.tone === "amber"
       ? "border-amber-200"
       : visual.tone === "green"
         ? "border-emerald-200"
-        : visual.tone === "blue"
-          ? "border-blue-200"
-          : visual.tone === "orange"
-            ? "border-orange-200"
-            : "border-slate-200";
+        : visual.tone === "orange"
+          ? "border-orange-200"
+          : "border-slate-200";
 
-  const ctaButton = cta ? (
-    cta.external ? (
+  const washTone =
+    visual.tone === "amber"
+      ? "from-amber-50/80"
+      : visual.tone === "green"
+        ? "from-emerald-50/80"
+        : visual.tone === "orange"
+          ? "from-orange-50/80"
+          : "from-slate-50/80";
+
+  const ctaButton =
+    cta?.kind === "expand" ? (
+      <MealDetailsToggle />
+    ) : cta?.kind === "external" ? (
       <a
         href={cta.href}
         target="_blank"
@@ -107,7 +122,7 @@ export function TodayMealJourneyCard({
         {cta.label}
         <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
       </a>
-    ) : (
+    ) : cta?.kind === "link" ? (
       <Link
         href={cta.href}
         className="group mt-2 inline-flex w-fit items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:brightness-105 active:scale-[0.98]"
@@ -115,23 +130,31 @@ export function TodayMealJourneyCard({
         {cta.label}
         <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
       </Link>
-    )
-  ) : null;
+    ) : null;
 
   return (
     <section
       className={cn(
-        "reveal-rise overflow-hidden rounded-3xl border bg-white shadow-sm",
+        "reveal-rise relative overflow-hidden rounded-3xl border bg-white shadow-sm",
         borderTone,
       )}
       style={{ ["--reveal-delay" as string]: "550ms" }}
     >
-      <div className="flex flex-col sm:flex-row sm:min-h-[17rem]">
+      {/* Shared wash bleeding from the illustration into the text panel, so
+          both halves read as one scene rather than two disconnected blocks. */}
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-0 bg-gradient-to-r to-transparent sm:to-70%",
+          washTone,
+        )}
+      />
+
+      <div className="relative flex flex-col sm:flex-row sm:min-h-[18rem]">
         <div className="h-48 w-full shrink-0 sm:h-auto sm:w-[45%]">
           <JourneyIllustration id={visual.illustration} tone={visual.tone} />
         </div>
 
-        <div className="flex flex-1 flex-col justify-center gap-3 p-6 sm:p-8">
+        <div className="relative flex flex-1 flex-col justify-center gap-3 p-6 sm:p-8">
           <div className="flex items-start justify-between gap-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               {visual.eyebrow}
@@ -156,6 +179,12 @@ export function TodayMealJourneyCard({
           ) : null}
 
           {ctaButton}
+
+          {stageIndex !== null ? (
+            <div className="mt-3 pt-3">
+              <MealJourneyStepper stageIndex={stageIndex} />
+            </div>
+          ) : null}
         </div>
       </div>
     </section>
