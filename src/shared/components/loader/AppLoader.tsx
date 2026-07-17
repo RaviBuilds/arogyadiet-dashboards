@@ -16,7 +16,9 @@ import Image from "next/image";
 export function AppLoader({
   message = "Preparing your healthy day…",
 }: {
-  message?: string;
+  /** Pass `null` to show the mark + halo only (used for the lighter
+   *  internal-navigation loader, where copy would feel heavy). */
+  message?: string | null;
 }) {
   return (
     <div className="app-loader-fadein flex -translate-y-[4%] flex-col items-center">
@@ -50,9 +52,11 @@ export function AppLoader({
         />
       </div>
 
-      <p className="mt-7 text-[15px] font-medium tracking-wide text-emerald-900/80">
-        {message}
-      </p>
+      {message ? (
+        <p className="mt-7 text-[15px] font-medium tracking-wide text-emerald-900/80">
+          {message}
+        </p>
+      ) : null}
     </div>
   );
 }

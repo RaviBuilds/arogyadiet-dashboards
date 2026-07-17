@@ -1,11 +1,51 @@
 import Link from "next/link";
+import type { LucideIcon } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { ChevronLeft, ChevronRight, PauseCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { StatusPill } from "@/shared/components/customer/profile-ui/StatusPill";
+import {
+  StatusPill,
+  type StatusPillTone,
+} from "@/shared/components/customer/profile-ui/StatusPill";
 import { getHistoryStatusVisual } from "@/shared/components/customer/meals/meal-history-status";
 
 export type AddonProductLine = { name: string; quantity: number };
+
+/** Text-tone map mirroring StatusPill's palette, but without the pill chrome
+ *  (border + tinted background) — used in the desktop table so a status
+ *  reads as a calm label rather than a loud badge repeated down every row. */
+const QUIET_TONES: Record<StatusPillTone, string> = {
+  green: "text-emerald-600",
+  coral: "text-primary",
+  amber: "text-amber-600",
+  slate: "text-slate-400",
+  blue: "text-blue-600",
+  purple: "text-purple-600",
+  red: "text-red-600",
+  orange: "text-orange-600",
+};
+
+function QuietStatusLabel({
+  tone,
+  icon: Icon,
+  children,
+}: {
+  tone: StatusPillTone;
+  icon?: LucideIcon;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 text-sm font-medium",
+        QUIET_TONES[tone],
+      )}
+    >
+      {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+      {children}
+    </span>
+  );
+}
 
 export type HistoryRow = {
   date: string;
@@ -36,17 +76,17 @@ export function SubscriptionTimeline({
   totalPages: number;
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
       {/* Desktop table */}
       <div className="hidden md:block">
-        <div className="grid grid-cols-4 bg-slate-50/50 border-b border-slate-100 px-6 py-4 text-xs font-medium text-slate-500 uppercase tracking-wider">
+        <div className="grid grid-cols-[1fr_1.4fr_1fr_auto] gap-4 border-b border-slate-100 px-6 py-3 text-xs font-medium text-slate-400 tracking-wide">
           <div>Date</div>
-          <div>Meal/Action</div>
+          <div>Meal</div>
           <div>Status</div>
-          <div className="text-right">Day #</div>
+          <div className="text-right">Day</div>
         </div>
 
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-slate-100/80">
           {historyData.map((row, idx) => {
             const absoluteDayNumber = (currentPage - 1) * pageSize + idx + 1;
             const dateObj = parseISO(row.date);
@@ -55,14 +95,22 @@ export function SubscriptionTimeline({
               row.is_paused,
               row.date,
             );
+            // Repeat-meal-name de-emphasis: when today's meal matches the
+            // row directly above it (the common case — same plan every
+            // day), fade it to a quieter tone instead of repeating it at
+            // full visual weight ten rows in a row. Still shows the data,
+            // just doesn't shout it.
+            const prevMealName = idx > 0 ? historyData[idx - 1]?.meal_name : null;
+            const isRepeatMeal =
+              !row.is_paused && row.meal_name && row.meal_name === prevMealName;
 
             return (
               <div
                 key={idx}
-                className="px-6 py-5 grid grid-cols-4 items-center hover:bg-slate-50 transition-colors duration-200"
+                className="grid grid-cols-[1fr_1.4fr_1fr_auto] items-center gap-4 px-6 py-3.5 transition-colors duration-200 hover:bg-slate-50/60"
               >
-                <div className="font-medium text-slate-900">
-                  {format(dateObj, "MMM do, yyyy")}
+                <div className="text-sm font-medium text-slate-700">
+                  {format(dateObj, "MMM d, yyyy")}
                 </div>
 
                 <div>
@@ -72,11 +120,18 @@ export function SubscriptionTimeline({
                     </span>
                   ) : (
                     <div>
-                      <span className="text-sm font-medium text-slate-700">
+                      <span
+                        className={cn(
+                          "text-sm",
+                          isRepeatMeal
+                            ? "text-slate-400"
+                            : "font-medium text-slate-700",
+                        )}
+                      >
                         {row.meal_name || "Meal"}
                       </span>
                       {row.addons.length > 0 && (
-                        <div className="text-xs text-slate-500 mt-0.5 space-y-0.5">
+                        <div className="mt-0.5 space-y-0.5 text-xs text-slate-400">
                           {row.addons.map((a, i) => (
                             <div key={`${a.name}-${i}`}>
                               + {a.name} (x{a.quantity})
@@ -89,12 +144,12 @@ export function SubscriptionTimeline({
                 </div>
 
                 <div>
-                  <StatusPill tone={visual.tone} icon={visual.icon}>
+                  <QuietStatusLabel tone={visual.tone} icon={visual.icon}>
                     {visual.label}
-                  </StatusPill>
+                  </QuietStatusLabel>
                 </div>
 
-                <div className="text-right font-mono text-sm text-slate-400">
+                <div className="text-right font-mono text-xs text-slate-400">
                   {absoluteDayNumber}
                 </div>
               </div>

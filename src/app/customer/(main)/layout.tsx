@@ -2,7 +2,6 @@ import { getCustomerSession } from "@/lib/customer/get-session";
 import { CustomerHeader } from "@/shared/components/layout/customer-header";
 import { CustomerSidebar } from "@/shared/components/layout/customer-sidebar";
 import { RouteProgressBar } from "@/shared/components/layout/RouteProgressBar";
-import { AppLoaderOverlay } from "@/shared/components/loader/AppLoaderOverlay";
 import { DeferredClientProviders } from "@/shared/components/customer/DeferredClientProviders";
 import { HydrationTimer } from "@/shared/components/perf/HydrationTimer";
 import { redirect } from "next/navigation";
@@ -41,9 +40,9 @@ export default async function CustomerLayout({
   return (
     // ADDED max-w-full and overflow-x-hidden to kill horizontal scroll
     <div className="flex min-h-screen w-full max-w-full bg-slate-50/50 print:block print:min-h-0 print:bg-white">
-      {/* Branded "opening the app" experience — covers the first paint, then
-          fades and reveals the page (which triggers the signature). */}
-      <AppLoaderOverlay message="Preparing today's wellness journey…" />
+      {/* The branded loading experience is owned by GlobalLoader in the
+          synchronous customer shell layout (see app/customer/layout.tsx), so it
+          is the first painted frame and never waits on this layout's session. */}
       {/* Instant visual feedback the moment a nav link is clicked, before the
           new route's data even starts loading. */}
       <Suspense fallback={null}>
