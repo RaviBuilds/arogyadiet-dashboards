@@ -44,6 +44,10 @@ import {
   type AddressSaveError,
 } from "@/lib/address/serviceablePincode";
 import type { CustomerCategory } from "@/lib/onboarding/category";
+import {
+  extractLocalityFields,
+  isFullyResolvedLocality,
+} from "@/lib/address/extractLocalityFields";
 
 const HYDERABAD_CENTER = { lat: 17.385, lng: 78.4867 };
 
@@ -189,56 +193,6 @@ async function getCurrentPosition(): Promise<{
   }
 }
 
-interface ResolvedLocalityFields {
-  streetAddress: string;
-  area: string;
-  city: string;
-  state: string;
-  pincode: string;
-}
-
-/**
- * Extract streetAddress/area/city/state/pincode from Google address components. Fields that
- * cannot be determined are returned as empty strings so the caller can leave
- * them blank and surface an unresolved-address error (Req 5.7).
- */
-function extractLocalityFields(
-  components: google.maps.GeocoderAddressComponent[],
-): ResolvedLocalityFields {
-  const byType = (type: string) =>
-    components.find((component) => component.types.includes(type));
-
-  const pincode = byType("postal_code")?.long_name ?? "";
-  const state = byType("administrative_area_level_1")?.long_name ?? "";
-  const city =
-    byType("locality")?.long_name ??
-    byType("postal_town")?.long_name ??
-    byType("administrative_area_level_2")?.long_name ??
-    "";
-  const area =
-    byType("sublocality_level_1")?.long_name ??
-    byType("sublocality")?.long_name ??
-    byType("neighborhood")?.long_name ??
-    byType("route")?.long_name ??
-    "";
-
-  // Build street address from premise, route, sublocality_level_2, sublocality_level_1, neighborhood
-  const streetParts = [
-    byType("premise")?.long_name,
-    byType("route")?.long_name,
-    byType("sublocality_level_2")?.long_name,
-    byType("sublocality_level_1")?.long_name,
-    byType("neighborhood")?.long_name,
-  ].filter(Boolean);
-  const streetAddress = streetParts.join(", ");
-
-  return { streetAddress, area, city, state, pincode };
-}
-
-function isFullyResolved(fields: ResolvedLocalityFields): boolean {
-  return Boolean(fields.area && fields.city && fields.state && fields.pincode);
-}
-
 export function AddressCaptureMap({
   value,
   onChange,
@@ -297,7 +251,7 @@ export function AddressCaptureMap({
       customerCategory,
     });
     const resolved =
-      isFullyResolved({
+      isFullyResolvedLocality({
         streetAddress: value.streetAddress,
         area: value.area,
         city: value.city,
@@ -353,7 +307,7 @@ export function AddressCaptureMap({
       }
 
       const fields = extractLocalityFields(components);
-      setUnresolved(!isFullyResolved(fields));
+      setUnresolved(!isFullyResolvedLocality(fields));
       patchValue({ lat, lng, ...fields });
     },
     [patchValue],
@@ -441,7 +395,7 @@ export function AddressCaptureMap({
       setMapCenter(coords);
       mapRef.current?.panTo(coords);
       const fields = extractLocalityFields(place.address_components);
-      setUnresolved(!isFullyResolved(fields));
+      setUnresolved(!isFullyResolvedLocality(fields));
       patchValue({ lat, lng, searchText, ...fields });
     } else {
       patchValue({ searchText });

@@ -1,28 +1,26 @@
-import { LoginForm } from "@/shared/components/forms/login-form";
-import Image from "next/image";
+import { RiderLoginForm } from "@/shared/components/rider/RiderLoginForm";
 
 export default function RiderLogin() {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted p-6 md:p-10">
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <div className="flex items-center justify-center bg-white p-4 rounded-2xl shadow-sm self-center">
-          <Image
-            src="/logo.png"
-            alt="ArogyaDiet"
-            width={180}
-            height={60}
-            priority
-            className="h-auto w-auto"
-          />
-        </div>
+    <div className="relative flex min-h-svh w-full items-center justify-center overflow-hidden bg-gradient-to-br from-red-50/60 via-white to-amber-50/50 p-5 sm:p-6">
+      {/* Ambient background — on-brand red/amber wash (matches --primary),
+          same visual grammar as the customer portal's wellness glow so the
+          two portals read as one product family. Purely decorative. */}
+      <div className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-red-200/40 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -left-20 h-80 w-80 rounded-full bg-amber-100/50 blur-3xl" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[460px] w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.9)_0%,rgba(255,255,255,0)_70%)]" />
 
-        <LoginForm
-          socialLogin={false}
-          showSignup={false} // <-- THIS HIDES THE SIGNUP TEXT
+      <div className="relative z-10 flex w-full max-w-[400px] flex-col items-center gap-6">
+        <RiderLoginForm
           formTitle="Delivery Partner Portal"
           portalRole="RIDER"
           redirectPath="/dashboard"
         />
+
+        <p className="text-center text-xs font-medium text-slate-400">
+          ArogyaDiet Delivery Partner Portal — keeping every delivery on
+          track.
+        </p>
       </div>
     </div>
   );
