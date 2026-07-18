@@ -22,13 +22,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
-import { MapPin, Loader2, CheckCircle2, Navigation, Home } from "lucide-react";
+import {
+  MapPin,
+  Loader2,
+  CheckCircle2,
+  Navigation,
+  Home,
+  ListChecks,
+  Settings2,
+} from "lucide-react";
 import { saveAddressAction } from "@/actions/addressActions";
 import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
 import { createAddressSchema } from "@/validations/addressSchema";
 import type { AddressFormValues } from "@/validations/addressSchema";
 import type { Address } from "@/services/addressService";
 import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh";
+import {
+  reverseGeocodeToFields,
+  type ResolvedLocalityFields,
+} from "@/lib/address/extractLocalityFields";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
+import { StatusPill } from "@/shared/components/customer/profile-ui/StatusPill";
 
 const AddressPickerMap = dynamic(
   () =>
@@ -51,18 +65,25 @@ interface AddressFormModalProps {
 }
 
 /**
- * Small numbered eyebrow used to visually group the dialog into a "guided
- * setup" feel (Location → Address Details → Delivery Preferences) without
- * turning it into an actual multi-step wizard — same section-label pattern
- * used elsewhere in profile-ui (uppercase, tracked, slate-400).
+ * Eyebrow used to visually group the dialog into a "guided setup" feel
+ * (Location → Address Details → Delivery Preferences) without turning it
+ * into an actual multi-step wizard. Reuses the same IconChip + tracked
+ * uppercase label pattern as every other section header across the
+ * customer dashboard (Personal Details, Delivery Addresses, etc.) instead
+ * of a generic numbered circle, so this dialog reads as part of the same
+ * product rather than a bolted-on form.
  */
-function FormGroupLabel({ step, children }: { step: number; children: React.ReactNode }) {
+function FormGroupLabel({
+  icon,
+  children,
+}: {
+  icon: React.ComponentProps<typeof IconChip>["icon"];
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-500">
-        {step}
-      </span>
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+    <div className="flex items-center gap-2.5">
+      <IconChip icon={icon} tone="coral" size="sm" />
+      <p className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-primary/80">
         {children}
       </p>
     </div>
@@ -183,6 +204,31 @@ export function AddressFormModal({
     [form],
   );
 
+  /**
+   * Auto-fills area/city/state/pincode whenever the map resolves a location —
+   * via search selection, pin drag, or "Detect" — mirroring the admin Quick
+   * Onboarding address capture flow. Flat/House No stays manual (street_1).
+   */
+  const handleAddressResolved = useCallback(
+    (fields: ResolvedLocalityFields) => {
+      const areaOrStreet = fields.streetAddress || fields.area;
+      if (areaOrStreet) {
+        form.setValue("street_2", areaOrStreet, { shouldDirty: true });
+      }
+      if (fields.city) {
+        form.setValue("city", fields.city, { shouldDirty: true });
+      }
+      if (fields.state) {
+        form.setValue("state", fields.state, { shouldDirty: true });
+      }
+      if (fields.pincode) {
+        form.setValue("pincode", fields.pincode, { shouldDirty: true });
+        form.trigger("pincode");
+      }
+    },
+    [form],
+  );
+
   const handleDetectLocation = () => {
     setLocationStatus("loading");
     setLocationErrorMsg("");
@@ -195,11 +241,17 @@ export function AddressFormModal({
     }
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        form.setValue("lat", position.coords.latitude, { shouldDirty: true });
-        form.setValue("lng", position.coords.longitude, { shouldDirty: true });
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        form.setValue("lat", latitude, { shouldDirty: true });
+        form.setValue("lng", longitude, { shouldDirty: true });
         setLocationStatus("success");
         setServerError(null); // Clear any previous errors
+
+        // Auto-fill the locality fields from the detected coordinates so
+        // "Detect" behaves the same as picking a place or dragging the pin.
+        const fields = await reverseGeocodeToFields(latitude, longitude);
+        if (fields) handleAddressResolved(fields);
       },
       (error) => {
         setLocationStatus("error");
@@ -273,13 +325,34 @@ export function AddressFormModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl sm:max-w-[500px]">
+      <DialogContent
+        className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-[520px]"
+        // Google Places renders its suggestion list (`.pac-container`) in a
+        // portal attached directly to <body>, outside this Dialog's content
+        // tree. Radix's dismissable-layer sees a click landing there as an
+        // "outside" interaction and closes the dialog before the click can
+        // ever reach Google's own onPlaceChanged handler — so a suggestion
+        // never gets a chance to register as selected. Letting clicks that
+        // land inside `.pac-container` pass through fixes that without
+        // touching the shared Dialog primitive.
+        onInteractOutside={(event) => {
+          const target = event.target as HTMLElement | null;
+          if (target?.closest(".pac-container")) {
+            event.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
-            <Home className="h-4 w-4 text-primary" />
-            {initialData ? "Edit Address" : "Add Delivery Address"}
+          <div className="flex items-center gap-2.5">
+            <IconChip icon={Home} tone="green" />
+            <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-emerald-700/90">
+              {initialData ? "Edit Address" : "New Address"}
+            </span>
+          </div>
+          <DialogTitle className="mt-1 text-xl font-semibold tracking-tight text-slate-900">
+            {initialData ? "Edit delivery address" : "Add delivery address"}
           </DialogTitle>
-          <DialogDescription className="text-sm text-slate-500">
+          <DialogDescription className="text-sm leading-relaxed text-slate-500">
             Enter the details for your daily diet deliveries.
           </DialogDescription>
         </DialogHeader>
@@ -287,24 +360,24 @@ export function AddressFormModal({
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 py-2">
           {/* Group 1 — Location */}
           <div className="space-y-3">
-            <FormGroupLabel step={1}>Location</FormGroupLabel>
+            <FormGroupLabel icon={MapPin}>Location</FormGroupLabel>
 
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+            <div className="flex flex-col gap-3 rounded-3xl border border-slate-100 bg-slate-50/60 p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h4 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                     <MapPin className="h-4 w-4 text-primary" /> Delivery
                     Coordinates
                   </h4>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
                     We need your exact location for accurate routing.
                   </p>
                 </div>
 
                 {locationStatus === "success" ? (
-                  <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Captured
-                  </div>
+                  <StatusPill icon={CheckCircle2} tone="green" className="shrink-0">
+                    Captured
+                  </StatusPill>
                 ) : (
                   <Button
                     type="button"
@@ -334,6 +407,9 @@ export function AddressFormModal({
                   lng={form.watch("lng") ?? null}
                   disabled={skipLocation}
                   onCoordinatesChange={handleCoordinatesChange}
+                  showSearchBox
+                  searchPlaceholder="Search apartment name or locality"
+                  onAddressResolved={handleAddressResolved}
                 />
               )}
 
@@ -369,9 +445,9 @@ export function AddressFormModal({
 
           {/* Group 2 — Address Details */}
           <div className="space-y-3">
-            <FormGroupLabel step={2}>Address Details</FormGroupLabel>
+            <FormGroupLabel icon={ListChecks}>Address Details</FormGroupLabel>
 
-            <div className="space-y-4 rounded-2xl border border-slate-200 p-4">
+            <div className="space-y-4 rounded-3xl border border-slate-100 p-4 sm:p-5">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-slate-600">Tag</Label>
@@ -438,9 +514,9 @@ export function AddressFormModal({
 
           {/* Group 3 — Delivery Preferences */}
           <div className="space-y-3">
-            <FormGroupLabel step={3}>Delivery Preferences</FormGroupLabel>
+            <FormGroupLabel icon={Settings2}>Delivery Preferences</FormGroupLabel>
 
-            <div className="flex flex-row items-center justify-between rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-row items-center justify-between rounded-3xl border border-slate-100 bg-slate-50/60 p-4 sm:p-5">
               <div className="space-y-0.5">
                 <Label className="text-sm font-medium text-slate-800">
                   Set as default address

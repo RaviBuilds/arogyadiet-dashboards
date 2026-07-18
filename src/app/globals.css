@@ -57,6 +57,44 @@
   font-family: var(--font-fraunces), Georgia, "Times New Roman", serif;
 }
 
+/* Safe-area utilities for the Capacitor-wrapped Rider app — padding that
+   respects a device notch / status bar / home-indicator instead of letting
+   fixed headers or bottom nav sit under them. Resolves to 0 (no-op) on any
+   browser without safe-area support, so desktop/tablet views are unaffected.
+   `rider-bottom-nav.tsx` already references `pb-safe`; this is what makes
+   that class actually do something instead of silently no-op. */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* =======================================================================
+   Rider app shell — native-app feel inside the Capacitor WebView (and any
+   mobile browser at narrow widths). Purely cosmetic/interaction polish:
+   no effect on data, routing, or component logic.
+   ======================================================================= */
+.rider-app-shell {
+  /* Kill the blue/gray tap-highlight flash Android WebViews show on every
+     touch — the single biggest "this is a website, not an app" tell. */
+  -webkit-tap-highlight-color: transparent;
+  /* Stop the rubber-band/bounce overscroll so swiping past the top/bottom
+     of the page doesn't reveal browser chrome behind it. */
+  overscroll-behavior-y: contain;
+}
+
+/* Buttons, links and nav items get the app-like "no text selection, no
+   callout menu" treatment — body copy (addresses, names, amounts) stays
+   selectable since riders may want to copy/share those. */
+.rider-app-shell button,
+.rider-app-shell a,
+.rider-app-shell [role="button"] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -139,6 +177,28 @@
   html {
     @apply font-sans;
   }
+}
+
+/* Google Places Autocomplete renders its suggestion dropdown (`.pac-container`)
+   in a portal attached directly to <body>. Two things break inside a modal:
+
+   1. Stacking — our dialogs use a z-50 overlay/content stack, so the dropdown
+      must sit above it to be visible.
+   2. Interaction — Radix Dialog sets `pointer-events: none` on <body> while
+      open and only re-enables it on the dialog content. Because the dropdown
+      is a direct child of <body> (outside the dialog content), it inherits
+      `pointer-events: none` and its suggestions become literally unclickable.
+
+   Forcing a high z-index AND `pointer-events: auto` fixes both so a customer
+   can actually tap a suggestion from inside the Add/Edit Address dialog. */
+.pac-container {
+  z-index: 100 !important;
+  pointer-events: auto !important;
+}
+
+.pac-item {
+  pointer-events: auto !important;
+  cursor: pointer;
 }
 
 /* =======================================================================

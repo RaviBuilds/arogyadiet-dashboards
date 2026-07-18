@@ -19,6 +19,7 @@ import {
   MapPin,
   ArrowRight,
   PowerOff,
+  Package,
 } from "lucide-react";
 import { RiderStatusToggle } from "@/shared/components/rider/rider-status-toggle";
 import { AutoOffDutyNotice } from "@/shared/components/rider/AutoOffDutyNotice";
@@ -144,10 +145,10 @@ export async function RiderDashboardContent() {
   return (
     <>
       <div className="pt-4 pb-2">
-        <h1 className="text-2xl font-black text-zinc-900 flex items-center gap-2">
+        <h1 className="flex items-center gap-2 text-2xl font-black text-zinc-900">
           Hey, {profile.full_name.split(" ")[0]} 👋
         </h1>
-        <p className="text-zinc-500 font-medium mt-1">
+        <p className="mt-1 font-medium text-zinc-500">
           {format(new Date(), "EEEE, do MMM")}
         </p>
       </div>
@@ -157,15 +158,15 @@ export async function RiderDashboardContent() {
       <AutoOffDutyNotice isOnline={isOnDuty} />
 
       {!isOnDuty && (
-        <Card className="border-dashed border-2 border-zinc-200 shadow-none bg-white rounded-2xl">
-          <CardContent className="p-6 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 text-zinc-500">
-              <PowerOff className="h-7 w-7" />
+        <Card className="rounded-2xl border-2 border-dashed border-zinc-200 bg-white/70 shadow-none backdrop-blur-sm">
+          <CardContent className="p-8 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-100 text-zinc-400 ring-8 ring-zinc-50">
+              <PowerOff className="h-8 w-8" />
             </div>
             <h2 className="text-xl font-black text-zinc-900">
               You are offline
             </h2>
-            <p className="mt-2 text-sm font-medium text-zinc-500">
+            <p className="mx-auto mt-2 max-w-[15rem] text-sm font-medium text-zinc-500">
               Toggle On Duty to sync{" "}
               {isEveningPreview ? "tomorrow's" : "today's"} assigned route.
             </p>
@@ -175,19 +176,20 @@ export async function RiderDashboardContent() {
 
       {isOnDuty && (
         <div>
-          <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-3 px-1">
+          <h3 className="mb-3 flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider text-zinc-400">
+            <span className="h-3.5 w-1 rounded-full bg-[#e74c3c]" aria-hidden="true" />
             {overviewHeading}
           </h3>
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <Card className="border-none shadow-sm bg-white rounded-2xl">
+          <div className="mb-4 grid grid-cols-2 gap-4">
+            <Card className="rounded-2xl border border-zinc-100 bg-white shadow-sm transition-transform active:scale-[0.98]">
               <CardContent className="flex flex-col items-center justify-center p-4 text-center">
-                <div className="mb-3 rounded-full bg-orange-50 p-3 text-orange-500">
+                <div className="mb-3 rounded-full bg-orange-50 p-3 text-orange-500 ring-8 ring-orange-50/40">
                   <Clock className="h-6 w-6" />
                 </div>
-                <p className="text-2xl font-black text-zinc-900">
+                <p className="text-3xl font-black leading-none text-zinc-900">
                   {pendingDrops}
                 </p>
-                <p className="mt-1 text-xs font-bold uppercase tracking-wider text-zinc-400">
+                <p className="mt-1.5 text-xs font-bold uppercase tracking-wider text-zinc-400">
                   Pending Drops
                 </p>
                 <span className="mt-2 rounded-full bg-zinc-50 px-2 py-1 text-[10px] text-zinc-500">
@@ -200,15 +202,15 @@ export async function RiderDashboardContent() {
               </CardContent>
             </Card>
 
-            <Card className="border-none shadow-sm bg-white rounded-2xl">
+            <Card className="rounded-2xl border border-zinc-100 bg-white shadow-sm transition-transform active:scale-[0.98]">
               <CardContent className="flex flex-col items-center justify-center p-4 text-center">
-                <div className="mb-3 rounded-full bg-green-50 p-3 text-green-600">
+                <div className="mb-3 rounded-full bg-green-50 p-3 text-green-600 ring-8 ring-green-50/40">
                   <IndianRupee className="h-6 w-6" />
                 </div>
-                <p className="text-2xl font-black text-green-600">
+                <p className="text-3xl font-black leading-none text-green-600">
                   ₹{estimatedPayout.toFixed(2)}
                 </p>
-                <p className="mt-1 text-xs font-bold uppercase tracking-wider text-zinc-400">
+                <p className="mt-1.5 text-xs font-bold uppercase tracking-wider text-zinc-400">
                   Est. Payout
                 </p>
                 <span className="mt-2 rounded-full bg-zinc-50 px-2 py-1 text-[10px] text-zinc-500">
@@ -218,22 +220,30 @@ export async function RiderDashboardContent() {
             </Card>
           </div>
 
-          <Card className="mt-4 border-none bg-white shadow-sm rounded-2xl">
+          <Card className="mt-4 rounded-2xl border border-zinc-100 bg-white shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold uppercase text-muted-foreground">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 Items to Deliver
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 pt-0">
               {Object.entries(itemsByCategory).length === 0 ? (
-                <p className="text-sm font-medium text-zinc-500">
-                  No items assigned for this shift.
-                </p>
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-50 text-zinc-300">
+                    <Package className="h-6 w-6" />
+                  </div>
+                  <p className="text-sm font-medium text-zinc-500">
+                    No items assigned for this shift.
+                  </p>
+                </div>
               ) : (
                 Object.entries(itemsByCategory)
                   .sort(([a], [b]) => a.localeCompare(b))
                   .map(([categoryName, stats]) => (
-                    <div key={categoryName} className="flex items-center">
+                    <div
+                      key={categoryName}
+                      className="flex items-center rounded-xl bg-zinc-50/60 px-3 py-2.5"
+                    >
                       {isCategoryComplete(stats) ? (
                         <CheckCircle2 className="mr-2 h-4 w-4 shrink-0 text-green-600" />
                       ) : stats.assigned > 0 ? (
@@ -254,21 +264,21 @@ export async function RiderDashboardContent() {
         <div className="mt-8">
           <Link
             href="/route"
-            className="block w-full bg-zinc-900 hover:bg-zinc-800 text-white rounded-2xl p-5 shadow-lg transition-transform"
+            className="block w-full rounded-2xl bg-gradient-to-br from-[#f0685a] via-[#e74c3c] to-[#c0392b] p-5 text-white shadow-lg shadow-red-900/25 transition-transform active:scale-[0.98]"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="bg-white/20 p-2.5 rounded-full">
+                <div className="rounded-full bg-white/20 p-2.5">
                   <MapPin className="h-6 w-6 text-white" />
                 </div>
                 <div>
                   <p className="font-bold text-lg leading-tight">Start Route</p>
-                  <p className="text-sm text-zinc-400 font-medium mt-0.5">
+                  <p className="mt-0.5 text-sm font-medium text-white/75">
                     Head to Central Kitchen
                   </p>
                 </div>
               </div>
-              <ArrowRight className="h-6 w-6 text-zinc-400" />
+              <ArrowRight className="h-6 w-6 text-white/75" />
             </div>
           </Link>
         </div>

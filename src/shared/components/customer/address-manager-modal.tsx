@@ -77,17 +77,19 @@ export function AddressManagerModal({
         }
       }}
     >
-      <DialogContent className="sm:max-w-4xl w-[95vw] md:w-[90vw] lg:w-[80vw] max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-4xl w-[95vw] md:w-[90vw] lg:w-[80vw] max-h-[85vh] overflow-y-auto rounded-3xl">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-bold">
+          <DialogTitle className="text-xl font-semibold tracking-tight text-slate-900">
             Manage Addresses
           </DialogTitle>
         </DialogHeader>
 
         <div className="py-4">
           {isLoading ? (
-            <div className="h-32 flex items-center justify-center">
-              Loading...
+            <div className="flex h-32 items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-slate-50/50">
+              <p className="animate-pulse text-sm text-slate-500">
+                Loading addresses...
+              </p>
             </div>
           ) : (
             // 3. Pass the refresh function down to your list!

@@ -320,14 +320,16 @@ export function RiderStatusToggle({
     <div className="space-y-3">
       <div
         className={cn(
-          "p-5 rounded-2xl border-2 transition-colors duration-300 flex items-center justify-between shadow-sm",
-          isOnDuty ? "bg-green-50 border-green-200" : "bg-white border-zinc-200",
+          "flex items-center justify-between rounded-2xl border-2 p-5 shadow-sm transition-colors duration-300",
+          isOnDuty
+            ? "border-green-200 bg-green-50"
+            : "border-zinc-200 bg-white",
         )}
       >
         <div className="flex items-center gap-4">
           <div
             className={cn(
-              "h-12 w-12 rounded-full flex items-center justify-center transition-colors shrink-0",
+              "flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-colors",
               isOnDuty
                 ? "bg-green-100 text-green-700"
                 : "bg-zinc-100 text-zinc-400",
@@ -340,22 +342,27 @@ export function RiderStatusToggle({
             )}
           </div>
           <div>
-            <h2 className="font-black text-lg text-zinc-900 leading-tight">
+            <h2 className="text-lg font-black leading-tight text-zinc-900">
               {isOnDuty ? "You are On Duty" : "You are Offline"}
             </h2>
-            <p className="text-sm font-medium text-zinc-500 mt-0.5">
+            <p className="mt-0.5 text-sm font-medium text-zinc-500">
               {isOnDuty
                 ? "Background tracking active..."
                 : "Toggle to start shift"}
             </p>
           </div>
         </div>
-        <Switch
-          checked={isOnDuty}
-          onCheckedChange={handleToggle}
-          disabled={isPending}
-          className="scale-125 ml-2"
-        />
+        {/* Extra padding around the Switch widens its effective tap target
+            without changing the control itself — easier to hit reliably on
+            touch, like a native iOS/Android toggle row. */}
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center">
+          <Switch
+            checked={isOnDuty}
+            onCheckedChange={handleToggle}
+            disabled={isPending}
+            className="scale-125"
+          />
+        </div>
       </div>
 
       {isOnDuty && gpsBlocked && (
