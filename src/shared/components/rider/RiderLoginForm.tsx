@@ -207,29 +207,28 @@ export function RiderLoginForm({
 
 /**
  * RiderBrandMark — one cohesive hero mark instead of a floating logo box
- * plus a separate generic icon. Uses `object-contain` (never `object-cover`)
- * so the wordmark logo is always shown in full, never cropped, regardless
- * of its native aspect ratio. The bike badge sits fully outside the logo's
- * padded frame — not layered on top of it — so it never obscures any part
- * of the wordmark while still reading as one connected mark.
+ * plus a separate generic icon. The logo image itself IS the rounded
+ * square (no separate padded white frame sitting behind it) — the
+ * `rounded-[22px] overflow-hidden` lives directly on the same element
+ * that sizes the image, so there's a single visible box, not a box inside
+ * a box. `object-cover` fills that square edge-to-edge since the source
+ * logo is already square (1080×1080), so nothing gets cropped.
  */
 function RiderBrandMark() {
   return (
-    <div className="relative">
+    <div className="relative h-[72px] w-[72px]">
       <div
         aria-hidden="true"
         className="absolute inset-0 -z-10 scale-125 rounded-[22px] bg-red-400/20 blur-xl"
       />
-      <div className="flex h-[72px] w-[72px] items-center justify-center overflow-hidden rounded-[22px] bg-white p-2 shadow-[0_12px_30px_-10px_rgba(120,30,20,0.4)] ring-1 ring-white/70">
-        <Image
-          src="/Logo-arogya.jpeg"
-          alt="ArogyaDiet"
-          width={72}
-          height={72}
-          priority
-          className="h-full w-full object-contain"
-        />
-      </div>
+      <Image
+        src="/Logo-arogya.jpeg"
+        alt="ArogyaDiet"
+        width={72}
+        height={72}
+        priority
+        className="h-full w-full rounded-[22px] object-cover shadow-[0_12px_30px_-10px_rgba(120,30,20,0.4)] ring-1 ring-white/70"
+      />
       <div className="absolute -bottom-2.5 -right-2.5 flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-[#e74c3c] to-[#c0392b] shadow-md shadow-red-900/30 ring-2 ring-white">
         <Bike className="h-3.5 w-3.5 text-white" aria-hidden="true" />
       </div>
