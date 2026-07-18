@@ -1,16 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { AlertCircle, CheckCircle2 } from "lucide-react";
-import { Card, CardContent } from "@/shared/components/ui/card";
-import { Button } from "@/shared/components/ui/button";
-import { cn } from "@/lib/utils";
+import { useMemo, useState } from "react";
+import { AlertCircle, Salad, UtensilsCrossed } from "lucide-react";
 import {
   Alert,
   AlertDescription,
   AlertTitle,
 } from "@/shared/components/ui/alert";
-import { CONTENT_STAGES } from "./content-stages";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
+import { OnboardingPlanCard } from "./onboarding/OnboardingPlanCard";
+import { FoodPreferenceCard } from "./onboarding/FoodPreferenceCard";
+import { OnboardingSummaryBar } from "./onboarding/OnboardingSummaryBar";
+
+const CATEGORY_LABELS: Record<string, string> = {
+  VEG: "Vegetarian",
+  EGG: "Egg",
+  CHICKEN: "Non-Vegetarian",
+};
 
 export function PlanSelection({
   plans,
@@ -33,104 +39,121 @@ export function PlanSelection({
     setData({ ...data, foodType: code });
   };
 
+  // Live summary derived purely from existing selections/plan data — never
+  // invented or separately fetched, so it can never drift from the actual
+  // checkout state.
+  const selectedPlan = useMemo(
+    () => plans.find((p: any) => p.id === data.planId) ?? null,
+    [plans, data.planId],
+  );
+  const foodLabel = data.foodType
+    ? CATEGORY_LABELS[data.foodType] ??
+      mealCategories.find((c: any) => c.code === data.foodType)?.name ??
+      null
+    : null;
+
   return (
-    <div className="space-y-10">
-      <section className="space-y-6">
-        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            {CONTENT_STAGES.PLAN_SELECT}
-          </span>
-          Selected subscription plan
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {plans.map((plan: any) => (
-            <Card
+    <div className="space-y-14">
+      <section className="space-y-7">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <IconChip icon={Salad} tone="green" />
+            <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-emerald-700/90">
+              Your Meal Plan
+            </span>
+          </div>
+          <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+            Choose Your Plan
+          </h2>
+          <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
+            Select the meal plan that best fits your lifestyle.
+          </p>
+        </div>
+
+        <div
+          className="grid justify-center gap-5"
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 280px))" }}
+        >
+          {plans.map((plan: any, index: number) => (
+            <div
               key={plan.id}
-              className={cn(
-                "cursor-pointer rounded-xl border bg-white shadow-sm transition-all duration-200 relative",
-                data.planId === plan.id
-                  ? "border-primary ring-2 ring-primary/20 shadow-md"
-                  : "border-slate-200 hover:border-slate-300 hover:shadow-md",
-              )}
-              onClick={() => setData({ ...data, planId: plan.id })}
+              className="reveal-rise"
+              style={{ ["--reveal-delay" as string]: `${index * 60}ms` }}
             >
-              {data.planId === plan.id && (
-                <div className="absolute top-2 right-2 text-primary">
-                  <CheckCircle2 className="h-5 w-5 fill-primary text-white" />
-                </div>
-              )}
-              <CardContent className="p-6 text-center">
-                <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                  {plan.duration_days} Days
-                </p>
-                <p className="text-3xl font-semibold text-slate-900 my-2">
-                  ₹{plan.price.toLocaleString("en-IN")}
-                </p>
-                <div className="text-xs text-slate-500 border-t border-slate-100 pt-3 mt-3">
-                  ₹{plan.base_price} Base + ₹{plan.tax_amount} GST
-                </div>
-              </CardContent>
-            </Card>
+              <OnboardingPlanCard
+                plan={plan}
+                isSelected={data.planId === plan.id}
+                onSelect={() => setData({ ...data, planId: plan.id })}
+              />
+            </div>
           ))}
         </div>
       </section>
-      <section className="space-y-6">
-        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            {CONTENT_STAGES.FOOD_PREFERENCE}
-          </span>
-          Initial Food Preference
-        </h2>
-        <div className="flex flex-wrap gap-4">
-          {mealCategories.map((category: any) => {
-            const label =
-              category.code === "CHICKEN"
-                ? "Non-Veg"
-                : category.code === "VEG"
-                  ? "Veg"
-                  : category.code === "EGG"
-                    ? "Egg"
-                    : category.name;
 
-            return (
-              <Button
-                key={category.code}
-                variant={
-                  data.foodType === category.code ? "default" : "outline"
-                }
-                className={cn(
-                  "px-10 h-12 rounded-lg font-semibold transition-all duration-200",
-                  data.foodType === category.code &&
-                    "ring-2 ring-primary ring-offset-2",
-                  data.foodType !== category.code && "hover:bg-slate-50",
-                )}
-                onClick={() => handleFoodTypeChange(category.code)}
-              >
-                {label}
-              </Button>
-            );
-          })}
+      {/* Soft organic divider between sections instead of plain whitespace —
+          echoes the faint separators used elsewhere in the wellness design
+          language rather than a hard rule. */}
+      <div
+        aria-hidden="true"
+        className="h-px w-full bg-gradient-to-r from-transparent via-slate-200 to-transparent"
+      />
+
+      <section className="space-y-7">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <IconChip icon={UtensilsCrossed} tone="coral" />
+            <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-primary/80">
+              Your Meal Style
+            </span>
+          </div>
+          <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+            Choose Your Food Preference
+          </h2>
+          <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
+            Tell us how you&apos;d like your meals prepared to start.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-4 sm:flex-row">
+          {mealCategories.map((category: any) => (
+            <FoodPreferenceCard
+              key={category.code}
+              code={category.code}
+              name={category.name}
+              isSelected={data.foodType === category.code}
+              onSelect={() => handleFoodTypeChange(category.code)}
+            />
+          ))}
         </div>
 
         {warning && (
-          <Alert className="mt-6 border-amber-200 bg-amber-50 text-amber-900">
+          <Alert className="border-amber-200 bg-amber-50 text-amber-900 animate-in fade-in slide-in-from-top-2">
             <AlertCircle className="h-4 w-4 stroke-amber-600" />
             <AlertTitle className="font-semibold">Dietary Note</AlertTitle>
             <AlertDescription>{warning}</AlertDescription>
           </Alert>
         )}
       </section>
-      <div className="pt-8 border-t border-slate-100 flex justify-end">
-        <Button
-          size="lg"
-          variant="secondary"
-          disabled={!data.planId}
-          onClick={onNext}
-          className="px-10 font-semibold transition-all duration-200"
-        >
-          Next: Delivery Details
-        </Button>
-      </div>
+
+      <OnboardingSummaryBar
+        items={[
+          selectedPlan
+            ? { label: "Selected Plan", value: `${selectedPlan.duration_days} Days` }
+            : null,
+          foodLabel ? { label: "Meal Preference", value: foodLabel } : null,
+          selectedPlan
+            ? {
+                label: "Estimated Total",
+                value: `₹${selectedPlan.price.toLocaleString("en-IN")}`,
+                emphasize: true,
+              }
+            : null,
+        ].filter((item): item is NonNullable<typeof item> => item !== null)}
+        emptyLabel="Select a plan to see your summary"
+        continueLabel="Continue to Delivery Details"
+        disabled={!data.planId}
+        onContinue={onNext}
+      />
     </div>
   );
 }

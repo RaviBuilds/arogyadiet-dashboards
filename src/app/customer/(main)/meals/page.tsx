@@ -1,12 +1,14 @@
 import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
 import { format, parseISO, differenceInCalendarDays } from "date-fns";
-import { Package, Utensils } from "lucide-react";
+import { Package } from "lucide-react";
 import { Card } from "@/shared/components/ui/card";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
 import { ShopOrdersTracker } from "@/shared/components/customer/shop-orders-tracker";
 import { MealsHero } from "@/shared/components/customer/meals/MealsHero";
 import { TodayMealJourneyCard } from "@/shared/components/customer/meals/TodayMealJourneyCard";
 import { TransformationStories } from "@/shared/components/customer/meals/TransformationStories";
+import { MealHistoryHeader } from "@/shared/components/customer/meals/MealHistoryHeader";
 import {
   SubscriptionTimeline,
   type HistoryRow,
@@ -49,7 +51,6 @@ export default async function MyMealsPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   const { page } = await searchParams;
-  const currentPage = parseInt(page || "1", 10);
   const pageSize = 10;
 
   // 1. Authenticate & Get Profile via unified session helper
@@ -90,6 +91,39 @@ export default async function MyMealsPage({
   const activeSub = activeSubRes.data;
 
   const todayStr = format(new Date(), "yyyy-MM-dd");
+
+  // --- Journey math (same derivation as the Dashboard's JourneyHeader, so
+  // "Day X of Y" means the same thing on every customer page) — all from
+  // real subscription fields, nothing invented. Computed early (rather than
+  // after the history fetch) because the default history page below needs
+  // to know which day of the journey "today" is. ---
+  const journeyStart = activeSub?.starts_on ? parseISO(activeSub.starts_on) : null;
+  const journeyEnd = activeSub?.effective_end_on
+    ? parseISO(activeSub.effective_end_on)
+    : null;
+  const now = new Date();
+  const totalJourneyDays = activeSub
+    ? journeyStart && journeyEnd
+      ? Math.max(1, differenceInCalendarDays(journeyEnd, journeyStart) + 1)
+      : activeSub.total_days || 1
+    : null;
+  const rawJourneyDay = journeyStart
+    ? differenceInCalendarDays(now, journeyStart) + 1
+    : 1;
+  const journeyDay =
+    totalJourneyDays != null
+      ? Math.max(1, Math.min(rawJourneyDay, totalJourneyDays))
+      : null;
+
+  // Meal History should open on whichever page contains today's entry by
+  // default (not always page 1) — only an explicit ?page= in the URL (from
+  // clicking Previous/Next) should override that. `journeyDay` is already
+  // clamped to the subscription's real day range, so the page it maps to
+  // always lands inside a valid page of the same daily-preference rows the
+  // history query below fetches.
+  const defaultHistoryPage =
+    activeSub && journeyDay != null ? Math.floor((journeyDay - 1) / pageSize) + 1 : 1;
+  const currentPage = page ? parseInt(page, 10) : defaultHistoryPage;
 
   // 2. SECTION 1: Fetch Today's Order & Preference
   type TodaysOrder = {
@@ -175,27 +209,6 @@ export default async function MyMealsPage({
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
-  // --- Journey math (same derivation as the Dashboard's JourneyHeader, so
-  // "Day X of Y" means the same thing on every customer page) — all from
-  // real subscription fields, nothing invented. ---
-  const journeyStart = activeSub?.starts_on ? parseISO(activeSub.starts_on) : null;
-  const journeyEnd = activeSub?.effective_end_on
-    ? parseISO(activeSub.effective_end_on)
-    : null;
-  const now = new Date();
-  const totalJourneyDays = activeSub
-    ? journeyStart && journeyEnd
-      ? Math.max(1, differenceInCalendarDays(journeyEnd, journeyStart) + 1)
-      : activeSub.total_days || 1
-    : null;
-  const rawJourneyDay = journeyStart
-    ? differenceInCalendarDays(now, journeyStart) + 1
-    : 1;
-  const journeyDay =
-    totalJourneyDays != null
-      ? Math.max(1, Math.min(rawJourneyDay, totalJourneyDays))
-      : null;
-
   return (
     <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8">
       <div className="flex justify-end">
@@ -219,9 +232,12 @@ export default async function MyMealsPage({
           {/* TODAY'S MEAL JOURNEY                       */}
           {/* ========================================== */}
           <section className="space-y-4">
-            <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-2">
-              <Package className="h-5 w-5 text-primary" /> Today&apos;s Meal Journey
-            </h2>
+            <div className="flex items-center gap-3">
+              <IconChip icon={Package} tone="coral" size="lg" />
+              <h2 className="text-lg font-semibold text-slate-900 tracking-tight sm:text-xl">
+                Today&apos;s Meal Journey
+              </h2>
+            </div>
 
             <TodayMealJourneyCard
               isPaused={Boolean(todaysPreference?.is_paused)}
@@ -243,9 +259,12 @@ export default async function MyMealsPage({
             className="reveal-rise space-y-4"
             style={{ ["--reveal-delay" as string]: "1300ms" }}
           >
-            <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-2">
-              <Utensils className="h-5 w-5 text-primary" /> Meal History
-            </h2>
+            <MealHistoryHeader
+              dayCurrent={journeyDay}
+              dayTotal={totalJourneyDays}
+              pauseCreditsUsed={activeSub?.pause_credits_used}
+              pauseCreditsTotal={activeSub?.pause_credits_total}
+            />
 
             <SubscriptionTimeline
               historyData={historyData}

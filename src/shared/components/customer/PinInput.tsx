@@ -162,34 +162,34 @@ export function PinInput({
             minWidth: "48px",
             maxWidth: "48px",
             width: "48px",
-            minHeight: "56px",
-            maxHeight: "56px",
-            height: "56px",
+            minHeight: "58px",
+            maxHeight: "58px",
+            height: "58px",
             fontSize: "26px",
             fontWeight: "700",
-            lineHeight: "56px",
+            lineHeight: "58px",
             textAlign: "center",
             verticalAlign: "middle",
-            border: "2px solid #cbd5e1",
-            borderRadius: "12px",
-            backgroundColor: "#ffffff",
-            color: "#0f172a",
+            border: "2px solid rgba(5, 150, 105, 0.18)",
+            borderRadius: "16px",
+            backgroundColor: digits[index] ? "rgba(236, 253, 245, 0.6)" : "#ffffff",
+            color: "#064e3b",
             outline: "none",
             transition: "all 0.2s ease",
-            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.08)",
+            boxShadow: "0 2px 6px rgba(4, 40, 26, 0.06)",
             boxSizing: "border-box",
             margin: "0",
             padding: "0",
             display: "block",
           }}
           onFocusCapture={(e) => {
-            e.currentTarget.style.borderColor = "#6366f1";
-            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99, 102, 241, 0.2), 0 2px 4px rgba(0, 0, 0, 0.08)";
+            e.currentTarget.style.borderColor = "#10b981";
+            e.currentTarget.style.boxShadow = "0 0 0 4px rgba(16, 185, 129, 0.15), 0 2px 6px rgba(4, 40, 26, 0.06)";
             e.currentTarget.style.transform = "scale(1.05)";
           }}
           onBlurCapture={(e) => {
-            e.currentTarget.style.borderColor = "#cbd5e1";
-            e.currentTarget.style.boxShadow = "0 2px 4px rgba(0, 0, 0, 0.08)";
+            e.currentTarget.style.borderColor = "rgba(5, 150, 105, 0.18)";
+            e.currentTarget.style.boxShadow = "0 2px 6px rgba(4, 40, 26, 0.06)";
             e.currentTarget.style.transform = "scale(1)";
           }}
         />

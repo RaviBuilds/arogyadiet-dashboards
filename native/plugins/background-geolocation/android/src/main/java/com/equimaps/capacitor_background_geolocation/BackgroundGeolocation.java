@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationManager;
 import android.net.Uri;
@@ -33,6 +34,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
@@ -45,6 +47,24 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
                                 Manifest.permission.ACCESS_FINE_LOCATION
                         },
                         alias = "location"
+                ),
+                // "Allow all the time" background location (Android 10+, API 29).
+                // MANDATORY for continuous tracking while the app is backgrounded
+                // or the screen is locked. Without it, a "while in use" / one-time
+                // grant is revoked the moment the rider leaves the app, killing the
+                // foreground service. Must be requested SEPARATELY, after foreground
+                // location is already granted (Android platform requirement).
+                @Permission(
+                        strings = { "android.permission.ACCESS_BACKGROUND_LOCATION" },
+                        alias = "backgroundLocation"
+                ),
+                // POST_NOTIFICATIONS (Android 13+, API 33). Without it the ongoing
+                // foreground-service notification is suppressed, which both hides the
+                // "tracking active" indicator from the rider and makes the location
+                // FGS more likely to be reaped by the OS.
+                @Permission(
+                        strings = { "android.permission.POST_NOTIFICATIONS" },
+                        alias = "notifications"
                 )
         }
 )
@@ -300,8 +320,135 @@ public class BackgroundGeolocation extends Plugin {
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         Uri uri = Uri.fromParts("package", getContext().getPackageName(), null);
         intent.setData(uri);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         getContext().startActivity(intent);
         call.resolve();
+    }
+
+    // -------------------------------------------------------------------------
+    // Tracking permission gate (foreground location, "all the time" background
+    // location, and notifications). These are the permissions continuous
+    // background GPS tracking actually requires on modern Android and must be
+    // requested explicitly — the plain addWatcher() location gate only covers
+    // foreground/one-time location, which Android revokes as soon as the rider
+    // leaves the app.
+    // -------------------------------------------------------------------------
+
+    private boolean hasForegroundLocation() {
+        Context c = getContext();
+        return ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED
+                || ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasBackgroundLocation() {
+        // Below Android 10 there is no separate background-location permission —
+        // foreground location implies background access.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return hasForegroundLocation();
+        }
+        return ContextCompat.checkSelfPermission(getContext(),
+                "android.permission.ACCESS_BACKGROUND_LOCATION")
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasNotificationsEnabled() {
+        // areNotificationsEnabled() is the authoritative "will the FGS
+        // notification actually show" check (covers POST_NOTIFICATIONS denial
+        // AND channel/user-level blocks).
+        return NotificationManagerCompat.from(getContext()).areNotificationsEnabled();
+    }
+
+    private JSObject trackingPermissionStatus() {
+        JSObject result = new JSObject();
+        result.put("location", hasForegroundLocation() ? "granted" : "denied");
+        result.put("backgroundLocation", hasBackgroundLocation() ? "granted" : "denied");
+        result.put("notifications", hasNotificationsEnabled() ? "granted" : "denied");
+        return result;
+    }
+
+    /**
+     * Returns the granular status of every permission continuous tracking needs:
+     * {@code { location, backgroundLocation, notifications }}, each "granted" or
+     * "denied". The JS onboarding uses this to decide what to request / what to
+     * guide the rider through in Settings.
+     */
+    @PluginMethod()
+    public void getTrackingPermissionStatus(PluginCall call) {
+        call.resolve(trackingPermissionStatus());
+    }
+
+    /**
+     * Requests the POST_NOTIFICATIONS runtime permission (Android 13+). On older
+     * OS versions notifications are enabled by default, so this resolves
+     * immediately. Resolves with the full {@link #trackingPermissionStatus()}.
+     */
+    @PluginMethod()
+    public void requestNotificationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+                || getPermissionState("notifications") == PermissionState.GRANTED) {
+            call.resolve(trackingPermissionStatus());
+            return;
+        }
+        requestPermissionForAlias("notifications", call, "trackingPermsCallback");
+    }
+
+    /**
+     * Requests the foreground location permission ("While using the app").
+     * This is stage 1 of the two-stage location grant; background location must
+     * be requested afterwards. Resolves with {@link #trackingPermissionStatus()}.
+     */
+    @PluginMethod()
+    public void requestForegroundLocationPermission(PluginCall call) {
+        if (hasForegroundLocation()) {
+            call.resolve(trackingPermissionStatus());
+            return;
+        }
+        requestPermissionForAlias("location", call, "trackingPermsCallback");
+    }
+
+    /**
+     * Requests "Allow all the time" background location (Android 10+).
+     *
+     * <p>Android requires foreground location to be granted first, so if it
+     * isn't we request that and then chain into the background request. On
+     * Android 11+ the OS routes the background request to a Settings screen
+     * (the rider must pick "Allow all the time"); if the OS silently denies it,
+     * the JS onboarding falls back to {@link #openSettings}. Resolves with
+     * {@link #trackingPermissionStatus()}.
+     */
+    @PluginMethod()
+    public void requestBackgroundLocationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasBackgroundLocation()) {
+            call.resolve(trackingPermissionStatus());
+            return;
+        }
+        if (!hasForegroundLocation()) {
+            // Stage 1 first: grant foreground, then chain to background.
+            requestPermissionForAlias("location", call, "foregroundThenBackgroundCallback");
+            return;
+        }
+        requestPermissionForAlias("backgroundLocation", call, "trackingPermsCallback");
+    }
+
+    @PermissionCallback
+    private void trackingPermsCallback(PluginCall call) {
+        call.resolve(trackingPermissionStatus());
+    }
+
+    @PermissionCallback
+    private void foregroundThenBackgroundCallback(PluginCall call) {
+        // Foreground just resolved. If it was granted and background is still
+        // missing on Android 10+, request background now (separate step, as the
+        // platform requires). Otherwise return the current status.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && hasForegroundLocation()
+                && !hasBackgroundLocation()) {
+            requestPermissionForAlias("backgroundLocation", call, "trackingPermsCallback");
+            return;
+        }
+        call.resolve(trackingPermissionStatus());
     }
 
     /**

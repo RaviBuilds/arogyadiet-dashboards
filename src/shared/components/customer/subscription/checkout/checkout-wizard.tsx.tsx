@@ -6,6 +6,8 @@ import { DeliveryDetails } from "./step-2-delivery";
 import { useSearchParams } from "next/navigation";
 import { MealCustomization } from "./step-4-customization";
 import { OrderPreview } from "./step-5-preview";
+import { OnboardingHero } from "./onboarding/OnboardingHero";
+import { OnboardingStepper } from "./onboarding/OnboardingStepper";
 import { cn } from "@/lib/utils";
 // import { MealPlannerConfig } from "./step-3-planner";
 // import { OrderPreview } from "./step-4-preview";
@@ -65,59 +67,22 @@ export function CheckoutWizard({
   const prevStep = () => setStep((s) => s - 1);
 
   return (
-    <div className="max-w-5xl mx-auto py-10 px-4">
-      <div className="mb-10 text-center">
-        <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 tracking-tight">
-          New Subscription
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Complete these steps to activate your meal plan
-        </p>
+    <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:space-y-8 sm:py-10">
+      {/* Onboarding hero — only shown on Step 1 (Plan), where the customer
+          is just beginning; later steps stay focused on their own task
+          rather than re-showing the same welcome message every time. */}
+      {step === 1 ? <OnboardingHero /> : null}
 
-        <div className="flex items-center justify-center mt-8 max-w-md mx-auto">
-          {WIZARD_STEPS.map((wizardStep, index) => {
-            const stepNumber = index + 1;
-            const isActive = step >= stepNumber;
-
-            return (
-              <div key={wizardStep.label} className="flex items-center">
-                <div className="flex flex-col items-center gap-2">
-                  <div
-                    className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-all duration-200",
-                      isActive
-                        ? "bg-primary text-white"
-                        : "bg-slate-100 text-slate-500",
-                    )}
-                  >
-                    {stepNumber}
-                  </div>
-                  <span
-                    className={cn(
-                      "text-xs transition-all duration-200",
-                      isActive
-                        ? "font-medium text-slate-900"
-                        : "text-slate-500",
-                    )}
-                  >
-                    {wizardStep.label}
-                  </span>
-                </div>
-                {index < WIZARD_STEPS.length - 1 && (
-                  <div
-                    className={cn(
-                      "h-0.5 w-8 sm:w-12 mx-1 sm:mx-2 mb-6 transition-all duration-200",
-                      step > stepNumber ? "bg-primary" : "bg-slate-200",
-                    )}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
+      <div className="reveal-rise" style={{ ["--reveal-delay" as string]: "150ms" }}>
+        <OnboardingStepper steps={WIZARD_STEPS} currentStep={step} />
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6 md:p-8">
+      <div
+        className={cn(
+          "rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-8 md:p-10",
+          step !== 1 && "border-slate-200",
+        )}
+      >
         {step === 1 && (
           <PlanSelection
             plans={plans}

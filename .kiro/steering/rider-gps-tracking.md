@@ -152,3 +152,53 @@ It only mounts once `isGpsActive` is true, which is when orders flip to `OUT_FOR
 - `rider-status-toggle.tsx` unchanged — it remains the single `addWatcher` owner.
 
 **Verify after deploy:** on-duty a rider, mark batch pickup, confirm `rider_live_locations.updated_at` keeps advancing (native 30s heartbeat) and the admin map stays on "Live GPS". Note: pre-existing stale rows for riders who never got the new build will still show inactive until they run a build that never starts the JS watcher (i.e. after this web deploy, since the web bundle loads remotely).
+
+---
+
+## 10. Root cause found & fixed (2026-07-18): missing background-location + notification permissions
+
+**Symptom (reported, with screenshots):** Admin map shows "Rider is online but GPS is inactive". On the rider app, GPS shows "GPS ACTIVE" for a few seconds right after going On Duty, then flips to "ACQUIRING GPS…" and stays there. Device GPS is ON. **The persistent "tracking your location" foreground-service notification no longer appears in the shade** (it used to). Rider had granted a **one-time ("Only this time")** location permission.
+
+**DB ground truth (`mcp_postgres_readonly_query`):** Test rider `b762fea6…` went `is_online=true` at `05:10:00Z`, `rider_live_locations.updated_at` got **exactly one** fix at `05:10:04Z`, then dead for 70+ minutes while still online. The native 30s heartbeat never fired again → the foreground-service **process died within 30s of the first fix and never recovered** (START_STICKY couldn't bring it back).
+
+**Root cause — two permissions that continuous background tracking requires were NEVER requested:**
+1. **`ACCESS_BACKGROUND_LOCATION` ("Allow all the time").** The `@CapacitorPlugin` in `BackgroundGeolocation.java` only declared `ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION`. On Android 10+ that dialog only offers "While using the app" / "Only this time" — there is no way to grant "all the time" from it, and no code ever requested background location separately. A one-time / while-in-use grant is **revoked by Android the moment the app stops being the foreground activity** (screen lock, app switch). Once revoked, `LocationEngine`'s permission checker pauses capture, the process is killed, and recovery fails because the permission is gone. → exactly one fix, then silence.
+2. **`POST_NOTIFICATIONS` (Android 13+, API 33).** Never requested at runtime. On this Android 13 device (targetSdk **36**) the foreground-service notification is **suppressed** without it — hence the missing notification. A location FGS without a visible/valid notification is also reaped more aggressively.
+
+The build/manifest were fine (merged manifest has all permissions + both location-typed services). The gap was purely that the app never *requested* background location or notifications at runtime. The earlier Doze tests "worked" because those test devices had been granted "Allow all the time" manually.
+
+**Fix (native + web):**
+- **Native** `com/equimaps/capacitor_background_geolocation/BackgroundGeolocation.java`:
+  - Added `@Permission` aliases `backgroundLocation` (`ACCESS_BACKGROUND_LOCATION`) and `notifications` (`POST_NOTIFICATIONS`).
+  - New `@PluginMethod`s: `getTrackingPermissionStatus()` (returns `{location, backgroundLocation, notifications}`), `requestNotificationPermission()`, `requestForegroundLocationPermission()`, `requestBackgroundLocationPermission()` (chains foreground→background, since Android requires foreground granted first and routes background to a Settings screen on API 30+). Uses `NotificationManagerCompat.areNotificationsEnabled()` as the authoritative notification check. Added `PackageManager` + `NotificationManagerCompat` imports and `FLAG_ACTIVITY_NEW_TASK` to `openSettings`.
+  - **Requires an APK rebuild** (native change). Copied to `rider-mobile-app/local-plugins` and `node_modules/@capacitor-community/background-geolocation` (all three hashes verified identical). Next: `npx cap sync android` from `E:\Local Clients\Next.js\rider-mobile-app`, then Android Studio Rebuild + signed APK.
+- **Web (deploys via Vercel, no APK rebuild):**
+  - `src/lib/capacitor/background-geolocation-stub.ts` — added `TrackingPermissionStatus` type + the 4 new method signatures.
+  - `src/lib/capacitor/tracking-permissions.ts` (new) — `getTrackingPermissions()`, `ensureTrackingPermissions()` (staged: notifications → foreground → background), `isFullyPermitted()`. Fails open if native methods are missing (old APK).
+  - `src/shared/components/rider/rider-status-toggle.tsx` — On Duty now calls `ensureTrackingPermissions()` before `addWatcher`; aborts if foreground location denied, warns (toast) if background/notifications missing.
+  - `src/shared/components/rider/LocationPermissionOnboarding.tsx` (new) — amber banner + dialog guiding the rider to "Allow all the time" + notifications, with Open Settings fallback and app-foreground re-check. Added above `BatteryPermissionOnboarding` in `dashboard-content.tsx`.
+
+**Verify after deploy + APK install:** grant "Allow all the time" + notifications, go On Duty, confirm (a) the persistent notification appears, (b) `rider_live_locations.updated_at` keeps advancing every ≤30s with the screen locked, (c) admin map stays "Live GPS". The old APK (without the new native methods) fails open — the web `ensureTrackingPermissions()`/status calls just resolve as granted, so nothing breaks, but the permissions won't actually be requested until the new APK is installed. **The new APK is required for the real fix.**
+
+**Note on "one-time permission":** even with all code fixes, a rider who picks "Only this time" will still lose tracking. The new onboarding + On Duty flow now actively pushes them to "Allow all the time"; the rider admin checklist should stress this.
+
+---
+
+## 11. Pilot APK verified + Bug 1/Bug 2 fixes (2026-07-18, later same day)
+
+**New APK (with the Section 10 native permission methods) installed and live-tested.** Once the rider grants **"Allow all the time" location + notifications**, screen-off tracking is now stable: verified via `rider_live_locations` polling — **12+ minutes screen-off, same `tracker_session_id` (`1c662453…`) throughout, ~≤30s staleness (native heartbeat firing on stationary coords)**. The persistent "ArogyaDiet is tracking your route" notification is present. This is the first genuinely-working screen-off run on the Vivo V2031 with a real (non-manually-forced) permission grant. Root cause from Section 10 (missing background-location + POST_NOTIFICATIONS requests) is confirmed fixed.
+
+**Bug 1 — app reopened while On Duty didn't re-arm / no GPS-off message (fixed, web/JS in `rider-status-toggle.tsx`):**
+- `startBackgroundTracking` now returns a typed `StartTrackingResult` (`ok` | `{reason: permission|location_off|unknown}`).
+- Added `resumeTracking()` invoked (a) once on mount when server `initialStatus=true`, and (b) on every `appStateChange` foreground when On Duty and no watcher is active → re-arms the native watcher after app kill/reboot/close.
+- Device Location OFF is now surfaced with a persistent red in-card banner ("Location is off — you're not being tracked") + a **Retry** button, instead of silently showing "Acquiring GPS" forever. Rider stays On Duty; tracking auto-resumes on next foreground once Location is back on.
+- **Removed the unmount `removeWatcher` cleanup** — the native FGS is owned by the shift (`is_online`), not the dashboard UI, so navigating dashboard↔route↔profile no longer stops tracking. Stop happens only on explicit Off Duty / auto-off-duty / admin off-duty reconcile / fatal location error.
+
+**Bug 2 — two confusing onboarding banners + mislabeled button (fixed, web/JS):**
+- Replaced `BatteryPermissionOnboarding` + `LocationPermissionOnboarding` (both **deleted**) with a single unified `src/shared/components/rider/RiderTrackingSetup.tsx`.
+- One amber banner ("Finish tracking setup (N/3)") → one dialog with a stepper checklist: Location "Allow all the time", Notifications, Battery (stock) — each auto-verified with a green tick or an action button that fires the right prompt and falls back to App Settings if the OS silently denies. Plus a manual OEM (Vivo/Xiaomi/…) battery-settings card with an "I've done this" acknowledgment (can't be auto-detected). Re-checks on app foreground + a "Re-check" button; shows an "You're all set" state when the three core items are done. Fixes the old mislabeled "Allow background location" button (it actually triggered battery exemption) and the no-way-to-reopen / no-recheck problems.
+- Wired into `dashboard-content.tsx` in place of the two old banners.
+
+**Deploy note:** All Section 11 changes are **web/JS only → deploy via Vercel; no APK rebuild needed** (the native permission methods they call already shipped in the Section 10 APK). The rider app loads the web bundle remotely from `server.url`.
+
+**Still open / next:** confirm multi-hour real driving shift; confirm Vivo iManager Step-2 (OEM battery) actually needed vs. the stock exemption alone on this build (screen-off survived 12+ min here — verify longer). `ShiftAuthorityCallback` remains a stub (Layer-3 off-duty). `tracker_session_id` still doesn't rotate per shift toggle (minor).

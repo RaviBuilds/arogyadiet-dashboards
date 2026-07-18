@@ -4,11 +4,10 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { format, addDays, startOfDay } from "date-fns";
 import {
   CalendarIcon,
-  MapPin,
   Plus,
-  CheckCircle2,
-  ChevronLeft,
   Settings,
+  CalendarClock,
+  MapPinned,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/shared/components/ui/button";
@@ -18,10 +17,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/shared/components/ui/popover";
-import { Card, CardContent } from "@/shared/components/ui/card";
-import { Badge } from "@/shared/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { CONTENT_STAGES } from "./content-stages";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
+import { OnboardingAddressCard } from "./onboarding/OnboardingAddressCard";
+import { OnboardingSummaryBar } from "./onboarding/OnboardingSummaryBar";
 
 // 1. IMPORT YOUR MODAL (Adjust path if necessary based on your structure)
 import { AddressManagerModal } from "@/shared/components/customer/address-manager-modal";
@@ -118,178 +117,190 @@ export function DeliveryDetails({
   }, [latestSubscription, minStartDate, data.startDate, setData]);
 
   
+  const selectedAddress = addresses.find((a) => a.id === data.addressId) ?? null;
+
   return (
-    <div className="space-y-10 animate-in fade-in slide-in-from-right-4">
+    <div className="space-y-14 animate-in fade-in slide-in-from-right-4">
       {/* 1. Subscription Start Date */}
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            {CONTENT_STAGES.START_DATE}
-          </span>
-          When should we start?
-        </h2>
-        <div className="max-w-xs">
-          <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "w-full justify-start text-left font-normal h-12 rounded-lg border border-slate-200 hover:bg-slate-50 transition-all duration-200",
-                  !data.startDate && "text-slate-500",
-                )}
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {data.startDate ? (
-                  format(data.startDate, "PPP")
-                ) : (
-                  <span>Select Start Date</span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={data.startDate}
-                defaultMonth={data.startDate || minStartDate} 
-                onSelect={(date) => {
-                  setData({ ...data, startDate: date });
-                  setIsCalendarOpen(false);
-                }}
-                disabled={(date) => startOfDay(date) < minStartDate}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
-          <p className="text-xs text-slate-500 mt-2 px-1">
-            * Note: Tomorrow's meal must be finalized before 5:00 PM today.
+      <section className="space-y-7">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <IconChip icon={CalendarClock} tone="green" />
+            <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-emerald-700/90">
+              Your Start Date
+            </span>
+          </div>
+          <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+            When should we start?
+          </h2>
+          <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
+            Pick the day your first delivery should arrive.
           </p>
-          {latestSubscription && (
-            <p className="text-sm text-blue-800 bg-blue-50 p-3 rounded-lg border border-blue-200">
-              Your new plan will automatically begin after your current
-              subscription expires.
-            </p>
-          )}
+        </div>
+
+        {/* Two-column layout on larger screens so the date picker never sits
+            alone in a wide, mostly-empty card — the right column carries the
+            same real notes that used to sit as small muted text underneath
+            the button, now given proper visual weight instead of being an
+            afterthought. Nothing here is invented; it's the same copy,
+            better composed. */}
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,280px)_1fr]">
+          <div>
+            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "h-12 w-full justify-start rounded-2xl border border-slate-200 text-left font-normal transition-all duration-200 hover:border-emerald-200 hover:bg-emerald-50/40",
+                    !data.startDate && "text-slate-500",
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4 text-emerald-600" />
+                  {data.startDate ? (
+                    format(data.startDate, "PPP")
+                  ) : (
+                    <span>Select Start Date</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto rounded-2xl p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={data.startDate}
+                  defaultMonth={data.startDate || minStartDate}
+                  onSelect={(date) => {
+                    setData({ ...data, startDate: date });
+                    setIsCalendarOpen(false);
+                  }}
+                  disabled={(date) => startOfDay(date) < minStartDate}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-4 sm:p-5">
+            <div className="flex items-start gap-2.5">
+              <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+              <p className="text-sm leading-relaxed text-slate-500">
+                Tomorrow&apos;s meal must be finalized before 5:00 PM today.
+              </p>
+            </div>
+            {latestSubscription && (
+              <div className="flex items-start gap-2.5 border-t border-slate-200/70 pt-3">
+                <CalendarIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <p className="text-sm leading-relaxed text-emerald-800">
+                  Your new plan will automatically begin after your current
+                  subscription expires.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
-      {/* 2. Address Selection */}
-      <section className="space-y-4">
-        <div className="flex flex-col md:flex-row gap-2 items-start justify-between md:items-center">
-          <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-              {CONTENT_STAGES.DELIVERY_ADDRESS}
-            </span>
-            Delivery Address
-          </h2>
+      {/* Soft organic divider between sections instead of plain whitespace. */}
+      <div
+        aria-hidden="true"
+        className="h-px w-full bg-gradient-to-r from-transparent via-slate-200 to-transparent"
+      />
 
-          {/* WIRE UP THE ONCLICK HANDLERS HERE */}
+      {/* 2. Address Selection */}
+      <section className="space-y-7">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <IconChip icon={MapPinned} tone="coral" />
+              <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-primary/80">
+                Your Delivery Address
+              </span>
+            </div>
+            <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+              Where should we deliver?
+            </h2>
+            <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
+              Choose a saved address, or add a new one.
+            </p>
+          </div>
+
+          {/* "Manage Addresses" is a distinct bulk-edit action (edit/delete
+              existing entries), so it stays as its own top-right button once
+              there's more than one to manage. Adding a NEW address now lives
+              as an inline tile in the row below instead — that fixes the
+              earlier "floating disconnected button" issue and, as a side
+              effect, keeps the row from ever looking sparse with just one
+              saved address, since there's always a second tile beside it. */}
           {addresses.length >= 2 ? (
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 transition-all duration-200"
+              className="gap-2 self-start rounded-full transition-all duration-200 sm:self-auto"
               onClick={() => setIsAddressModalOpen(true)}
             >
               <Settings className="h-4 w-4" /> Manage Addresses
             </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 transition-all duration-200"
-              onClick={() => setIsAddressModalOpen(true)}
-            >
-              <Plus className="h-4 w-4" /> Add New Address
-            </Button>
-          )}
+          ) : null}
         </div>
 
         {isLoading ? (
-          <div className="h-32 flex items-center justify-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
-            <p className="text-sm text-slate-500 animate-pulse">
+          <div className="flex h-32 items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-slate-50/50">
+            <p className="animate-pulse text-sm text-slate-500">
               Loading saved addresses...
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {addresses.map((addr) => (
-              <Card
+          <div className="flex flex-wrap gap-4">
+            {/* flex-wrap + a per-card max-width (rather than a CSS grid with
+                auto-fit) so saved addresses never leave a phantom empty
+                column of whitespace beside them — cards only ever take the
+                room they need and wrap naturally once there are enough of
+                them to fill a row. */}
+            {addresses.map((addr, index) => (
+              <div
                 key={addr.id}
-                className={cn(
-                  "cursor-pointer rounded-xl border shadow-sm transition-all duration-200 relative group",
-                  data.addressId === addr.id
-                    ? "border-secondary bg-secondary/5 ring-2 ring-secondary/20"
-                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50",
-                )}
-                onClick={() => setData({ ...data, addressId: addr.id })}
+                className="reveal-rise w-full sm:max-w-md sm:flex-1 sm:basis-[320px]"
+                style={{ ["--reveal-delay" as string]: `${index * 60}ms` }}
               >
-                {data.addressId === addr.id && (
-                  <div className="absolute top-3 right-3 text-secondary">
-                    <CheckCircle2 className="h-5 w-5 fill-secondary text-white" />
-                  </div>
-                )}
-                <CardContent className="p-4 flex gap-3">
-                  <MapPin className="h-5 w-5 text-slate-400 shrink-0 mt-1" />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold text-sm text-slate-900">
-                        {addr.tag}
-                      </p>
-                      {addr.is_primary && (
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] font-semibold uppercase tracking-wider text-emerald-700"
-                        >
-                          PRIMARY
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-slate-500 mt-1 line-clamp-2">
-                      {addr.street_1}, {addr.street_2 && `${addr.street_2},`}{" "}
-                      {addr.city}, {addr.pincode}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
+                <OnboardingAddressCard
+                  address={addr}
+                  isSelected={data.addressId === addr.id}
+                  onSelect={() => setData({ ...data, addressId: addr.id })}
+                />
+              </div>
             ))}
 
-            {addresses.length === 0 && (
-              <div className="col-span-full py-10 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-3">
-                <p className="text-sm text-slate-500">
-                  No saved addresses found.
-                </p>
-                <Button
-                  size="sm"
-                  onClick={() => setIsAddressModalOpen(true)}
-                  className="transition-all duration-200"
-                >
-                  Enter Delivery Address
-                </Button>
-              </div>
-            )}
+            {/* Inline "Add address" tile — same footprint as a saved address
+                card, so it belongs in the same row/story rather than being a
+                separate floating action. */}
+            <button
+              type="button"
+              onClick={() => setIsAddressModalOpen(true)}
+              className="reveal-rise flex w-full items-center justify-center gap-2 rounded-3xl border border-dashed border-slate-200 bg-slate-50/50 p-5 text-sm font-medium text-slate-500 transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50/40 hover:text-emerald-700 sm:max-w-md sm:flex-1 sm:basis-[320px]"
+              style={{ ["--reveal-delay" as string]: `${addresses.length * 60}ms` }}
+            >
+              <Plus className="h-4 w-4" />
+              {addresses.length === 0 ? "Enter Delivery Address" : "Add New Address"}
+            </button>
           </div>
         )}
       </section>
 
-      {/* Navigation */}
-      <div className="pt-8 border-t border-slate-100 flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8">
-        <Button
-          variant="ghost"
-          onClick={onBack}
-          className="gap-2 transition-all duration-200"
-        >
-          <ChevronLeft className="h-4 w-4" /> Back to Plans
-        </Button>
-        <Button
-          size="lg"
-          variant="secondary"
-          disabled={!data.startDate || !data.addressId}
-          onClick={onNext}
-          className="px-10 font-semibold transition-all duration-200"
-        >
-          Customize My Meals
-        </Button>
-      </div>
+      <OnboardingSummaryBar
+        items={[
+          data.startDate
+            ? { label: "Start Date", value: format(data.startDate, "MMM d, yyyy") }
+            : null,
+          selectedAddress
+            ? { label: "Delivery Address", value: selectedAddress.tag || "Selected" }
+            : null,
+        ].filter((item): item is NonNullable<typeof item> => item !== null)}
+        emptyLabel="Pick a start date and address to continue"
+        continueLabel="Customize My Meals"
+        disabled={!data.startDate || !data.addressId}
+        onContinue={onNext}
+        backLabel="Back to Plans"
+        onBack={onBack}
+      />
 
       {/* 4. RENDER THE MODAL AT THE BOTTOM */}
       {isAddressModalOpen && (
