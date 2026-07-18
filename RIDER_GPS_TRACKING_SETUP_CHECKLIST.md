@@ -12,25 +12,26 @@
 - Install the provided release APK on the rider's phone.
 - Open the app and log in with the rider's credentials.
 
-### Step 2 — Grant location permission correctly
-- When prompted for location permission, the rider must choose **"Allow all the time"** — NOT "Allow only while using the app."
-- If they accidentally pick "while using the app," tracking will stop the moment they switch apps or lock the screen.
-- To fix afterward: Phone Settings → Apps → ArogyaDiet Rider → Permissions → Location → **Allow all the time**.
+### Step 2 — Open the "Finish tracking setup" banner
+- On the rider dashboard (Home), if anything still needs granting, an amber banner appears: **"Finish tracking setup (N/3)"** (where N is how many of the 3 core steps are already done).
+- Tap it to open the setup checklist. Each item shows either a green tick (done) or an **Allow** button. Complete all of them:
 
-### Step 3 — Complete the in-app battery permission banner
-- On the rider dashboard, if the phone isn't already set up correctly, an amber banner will appear: **"Fix location tracking before your shift."**
-- Tap it and follow both steps shown:
-  1. Tap **"Allow background location"** — this opens the phone's own permission popup. Choose **Allow / Don't optimize**.
-  2. Follow the phone-specific instructions shown below the button (varies by brand — see Section 2).
-- After completing the steps, reopen the app. The banner should disappear. If it doesn't, the setup wasn't completed correctly — go through the steps again.
+  1. **Location: "Allow all the time"** — tap **Allow**, then on the phone's popup choose **"Allow all the time"** (NOT "While using the app" or "Only this time"). This is the single most important setting — without it, tracking stops the moment the rider locks the screen or switches apps.
+  2. **Notifications** — tap **Allow** and accept. This shows the ongoing tracking notification and helps the phone keep tracking alive.
+  3. **Battery: don't optimise** — tap **Allow**, then choose **Allow / Don't optimize** on the phone's popup.
 
-### Step 4 — Enable "Autostart" / "Auto-launch" (critical, especially on Chinese-brand phones)
-- Most phones (Vivo, Xiaomi, Oppo, Realme, OnePlus) have a separate **Autostart** permission, hidden outside normal Settings, that must be turned ON. Without it, the tracking service can get killed and may not restart on its own.
-- See brand-specific steps in Section 2.
+- As each is granted it turns into a green tick. When all three are done, the header changes to **"You're all set"** and the banner disappears.
+- The checklist re-checks itself automatically when the rider returns to the app, and has a **"Re-check"** button at the bottom if a tick doesn't update immediately.
+- If a popup doesn't appear (e.g. a permission was denied before, or the phone routes it to Settings), the app automatically opens **App Settings** — set Location to "Allow all the time" / turn Notifications on there manually, then return to the app.
 
-### Step 5 — Confirm the persistent notification appears
-- Once the rider taps **On Duty**, they should see a permanent notification saying something like *"ArogyaDiet is tracking your location."*
-- This notification is required by Android — it cannot be hidden. If it's not there, tracking is not active and must be checked before the rider starts their route.
+### Step 3 — Complete the phone-maker battery settings (critical on Chinese-brand phones)
+- Below the three core steps, riders on Vivo / Xiaomi / Oppo / Realme / OnePlus / Samsung phones see an extra **"[Brand] battery settings"** card with manual steps. These controls (Autostart / Auto-launch and OEM battery managers) live *outside* normal Android settings and **cannot be detected by the app**, so they must be done by hand.
+- Follow every step listed for that brand (also in Section 2 below), then tap **"I've done this"** on the card, or use **"Open App Settings"** to jump to the right screen.
+- Without these, the tracking service can be killed by the phone's own power manager and may not restart on its own.
+
+### Step 4 — Confirm the persistent notification appears
+- Once the rider taps **On Duty**, they should see a permanent notification: *"ArogyaDiet is tracking your route for delivery updates."*
+- This notification is required by Android and is **intentionally not swipe-able** — it stays until the rider goes Off Duty. If it's not there, tracking is not active and setup should be re-checked before the rider starts their route.
 
 ---
 
@@ -75,21 +76,23 @@ Different phone brands hide extra battery/power-saving controls beyond the stand
 
 ## 3. Rider habits during a shift (things the rider should and shouldn't do)
 
-- ✅ **It is safe to** lock the screen, put the phone in a pocket, take calls, and switch to other apps (maps, WhatsApp, etc.) while On Duty — tracking will continue running in the background once the setup above is done.
-- ✅ Leave the persistent tracking notification alone — don't swipe it away or force-close the app from Recents while On Duty.
-- ❌ Don't manually "clear" or "force stop" the app from phone Settings while on a shift — this fully kills tracking and the rider will need to reopen the app and go back On Duty to resume.
-- ❌ Don't use any third-party "battery saver" or "cleaner" apps (e.g. some phone cleaner/booster apps) that auto-kill background apps — these can override the settings above. If the rider has one installed, ArogyaDiet Rider should be whitelisted there too, or the app removed.
-- If the rider gets a low-battery warning and enables the phone's Battery Saver / Power Saving mode, that can also override the above settings on some phones. Ask riders to report if this happens.
+- ✅ **It is safe to** lock the screen, put the phone in a pocket, take calls, and switch to other apps (maps, WhatsApp, etc.) while On Duty — tracking continues running in the background once the setup above is done.
+- ✅ **It is safe to** close the app or restart the phone while On Duty — when the rider reopens the app it automatically resumes tracking (no need to toggle Off/On). After a phone restart the rider just needs to open the app once.
+- ✅ Leave the persistent tracking notification alone. It is intentionally not swipe-able while On Duty — that's normal, not a fault.
+- ✅ If the rider turns their device **Location/GPS off** by mistake, the app now shows a red **"Location is off — you're not being tracked"** warning with a **Retry** button, and stays On Duty. Turning Location back on and tapping Retry (or just reopening the app) resumes tracking.
+- ❌ Don't manually "clear" or "force stop" the app from phone Settings while on a shift — this fully kills tracking; the rider will need to reopen the app to resume.
+- ❌ Don't use third-party "battery saver" / "cleaner" / "booster" apps that auto-kill background apps — these can override the settings above. If the rider has one, ArogyaDiet Rider should be whitelisted there too, or the app removed.
+- If the rider enables the phone's Battery Saver / Power Saving mode (e.g. on a low-battery warning), that can override the above settings on some phones. Ask riders to report if this happens.
 
 ---
 
 ## 4. What to check if a rider reports "my location isn't showing" or admin sees them going inactive
 
 Ask the rider:
-1. Did the amber "Fix location tracking" banner ever appear in the app? Did they complete both steps?
-2. What is their phone brand and model?
-3. Did they complete the brand-specific steps in Section 2 for their phone?
-4. Is the "ArogyaDiet is tracking your location" notification visible right now?
+1. In the app's **"Finish tracking setup"** checklist, are all three items (Location "Allow all the time", Notifications, Battery) showing a green tick? If the banner still shows "(N/3)", setup is incomplete.
+2. Is their Location set specifically to **"Allow all the time"** (not "While using the app")? Check: Settings → Apps → ArogyaDiet Rider → Permissions → Location.
+3. What is their phone brand and model? Did they complete the brand-specific steps in Section 2 for their phone?
+4. Is the "ArogyaDiet is tracking your route for delivery updates" notification visible right now?
 5. Did they recently update their phone software, or install a new battery/cleaner app?
 
 If all of the above check out and the issue persists, please pass along:
@@ -104,5 +107,6 @@ This info lets us check the exact upload history for that rider's device and pin
 ## 5. Current status (for the admin's awareness)
 
 - This is a **pilot rollout**, not the final rider-wide release. A small group of test riders is using this build first so real-world issues can be caught and fixed before wider distribution.
-- The core tracking fix (native background service, works through screen lock and app switching) has been tested and confirmed working — including under simulated worst-case conditions on a Vivo phone.
-- The remaining risk is phone-specific battery settings (Section 2), which depend on each rider correctly completing the setup steps. This checklist exists specifically to close that gap.
+- The core tracking fix (native background service) has been tested and confirmed working — including **screen locked for 12+ minutes continuously** on a Vivo phone with the location still updating, and automatic resume after the app is closed and reopened.
+- The critical requirement is granting **Location = "Allow all the time"** plus notifications; the in-app "Finish tracking setup" checklist now walks every rider through this and won't clear until it's done.
+- The remaining risk is phone-specific battery settings (Section 2), which the app cannot detect or set automatically — these depend on each rider completing the manual steps for their brand. This checklist exists specifically to close that gap.
