@@ -165,7 +165,13 @@ export function MobilePinLoginForm({
             {/* Welcome — Hero Section */}
             <div className="relative px-7 pb-6 pt-9 sm:px-8">
               <div className="relative flex flex-col items-center gap-4 text-center">
-                <BrandMark />
+                {/* Hidden on mobile: the page header already shows the logo
+                    right above the card there, so repeating the wordmark inside
+                    the card reads as duplication. On desktop the logo lives on
+                    the separate left brand panel, so the card mark is shown. */}
+                <div className="hidden lg:block">
+                  <BrandMark />
+                </div>
                 <div className="space-y-1.5">
                   <CardTitle className="font-display text-[1.75rem] font-semibold leading-tight tracking-tight text-slate-900">
                     Welcome back
@@ -374,14 +380,18 @@ function BrandMark() {
         aria-hidden="true"
         className="absolute inset-0 -z-10 scale-125 rounded-[22px] bg-emerald-400/25 blur-xl"
       />
-      <div className="flex h-[72px] w-[72px] items-center justify-center rounded-[22px] bg-gradient-to-br from-emerald-50 to-white shadow-[0_10px_30px_-10px_rgba(4,40,26,0.35)] ring-1 ring-emerald-900/10">
+      {/* The logo (Logo-arogya.jpeg) has its own opaque background, so it fills
+          the container edge-to-edge as a rounded "app-icon" badge — no light
+          padding framing a dark square (box-in-a-box). A white ring + emerald
+          glow keep it feeling premium against the glass card. */}
+      <div className="h-[72px] w-[72px] overflow-hidden rounded-[22px] shadow-[0_12px_30px_-10px_rgba(4,40,26,0.45)] ring-1 ring-white/70">
         <Image
-          src="/Logo-arogya.png"
+          src="/Logo-arogya.jpeg"
           alt="ArogyaDiet"
-          width={56}
-          height={56}
+          width={72}
+          height={72}
           priority
-          className="h-14 w-14 object-contain"
+          className="h-full w-full object-cover"
         />
       </div>
     </div>
