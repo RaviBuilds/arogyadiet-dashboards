@@ -50,26 +50,38 @@ export default async function RiderProfilePage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 pb-20 md:pb-8">
-      <div className="flex px-3 pt-2 flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-row justify-between gap-4 px-3 pt-2 sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900">My Profile</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-3xl font-black text-zinc-900">My Profile</h1>
+          <p className="mt-1 font-medium text-muted-foreground">
             Manage your personal details and account settings.
           </p>
         </div>
         <RiderLogoutButton />
       </div>
 
-      <Card className="border-2 py-0 shadow-sm overflow-hidden">
-        <div className="h-24 top-0 bg-zinc-900 w-full relative">
+      <Card className="overflow-hidden rounded-2xl border border-zinc-100 py-0 shadow-sm">
+        {/* Brand banner — dark, premium base (keeps the original's
+            sophistication) with the brand red worked in as a warm glow
+            rather than a flat saturated fill, so it reads as refined instead
+            of alarming/promotional. */}
+        <div className="relative h-24 w-full overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-900 to-red-950">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -bottom-10 -left-6 h-40 w-40 rounded-full bg-[#e74c3c]/30 blur-3xl"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-8 -top-12 h-32 w-32 rounded-full bg-amber-400/10 blur-3xl"
+          />
           {riderProfile?.is_active && (
-            <div className="absolute top-4 right-4 bg-green-500/20 text-green-300 px-3 py-1 rounded-full text-xs font-bold uppercase flex items-center gap-1 backdrop-blur-sm border border-green-500/30">
+            <div className="absolute top-4 right-4 flex items-center gap-1 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold uppercase text-emerald-300 backdrop-blur-sm">
               <BadgeCheck className="h-3.5 w-3.5 shrink-0" /> Active Partner
             </div>
           )}
         </div>
-        <CardContent className="px-6 pb-6 pt-0 relative">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 -mt-12 mb-6">
+        <CardContent className="relative px-6 pt-0 pb-6">
+          <div className="mb-6 -mt-12 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div className="flex flex-col gap-3">
               {/* REPLACED THE STATIC AVATAR WITH THE NEW UPLOADER */}
               <RiderAvatarUpload
@@ -81,7 +93,7 @@ export default async function RiderProfilePage() {
                 <h2 className="text-2xl font-black text-zinc-900">
                   {appUser.full_name}
                 </h2>
-                <p className="text-sm font-bold text-zinc-400 uppercase tracking-wider">
+                <p className="text-sm font-bold uppercase tracking-wider text-zinc-400">
                   Rider ID: {riderProfile?.employee_code || "PENDING"}
                 </p>
               </div>
@@ -94,9 +106,9 @@ export default async function RiderProfilePage() {
             />
           </div>
 
-          <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 flex items-center gap-4 mt-6">
-            <div className="bg-orange-100 p-3 rounded-full text-orange-600 shrink-0">
-              <CalendarHeart className="h-6 w-6" />
+          <div className="mt-6 flex items-center gap-4 rounded-xl border border-orange-100 bg-orange-50 p-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 ring-8 ring-orange-50/40">
+              <CalendarHeart className="h-5 w-5" />
             </div>
             <div>
               <p className="text-sm font-medium text-orange-800">
@@ -108,35 +120,38 @@ export default async function RiderProfilePage() {
         </CardContent>
       </Card>
 
-      <Card className="border-2 shadow-sm">
+      <Card className="rounded-2xl border border-zinc-100 shadow-sm">
         <CardContent className="p-0">
-          <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-zinc-100">
-            <div className="p-6 space-y-6">
-              <h3 className="font-bold text-zinc-900 uppercase tracking-wider text-xs">
+          <div className="grid grid-cols-1 divide-y divide-zinc-100 md:grid-cols-2 md:divide-y-0 md:divide-x">
+            <div className="space-y-6 p-6">
+              <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400">
+                <span className="h-3.5 w-1 rounded-full bg-[#e74c3c]" aria-hidden="true" />
                 Contact Details
               </h3>
               <div className="space-y-4">
                 <div className="flex items-start gap-3">
-                  {/* ADDED shrink-0 TO PREVENT SQUISHING */}
-                  <Phone className="h-5 w-5 text-zinc-400 mt-0.5 shrink-0" />
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-50 text-zinc-400">
+                    <Phone className="h-4 w-4" />
+                  </div>
                   <div>
                     <p className="text-sm font-medium text-zinc-500">
                       Mobile Number
                     </p>
-                    <p className="font-bold text-zinc-900 mt-0.5">
+                    <p className="mt-0.5 font-bold text-zinc-900">
                       {appUser.mobile || "Not provided"}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-start gap-3">
-                  {/* ADDED shrink-0 TO PREVENT SQUISHING */}
-                  <Mail className="h-5 w-5 text-zinc-400 mt-0.5 shrink-0" />
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-50 text-zinc-400">
+                    <Mail className="h-4 w-4" />
+                  </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-zinc-500">
                       Email Address
                     </p>
-                    <p className="font-bold text-zinc-900 mt-0.5 truncate">
+                    <p className="mt-0.5 truncate font-bold text-zinc-900">
                       {appUser.email}
                     </p>
                   </div>
@@ -144,23 +159,25 @@ export default async function RiderProfilePage() {
               </div>
             </div>
 
-            <div className="p-6 flex flex-col justify-between bg-zinc-50/50">
+            <div className="flex flex-col justify-between bg-zinc-50/50 p-6">
               <div className="space-y-6">
-                <h3 className="font-bold text-zinc-900 uppercase tracking-wider text-xs">
+                <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-zinc-400">
+                  <span className="h-3.5 w-1 rounded-full bg-[#e74c3c]" aria-hidden="true" />
                   Emergency Info
                 </h3>
                 <div className="flex items-start justify-start gap-3">
-                  {/* ADDED shrink-0 TO PREVENT SQUISHING */}
-                  <ShieldAlert className="h-5 w-5 text-red-400 mt-0.5 shrink-0" />
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-500">
+                    <ShieldAlert className="h-4 w-4" />
+                  </div>
                   <div>
                     <p className="text-sm font-medium text-zinc-500">
                       Emergency Contact
                     </p>
-                    <p className="font-bold text-zinc-900 mt-0.5">
+                    <p className="mt-0.5 font-bold text-zinc-900">
                       {riderProfile?.emergency_contact || "Not setup yet"}
                     </p>
                     {!riderProfile?.emergency_contact && (
-                      <p className="text-xs text-red-500 font-medium mt-1">
+                      <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-red-100 bg-red-50 px-2.5 py-2 text-xs font-medium text-red-600">
                         Please update your emergency contact for your safety.
                       </p>
                     )}

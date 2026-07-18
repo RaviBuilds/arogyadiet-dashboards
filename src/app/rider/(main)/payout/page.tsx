@@ -3,7 +3,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import {
-  IndianRupee,
   TrendingUp,
   Calendar,
   Wallet,
@@ -165,17 +164,22 @@ export default async function RiderEarningsPage() {
       {/* Header */}
       <div className="pt-2 pb-2">
         <h1 className="text-2xl font-black text-zinc-900">Your Earnings</h1>
-        <p className="text-zinc-500 font-medium">
+        <p className="font-medium text-zinc-500">
           Track your daily and total payouts
         </p>
       </div>
 
       {/* Primary Highlight: Today's Earnings */}
-      <Card className="border-none shadow-md bg-gradient-to-br from-green-500 to-emerald-600 text-white rounded-2xl overflow-hidden">
-        <CardContent className="p-6 relative">
-          <Wallet className="absolute right-[-20px] bottom-[-20px] h-32 w-32 text-white/10" />
-          <p className="font-bold text-green-50 uppercase tracking-wider text-xs mb-1">
-            Today's Earnings
+      <Card className="relative overflow-hidden rounded-2xl border-none bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-lg shadow-emerald-900/20">
+        {/* Soft top sheen + oversized wallet watermark for depth. */}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 to-transparent"
+        />
+        <CardContent className="relative p-6">
+          <Wallet className="absolute -bottom-5 -right-5 h-32 w-32 text-white/10" />
+          <p className="mb-1 text-xs font-bold uppercase tracking-wider text-green-50/90">
+            Today&apos;s Earnings
           </p>
           <div className="flex items-baseline gap-1">
             <span className="text-2xl font-bold">₹</span>
@@ -183,18 +187,20 @@ export default async function RiderEarningsPage() {
               {todayEarnings.toFixed(2)}
             </span>
           </div>
-          <p className="text-sm font-medium text-green-100 mt-2">
+          <p className="mt-2 text-sm font-medium text-green-100">
             {format(new Date(), "EEEE, do MMMM")}
           </p>
         </CardContent>
       </Card>
 
-      <Card className="mb-6 border-none bg-white shadow-sm rounded-2xl">
+      <Card className="rounded-2xl border border-zinc-100 bg-white shadow-sm">
         <CardHeader>
-          <CardTitle>🏆 Top Riders (Last 3 Months)</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            🏆 Top Riders <span className="text-muted-foreground font-normal">· Last 3 Months</span>
+          </CardTitle>
           <CardDescription>{windowLabel}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3.5">
           {topRiders.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No paid settlements in this period yet.
@@ -202,12 +208,18 @@ export default async function RiderEarningsPage() {
           ) : (
             topRiders.map((rider, index) => (
               <div key={rider.riderId} className="flex items-center gap-3">
-                <span className="w-24 shrink-0 truncate text-sm font-medium">
-                  {rider.displayName}
+                <span className="flex w-24 shrink-0 items-center gap-1.5 truncate text-sm font-medium">
+                  <span
+                    aria-hidden="true"
+                    className="text-xs tabular-nums text-zinc-400"
+                  >
+                    {index + 1}.
+                  </span>
+                  <span className="truncate">{rider.displayName}</span>
                 </span>
-                <div className="relative h-6 w-full flex-1 rounded-sm bg-zinc-100">
+                <div className="relative h-6 w-full flex-1 overflow-hidden rounded-full bg-zinc-100">
                   <div
-                    className={`h-full rounded-sm ${index === 0 ? "bg-emerald-500" : "bg-indigo-500"}`}
+                    className={`h-full rounded-full transition-all ${index === 0 ? "bg-gradient-to-r from-emerald-400 to-emerald-500" : "bg-gradient-to-r from-indigo-400 to-indigo-500"}`}
                     style={{
                       width: `${(rider.total / maxEarnings) * 100}%`,
                     }}
@@ -224,38 +236,39 @@ export default async function RiderEarningsPage() {
 
       {/* Secondary Metrics */}
       <div className="grid grid-cols-2 gap-4">
-        <Card className="border-2 border-zinc-100 shadow-sm rounded-2xl">
-          <CardContent className="p-5">
-            <div className="bg-blue-50 w-10 h-10 rounded-full flex items-center justify-center mb-3">
-              <Calendar className="h-5 w-5 text-blue-600" />
+        <Card className="rounded-2xl border border-zinc-100 shadow-sm transition-transform active:scale-[0.98]">
+          <CardContent className="flex flex-col items-center justify-center p-5 text-center">
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-blue-600 ring-8 ring-blue-50/40">
+              <Calendar className="h-5 w-5" />
             </div>
-            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">
-              This Month
-            </p>
-            <h3 className="text-2xl font-black text-zinc-900">
+            <h3 className="text-2xl font-black leading-none text-zinc-900">
               ₹{monthEarnings.toFixed(2)}
             </h3>
+            <p className="mt-1.5 text-xs font-bold uppercase tracking-wider text-zinc-400">
+              This Month
+            </p>
           </CardContent>
         </Card>
 
-        <Card className="border-2 border-zinc-100 shadow-sm rounded-2xl">
-          <CardContent className="p-5">
-            <div className="bg-orange-50 w-10 h-10 rounded-full flex items-center justify-center mb-3">
-              <TrendingUp className="h-5 w-5 text-orange-600" />
+        <Card className="rounded-2xl border border-zinc-100 shadow-sm transition-transform active:scale-[0.98]">
+          <CardContent className="flex flex-col items-center justify-center p-5 text-center">
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-orange-50 text-orange-600 ring-8 ring-orange-50/40">
+              <TrendingUp className="h-5 w-5" />
             </div>
-            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1">
-              Total All Time
-            </p>
-            <h3 className="text-2xl font-black text-zinc-900">
+            <h3 className="text-2xl font-black leading-none text-zinc-900">
               ₹{totalEarnings.toFixed(2)}
             </h3>
+            <p className="mt-1.5 text-xs font-bold uppercase tracking-wider text-zinc-400">
+              Total All Time
+            </p>
           </CardContent>
         </Card>
       </div>
 
       {/* Payment History (Monthly Settlements) */}
       <div>
-        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-3 px-1">
+        <h3 className="mb-3 flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider text-zinc-400">
+          <span className="h-3.5 w-1 rounded-full bg-[#e74c3c]" aria-hidden="true" />
           Payment History
         </h3>
 
@@ -273,7 +286,7 @@ export default async function RiderEarningsPage() {
               const isPaid = payment.status === "PAID";
 
               return (
-                <Card key={payment.id} className="border-none shadow-sm rounded-xl">
+                <Card key={payment.id} className="rounded-xl border border-zinc-100 shadow-sm">
                   <CardContent className="p-4">
                     <div className="flex justify-between items-start">
                       <div className="flex gap-3 items-center">
@@ -330,7 +343,8 @@ export default async function RiderEarningsPage() {
 
       {/* Recent Transactions / History */}
       <div>
-        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-3 px-1">
+        <h3 className="mb-3 flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider text-zinc-400">
+          <span className="h-3.5 w-1 rounded-full bg-[#e74c3c]" aria-hidden="true" />
           Recent Completed Deliveries
         </h3>
 
@@ -340,38 +354,56 @@ export default async function RiderEarningsPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {safeOrders.slice(0, 10).map((order) => (
-              <Card key={order.id} className="border-none shadow-sm rounded-xl">
-                <CardContent className="p-4 flex justify-between items-center">
-                  <div className="flex gap-3 items-center">
-                    <div className="bg-green-100 h-10 w-10 rounded-full flex items-center justify-center shrink-0">
-                      <CheckCircle2 className="h-5 w-5 text-green-600" />
+            {safeOrders.slice(0, 10).map((order) => {
+              // Purely presentational: a ₹0.00 payout is styled quietly (muted
+              // icon + gray amount) so a run of zero-value deliveries doesn't
+              // read as a wall of bold-green "earnings". Derived from the same
+              // amount already being displayed — no data/logic change.
+              const amount = Number(order.payout_amount || 0);
+              const isPaidOut = amount > 0;
+
+              return (
+                <Card
+                  key={order.id}
+                  className="rounded-xl border border-zinc-100 shadow-sm transition-transform active:scale-[0.99]"
+                >
+                  <CardContent className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${isPaidOut ? "bg-green-100 text-green-600" : "bg-zinc-100 text-zinc-400"}`}
+                      >
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-zinc-900">
+                          Delivery Payout
+                        </p>
+                        <p className="text-xs font-medium text-zinc-500">
+                          {order.delivered_at
+                            ? format(
+                                new Date(order.delivered_at),
+                                "MMM dd, h:mm a",
+                              )
+                            : format(
+                                new Date(order.delivery_date),
+                                "MMM dd, yyyy",
+                              )}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-bold text-zinc-900 text-sm">
-                        Delivery Payout
-                      </p>
-                      <p className="text-xs font-medium text-zinc-500">
-                        {order.delivered_at
-                          ? format(
-                              new Date(order.delivered_at),
-                              "MMM dd, h:mm a",
-                            )
-                          : format(
-                              new Date(order.delivery_date),
-                              "MMM dd, yyyy",
-                            )}
-                      </p>
+                    <div className="text-right">
+                      <span
+                        className={`font-black ${isPaidOut ? "text-green-600" : "text-zinc-400"}`}
+                      >
+                        {isPaidOut
+                          ? `+₹${amount.toFixed(2)}`
+                          : `₹${amount.toFixed(2)}`}
+                      </span>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-black text-green-600">
-                      +₹{Number(order.payout_amount || 0).toFixed(2)}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>

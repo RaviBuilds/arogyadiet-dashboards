@@ -26,6 +26,11 @@ import {
 interface AddressListProps {
   addresses: Address[];
   onRefresh?: () => void;
+  /**
+   * When true (KIT-only customers), the address form skips the service-area
+   * pincode check and only validates the 6-digit format.
+   */
+  bypassPincodeServiceability?: boolean;
 }
 
 /**
@@ -99,7 +104,11 @@ function AddressCard({
   );
 }
 
-export function AddressList({ addresses, onRefresh }: AddressListProps) {
+export function AddressList({
+  addresses,
+  onRefresh,
+  bypassPincodeServiceability = false,
+}: AddressListProps) {
   const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
@@ -203,6 +212,7 @@ export function AddressList({ addresses, onRefresh }: AddressListProps) {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         initialData={editingAddress}
+        bypassPincodeServiceability={bypassPincodeServiceability}
         onSuccess={() => {
           setIsModalOpen(false);
           if (onRefresh) onRefresh();

@@ -62,6 +62,12 @@ interface AddressFormModalProps {
   onClose: () => void;
   onSuccess?: () => void;
   initialData?: Address | null;
+  /**
+   * KIT customers ship by courier, so their pincode only needs a valid format
+   * — the service-area serviceability check is skipped. Defaults to false so
+   * MEAL/ACCOMMODATION flows keep enforcing deliverable pincodes.
+   */
+  bypassPincodeServiceability?: boolean;
 }
 
 /**
@@ -95,6 +101,7 @@ export function AddressFormModal({
   onClose,
   initialData,
   onSuccess,
+  bypassPincodeServiceability = false,
 }: AddressFormModalProps) {
   const [isPending, setIsPending] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -109,8 +116,8 @@ export function AddressFormModal({
   const [skipLocation, setSkipLocation] = useState(false);
   const [serviceAreaPincodes, setServiceAreaPincodes] = useState<string[]>([]);
   const addressSchema = useMemo(
-    () => createAddressSchema(serviceAreaPincodes),
-    [serviceAreaPincodes],
+    () => createAddressSchema(serviceAreaPincodes, bypassPincodeServiceability),
+    [serviceAreaPincodes, bypassPincodeServiceability],
   );
 
   const form = useForm<AddressFormValues>({
@@ -325,23 +332,7 @@ export function AddressFormModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-[520px]"
-        // Google Places renders its suggestion list (`.pac-container`) in a
-        // portal attached directly to <body>, outside this Dialog's content
-        // tree. Radix's dismissable-layer sees a click landing there as an
-        // "outside" interaction and closes the dialog before the click can
-        // ever reach Google's own onPlaceChanged handler — so a suggestion
-        // never gets a chance to register as selected. Letting clicks that
-        // land inside `.pac-container` pass through fixes that without
-        // touching the shared Dialog primitive.
-        onInteractOutside={(event) => {
-          const target = event.target as HTMLElement | null;
-          if (target?.closest(".pac-container")) {
-            event.preventDefault();
-          }
-        }}
-      >
+      <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-[520px]">
         <DialogHeader>
           <div className="flex items-center gap-2.5">
             <IconChip icon={Home} tone="green" />

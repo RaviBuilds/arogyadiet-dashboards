@@ -179,18 +179,12 @@
   }
 }
 
-/* Google Places Autocomplete renders its suggestion dropdown (`.pac-container`)
-   in a portal attached directly to <body>. Two things break inside a modal:
-
-   1. Stacking — our dialogs use a z-50 overlay/content stack, so the dropdown
-      must sit above it to be visible.
-   2. Interaction — Radix Dialog sets `pointer-events: none` on <body> while
-      open and only re-enables it on the dialog content. Because the dropdown
-      is a direct child of <body> (outside the dialog content), it inherits
-      `pointer-events: none` and its suggestions become literally unclickable.
-
-   Forcing a high z-index AND `pointer-events: auto` fixes both so a customer
-   can actually tap a suggestion from inside the Add/Edit Address dialog. */
+/* Defensive global for Google's legacy Places Autocomplete widget, whose
+   dropdown (`.pac-container`) is portalled to <body>. Inside a modal it can be
+   both hidden under the z-50 overlay and made unclickable by the dialog's
+   body-level `pointer-events: none` lock. The customer address picker renders
+   its own in-dialog prediction list instead of this widget, but keeping the
+   rule ensures any remaining `<Autocomplete>` usage stays usable in a dialog. */
 .pac-container {
   z-index: 100 !important;
   pointer-events: auto !important;

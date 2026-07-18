@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Autocomplete, GoogleMap, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, useJsApiLoader } from "@react-google-maps/api";
 import { Capacitor } from "@capacitor/core";
 import { Geolocation } from "@capacitor/geolocation";
 import { Loader2, Locate, MapPin, Search } from "lucide-react";
@@ -131,9 +131,18 @@ export function AddressPickerMap({
 }: AddressPickerMapProps) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
-  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  const autocompleteServiceRef =
+    useRef<google.maps.places.AutocompleteService | null>(null);
+  const sessionTokenRef =
+    useRef<google.maps.places.AutocompleteSessionToken | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDraggingRef = useRef(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [predictions, setPredictions] = useState<
+    google.maps.places.AutocompletePrediction[]
+  >([]);
+  const [showPredictions, setShowPredictions] = useState(false);
   const [mapCenter, setMapCenter] = useState<google.maps.LatLngLiteral>(
     () => toCoords(lat, lng) ?? HYDERABAD_CENTER,
   );
@@ -200,38 +209,117 @@ export function AddressPickerMap({
     void reverseGeocodeAndResolve(nextLat, nextLng);
   }, [onCoordinatesChange, reverseGeocodeAndResolve]);
 
-  const handleAutocompleteLoad = useCallback(
-    (autocomplete: google.maps.places.Autocomplete) => {
-      autocompleteRef.current = autocomplete;
+  /**
+   * Resolve a Places `place_id` to coordinates + locality fields via the
+   * Geocoder (which accepts a placeId and returns geometry AND
+   * address_components in one call), then pan the map and auto-fill.
+   */
+  const resolvePlaceId = useCallback(
+    async (placeId: string) => {
+      if (typeof google === "undefined") return;
+      const geocoder =
+        geocoderRef.current ??
+        (geocoderRef.current = new google.maps.Geocoder());
+      try {
+        const response = await geocoder.geocode({ placeId });
+        const first = response.results?.[0];
+        const location = first?.geometry?.location;
+        if (!first || !location) return;
+
+        const latitude = location.lat();
+        const longitude = location.lng();
+        const coords = { lat: latitude, lng: longitude };
+        setMapCenter(coords);
+        mapRef.current?.panTo(coords);
+        onCoordinatesChange(latitude, longitude);
+
+        if (first.address_components) {
+          onAddressResolved?.(
+            extractLocalityFields(first.address_components),
+            latitude,
+            longitude,
+          );
+        }
+      } catch {
+        // Silently ignore — the user can still drag the pin.
+      }
     },
-    [],
+    [onAddressResolved, onCoordinatesChange],
   );
 
-  const handlePlaceChanged = useCallback(() => {
-    const place = autocompleteRef.current?.getPlace();
-    const location = place?.geometry?.location;
-    if (!place || !location) return;
+  /**
+   * Debounced Places Autocomplete lookup. We render the prediction list
+   * ourselves (see JSX below) instead of using the `<Autocomplete>` widget,
+   * whose dropdown is portalled to <body> and becomes unclickable inside a
+   * Radix Dialog (pointer-events lock + nested dismissable layers). This
+   * custom dropdown lives inside the dialog DOM, so it just works.
+   */
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchInput(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    const latitude = location.lat();
-    const longitude = location.lng();
-
-    // Google already writes the selected place label into the (uncontrolled)
-    // input's DOM value on selection, so there's nothing to sync here.
-    const coords = { lat: latitude, lng: longitude };
-    setMapCenter(coords);
-    mapRef.current?.panTo(coords);
-    onCoordinatesChange(latitude, longitude);
-
-    if (place.address_components && place.address_components.length > 0) {
-      onAddressResolved?.(
-        extractLocalityFields(place.address_components),
-        latitude,
-        longitude,
-      );
-    } else {
-      void reverseGeocodeAndResolve(latitude, longitude);
+    const trimmed = value.trim();
+    if (
+      trimmed.length < 3 ||
+      typeof google === "undefined" ||
+      !google.maps?.places
+    ) {
+      setPredictions([]);
+      setShowPredictions(false);
+      return;
     }
-  }, [onAddressResolved, onCoordinatesChange, reverseGeocodeAndResolve]);
+
+    debounceRef.current = setTimeout(() => {
+      const service =
+        autocompleteServiceRef.current ??
+        (autocompleteServiceRef.current =
+          new google.maps.places.AutocompleteService());
+      if (!sessionTokenRef.current) {
+        sessionTokenRef.current =
+          new google.maps.places.AutocompleteSessionToken();
+      }
+      service.getPlacePredictions(
+        {
+          input: trimmed,
+          componentRestrictions: { country: "in" },
+          sessionToken: sessionTokenRef.current,
+        },
+        (results, status) => {
+          if (
+            status === google.maps.places.PlacesServiceStatus.OK &&
+            results &&
+            results.length > 0
+          ) {
+            setPredictions(results);
+            setShowPredictions(true);
+          } else {
+            setPredictions([]);
+            setShowPredictions(false);
+          }
+        },
+      );
+    }, 250);
+  }, []);
+
+  const handleSelectPrediction = useCallback(
+    (prediction: google.maps.places.AutocompletePrediction) => {
+      setSearchInput(prediction.description);
+      setPredictions([]);
+      setShowPredictions(false);
+      // A session ends once a place is selected — drop the token so the next
+      // search starts a fresh (correctly billed) session.
+      sessionTokenRef.current = null;
+      void resolvePlaceId(prediction.place_id);
+    },
+    [resolvePlaceId],
+  );
+
+  // Clean up any pending debounce timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
@@ -302,25 +390,54 @@ export function AddressPickerMap({
   return (
     <div className="flex flex-col gap-2">
       {showSearchBox && (
-        <Autocomplete
-          onLoad={handleAutocompleteLoad}
-          onPlaceChanged={handlePlaceChanged}
-          options={{
-            fields: ["geometry", "address_components", "formatted_address"],
-            componentRestrictions: { country: "in" },
-          }}
-        >
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="text"
-              className="pl-8"
-              maxLength={255}
-              placeholder={searchPlaceholder}
-              disabled={disabled}
-            />
-          </div>
-        </Autocomplete>
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            className="pl-8"
+            maxLength={255}
+            placeholder={searchPlaceholder}
+            value={searchInput}
+            disabled={disabled}
+            autoComplete="off"
+            onChange={(event) => handleSearchChange(event.target.value)}
+            onFocus={() => {
+              if (predictions.length > 0) setShowPredictions(true);
+            }}
+            // Delay hiding so a click on a prediction registers first.
+            onBlur={() => window.setTimeout(() => setShowPredictions(false), 150)}
+          />
+
+          {showPredictions && predictions.length > 0 && (
+            <ul className="absolute inset-x-0 top-[calc(100%+4px)] z-30 max-h-60 overflow-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
+              {predictions.map((prediction) => (
+                <li key={prediction.place_id}>
+                  <button
+                    type="button"
+                    // Prevent the input's blur from firing before the click,
+                    // which would close the list before selection registers.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => handleSelectPrediction(prediction)}
+                    className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-zinc-50"
+                  >
+                    <MapPin className="mt-0.5 size-4 shrink-0 text-zinc-400" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-zinc-800">
+                        {prediction.structured_formatting?.main_text ??
+                          prediction.description}
+                      </span>
+                      {prediction.structured_formatting?.secondary_text && (
+                        <span className="block truncate text-xs text-zinc-500">
+                          {prediction.structured_formatting.secondary_text}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       <div

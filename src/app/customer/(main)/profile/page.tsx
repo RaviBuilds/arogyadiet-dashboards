@@ -14,10 +14,15 @@ export default async function CustomerProfilePage() {
     await getCustomerSession();
   if (error || !user) redirect("/login");
 
-  // Parallelize independent queries: full user record, customer_profiles data, addresses, and medical_documents
+  // Parallelize independent queries: full user record, customer_profiles data, addresses, medical_documents, and active subscription categories
   // All queries only depend on profile.id or customerProfileId which are already resolved
-  const [dbUserResult, customerProfileResult, addressesResult, medicalDocsResult] =
-    await Promise.all([
+  const [
+    dbUserResult,
+    customerProfileResult,
+    addressesResult,
+    medicalDocsResult,
+    subscriptionsResult,
+  ] = await Promise.all([
       profile
         ? supabase
             .from("users")
@@ -47,12 +52,28 @@ export default async function CustomerProfilePage() {
             .eq("customer_profile_id", customerProfileId)
             .order("uploaded_at", { ascending: false })
         : Promise.resolve({ data: [] }),
+      customerProfileId
+        ? supabase
+            .from("subscriptions")
+            .select("customer_category")
+            .eq("customer_profile_id", customerProfileId)
+            .in("status", ["ACTIVE", "PENDING"])
+        : Promise.resolve({ data: [] }),
     ]);
 
   const dbUser = dbUserResult.data;
   const customerProfile = customerProfileResult.data;
   const addresses = (addressesResult.data as any[]) || [];
   const docs = (medicalDocsResult.data as any[]) || [];
+
+  // KIT-only customers ship by courier, so their delivery address only needs a
+  // valid pincode format — skip the service-area serviceability check. If they
+  // have any MEAL/ACCOMMODATION subscription (or none at all), keep enforcing it.
+  const activeSubscriptions =
+    (subscriptionsResult.data as { customer_category: string }[] | null) ?? [];
+  const isKitOnlyCustomer =
+    activeSubscriptions.length > 0 &&
+    activeSubscriptions.every((sub) => sub.customer_category === "KIT");
 
   // Generate secure Signed URLs for medical documents
   let documentsWithUrls: any[] = [];
@@ -153,7 +174,10 @@ export default async function CustomerProfilePage() {
 
       <PinChangeForm />
 
-      <AddressList addresses={addresses} />
+      <AddressList
+        addresses={addresses}
+        bypassPincodeServiceability={isKitOnlyCustomer}
+      />
 
       {/* Logout — a quiet exit action at the bottom, not the second thing
           users see on the page. */}
