@@ -16,6 +16,7 @@ import {
   notifyAddressSaved,
 } from "@/lib/customer/customerProfileNotifications";
 import { stampCustomerByPrimaryAddress } from "@/lib/clinic/stamping";
+import { customerRequiresServiceablePincode } from "@/lib/address/customerServiceability";
 
 // 2. The Server Action
 
@@ -27,17 +28,6 @@ export async function saveAddressAction(data: AddressFormValues) {
   } = await supabase.auth.getUser();
 
   if (!user) throw new Error("Unauthorized");
-
-  const pincodeCheck = await assertDeliverablePincode(data.pincode);
-  if (!pincodeCheck.ok) {
-    return { error: pincodeCheck.error };
-  }
-
-  const serviceAreaPincodes = await getServiceAreaPincodesAction();
-  const parsed = createAddressSchema(serviceAreaPincodes).safeParse(data);
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Invalid address data" };
-  }
 
   // get internal user
   const { data: dbUser } = await supabase
@@ -56,6 +46,31 @@ export async function saveAddressAction(data: AddressFormValues) {
     .single();
 
   if (!profile) return { error: "Customer profile not found" };
+
+  // KIT-only customers ship by courier, so their address only needs a valid
+  // pincode format — the service-area check is skipped (Req: KIT bypass).
+  const requiresServiceability = await customerRequiresServiceablePincode(
+    supabase,
+    profile.id,
+  );
+
+  if (requiresServiceability) {
+    const pincodeCheck = await assertDeliverablePincode(data.pincode);
+    if (!pincodeCheck.ok) {
+      return { error: pincodeCheck.error };
+    }
+  }
+
+  const serviceAreaPincodes = requiresServiceability
+    ? await getServiceAreaPincodesAction()
+    : [];
+  const parsed = createAddressSchema(
+    serviceAreaPincodes,
+    !requiresServiceability,
+  ).safeParse(data);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid address data" };
+  }
 
   // count
   if (!parsed.data.id) {
