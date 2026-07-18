@@ -54,7 +54,15 @@ export function MobileNumberInput({
   );
 
   return (
-    <div className="relative">
+    <div className="relative flex items-center overflow-hidden rounded-2xl border-2 border-emerald-900/10 bg-white shadow-sm transition-all duration-300 focus-within:border-emerald-400 focus-within:shadow-[0_0_0_4px_rgba(16,185,129,0.12)]">
+      {/* Country code chip — purely cosmetic; the field itself still only
+          collects the 10-digit number, unchanged from prior behaviour. */}
+      <span
+        aria-hidden="true"
+        className="flex h-16 shrink-0 items-center border-r border-emerald-900/10 bg-emerald-50/60 px-4 text-lg font-semibold text-emerald-700"
+      >
+        +91
+      </span>
       <input
         id={id}
         name="mobile"
@@ -71,20 +79,12 @@ export function MobileNumberInput({
         disabled={disabled}
         aria-label={label}
         className={cn(
-          "w-full text-center font-bold tracking-[0.35em] transition-all duration-300",
-          "h-16 rounded-xl border-2 shadow-sm",
-          "text-2xl sm:text-3xl",
-          "bg-white dark:bg-slate-800",
-          "text-slate-900 dark:text-slate-100",
-          "placeholder:text-slate-300 dark:placeholder:text-slate-600 placeholder:tracking-[0.35em]",
-          "outline-none",
-          // Border colors - using slate/gray as default
-          "border-slate-300 dark:border-slate-600",
-          // Focus states - no custom colors, just standard outline
-          "focus:border-slate-400 dark:focus:border-slate-500",
-          "focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-700",
-          // Disabled state
-          "disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-900"
+          "h-16 w-full min-w-0 flex-1 text-center font-semibold tracking-[0.3em] transition-colors",
+          "text-xl sm:text-2xl",
+          "bg-transparent text-slate-900",
+          "placeholder:text-slate-300 placeholder:tracking-[0.3em]",
+          "outline-none border-none",
+          "disabled:cursor-not-allowed disabled:opacity-50"
         )}
       />
     </div>

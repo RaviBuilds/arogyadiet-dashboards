@@ -8,6 +8,11 @@ import {
   PauseCircle,
   CalendarClock,
   Clock,
+  Drumstick,
+  Egg,
+  Wheat,
+  Salad,
+  Soup,
   type LucideIcon,
 } from "lucide-react";
 import type { StatusPillTone } from "@/shared/components/customer/profile-ui/StatusPill";
@@ -65,4 +70,23 @@ export function getHistoryStatusVisual(
     default:
       return { label: "Preparing", tone: "blue", icon: ChefHat };
   }
+}
+
+/**
+ * Meal-name → Lucide icon, for the Meal History journal rows.
+ *
+ * Mirrors the same substring matching the admin operations tables already
+ * use for `meal_categories.name` (see `getMealLabel` in
+ * admin/operations/PlannedDeliveries.tsx) — no new categorisation invented,
+ * just a calm icon paired with the same real label already shown.
+ */
+export function getMealIcon(mealName: string | null | undefined): LucideIcon {
+  if (!mealName) return Soup;
+  const upper = mealName.toUpperCase();
+  if (upper.includes("CHICKEN") || upper.includes("NON-VEGETARIAN")) return Drumstick;
+  if (upper.includes("EGG")) return Egg;
+  if (upper.includes("MILLET")) return Wheat;
+  if (upper.includes("MIXED")) return Soup;
+  if (upper.includes("VEGETARIAN") || upper === "VEG") return Salad;
+  return Soup;
 }

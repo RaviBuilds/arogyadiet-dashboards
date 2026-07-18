@@ -14,7 +14,6 @@ const containerStyle = {
   width: "100%",
   height: "100%",
   minHeight: "400px",
-  borderRadius: "1rem",
 };
 
 const MAP_OPTIONS: google.maps.MapOptions = {
@@ -37,12 +36,21 @@ export function LiveTrackingMap({
   customerLat,
   customerLng,
   onEtaChange,
+  onDistanceChange,
+  onLocationUpdate,
 }: {
   riderId: string | null;
   orderStatus: string;
   customerLat?: number;
   customerLng?: number;
   onEtaChange?: (etaText: string | null) => void;
+  /** Distance-to-arrival text (e.g. "1.4 km"), derived from the SAME
+   *  Directions response already fetched for the ETA — no extra API call. */
+  onDistanceChange?: (distanceText: string | null) => void;
+  /** Fired every time a fresh rider coordinate lands (initial fetch or
+   *  realtime update) — purely a UI freshness signal ("Updated Xs ago"),
+   *  does not alter the underlying subscription/polling behavior at all. */
+  onLocationUpdate?: () => void;
 }) {
   // Stable Supabase client — created once and reused across renders.
   const supabaseRef = useRef(createClient());
@@ -126,14 +134,15 @@ export function LiveTrackingMap({
         if (cancelled) return;
         setDirectionsResponse(response);
 
-        const etaText =
-          response.routes?.[0]?.legs?.[0]?.duration?.text ?? null;
-        onEtaChange?.(etaText);
+        const leg = response.routes?.[0]?.legs?.[0];
+        onEtaChange?.(leg?.duration?.text ?? null);
+        onDistanceChange?.(leg?.distance?.text ?? null);
       } catch (err) {
         console.error("[LiveTrackingMap] Directions request failed", err);
         if (cancelled) return;
         setDirectionsResponse(null);
         onEtaChange?.(null);
+        onDistanceChange?.(null);
       }
     };
 
@@ -166,6 +175,7 @@ export function LiveTrackingMap({
 
         if (data && data.lat && data.lng) {
           setRiderLocation({ lat: Number(data.lat), lng: Number(data.lng) });
+          onLocationUpdate?.();
         }
       } catch (err) {
         console.error("[LiveTrackingMap] Initial Fetch Error:", err);
@@ -192,6 +202,7 @@ export function LiveTrackingMap({
               lat: Number(newData.lat),
               lng: Number(newData.lng),
             });
+            onLocationUpdate?.();
           }
         },
       )
@@ -200,6 +211,9 @@ export function LiveTrackingMap({
     return () => {
       supabase.removeChannel(channel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onLocationUpdate
+    // is a UI-only freshness callback; including it would resubscribe the
+    // realtime channel on every parent re-render.
   }, [riderId, supabase]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -223,35 +237,29 @@ export function LiveTrackingMap({
 
   if (!isLoaded) {
     return (
-      <div className="h-[400px] w-full bg-zinc-100 animate-pulse rounded-2xl flex items-center justify-center text-zinc-400 font-bold">
-        Loading Maps Engine...
+      <div className="flex h-full w-full min-h-[400px] animate-pulse items-center justify-center bg-slate-100 text-sm font-semibold text-slate-400">
+        Loading map…
       </div>
     );
   }
 
   if (!canTrack) {
     return (
-      <div className="p-6 bg-orange-50 border border-orange-100 text-orange-800 rounded-2xl text-center shadow-sm">
-        <MapPin className="h-8 w-8 mx-auto mb-2 opacity-50" />
-        <p className="font-bold">Map unavailable</p>
-        <p className="text-sm mt-1">
-          Live tracking will appear here once the rider leaves the kitchen.
+      <div className="flex h-full w-full min-h-[400px] flex-col items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-amber-50/40 p-8 text-center">
+        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-sm">
+          <MapPin className="h-6 w-6 text-emerald-500" />
+        </div>
+        <p className="font-semibold text-slate-700">Map unavailable yet</p>
+        <p className="mt-1 max-w-xs text-sm leading-relaxed text-slate-500">
+          We&apos;ll start live tracking once your rider begins today&apos;s
+          delivery.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-2xl overflow-hidden border-4 border-white shadow-lg relative h-[400px] w-full bg-zinc-100">
-      {/* Live Status Badge Overlay */}
-      <div className="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-sm px-4 py-2 rounded-full shadow-md font-bold text-sm text-zinc-900 flex items-center gap-2">
-        <span className="relative flex h-3 w-3">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-        </span>
-        Rider Approaching
-      </div>
-
+    <div className="relative h-full w-full">
       <GoogleMap
         mapContainerStyle={containerStyle}
         center={initialCenter}
@@ -267,7 +275,7 @@ export function LiveTrackingMap({
               suppressMarkers: true,
               preserveViewport: true,
               polylineOptions: {
-                strokeColor: "#111827",
+                strokeColor: "#059669",
                 strokeOpacity: 0.9,
                 strokeWeight: 5,
               },

@@ -57,6 +57,18 @@ export interface BatteryOptimizationStatus {
   sdkInt: number;
 }
 
+/** Per-permission grant state as reported by the native layer. */
+export type TrackingPermissionState = "granted" | "denied";
+
+export interface TrackingPermissionStatus {
+  /** Foreground location ("While using the app" / fine or coarse). */
+  location: TrackingPermissionState;
+  /** "Allow all the time" background location (Android 10+). */
+  backgroundLocation: TrackingPermissionState;
+  /** Whether the OS will actually display the foreground-service notification. */
+  notifications: TrackingPermissionState;
+}
+
 export interface BackgroundGeolocationPlugin {
   addWatcher(
     options: WatcherOptions,
@@ -68,6 +80,20 @@ export interface BackgroundGeolocationPlugin {
   getBatteryOptimizationStatus(): Promise<BatteryOptimizationStatus>;
   /** Launches the stock "Ignore battery optimizations" system prompt. */
   requestIgnoreBatteryOptimizations(): Promise<void>;
+  /**
+   * Granular status of the permissions continuous background tracking needs:
+   * foreground location, "all the time" background location, and notifications.
+   */
+  getTrackingPermissionStatus(): Promise<TrackingPermissionStatus>;
+  /** Requests POST_NOTIFICATIONS (Android 13+). Resolves with updated status. */
+  requestNotificationPermission(): Promise<TrackingPermissionStatus>;
+  /** Requests foreground location ("While using the app"). Resolves with updated status. */
+  requestForegroundLocationPermission(): Promise<TrackingPermissionStatus>;
+  /**
+   * Requests "Allow all the time" background location (Android 10+). Chains the
+   * foreground grant first if needed. Resolves with updated status.
+   */
+  requestBackgroundLocationPermission(): Promise<TrackingPermissionStatus>;
 }
 
 /**

@@ -48,6 +48,15 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Premium display serif (Fraunces, loaded via next/font in app/layout.tsx and
+   exposed as --font-fraunces on <html>). Defined as a real Tailwind v4 utility
+   so `.font-display` lands in the utilities layer and reliably beats the base
+   `html { font-family: Arial }` rule — referencing --font-fraunces through
+   @theme did NOT generate a working utility. */
+@utility font-display {
+  font-family: var(--font-fraunces), Georgia, "Times New Roman", serif;
+}
+
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -202,6 +211,24 @@
   }
 }
 
+/* Today's Inspiration — premium story-style progress pill. Linear fill from
+   0% to 100% over the slide's dwell time (duration set inline per-instance
+   to match the carousel's autoplay interval). Paused via inline
+   animation-play-state while the customer hovers/focuses the carousel. */
+@keyframes story-progress-fill {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+.story-progress-fill {
+  animation-name: story-progress-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
 
 
 /* Resting states (before reveal / no JS): visible; the sheen strip is hidden. */
@@ -253,7 +280,8 @@
   .app-intro .journey-bar-anim,
   .app-intro .hero-sheen,
   .app-intro .play-pulse-once,
-  .reveal-page {
+  .reveal-page,
+  .story-progress-fill {
     animation: none;
   }
 }
@@ -466,6 +494,36 @@
   .journey-sparkle-2,
   .journey-glow-breathe,
   .journey-leaf-float {
+    animation: none;
+  }
+}
+
+/* =======================================================================
+   Meal History — "My Nutrition Journal" quiet status motion.
+
+   Same restrained approach as the journey-* set above: slow, low-amplitude,
+   always resting on a fully-valid static frame, and fully disabled under
+   prefers-reduced-motion. Used for the small in-row status indicators in
+   SubscriptionTimeline (desktop table + mobile cards) so "Preparing" /
+   "Out for delivery" / "Arriving" read as gently alive rather than static
+   text, without ever feeling busy or cartoonish.
+   ======================================================================= */
+@keyframes history-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(2px);
+  }
+}
+
+.history-status-nudge {
+  animation: history-nudge 1600ms ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-status-nudge {
     animation: none;
   }
 }
