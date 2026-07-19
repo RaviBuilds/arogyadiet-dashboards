@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { format, addDays } from "date-fns";
 import {
-  ChevronLeft,
   MapPin,
   Calendar,
   Utensils,
@@ -14,9 +13,11 @@ import {
   Tag,
   X,
   AlertCircle,
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
-import { Badge } from "@/shared/components/ui/badge";
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { Input } from "@/shared/components/ui/input";
 import {
@@ -25,9 +26,11 @@ import {
   AlertTitle,
 } from "@/shared/components/ui/alert";
 import { createClient } from "@/lib/supabase/client";
-import { CONTENT_STAGES } from "./content-stages";
+import { cn } from "@/lib/utils";
 import { Capacitor } from "@capacitor/core";
 import { App } from "@capacitor/app";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
+import { StatusPill } from "@/shared/components/customer/profile-ui/StatusPill";
 
 import {
   createRazorpayOrderAction,
@@ -367,22 +370,25 @@ export function OrderPreview({ data, plans, onBack }: any) {
       )}
 
       <section>
-        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            {CONTENT_STAGES.REVIEW}
+        <div className="flex items-center gap-2.5">
+          <IconChip icon={ShieldCheck} tone="green" />
+          <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-emerald-700/90">
+            Review &amp; Pay
           </span>
-          Review Your Order
+        </div>
+        <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+          Review your order
         </h2>
-        <p className="text-sm text-slate-500 ml-10 mt-1">
+        <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
           Please review your subscription details before secure payment.
         </p>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
         <div className="lg:col-span-7 space-y-6">
-          <Card className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="border-b border-slate-100 bg-slate-50/50 px-6 py-4 flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-slate-700" />
+          <Card className="rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="border-b border-slate-100 bg-slate-50/60 px-6 py-4 flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
               <h3 className="font-semibold text-slate-900">
                 Subscription Summary
               </h3>
@@ -390,9 +396,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
 
             <CardContent className="p-0">
               <div className="p-6 flex items-start gap-4">
-                <div className="rounded-full bg-primary/10 p-3 text-primary shrink-0 mt-0.5">
-                  <Calendar className="h-5 w-5" />
-                </div>
+                <IconChip icon={Calendar} tone="green" size="lg" className="mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <h4 className="font-semibold text-slate-900 truncate">
                     {planName}
@@ -419,9 +423,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
               <hr className="border-slate-100" />
 
               <div className="p-6 flex items-start gap-4">
-                <div className="rounded-full bg-amber-100 p-3 text-amber-600 shrink-0 mt-0.5">
-                  <Utensils className="h-5 w-5" />
-                </div>
+                <IconChip icon={Utensils} tone="amber" size="lg" className="mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <h4 className="font-semibold text-slate-900">
                     Meal Schedule
@@ -433,17 +435,14 @@ export function OrderPreview({ data, plans, onBack }: any) {
                     </strong>
                   </p>
 
-                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 w-full">
+                  <div className="mt-3 rounded-2xl border border-slate-100 bg-slate-50/60 p-4 w-full">
                     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-2">
                       <span className="text-sm font-semibold text-slate-700">
                         Pause Credits Used
                       </span>
-                      <Badge
-                        variant="outline"
-                        className="w-fit border-slate-200 bg-white text-xs font-semibold"
-                      >
+                      <StatusPill tone="slate" className="w-fit">
                         {pausesUsed} of {maxPauses}
-                      </Badge>
+                      </StatusPill>
                     </div>
                     {pausesUsed > 0 ? (
                       <div className="text-xs text-slate-500 leading-relaxed break-words">
@@ -467,15 +466,13 @@ export function OrderPreview({ data, plans, onBack }: any) {
               <hr className="border-slate-100" />
 
               <div className="p-6 flex items-start gap-4">
-                <div className="rounded-full bg-green-100 p-3 text-green-600 shrink-0 mt-0.5">
-                  <MapPin className="h-5 w-5" />
-                </div>
+                <IconChip icon={MapPin} tone="coral" size="lg" className="mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <h4 className="font-semibold text-slate-900">
                     Delivery Address
                   </h4>
                   {isLoadingAddress ? (
-                    <div className="mt-2 h-10 bg-slate-100 animate-pulse rounded-md w-3/4"></div>
+                    <div className="mt-2 h-10 bg-slate-100 animate-pulse rounded-xl w-3/4"></div>
                   ) : deliveryAddress ? (
                     <div className="mt-2 text-sm text-slate-500 leading-relaxed break-words">
                       <div className="flex items-center gap-2 mb-1">
@@ -499,10 +496,10 @@ export function OrderPreview({ data, plans, onBack }: any) {
         </div>
 
         <div className="lg:col-span-5 space-y-6">
-          <Card className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <Card className="rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             <CardContent className="p-6">
               <div className="flex items-center gap-2 mb-4">
-                <Tag className="h-5 w-5 text-primary" />
+                <Tag className="h-4 w-4 text-emerald-600" />
                 <h3 className="font-semibold text-slate-900">Apply Coupon</h3>
               </div>
 
@@ -519,12 +516,11 @@ export function OrderPreview({ data, plans, onBack }: any) {
                       disabled={isLoadingProfile}
                     />
                     <Button
-                      variant="secondary"
                       onClick={handleApplyCoupon}
                       disabled={
                         isApplyingCoupon || !couponInput || isLoadingProfile
                       }
-                      className="transition-all duration-200"
+                      className="bg-emerald-600 text-white hover:bg-emerald-700 transition-all duration-200"
                     >
                       {isApplyingCoupon ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -540,14 +536,11 @@ export function OrderPreview({ data, plans, onBack }: any) {
                   )}
                 </div>
               ) : (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 flex justify-between items-center">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 flex justify-between items-center">
                   <div className="min-w-0">
-                    <Badge
-                      variant="outline"
-                      className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold"
-                    >
-                      <ShieldCheck className="h-3 w-3" /> Applied!
-                    </Badge>
+                    <StatusPill icon={CheckCircle2} tone="green">
+                      Applied
+                    </StatusPill>
                     <p className="text-xs text-emerald-700 mt-2 truncate">
                       Code: <strong>{appliedCoupon.code}</strong>
                     </p>
@@ -565,9 +558,9 @@ export function OrderPreview({ data, plans, onBack }: any) {
             </CardContent>
           </Card>
 
-          <Card className="border border-slate-200 rounded-xl overflow-hidden shadow-sm relative">
-            <div className="border-b border-slate-100 bg-slate-50/50 px-6 py-4 flex items-center gap-2">
-              <Receipt className="h-5 w-5 text-slate-700" />
+          <Card className="rounded-3xl border border-slate-100 shadow-sm overflow-hidden relative">
+            <div className="border-b border-slate-100 bg-slate-50/60 px-6 py-4 flex items-center gap-2">
+              <Receipt className="h-4 w-4 text-emerald-600" />
               <h3 className="font-semibold text-slate-900">Price Details</h3>
             </div>
 
@@ -587,7 +580,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
               )}
 
               <div className="flex justify-between text-sm text-slate-500">
-                <span>GST ({gstRate * 100}%)</span>
+                <span>GST ({(gstRate * 100).toFixed(1)}%)</span>
                 <span className="font-medium text-slate-900">
                   ₹
                   {gst.toLocaleString("en-IN", {
@@ -622,7 +615,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
                 <span className="text-lg font-semibold text-slate-900">
                   Total
                 </span>
-                <span className="text-2xl font-semibold text-primary">
+                <span className="text-2xl font-semibold text-emerald-700">
                   ₹
                   {totalAmount.toLocaleString("en-IN", {
                     minimumFractionDigits: 2,
@@ -670,7 +663,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
                     isProcessing || isLoadingAddress || isLoadingProfile || isLoadingDeliveryCharge || !!deliveryChargeError
                   }
                   onClick={handlePayment}
-                  className="w-full h-12 sm:h-14 text-base font-semibold transition-all duration-200 active:scale-95 disabled:opacity-80"
+                  className="group w-full h-12 sm:h-14 rounded-full bg-emerald-600 text-base font-semibold text-white shadow-sm transition-all duration-200 hover:bg-emerald-700 hover:shadow-md active:scale-[0.98] disabled:opacity-80"
                 >
                   {isProcessing ? (
                     <span className="flex items-center">
@@ -678,11 +671,14 @@ export function OrderPreview({ data, plans, onBack }: any) {
                       Verifying Payment...
                     </span>
                   ) : (
-                    "Proceed to Pay"
+                    <span className="flex items-center">
+                      Proceed to Pay
+                      <ArrowRight className="ml-1.5 h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+                    </span>
                   )}
                 </Button>
                 <p className="text-center text-xs text-slate-500 flex justify-center items-center gap-1.5 break-words">
-                  <ShieldCheck className="h-4 w-4 text-green-600 shrink-0" />
+                  <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
                   100% Secure Checkout via Razorpay
                 </p>
               </div>
@@ -691,15 +687,37 @@ export function OrderPreview({ data, plans, onBack }: any) {
         </div>
       </div>
 
-      <div className="pt-8 border-t border-slate-100 flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8 pb-6">
-        <Button
-          variant="ghost"
-          onClick={onBack}
-          disabled={isProcessing}
-          className="w-full sm:w-auto gap-2 hover:bg-slate-50 text-sm transition-all duration-200"
-        >
-          <ChevronLeft className="h-4 w-4 shrink-0" /> Back to Meal Planner
-        </Button>
+      <div
+        className={cn(
+          "sticky bottom-0 z-30 -mx-5 mt-2 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur-md sm:static sm:z-auto sm:mx-0 sm:mt-6 sm:rounded-3xl sm:border sm:border-slate-100 sm:px-6 sm:py-5 sm:shadow-sm",
+        )}
+      >
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div>
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-400">
+                Total Payable
+              </p>
+              <p className="mt-0.5 text-base font-semibold text-emerald-700">
+                ₹
+                {totalAmount.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onBack}
+            disabled={isProcessing}
+            className="gap-1.5 text-slate-600 transition-all duration-200 hover:text-slate-900"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Meal Planner
+          </Button>
+        </div>
       </div>
     </div>
   );
