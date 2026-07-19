@@ -30,6 +30,49 @@ const MAP_OPTIONS: google.maps.MapOptions = {
 
 type RiderCoords = { lat: number; lng: number };
 
+// Polling fallback interval. The realtime websocket is the primary channel,
+// but it can silently drop in production (proxies/CDN, idle timeouts, auth
+// token refresh). Polling guarantees the marker + route keep moving even when
+// the socket is dead, without waiting for a manual page refresh.
+const LOCATION_POLL_MS = 8_000;
+
+// Re-fetch the route polyline once the rider has moved at least this far from
+// the origin used for the last Directions request. Keeps the green line
+// following the rider instead of freezing on the first position.
+const ROUTE_REFETCH_MIN_MOVE_M = 60;
+
+// Never re-request Directions more often than this (cost / rate-limit guard).
+const ROUTE_REFETCH_MIN_INTERVAL_MS = 12_000;
+
+// How long the bike takes to glide from its old position to a freshly received
+// one. Kept comfortably shorter than the poll interval so the marker settles
+// before the next update arrives, giving a smooth "riding" feel.
+const MARKER_ANIM_DURATION_MS = 1_400;
+
+// Movements below this (GPS jitter while stationary) snap instantly — no point
+// animating a 1-2m wobble. Movements above the max are treated as a teleport
+// (first fix, big GPS correction) and snap rather than slide across the map.
+const MARKER_SNAP_MIN_M = 2;
+const MARKER_SNAP_MAX_M = 3_000;
+
+// easeInOutQuad — gentle acceleration then deceleration.
+function easeInOutQuad(t: number): number {
+  return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+}
+
+// Haversine distance in meters between two coordinates.
+function distanceMeters(a: RiderCoords, b: RiderCoords): number {
+  const R = 6_371_000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 export function LiveTrackingMap({
   riderId,
   orderStatus,
@@ -57,12 +100,28 @@ export function LiveTrackingMap({
   const supabase = supabaseRef.current;
 
   const mapRef = useRef<google.maps.Map | null>(null);
+  // `riderLocation` is the raw TARGET coordinate from realtime/polling.
+  // `displayPosition` is the ANIMATED coordinate actually rendered for the
+  // marker — it eases from the previous position to the target so the bike
+  // glides instead of teleporting on each update.
   const [riderLocation, setRiderLocation] = useState<RiderCoords | null>(null);
+  const [displayPosition, setDisplayPosition] = useState<RiderCoords | null>(
+    null,
+  );
+  // Mirror of displayPosition kept in a ref so the animation effect can read
+  // the current on-screen position as its start point WITHOUT depending on it
+  // (which would restart the tween every frame).
+  const displayPosRef = useRef<RiderCoords | null>(null);
+  const animFrameRef = useRef<number | null>(null);
   const [directionsResponse, setDirectionsResponse] =
     useState<google.maps.DirectionsResult | null>(null);
 
-  // Track whether we've already fetched directions so we never re-fetch.
-  const directionsFetchedRef = useRef(false);
+  // Origin (rider coords) used for the last Directions request, plus the
+  // timestamp of that request. Used to decide when the route is stale enough
+  // to warrant a re-fetch as the rider moves.
+  const lastDirectionsOriginRef = useRef<RiderCoords | null>(null);
+  const lastDirectionsAtRef = useRef<number>(0);
+  const directionsInFlightRef = useRef(false);
 
   const initialCenter = useMemo(
     () =>
@@ -82,48 +141,58 @@ export function LiveTrackingMap({
     orderStatus === "REACHING_TO_LOCATION";
 
   // ─────────────────────────────────────────────────────────────────────────
-  // DIRECTIONS: Fetch the route polyline ONCE (rider → customer).
-  // This effect only fires when we first have both:
-  //   1. A valid riderLocation (initial fetch from DB)
-  //   2. The Maps JS SDK loaded
-  // It will NOT re-fire on subsequent riderLocation updates because of the
-  // directionsFetchedRef guard.
+  // DIRECTIONS: Fetch the route polyline (rider → customer) and KEEP IT FRESH.
+  // Fires on the first valid riderLocation, then re-fetches whenever the rider
+  // has moved far enough (ROUTE_REFETCH_MIN_MOVE_M) since the last request,
+  // rate-limited by ROUTE_REFETCH_MIN_INTERVAL_MS. This makes the green route
+  // line follow the rider live instead of freezing on the first position.
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Already fetched — never re-fetch.
-    if (directionsFetchedRef.current) return;
     if (!isLoaded || !canTrack) return;
     if (customerLat == null || customerLng == null) return;
     if (!riderLocation) return;
+    if (directionsInFlightRef.current) return;
+
+    const originCoords = {
+      lat: Number(riderLocation.lat),
+      lng: Number(riderLocation.lng),
+    };
+    const destCoords = {
+      lat: Number(customerLat),
+      lng: Number(customerLng),
+    };
+
+    if (
+      Number.isNaN(originCoords.lat) ||
+      Number.isNaN(originCoords.lng) ||
+      Number.isNaN(destCoords.lat) ||
+      Number.isNaN(destCoords.lng)
+    ) {
+      console.warn("[LiveTrackingMap] Directions aborted: NaN coordinates", {
+        originCoords,
+        destCoords,
+      });
+      onEtaChange?.(null);
+      return;
+    }
+
+    // Decide whether this rider position warrants a fresh route request.
+    const prevOrigin = lastDirectionsOriginRef.current;
+    const now = Date.now();
+    if (prevOrigin) {
+      const moved = distanceMeters(prevOrigin, originCoords);
+      const elapsed = now - lastDirectionsAtRef.current;
+      if (moved < ROUTE_REFETCH_MIN_MOVE_M) return;
+      if (elapsed < ROUTE_REFETCH_MIN_INTERVAL_MS) return;
+    }
 
     let cancelled = false;
-    directionsFetchedRef.current = true;
+    directionsInFlightRef.current = true;
+    lastDirectionsOriginRef.current = originCoords;
+    lastDirectionsAtRef.current = now;
 
     const fetchDirections = async () => {
       try {
-        const originCoords = {
-          lat: Number(riderLocation.lat),
-          lng: Number(riderLocation.lng),
-        };
-        const destCoords = {
-          lat: Number(customerLat),
-          lng: Number(customerLng),
-        };
-
-        if (
-          Number.isNaN(originCoords.lat) ||
-          Number.isNaN(originCoords.lng) ||
-          Number.isNaN(destCoords.lat) ||
-          Number.isNaN(destCoords.lng)
-        ) {
-          console.warn(
-            "[LiveTrackingMap] Directions aborted: NaN coordinates",
-            { originCoords, destCoords },
-          );
-          onEtaChange?.(null);
-          return;
-        }
-
         const service = new window.google.maps.DirectionsService();
         const response = await service.route({
           origin: originCoords,
@@ -140,9 +209,12 @@ export function LiveTrackingMap({
       } catch (err) {
         console.error("[LiveTrackingMap] Directions request failed", err);
         if (cancelled) return;
-        setDirectionsResponse(null);
+        // Keep the previous route on transient failures rather than blanking
+        // the map; only clear ETA/distance so stale numbers aren't shown.
         onEtaChange?.(null);
         onDistanceChange?.(null);
+      } finally {
+        directionsInFlightRef.current = false;
       }
     };
 
@@ -151,8 +223,8 @@ export function LiveTrackingMap({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
-    // gated by directionsFetchedRef; we only want the first valid riderLocation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks are
+    // stable UI setters; re-adding them would not change behavior.
   }, [isLoaded, canTrack, customerLat, customerLng, riderLocation]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -162,29 +234,47 @@ export function LiveTrackingMap({
   useEffect(() => {
     if (!riderId) return;
 
-    // 1. Initial fetch
-    const fetchInitialLocation = async () => {
+    let cancelled = false;
+
+    // Apply a coordinate only when it actually changed, so we don't churn
+    // state (and re-run the directions effect) on identical repeated reads.
+    const applyLocation = (lat: unknown, lng: unknown) => {
+      if (cancelled) return;
+      const nextLat = Number(lat);
+      const nextLng = Number(lng);
+      if (Number.isNaN(nextLat) || Number.isNaN(nextLng)) return;
+
+      setRiderLocation((prev) => {
+        if (prev && prev.lat === nextLat && prev.lng === nextLng) {
+          return prev;
+        }
+        return { lat: nextLat, lng: nextLng };
+      });
+      onLocationUpdate?.();
+    };
+
+    // Shared fetch used for both the initial load and the polling fallback.
+    const fetchLocation = async () => {
       try {
         const { data, error } = await supabase
           .from("rider_live_locations")
           .select("lat, lng")
           .eq("rider_id", riderId)
-          .single();
+          .maybeSingle();
 
         if (error) throw error;
-
         if (data && data.lat && data.lng) {
-          setRiderLocation({ lat: Number(data.lat), lng: Number(data.lng) });
-          onLocationUpdate?.();
+          applyLocation(data.lat, data.lng);
         }
       } catch (err) {
-        console.error("[LiveTrackingMap] Initial Fetch Error:", err);
+        console.error("[LiveTrackingMap] Location fetch error:", err);
       }
     };
 
-    fetchInitialLocation();
+    // 1. Initial fetch
+    fetchLocation();
 
-    // 2. Realtime subscription
+    // 2. Realtime subscription (primary channel)
     const channel = supabase
       .channel(`public:rider_live_locations:rider_id=eq.${riderId}`)
       .on(
@@ -198,30 +288,92 @@ export function LiveTrackingMap({
         (payload) => {
           const newData = payload.new as Record<string, unknown> | undefined;
           if (newData && newData.lat && newData.lng) {
-            setRiderLocation({
-              lat: Number(newData.lat),
-              lng: Number(newData.lng),
-            });
-            onLocationUpdate?.();
+            applyLocation(newData.lat, newData.lng);
           }
         },
       )
       .subscribe();
 
+    // 3. Polling fallback. Realtime websockets can silently drop in production
+    // (proxies/CDN, idle timeouts, auth token refresh). Polling guarantees the
+    // marker + route keep updating without a manual refresh. applyLocation
+    // dedupes identical reads, so this is cheap when realtime is healthy.
+    const pollId = setInterval(fetchLocation, LOCATION_POLL_MS);
+
     return () => {
+      cancelled = true;
+      clearInterval(pollId);
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onLocationUpdate
     // is a UI-only freshness callback; including it would resubscribe the
-    // realtime channel on every parent re-render.
+    // realtime channel + polling on every parent re-render.
   }, [riderId, supabase]);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // PAN: Smoothly follow rider on the map without re-rendering <GoogleMap>.
+  // ANIMATE: Ease the bike marker from its current on-screen position to the
+  // newly received target, and glide the map center along with it — instead of
+  // snapping. This runs a requestAnimationFrame tween on every new target.
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!riderLocation || !mapRef.current) return;
-    mapRef.current.panTo(riderLocation);
+    if (!riderLocation) return;
+
+    const target = riderLocation;
+    const from = displayPosRef.current;
+
+    // Cancel any in-flight tween so a fresh update always wins.
+    if (animFrameRef.current != null) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
+    const commit = (pos: RiderCoords) => {
+      displayPosRef.current = pos;
+      setDisplayPosition(pos);
+      mapRef.current?.setCenter(pos);
+    };
+
+    // First fix, negligible jitter, or teleport-sized jump → snap instantly.
+    if (!from) {
+      commit(target);
+      return;
+    }
+    const dist = distanceMeters(from, target);
+    if (dist < MARKER_SNAP_MIN_M || dist > MARKER_SNAP_MAX_M) {
+      commit(target);
+      return;
+    }
+
+    const start =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+
+    const step = (now: number) => {
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / MARKER_ANIM_DURATION_MS);
+      const eased = easeInOutQuad(t);
+      const pos = {
+        lat: from.lat + (target.lat - from.lat) * eased,
+        lng: from.lng + (target.lng - from.lng) * eased,
+      };
+      commit(pos);
+      if (t < 1) {
+        animFrameRef.current = requestAnimationFrame(step);
+      } else {
+        animFrameRef.current = null;
+      }
+    };
+
+    animFrameRef.current = requestAnimationFrame(step);
+
+    return () => {
+      if (animFrameRef.current != null) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
+    // keyed on the target only; displayPosRef supplies the start point so the
+    // tween is not restarted on its own per-frame state updates.
   }, [riderLocation]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -283,10 +435,11 @@ export function LiveTrackingMap({
           />
         )}
 
-        {/* Rider marker — updates position in real-time without re-fetching anything */}
-        {riderLocation && (
+        {/* Rider marker — renders the animated (eased) position so the bike
+            glides smoothly toward each new coordinate instead of jumping. */}
+        {displayPosition && (
           <Marker
-            position={riderLocation}
+            position={displayPosition}
             title="Rider"
             label={{ text: "🛵", fontSize: "22px" }}
             icon={{

@@ -2,15 +2,10 @@
 
 import { useMemo } from "react";
 import { format, addDays } from "date-fns";
-import {
-  AlertCircle,
-  CalendarCheck,
-  ChevronLeft,
-  RefreshCw,
-} from "lucide-react";
-import { Button } from "@/shared/components/ui/button";
+import { AlertCircle, CalendarCheck, RefreshCw, Utensils } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CONTENT_STAGES } from "./content-stages";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
+import { OnboardingSummaryBar } from "./onboarding/OnboardingSummaryBar";
 
 // --- CUSTOM REALISTIC SVG ILLUSTRATIONS ---
 
@@ -376,6 +371,11 @@ export function MealCustomization({
   const endDate =
     scheduleDays.length > 0 ? scheduleDays[scheduleDays.length - 1] : null;
 
+  const baseFoodTypeLabel = getCategoryLabel(
+    data.foodType,
+    mealCategories.find((c: any) => c.code === data.foodType)?.name,
+  );
+
   const handleToggleMeal = (dateString: string) => {
     setData((prev: any) => {
       const currentState = prev.pausedDates?.includes(dateString)
@@ -418,45 +418,45 @@ export function MealCustomization({
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 max-w-4xl mx-auto">
-      <div className="space-y-2">
-        <h2 className="text-lg font-semibold text-slate-900 tracking-tight flex items-center gap-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
-            {CONTENT_STAGES.MEAL_PLANNER}
+      <div>
+        <div className="flex items-center gap-2.5">
+          <IconChip icon={Utensils} tone="green" />
+          <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-emerald-700/90">
+            Your Meal Planner
           </span>
-          Meal Planner
+        </div>
+        <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+          Fine-tune each day
         </h2>
-        <p className="text-sm text-slate-500 ml-10">
+        <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
           Your base plan is set to{" "}
           <strong className="font-semibold text-slate-900">
-            {getCategoryLabel(
-              data.foodType,
-              mealCategories.find((c: any) => c.code === data.foodType)?.name,
-            )}
+            {baseFoodTypeLabel}
           </strong>
-          . Click any date to cycle through meal types or pause a day!
+          . Tap any date to cycle its meal type or pause that day.
         </p>
       </div>
 
-      <div className="ml-0 md:ml-10 space-y-8">
+      <div className="space-y-8">
         <div
           className={cn(
-            "rounded-xl border p-5 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors duration-200",
+            "rounded-3xl border p-5 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors duration-200",
             isLimitReached
               ? "bg-amber-50 border-amber-200"
-              : "bg-blue-50 border-blue-200",
+              : "bg-emerald-50/60 border-emerald-100",
           )}
         >
           <div className="flex items-center gap-3">
             {isLimitReached ? (
               <AlertCircle className="h-6 w-6 text-amber-600" />
             ) : (
-              <CalendarCheck className="h-6 w-6 text-blue-600" />
+              <CalendarCheck className="h-6 w-6 text-emerald-600" />
             )}
             <div>
               <p
                 className={cn(
                   "text-sm font-semibold",
-                  isLimitReached ? "text-amber-900" : "text-blue-900",
+                  isLimitReached ? "text-amber-900" : "text-emerald-900",
                 )}
               >
                 Your {baseDuration}-Meal Plan
@@ -464,7 +464,7 @@ export function MealCustomization({
               <p
                 className={cn(
                   "text-xs",
-                  isLimitReached ? "text-amber-700" : "text-blue-700",
+                  isLimitReached ? "text-amber-700" : "text-emerald-700",
                 )}
               >
                 You have used <strong>{pausesUsed}</strong> of{" "}
@@ -477,7 +477,7 @@ export function MealCustomization({
             <p
               className={cn(
                 "text-xs font-medium",
-                isLimitReached ? "text-amber-700" : "text-blue-700",
+                isLimitReached ? "text-amber-700" : "text-emerald-700",
               )}
             >
               New End Date
@@ -485,7 +485,7 @@ export function MealCustomization({
             <p
               className={cn(
                 "text-lg font-extrabold",
-                isLimitReached ? "text-amber-900" : "text-blue-900",
+                isLimitReached ? "text-amber-900" : "text-emerald-900",
               )}
             >
               {endDate ? format(endDate, "MMMM do, yyyy") : "..."}
@@ -493,174 +493,215 @@ export function MealCustomization({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 p-4 bg-slate-50/50 rounded-xl border border-slate-200 text-sm w-fit mx-auto md:mx-0">
-          <span className="text-slate-500 font-medium mr-2 flex items-center gap-1 hidden sm:flex">
-            <RefreshCw className="h-4 w-4" /> Cycle:
+        <div className="flex flex-col gap-3 rounded-3xl border border-slate-100 bg-slate-50/60 p-4 sm:flex-row sm:items-center sm:gap-4 sm:p-5">
+          <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <RefreshCw className="h-3.5 w-3.5" /> Tap to cycle
           </span>
-          {cycleOptions.map((option) => {
-            if (option === "PAUSE") {
-              const Icon = PAUSE_STYLE.icon;
+          <div className="flex flex-wrap items-center gap-2">
+            {cycleOptions.map((option) => {
+              if (option === "PAUSE") {
+                const Icon = PAUSE_STYLE.icon;
+                return (
+                  <div
+                    key="PAUSE"
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full border bg-white px-3 py-1.5",
+                      PAUSE_STYLE.color,
+                      "border-zinc-200",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="text-xs font-semibold sm:text-sm">
+                      {PAUSE_STYLE.label}
+                    </span>
+                  </div>
+                );
+              }
+
+              const category = mealCategories.find(
+                (c: any) => c.code === option,
+              );
+              const style = CODE_STYLES[option] || CODE_STYLES.VEG;
+              const Icon = style.icon;
+              const label = getCategoryLabel(option, category?.name);
+              const isBasePreference = option === data.foodType;
+
               return (
                 <div
-                  key="PAUSE"
+                  key={option}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-full border",
-                    PAUSE_STYLE.bg,
-                    PAUSE_STYLE.color,
-                    "border-zinc-200",
+                    "flex items-center gap-2 rounded-full border bg-white px-3.5 py-1.5",
+                    style.color,
+                    style.border.split(" ")[0],
+                    isBasePreference && "ring-1 ring-inset ring-current/20",
                   )}
                 >
-                  <Icon className="h-5 w-5 drop-shadow-sm" />
-                  <span className="font-semibold text-xs md:text-sm">
-                    {PAUSE_STYLE.label}
-                  </span>
+                  <Icon className="h-4 w-4" />
+                  <span className="text-xs font-semibold sm:text-sm">{label}</span>
+                  {isBasePreference && (
+                    <>
+                      <span className="h-1 w-1 rounded-full bg-current opacity-30" />
+                      <span className="text-[0.6rem] font-semibold uppercase tracking-wider opacity-70">
+                        Base
+                      </span>
+                    </>
+                  )}
                 </div>
               );
-            }
-
-            const category = mealCategories.find(
-              (c: any) => c.code === option,
-            );
-            const style = CODE_STYLES[option] || CODE_STYLES.VEG;
-            const Icon = style.icon;
-            const label = getCategoryLabel(option, category?.name);
-
-            return (
-              <div
-                key={option}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full border",
-                  style.bg,
-                  style.color,
-                  style.border.split(" ")[0],
-                )}
-              >
-                <Icon className="h-5 w-5 drop-shadow-sm" />
-                <span className="font-semibold text-xs md:text-sm">{label}</span>
-              </div>
-            );
-          })}
+            })}
+          </div>
         </div>
 
-        <div className="space-y-12">
-          {Object.entries(calendarMonths).map(([monthName, daysInMonth]) => {
-            const firstDayOffset = daysInMonth[0].getDay();
+        <div className="rounded-3xl border border-slate-100 bg-white shadow-sm">
+          {Object.entries(calendarMonths).map(
+            ([monthName, daysInMonth], monthIndex) => {
+              const firstDayOffset = daysInMonth[0].getDay();
 
-            return (
-              <div
-                key={monthName}
-                className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 md:p-8"
-              >
-                <h3 className="text-lg font-semibold text-slate-900 tracking-tight text-center mb-6">
-                  {monthName}
-                </h3>
-                <div
-                  className="grid gap-2 md:gap-4 text-center mb-2"
-                  style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
-                >
-                  {WEEKDAYS.map((day) => (
+              return (
+                <div key={monthName}>
+                  {monthIndex > 0 && (
                     <div
-                      key={day}
-                      className="text-xs font-medium text-slate-500 uppercase tracking-wider"
+                      aria-hidden="true"
+                      className="mx-5 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent sm:mx-6"
+                    />
+                  )}
+                  <div className="p-5 sm:p-6">
+                    <h3 className="mb-5 text-sm font-semibold uppercase tracking-wider text-slate-400">
+                      {monthName}
+                    </h3>
+                    <div
+                      className="grid gap-1.5 text-center mb-2 sm:gap-2.5"
+                      style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
                     >
-                      {day}
-                    </div>
-                  ))}
-                </div>
-                <div
-                  className="grid gap-2 md:gap-4"
-                  style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
-                >
-                  {Array.from({ length: firstDayOffset }).map((_, i) => (
-                    <div key={`empty-${i}`} className="aspect-square" />
-                  ))}
-
-                  {daysInMonth.map((date, index) => {
-                    const dateStr = format(date, "yyyy-MM-dd");
-                    const isPaused = data.pausedDates?.includes(dateStr);
-
-                    const dayPrefCode =
-                      data.mealOverrides?.[dateStr] || data.foodType;
-                    const style = isPaused
-                      ? PAUSE_STYLE
-                      : CODE_STYLES[dayPrefCode] || CODE_STYLES.VEG;
-                    const Icon = style.icon;
-                    const dayLabel = isPaused
-                      ? PAUSE_STYLE.label
-                      : getCategoryLabel(
-                          dayPrefCode,
-                          mealCategories.find(
-                            (c: any) => c.code === dayPrefCode,
-                          )?.name,
-                        );
-
-                    return (
-                      <button
-                        key={index}
-                        onClick={() => handleToggleMeal(dateStr)}
-                        className={cn(
-                          "flex flex-col items-center justify-center aspect-square p-1 rounded-xl border transition-all duration-200 relative select-none group hover:shadow-md hover:-translate-y-0.5",
-                          style.bg,
-                          style.border,
-                        )}
-                      >
-                        {holidaysByDate[dateStr] && (
-                          <span className="text-[9px] md:text-[10px] font-bold leading-tight text-center line-clamp-2 max-w-full px-0.5 mb-0.5 text-zinc-700">
-                            {holidaysByDate[dateStr]}
-                          </span>
-                        )}
-                        <span
-                          className={cn(
-                            "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",
-                            style.color,
-                          )}
-                        >
-                          {format(date, "d")}
-                        </span>
-
+                      {WEEKDAYS.map((day) => (
                         <div
-                          className={cn(
-                            "flex flex-col items-center justify-center gap-1",
-                            style.color,
-                          )}
+                          key={day}
+                          className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-400"
                         >
-                          <Icon className="h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95" />
-                          <span className="text-[9px] md:text-[11px] font-bold leading-none hidden sm:block">
-                            {dayLabel}
-                          </span>
+                          {day}
                         </div>
+                      ))}
+                    </div>
+                    <div
+                      className="grid gap-1.5 sm:gap-2.5"
+                      style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
+                    >
+                      {Array.from({ length: firstDayOffset }).map((_, i) => (
+                        <div key={`empty-${i}`} className="aspect-square" />
+                      ))}
 
-                        <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                          <RefreshCw className="h-5 w-5 text-zinc-600 opacity-20" />
-                        </div>
-                      </button>
-                    );
-                  })}
+                      {daysInMonth.map((date, index) => {
+                        const dateStr = format(date, "yyyy-MM-dd");
+                        const isPaused = data.pausedDates?.includes(dateStr);
+                        const isFirstDay =
+                          scheduleDays.length > 0 &&
+                          dateStr === format(scheduleDays[0], "yyyy-MM-dd");
+
+                        const dayPrefCode =
+                          data.mealOverrides?.[dateStr] || data.foodType;
+                        // A day only "stands out" once the customer has
+                        // actually changed it from the base plan — the
+                        // default schedule (every day = base preference)
+                        // stays visually quiet so 22 identical cells don't
+                        // compete for attention. This is the fix for the
+                        // calendar reading as pure noise.
+                        const isModified =
+                          isPaused || Boolean(data.mealOverrides?.[dateStr]);
+                        const style = isPaused
+                          ? PAUSE_STYLE
+                          : CODE_STYLES[dayPrefCode] || CODE_STYLES.VEG;
+                        const Icon = style.icon;
+                        const dayLabel = isPaused
+                          ? PAUSE_STYLE.label
+                          : getCategoryLabel(
+                              dayPrefCode,
+                              mealCategories.find(
+                                (c: any) => c.code === dayPrefCode,
+                              )?.name,
+                            );
+
+                        return (
+                          <button
+                            key={index}
+                            onClick={() => handleToggleMeal(dateStr)}
+                            className={cn(
+                              "group relative flex aspect-square select-none flex-col items-center justify-center rounded-2xl border p-1 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md",
+                              isModified ? style.bg : "bg-white",
+                              isModified
+                                ? style.border
+                                : "border-slate-100 hover:border-slate-200",
+                            )}
+                          >
+                            {isFirstDay && (
+                              <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wide text-white shadow-sm">
+                                Start
+                              </span>
+                            )}
+
+                            {holidaysByDate[dateStr] && (
+                              <span className="text-[9px] md:text-[10px] font-bold leading-tight text-center line-clamp-2 max-w-full px-0.5 mb-0.5 text-zinc-700">
+                                {holidaysByDate[dateStr]}
+                              </span>
+                            )}
+                            <span
+                              className={cn(
+                                "text-base font-bold sm:text-lg",
+                                isModified ? style.color : "text-slate-700",
+                              )}
+                            >
+                              {format(date, "d")}
+                            </span>
+
+                            <div
+                              className={cn(
+                                "flex flex-col items-center justify-center gap-0.5",
+                                isModified ? style.color : "text-slate-400",
+                              )}
+                            >
+                              <Icon
+                                className={cn(
+                                  "drop-shadow-sm transition-transform group-active:scale-95",
+                                  isModified
+                                    ? "h-5 w-5 sm:h-6 sm:w-6"
+                                    : "h-4 w-4 sm:h-5 sm:w-5 opacity-60",
+                                )}
+                              />
+                              {isModified && (
+                                <span className="hidden text-[9px] font-bold leading-none sm:block sm:text-[10px]">
+                                  {dayLabel}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/5 opacity-0 transition-opacity group-hover:opacity-100">
+                              <RefreshCw className="h-4 w-4 text-zinc-600 opacity-30" />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            },
+          )}
         </div>
       </div>
 
-      <div className="pt-8 border-t border-slate-100 flex flex-col-reverse sm:flex-row justify-between items-center gap-4 mt-8">
-        <Button
-          variant="ghost"
-          onClick={onBack}
-          className="w-full sm:w-auto gap-2 transition-all duration-200"
-        >
-          <ChevronLeft className="h-4 w-4 shrink-0" /> Back to Plans
-        </Button>
-        <Button
-          size="lg"
-          variant="secondary"
-          disabled={!data.startDate || !data.addressId}
-          onClick={onNext}
-          className="w-full sm:w-auto px-10 font-semibold transition-all duration-200"
-        >
-          Review and Pay
-        </Button>
-      </div>
+      <OnboardingSummaryBar
+        items={[
+          { label: "Base Preference", value: baseFoodTypeLabel },
+          { label: "Pause Credits", value: `${pausesUsed} / ${maxPauses} used` },
+          endDate
+            ? { label: "New End Date", value: format(endDate, "MMM d, yyyy") }
+            : null,
+        ].filter((item): item is NonNullable<typeof item> => item !== null)}
+        continueLabel="Review and Pay"
+        disabled={!data.startDate || !data.addressId}
+        onContinue={onNext}
+        backLabel="Back to Plans"
+        onBack={onBack}
+      />
     </div>
   );
 }
