@@ -60,6 +60,39 @@ function easeInOutQuad(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 }
 
+// Initial-bearing (forward azimuth) from `a` to `b`, in degrees clockwise from
+// north [0,360). Used to rotate the direction pointer so the bike "faces" the
+// way it's travelling along the route.
+function bearingDegrees(a: RiderCoords, b: RiderCoords): number {
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  const deg = (Math.atan2(y, x) * 180) / Math.PI;
+  return (deg + 360) % 360;
+}
+
+// Circular SVG badge (upright, non-rotating) so the marker always reads as the
+// delivery scooter. Direction is conveyed by the separate rotating beam behind
+// it. Uses the Material "two-wheeler" glyph for a crisp, recognizable scooter.
+const BIKE_BADGE_PX = 46;
+const BIKE_BADGE_SVG = encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46" viewBox="0 0 46 46">
+    <defs>
+      <filter id="bikeShadow" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="1" stdDeviation="1.6" flood-color="#0f172a" flood-opacity="0.35"/>
+      </filter>
+    </defs>
+    <circle cx="23" cy="23" r="16" fill="#ffffff" stroke="#059669" stroke-width="3" filter="url(#bikeShadow)"/>
+    <g transform="translate(11,11)" fill="#059669">
+      <path d="M19.44 9.03 15.41 5H11v2h3.59l2 2H5c-2.8 0-5 2.2-5 5s2.2 5 5 5c2.46 0 4.45-1.69 4.9-4h1.65l2.77-2.77c-.21.54-.32 1.14-.32 1.77 0 2.8 2.2 5 5 5s5-2.2 5-5c0-2.76-2.24-4.97-4.56-4.97zM7.82 15C7.4 16.15 6.28 17 5 17c-1.63 0-3-1.37-3-3s1.37-3 3-3c1.28 0 2.4.85 2.82 2H5v2h2.82zM19 17c-1.63 0-3-1.37-3-3s1.37-3 3-3 3 1.37 3 3-1.37 3-3 3z"/>
+    </g>
+  </svg>`,
+);
+
 // Haversine distance in meters between two coordinates.
 function distanceMeters(a: RiderCoords, b: RiderCoords): number {
   const R = 6_371_000;
@@ -113,6 +146,10 @@ export function LiveTrackingMap({
   // (which would restart the tween every frame).
   const displayPosRef = useRef<RiderCoords | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  // Direction the bike is travelling (degrees clockwise from north). Held in a
+  // ref too so jitter-sized moves can keep the last heading instead of spinning.
+  const [heading, setHeading] = useState<number>(0);
+  const headingRef = useRef<number>(0);
   const [directionsResponse, setDirectionsResponse] =
     useState<google.maps.DirectionsResult | null>(null);
 
@@ -339,6 +376,15 @@ export function LiveTrackingMap({
       return;
     }
     const dist = distanceMeters(from, target);
+
+    // Update the facing direction only on a real move — a stationary rider's
+    // GPS jitter would otherwise spin the pointer randomly.
+    if (dist >= MARKER_SNAP_MIN_M) {
+      const nextHeading = bearingDegrees(from, target);
+      headingRef.current = nextHeading;
+      setHeading(nextHeading);
+    }
+
     if (dist < MARKER_SNAP_MIN_M || dist > MARKER_SNAP_MAX_M) {
       commit(target);
       return;
@@ -382,6 +428,41 @@ export function LiveTrackingMap({
   const handleMapLoad = useCallback((map: google.maps.Map) => {
     mapRef.current = map;
   }, []);
+
+  // Upright scooter badge — memoized so the per-frame animation re-renders
+  // don't rebuild the icon object (which would flicker the marker).
+  const bikeBadgeIcon = useMemo<google.maps.Icon | undefined>(() => {
+    if (!isLoaded) return undefined;
+    return {
+      url: `data:image/svg+xml;charset=UTF-8,${BIKE_BADGE_SVG}`,
+      scaledSize: new window.google.maps.Size(BIKE_BADGE_PX, BIKE_BADGE_PX),
+      anchor: new window.google.maps.Point(BIKE_BADGE_PX / 2, BIKE_BADGE_PX / 2),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- static asset,
+    // only depends on the Maps SDK being ready.
+  }, [isLoaded]);
+
+  // Rotating direction "beam" — a soft translucent cone (Google-Maps driving
+  // style) emanating from behind the badge, pointing along the travel heading.
+  // Drawn pointing "up" (north) with its tip at the badge center, then rotated
+  // clockwise by the heading. Rebuilt only when the heading changes.
+  const headingBeamIcon = useMemo<google.maps.Symbol | undefined>(() => {
+    if (!isLoaded) return undefined;
+    return {
+      // Tip at center (0,0), fanning out and up with a gently rounded far edge.
+      path: "M 0 0 L -13 -30 Q 0 -37 13 -30 Z",
+      fillColor: "#059669",
+      fillOpacity: 0.35,
+      strokeColor: "#059669",
+      strokeOpacity: 0.15,
+      strokeWeight: 1,
+      rotation: heading,
+      scale: 1,
+      anchor: new window.google.maps.Point(0, 0),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rotation is the
+    // only dynamic field; anchor/colors are constant.
+  }, [isLoaded, heading]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
@@ -436,16 +517,23 @@ export function LiveTrackingMap({
         )}
 
         {/* Rider marker — renders the animated (eased) position so the bike
-            glides smoothly toward each new coordinate instead of jumping. */}
-        {displayPosition && (
+            glides smoothly toward each new coordinate instead of jumping.
+            Two stacked markers: a rotating direction beam (heading) beneath
+            an upright scooter badge, mimicking live delivery apps. */}
+        {displayPosition && headingBeamIcon && (
+          <Marker
+            position={displayPosition}
+            icon={headingBeamIcon}
+            zIndex={10}
+            clickable={false}
+          />
+        )}
+        {displayPosition && bikeBadgeIcon && (
           <Marker
             position={displayPosition}
             title="Rider"
-            label={{ text: "🛵", fontSize: "22px" }}
-            icon={{
-              url: "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E",
-              scaledSize: new window.google.maps.Size(1, 1),
-            }}
+            icon={bikeBadgeIcon}
+            zIndex={11}
           />
         )}
 
