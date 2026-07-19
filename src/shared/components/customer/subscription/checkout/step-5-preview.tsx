@@ -26,7 +26,6 @@ import {
   AlertTitle,
 } from "@/shared/components/ui/alert";
 import { createClient } from "@/lib/supabase/client";
-import { cn } from "@/lib/utils";
 import { Capacitor } from "@capacitor/core";
 import { App } from "@capacitor/app";
 import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
@@ -293,7 +292,7 @@ export function OrderPreview({ data, plans, onBack }: any) {
         name: "Arogyadiet",
         description: `Subscription: ${planName}`,
         order_id: orderRes.order.id,
-        theme: { color: "#ea580c" },
+        theme: { color: "#059669" },
         handler: async function (response: any) {
           // Keep processing state true while we verify with the DB
           pendingPaymentRef.current = null;
@@ -369,19 +368,31 @@ export function OrderPreview({ data, plans, onBack }: any) {
         <div className="absolute inset-0 z-50 bg-white/50 backdrop-blur-[1px] rounded-xl" />
       )}
 
-      <section>
-        <div className="flex items-center gap-2.5">
-          <IconChip icon={ShieldCheck} tone="green" />
-          <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-emerald-700/90">
-            Review &amp; Pay
-          </span>
+      <section className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <IconChip icon={ShieldCheck} tone="green" />
+            <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-emerald-700/90">
+              Review &amp; Pay
+            </span>
+          </div>
+          <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+            Review your order
+          </h2>
+          <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-600">
+            Please review your subscription details before secure payment.
+          </p>
         </div>
-        <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
-          Review your order
-        </h2>
-        <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
-          Please review your subscription details before secure payment.
-        </p>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onBack}
+          disabled={isProcessing}
+          className="-ml-3 gap-1.5 self-start text-slate-600 transition-all duration-200 hover:text-slate-900 sm:ml-0"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Meal Planner
+        </Button>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
@@ -687,37 +698,40 @@ export function OrderPreview({ data, plans, onBack }: any) {
         </div>
       </div>
 
-      <div
-        className={cn(
-          "sticky bottom-0 z-30 -mx-5 mt-2 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur-md sm:static sm:z-auto sm:mx-0 sm:mt-6 sm:rounded-3xl sm:border sm:border-slate-100 sm:px-6 sm:py-5 sm:shadow-sm",
-        )}
-      >
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <div>
-              <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-400">
-                Total Payable
-              </p>
-              <p className="mt-0.5 text-base font-semibold text-emerald-700">
-                ₹
-                {totalAmount.toLocaleString("en-IN", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-              </p>
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onBack}
-            disabled={isProcessing}
-            className="gap-1.5 text-slate-600 transition-all duration-200 hover:text-slate-900"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Meal Planner
-          </Button>
+      {/* Mobile-only sticky payable summary — keeps the total visible while the
+          Price Details card above is scrolled out of view. Hidden on larger
+          screens where the card is already in frame, to avoid showing the
+          same total twice. */}
+      <div className="sticky bottom-0 z-30 -mx-5 mt-2 flex items-center justify-between border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur-md sm:hidden">
+        <div>
+          <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-400">
+            Total Payable
+          </p>
+          <p className="mt-0.5 text-base font-semibold text-emerald-700">
+            ₹
+            {totalAmount.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
         </div>
+        <Button
+          size="sm"
+          disabled={
+            isProcessing || isLoadingAddress || isLoadingProfile || isLoadingDeliveryCharge || !!deliveryChargeError
+          }
+          onClick={handlePayment}
+          className="h-10 rounded-full bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
+        >
+          {isProcessing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <span className="flex items-center">
+              Pay
+              <ArrowRight className="ml-1 h-3.5 w-3.5" />
+            </span>
+          )}
+        </Button>
       </div>
     </div>
   );

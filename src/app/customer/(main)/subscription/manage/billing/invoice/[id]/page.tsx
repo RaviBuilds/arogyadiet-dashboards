@@ -38,8 +38,14 @@ export default async function InvoicePage({
       .eq("id", paymentId)
       .single();
 
+    // Same many-to-one embed shape issue as the ownership check below —
+    // `subscriptions` comes back as an object here, not an array.
+    const subscriptionRelation = Array.isArray(paymentCheck?.subscriptions)
+      ? paymentCheck?.subscriptions[0]
+      : paymentCheck?.subscriptions;
+
     const isUnpaidKit =
-      paymentCheck?.subscriptions?.[0]?.customer_category === "KIT" &&
+      subscriptionRelation?.customer_category === "KIT" &&
       paymentCheck?.status !== "PAID";
 
     if (isUnpaidKit) {
@@ -103,10 +109,16 @@ export default async function InvoicePage({
     .eq("id", paymentId)
     .single();
 
-  if (
-    !paymentCheck?.customer_profiles?.[0] ||
-    paymentCheck.customer_profiles[0].user_id !== internalUser?.id
-  ) {
+  // Supabase returns a many-to-one embedded relation (payments →
+  // customer_profiles) as a single object here, not an array — unlike
+  // one-to-many embeds elsewhere in the app. Handle both shapes defensively,
+  // matching the Array.isArray(...) pattern used for every other embedded
+  // relation in this codebase (see dashboard/page.tsx, subscription/page.tsx).
+  const ownerProfile = Array.isArray(paymentCheck?.customer_profiles)
+    ? paymentCheck?.customer_profiles[0]
+    : paymentCheck?.customer_profiles;
+
+  if (!ownerProfile || ownerProfile.user_id !== internalUser?.id) {
     return (
       <div className="p-10 text-center font-bold text-red-600">
         Unauthorized to view this invoice.

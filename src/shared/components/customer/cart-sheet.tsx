@@ -44,15 +44,18 @@ export function CartSheet() {
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetTrigger asChild>
-        <Button variant="outline" size="icon" className="relative">
-          <ShoppingCart className="h-5 w-5" />
+        <button
+          type="button"
+          className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700 transition-all duration-200 hover:bg-emerald-100"
+        >
+          <ShoppingCart className="h-4 w-4" />
           {totalItems > 0 && (
-            <span className="absolute -right-1.5 -top-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-5 text-white">
+            <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-4 text-primary-foreground ring-2 ring-white">
               {totalItems}
             </span>
           )}
           <span className="sr-only">Open cart</span>
-        </Button>
+        </button>
       </SheetTrigger>
 
       <SheetContent

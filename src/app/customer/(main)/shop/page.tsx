@@ -6,6 +6,7 @@ import {
 import { Product } from "@/types/product";
 import ProductCard from "@/shared/components/customer/product-card";
 import { CartStockSync } from "@/shared/components/customer/cart-stock-sync";
+import { ShopHero } from "@/shared/components/customer/shop/ShopHero";
 import {
   Card,
   CardContent,
@@ -43,32 +44,38 @@ export default async function ShopPage() {
   const products: Product[] = data ?? [];
 
   return (
-    <div className="space-y-8">
+    <div className="relative z-10 mx-auto max-w-5xl space-y-6 sm:space-y-8">
       <CartStockSync products={products} />
-      <header>
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-          ArogyaDiet Shop
-        </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Discover clean, nourishing essentials curated for your wellness
-          journey.
-        </p>
-      </header>
+
+      <ShopHero productCount={products.length} />
 
       {products.length === 0 ? (
-        <Card className="border border-dashed border-slate-200 bg-slate-50/50 shadow-none">
-          <CardContent className="p-12 text-center">
-            <Package className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-            <p className="font-medium text-slate-500">
-              No products available right now.
-            </p>
-            <p className="mt-1 text-sm text-slate-400">
-              Check back soon for new wellness essentials.
+        <Card
+          className="reveal-rise rounded-3xl border border-dashed border-emerald-900/15 bg-white text-center shadow-sm"
+          style={{ ["--reveal-delay" as string]: "300ms" }}
+        >
+          <CardContent className="flex flex-col items-center space-y-4 py-16">
+            <div className="mb-1 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
+              <Package className="h-8 w-8 text-emerald-400" />
+            </div>
+            <h2 className="text-lg font-semibold tracking-tight text-slate-900">
+              No products available right now
+            </h2>
+            <p className="max-w-md text-sm text-slate-500">
+              Check back soon for new wellness essentials curated for your
+              journey.
             </p>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        // auto-fill (not auto-fit / fixed column counts) keeps each card at
+        // its natural width. A handful of products stay compact and
+        // left-aligned instead of stretching to fill empty columns, so the
+        // grid never looks abandoned regardless of catalog size.
+        <div
+          className="reveal-rise grid grid-cols-2 gap-4 sm:[grid-template-columns:repeat(auto-fill,minmax(220px,240px))] sm:gap-5"
+          style={{ ["--reveal-delay" as string]: "300ms" }}
+        >
           {products.map((product) => (
             <ProductCard key={product.id} product={product} />
           ))}

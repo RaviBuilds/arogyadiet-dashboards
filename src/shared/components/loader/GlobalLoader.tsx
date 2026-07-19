@@ -371,7 +371,14 @@ export function GlobalLoader({ message }: { message?: string }) {
     <div
       aria-hidden="true"
       className={cn(
-        "fixed inset-0 flex items-center justify-center transition-opacity ease-out",
+        // print:hidden matters beyond paper printing: pages like the invoice
+        // trigger window.print() (browser "Save as PDF") shortly after load,
+        // and this overlay's 1s+ minimum-visible time means it can still be
+        // mounted — with a z-index above everything — at that exact moment.
+        // Without this, the PDF captures the branded loader instead of the
+        // actual page content underneath it. Matches the same print:hidden
+        // convention already used on the sidebar/header/support button.
+        "fixed inset-0 flex items-center justify-center transition-opacity ease-out print:hidden",
         phase === "leaving" ? "opacity-0" : "opacity-100",
       )}
       data-loader-mode={mode}

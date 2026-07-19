@@ -2,17 +2,12 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { format, addDays, startOfDay, parseISO, isBefore } from "date-fns";
-import { MapPin, Save, Loader2, AlertCircle } from "lucide-react";
+import { format, addDays, startOfDay, parseISO, isBefore, isToday as isDateToday } from "date-fns";
+import { Check, Home, MapPinned, Save, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/shared/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/shared/components/ui/card";
-import { Badge } from "@/shared/components/ui/badge";
 import { Alert, AlertDescription } from "@/shared/components/ui/alert";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
+import { StatusPill } from "@/shared/components/customer/profile-ui/StatusPill";
 import { cn } from "@/lib/utils";
 import { bulkUpdateAddressPreferencesAction } from "@/actions/manageMealActions";
 import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh";
@@ -127,39 +122,55 @@ export function AddressSwitcherClient({
     JSON.stringify(addressMap) !== JSON.stringify(initialAddressMap);
 
   return (
-    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4">
-      {/* Top Banner & Save Button */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-white border border-slate-200 rounded-xl shadow-sm p-6 sticky top-[60px] z-10">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">
-            Switch Delivery Address
-          </h2>
-          <p className="text-sm text-slate-500 flex items-center gap-1.5 mt-1">
-            <AlertCircle className="h-3 w-3 shrink-0" /> Select an address
-            below, then click dates to apply.
-          </p>
+    <div className="space-y-8 max-w-4xl mx-auto">
+      {/* Header — same IconChip + eyebrow + heading pattern as the checkout
+          wizard's "Where should we deliver?" step, so switching an address
+          on an existing plan feels like the same product as setting one up
+          during checkout. */}
+      <div>
+        <div className="flex items-center gap-2.5">
+          <IconChip icon={MapPinned} tone="coral" />
+          <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-primary/80">
+            Your Delivery Address
+          </span>
         </div>
-        <Button
-          onClick={handleSave}
-          disabled={!hasChanges || isSaving}
-          className="w-full sm:w-auto transition-all duration-200"
-        >
-          {isSaving ? (
-            <Loader2 className="animate-spin h-4 w-4 mr-2" />
-          ) : (
-            <Save className="h-4 w-4 mr-2" />
-          )}
-          Save Address Changes
-        </Button>
+        <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+              Switch Delivery Address
+            </h2>
+            <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
+              Select an address below, then tap the dates you want it applied
+              to.
+            </p>
+          </div>
+          <Button
+            onClick={handleSave}
+            disabled={!hasChanges || isSaving}
+            size="lg"
+            className="group h-12 shrink-0 rounded-full bg-emerald-600 text-base font-semibold text-white shadow-sm transition-all duration-200 hover:bg-emerald-700 hover:shadow-md active:scale-[0.98] disabled:opacity-50"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" /> Save Changes
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {saveMessage && (
         <Alert
-          className={
+          className={cn(
+            "rounded-2xl",
             saveMessage.type === "success"
               ? "bg-emerald-50 border-emerald-200 text-emerald-900"
-              : "bg-red-50 border-red-200 text-red-900"
-          }
+              : "bg-red-50 border-red-200 text-red-900",
+          )}
         >
           <AlertDescription className="text-sm font-medium">
             {saveMessage.text}
@@ -167,155 +178,175 @@ export function AddressSwitcherClient({
         </Alert>
       )}
 
-      {/* Address Selection Strip */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-base font-semibold text-slate-900 tracking-tight">
-            Your Addresses
-          </h3>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Tap an address, then click dates below to assign it.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-          {availableAddresses.map((addr: any) => {
-            const theme = addressColors[addr.id];
-            const isSelected = selectedAddressId === addr.id;
-
-            return (
-              <Card
-                key={addr.id}
-                onClick={() => setSelectedAddressId(addr.id)}
-                className={cn(
-                  "rounded-xl border shadow-sm transition-all duration-200 select-none cursor-pointer",
-                  isSelected
-                    ? cn(theme.border, theme.activeBg, "ring-2 ring-offset-1")
-                    : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-md hover:bg-slate-50/50",
-                )}
-              >
-                <CardContent className="p-6 flex gap-4 items-center">
-                  <MapPin
-                    className={cn(
-                      "h-5 w-5 shrink-0",
-                      isSelected ? theme.icon : "text-slate-400",
-                    )}
-                  />
-                  <div className="overflow-hidden flex-1 min-w-0">
-                    <p
-                      className={cn(
-                        "font-semibold text-sm",
-                        isSelected ? theme.text : "text-slate-700",
-                      )}
-                    >
-                      {addr.tag}
-                    </p>
-                    <p className="text-sm text-slate-500 truncate">
-                      {addr.street_1}, {addr.city}
-                    </p>
-                  </div>
-                  {isSelected && (
-                    <Badge
-                      variant="outline"
-                      className="ml-auto shrink-0 border-emerald-200 bg-emerald-50 text-emerald-700"
-                    >
-                      Selected
-                    </Badge>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Calendar Grid */}
-      <Card className="border border-slate-200 bg-white rounded-xl shadow-sm overflow-hidden">
-        <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-6 py-4">
-          <CardTitle className="text-base font-semibold text-slate-900">
-            Delivery Schedule
-          </CardTitle>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Click a date to apply the selected address. Locked dates cannot be
-            changed.
-          </p>
-        </CardHeader>
-        <CardContent className="p-6">
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-3 md:gap-4">
-            {scheduleDays.map((dateStr: string) => {
-              const date = parseISO(dateStr);
-              const isCutoffLocked = isBefore(startOfDay(date), minEditableDate);
-              const isPaused = pausedDates.includes(dateStr); // Check if paused
-              const isLocked = isCutoffLocked || isPaused; // Lock if past cutoff OR paused
-
-              const currentAddr =
-                availableAddresses.find(
-                  (a: any) => a.id === addressMap[dateStr],
-                ) || availableAddresses[0];
-              const theme = addressColors[currentAddr?.id] || ADDRESS_THEMES[0];
+      <div className="space-y-8">
+        {/* Address Selection Strip — same rounded-3xl selectable card as
+            OnboardingAddressCard in the checkout wizard (home icon chip,
+            emerald glow + checkmark on selection). */}
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-base font-semibold tracking-tight text-slate-900">
+              Your Addresses
+            </h3>
+            <p className="mt-0.5 text-sm text-slate-500">
+              Tap an address, then click dates below to assign it.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            {availableAddresses.map((addr: any) => {
+              const isSelected = selectedAddressId === addr.id;
 
               return (
                 <button
-                  key={dateStr}
-                  disabled={isLocked}
-                  onClick={() => handleDateClick(dateStr)}
+                  key={addr.id}
+                  type="button"
+                  onClick={() => setSelectedAddressId(addr.id)}
+                  aria-pressed={isSelected}
                   className={cn(
-                    "flex flex-col items-center justify-center p-2 md:p-3 rounded-xl border-2 transition-all duration-200 text-center relative overflow-hidden select-none",
-                    isPaused
-                      ? "bg-slate-50 border-slate-300 border-dashed opacity-80 cursor-not-allowed"
-                      : isCutoffLocked
-                        ? "bg-slate-50 border-slate-200 opacity-60 grayscale cursor-not-allowed"
-                        : cn(
-                            "bg-white hover:bg-slate-50 hover:shadow-sm",
-                            theme.border,
-                          ),
+                    "group relative flex w-full items-start gap-3.5 rounded-3xl border bg-white p-5 text-left shadow-sm transition-all duration-300 sm:max-w-md sm:flex-1 sm:basis-[280px]",
+                    "hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60",
+                    isSelected
+                      ? "-translate-y-0.5 border-emerald-400 bg-emerald-50/40 shadow-md ring-2 ring-emerald-200"
+                      : "border-slate-200 hover:border-emerald-200",
                   )}
                 >
-                  <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                    {format(date, "EEE")}
-                  </span>
                   <span
                     className={cn(
-                      "text-lg md:text-xl font-semibold mt-0.5 mb-1 md:mb-2",
-                      isLocked ? "text-slate-500" : theme.text,
+                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors duration-300",
+                      isSelected
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-slate-100 text-slate-500",
                     )}
                   >
-                    {format(date, "dd")}
+                    <Home className="h-5 w-5" strokeWidth={1.75} />
                   </span>
 
-                  <div className="w-full px-1">
-                    {isPaused ? (
-                      <Badge
-                        variant="outline"
-                        className="w-full justify-center rounded-full border-slate-300 bg-slate-100 text-slate-600 text-[10px] font-medium border-dashed"
-                      >
-                        Paused
-                      </Badge>
-                    ) : (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-center rounded-full text-[10px] font-medium truncate",
-                          isCutoffLocked
-                            ? "bg-slate-100 text-slate-500 border-slate-200"
-                            : cn(theme.tagBg, theme.text),
-                        )}
-                      >
-                        {currentAddr?.tag || "Default"}
-                      </Badge>
-                    )}
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={cn(
+                        "text-sm font-semibold",
+                        isSelected ? "text-emerald-800" : "text-slate-900",
+                      )}
+                    >
+                      {addr.tag || "Address"}
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-slate-500">
+                      {addr.street_1}
+                      {addr.city ? `, ${addr.city}` : ""}
+                    </p>
                   </div>
 
-                  {isCutoffLocked && !isPaused && (
-                    <div className="absolute top-1 right-1">
-                      <AlertCircle className="h-2.5 w-2.5 text-slate-400" />
-                    </div>
-                  )}
+                  {isSelected ? (
+                    <span className="absolute right-4 top-4 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white duration-200 animate-in zoom-in-50">
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* Delivery Schedule — unified rounded-3xl card matching the meal
+            planner's calendar, instead of a separately-bordered Card with
+            its own header. */}
+        <div className="rounded-3xl border border-slate-100 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+              Delivery Schedule
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Click a date to apply the selected address. Locked dates cannot
+              be changed.
+            </p>
+          </div>
+          <div className="p-5 sm:p-6">
+            <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 sm:gap-3 md:grid-cols-5 lg:grid-cols-7">
+              {scheduleDays.map((dateStr: string) => {
+                const date = parseISO(dateStr);
+                const isCutoffLocked = isBefore(
+                  startOfDay(date),
+                  minEditableDate,
+                );
+                const isPaused = pausedDates.includes(dateStr);
+                const isLocked = isCutoffLocked || isPaused;
+                const isTodayCell = isDateToday(date);
+
+                const currentAddr =
+                  availableAddresses.find(
+                    (a: any) => a.id === addressMap[dateStr],
+                  ) || availableAddresses[0];
+                const theme =
+                  addressColors[currentAddr?.id] || ADDRESS_THEMES[0];
+
+                return (
+                  <button
+                    key={dateStr}
+                    disabled={isLocked}
+                    onClick={() => handleDateClick(dateStr)}
+                    className={cn(
+                      "group relative flex select-none flex-col items-center justify-center gap-1.5 rounded-2xl border p-2 text-center transition-all duration-200 sm:p-3",
+                      isPaused
+                        ? "cursor-not-allowed border-dashed border-slate-300 bg-slate-50 opacity-80"
+                        : isCutoffLocked
+                          ? "cursor-not-allowed border-slate-100 bg-slate-50 opacity-60"
+                          : cn(
+                              "bg-white hover:-translate-y-0.5 hover:shadow-md",
+                              theme.border,
+                            ),
+                    )}
+                  >
+                    {isTodayCell && !isLocked && (
+                      <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wide text-white shadow-sm">
+                        Today
+                      </span>
+                    )}
+
+                    <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-400">
+                      {format(date, "EEE")}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-base font-bold sm:text-lg",
+                        isLocked ? "text-slate-400" : theme.text,
+                      )}
+                    >
+                      {format(date, "dd")}
+                    </span>
+
+                    <div className="w-full px-0.5">
+                      {isPaused ? (
+                        <StatusPill
+                          tone="slate"
+                          className="w-full justify-center border-dashed px-2 py-0.5 text-[0.6rem]"
+                        >
+                          Paused
+                        </StatusPill>
+                      ) : (
+                        <span
+                          className={cn(
+                            "block w-full truncate rounded-full border px-2 py-0.5 text-[0.6rem] font-semibold",
+                            isCutoffLocked
+                              ? "border-slate-200 bg-slate-100 text-slate-500"
+                              : cn(theme.tagBg, theme.text),
+                          )}
+                        >
+                          {currentAddr?.tag || "Default"}
+                        </span>
+                      )}
+                    </div>
+
+                    {isCutoffLocked && !isPaused && (
+                      <div className="absolute right-1 top-1">
+                        <AlertCircle className="h-2.5 w-2.5 text-slate-400" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

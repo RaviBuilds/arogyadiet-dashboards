@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import {
   MoreHorizontal,
@@ -10,6 +11,7 @@ import {
   Clock,
   Truck,
   XCircle,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -30,7 +32,6 @@ import {
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
-import { Badge } from "@/shared/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { updateAddonOrderDeliveryDate } from "@/actions/shop-actions";
 
@@ -84,32 +85,32 @@ const STATUS_CONFIG = {
   purchased: {
     label: "Purchased",
     icon: Clock,
-    className: "bg-amber-50 text-amber-700 border-amber-200",
+    className: "bg-amber-50 text-amber-700 ring-amber-200",
   },
   scheduled: {
     label: "Scheduled for Delivery",
     icon: Truck,
-    className: "bg-blue-50 text-blue-700 border-blue-200",
+    className: "bg-blue-50 text-blue-700 ring-blue-200",
   },
   delivered: {
     label: "Delivered",
     icon: CheckCircle2,
-    className: "bg-green-50 text-green-700 border-green-200",
+    className: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   },
   cancelled: {
     label: "Cancelled",
     icon: XCircle,
-    className: "bg-red-50 text-red-700 border-red-200",
+    className: "bg-red-50 text-red-700 ring-red-200",
   },
   pending: {
     label: "Payment Pending",
     icon: Clock,
-    className: "bg-slate-100 text-slate-600 border-slate-200",
+    className: "bg-slate-100 text-slate-600 ring-slate-200",
   },
   unknown: {
     label: "Unknown",
     icon: Clock,
-    className: "bg-slate-100 text-slate-500 border-slate-200",
+    className: "bg-slate-100 text-slate-500 ring-slate-200",
   },
 };
 
@@ -118,16 +119,15 @@ function StatusBadge({ order }: { order: ShopOrderRow }) {
   const cfg = STATUS_CONFIG[key];
   const Icon = cfg.icon;
   return (
-    <Badge
-      variant="outline"
+    <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset",
         cfg.className,
       )}
     >
       <Icon className="h-3 w-3" />
       {cfg.label}
-    </Badge>
+    </span>
   );
 }
 
@@ -173,7 +173,7 @@ function EditDeliveryDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="rounded-3xl border-emerald-900/10 sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 font-semibold tracking-tight text-slate-900">
             <CalendarDays className="h-5 w-5 text-primary" />
@@ -241,23 +241,40 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
 
   if (orders.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-12 text-center">
-        <Package className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-        <p className="font-medium text-slate-500">
-          You haven&apos;t purchased any shop products yet.
-        </p>
-        <p className="mt-1 text-sm text-slate-400">
-          Browse the shop and add products to your next delivery.
-        </p>
+      <div className="rounded-3xl border border-dashed border-emerald-900/15 bg-white text-center shadow-sm">
+        <div className="flex flex-col items-center gap-4 px-6 py-16">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
+            <Package className="h-8 w-8 text-emerald-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-slate-900">
+              No shop orders yet
+            </h2>
+            <p className="mt-1 max-w-sm text-sm text-slate-500">
+              Browse the shop and add wellness essentials — they&apos;ll be
+              merged into your next delivery batch.
+            </p>
+          </div>
+          <Link
+            href="/shop"
+            className="group/cta mt-2 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:brightness-105 active:scale-[0.98]"
+          >
+            Browse Shop
+            <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/cta:translate-x-0.5" />
+          </Link>
+        </div>
       </div>
     );
   }
 
   return (
     <>
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        {/* Desktop header */}
-        <div className="hidden grid-cols-[1fr_1.2fr_1.4fr_1fr_1.2fr_48px] border-b bg-slate-50/50 px-6 py-3 text-xs font-medium uppercase tracking-wider text-slate-500 md:grid">
+      {/* Desktop: table-like rows inside a dashboard-style card.
+          Mobile: a stack of self-contained order cards — same data,
+          presented the way the Momentum/UpcomingDeliveries cards are:
+          one unified card rather than a cramped grid. */}
+      <div className="hidden overflow-hidden rounded-3xl border border-emerald-900/10 bg-white shadow-sm md:block">
+        <div className="grid grid-cols-[1fr_1.2fr_1.4fr_1fr_1.2fr_48px] border-b border-emerald-900/10 bg-emerald-50/40 px-6 py-3 text-xs font-medium uppercase tracking-wider text-emerald-700/80">
           <div>Order</div>
           <div>Purchased</div>
           <div>Items</div>
@@ -280,7 +297,7 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
             return (
               <div
                 key={order.id}
-                className="grid grid-cols-1 items-center gap-3 px-6 py-4 transition-colors duration-200 hover:bg-slate-50 md:grid-cols-[1fr_1.2fr_1.4fr_1fr_1.2fr_48px] md:gap-0"
+                className="grid grid-cols-[1fr_1.2fr_1.4fr_1fr_1.2fr_48px] items-center gap-0 px-6 py-4 transition-colors duration-200 hover:bg-emerald-50/30"
               >
                 {/* Order ID */}
                 <div>
@@ -373,6 +390,107 @@ export function ShopOrdersClient({ orders }: { orders: ShopOrderRow[] }) {
             );
           })}
         </div>
+      </div>
+
+      {/* Mobile card stack */}
+      <div className="flex flex-col gap-3 md:hidden">
+        {orders.map((order) => {
+          const orderStatus = getOrderStatus(order);
+          const canEdit = orderStatus === "purchased";
+          const items = Array.isArray(order.addon_order_items)
+            ? order.addon_order_items.filter(Boolean)
+            : [];
+          const scheduledDate = getScheduledDate(order);
+          const displayDate = scheduledDate ?? order.target_delivery_date ?? null;
+
+          return (
+            <div
+              key={order.id}
+              className="overflow-hidden rounded-2xl border border-emerald-900/10 bg-white shadow-sm"
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-emerald-900/10 bg-emerald-50/40 px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    #{String(order.id).slice(-6).toUpperCase()}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {format(parseISO(order.created_at), "MMM do, yyyy")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusBadge order={order} />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                        <span className="sr-only">Order actions</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuItem
+                        onClick={() => canEdit && openEdit(order)}
+                        disabled={!canEdit}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2",
+                          !canEdit && "cursor-not-allowed opacity-40",
+                        )}
+                      >
+                        <CalendarDays className="h-4 w-4" />
+                        Edit Delivery Date
+                        {!canEdit && orderStatus === "scheduled" && (
+                          <span className="ml-auto text-[10px] font-normal text-slate-400">
+                            Locked
+                          </span>
+                        )}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+
+              <div className="space-y-2 px-4 py-3">
+                {items.length === 0 ? (
+                  <span className="text-sm text-slate-400">No items</span>
+                ) : (
+                  items.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="font-medium text-slate-800">
+                        {getProductName(item?.products ?? null) ?? "Product"}
+                      </span>
+                      <span className="text-xs text-slate-400">
+                        ×{item?.quantity}
+                      </span>
+                    </div>
+                  ))
+                )}
+
+                <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-sm">
+                  <span className="text-slate-500">Target delivery</span>
+                  <span className="font-medium text-slate-700">
+                    {displayDate
+                      ? format(parseISO(displayDate), "MMM do, yyyy")
+                      : "—"}
+                  </span>
+                </div>
+                {typeof order.total_amount === "number" && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Total</span>
+                    <span className="font-semibold text-slate-900">
+                      ₹{Number(order.total_amount).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <EditDeliveryDialog order={editOrder} open={editOpen} onClose={closeEdit} />
