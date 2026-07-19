@@ -44,9 +44,9 @@ export function OnboardingStepper({
                 className={cn(
                   "relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-all duration-300 sm:h-12 sm:w-12",
                   isCompleted
-                    ? "bg-emerald-600 text-white"
+                    ? "bg-emerald-500 text-white"
                     : isCurrent
-                      ? "journey-glow-breathe bg-emerald-600 text-white ring-4 ring-emerald-100"
+                      ? "journey-glow-breathe bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 ring-4 ring-emerald-200 ring-offset-2 ring-offset-white"
                       : "bg-slate-100 text-slate-400",
                 )}
               >

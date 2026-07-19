@@ -2,10 +2,11 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { format, addDays, startOfDay, parseISO, isBefore } from "date-fns";
-import { RefreshCw, Save, Loader2, AlertCircle, CalendarCheck } from "lucide-react";
-import { Button } from "@/shared/components/ui/button";
+import { format, addDays, startOfDay, parseISO, isBefore, isToday as isDateToday } from "date-fns";
+import { RefreshCw, Save, Loader2, AlertCircle, CalendarCheck, Utensils } from "lucide-react";
 import { Alert, AlertDescription } from "@/shared/components/ui/alert";
+import { Button } from "@/shared/components/ui/button";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
 import { cn } from "@/lib/utils";
 import {
   bulkUpdateMealPreferencesAction,
@@ -509,43 +510,68 @@ export function MealPlannerClient({
     return wasPaused !== isNowPaused || initialMeal !== currentMeal;
   });
 
+  const baseFoodLabel = getCategoryLabel(
+    baseFoodType,
+    mealCategories.find((c: any) => c.code === baseFoodType)?.name,
+  );
+
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 max-w-4xl">
-      {/* Top Banner & Save Button */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 border border-slate-200 rounded-xl shadow-sm sticky top-[60px] z-10">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900 tracking-tight">
-            Manage Meal Planner
-          </h2>
-          <p className="text-sm text-slate-500 flex items-center gap-1 mt-1">
-            <AlertCircle className="h-3 w-3" /> Changes for tomorrow must be
-            made before 5:00 PM today.
-          </p>
+    <div className="space-y-8 max-w-4xl mx-auto">
+      {/* Header — same IconChip + eyebrow + heading pattern as the checkout
+          wizard's "Your Meal Planner" step, so managing an existing plan
+          feels like the same product as setting one up. */}
+      <div>
+        <div className="flex items-center gap-2.5">
+          <IconChip icon={Utensils} tone="green" />
+          <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-emerald-700/90">
+            Your Meal Planner
+          </span>
         </div>
-        <Button
-          onClick={handleSave}
-          disabled={!hasChanges || isSaving}
-          className="w-full sm:w-auto font-bold transition-all"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...
-            </>
-          ) : (
-            <>
-              <Save className="mr-2 h-4 w-4" /> Save Changes
-            </>
-          )}
-        </Button>
+        <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+              Manage Meal Planner
+            </h2>
+            <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-slate-500">
+              Your base plan is set to{" "}
+              <strong className="font-semibold text-slate-900">
+                {baseFoodLabel}
+              </strong>
+              . Tap any upcoming date to cycle its meal type or pause that
+              day.
+            </p>
+            <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-amber-700">
+              <AlertCircle className="h-3.5 w-3.5" /> Changes for tomorrow
+              must be made before 5:00 PM today.
+            </p>
+          </div>
+          <Button
+            onClick={handleSave}
+            disabled={!hasChanges || isSaving}
+            size="lg"
+            className="group h-12 shrink-0 rounded-full bg-emerald-600 text-base font-semibold text-white shadow-sm transition-all duration-200 hover:bg-emerald-700 hover:shadow-md active:scale-[0.98] disabled:opacity-50"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" /> Save Changes
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {saveMessage && (
         <Alert
-          className={
+          className={cn(
+            "rounded-2xl",
             saveMessage.type === "success"
-              ? "bg-green-50 border-green-200 text-green-900"
-              : "bg-red-50 border-red-200 text-red-900"
-          }
+              ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+              : "bg-red-50 border-red-200 text-red-900",
+          )}
         >
           <AlertDescription className="font-medium">
             {saveMessage.text}
@@ -553,270 +579,307 @@ export function MealPlannerClient({
         </Alert>
       )}
 
-      {/* Pause Credit Banner */}
-      <div
-        className={cn(
-          "rounded-xl border p-5 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors duration-200",
-          isLimitReached
-            ? "bg-amber-50 border-amber-200"
-            : "bg-blue-50 border-blue-200",
-        )}
-      >
-        <div className="flex items-center gap-3">
-          {isLimitReached ? (
-            <AlertCircle className="h-6 w-6 text-amber-600" />
-          ) : (
-            <CalendarCheck className="h-6 w-6 text-blue-600" />
+      <div className="space-y-8">
+        {/* Pause Credit Banner — identical markup/tokens to the checkout
+            wizard's plan summary card. */}
+        <div
+          className={cn(
+            "rounded-3xl border p-5 flex flex-col sm:flex-row items-center justify-between gap-4 transition-colors duration-200",
+            isLimitReached
+              ? "bg-amber-50 border-amber-200"
+              : "bg-emerald-50/60 border-emerald-100",
           )}
-          <div>
+        >
+          <div className="flex items-center gap-3">
+            {isLimitReached ? (
+              <AlertCircle className="h-6 w-6 text-amber-600" />
+            ) : (
+              <CalendarCheck className="h-6 w-6 text-emerald-600" />
+            )}
+            <div>
+              <p
+                className={cn(
+                  "text-sm font-semibold",
+                  isLimitReached ? "text-amber-900" : "text-emerald-900",
+                )}
+              >
+                Your {planDuration}-Meal Plan
+              </p>
+              <p
+                className={cn(
+                  "text-xs",
+                  isLimitReached ? "text-amber-700" : "text-emerald-700",
+                )}
+              >
+                You have used <strong>{pausesUsed}</strong> of{" "}
+                <strong>{maxPauses}</strong> pause credits.
+                {isLimitReached && " (Limit Reached)"}
+              </p>
+            </div>
+          </div>
+          <div className="text-center sm:text-right">
             <p
               className={cn(
-                "text-sm font-semibold",
-                isLimitReached ? "text-amber-900" : "text-blue-900",
+                "text-xs font-medium",
+                isLimitReached ? "text-amber-700" : "text-emerald-700",
               )}
             >
-              Your {planDuration}-Meal Plan
+              New End Date
             </p>
             <p
               className={cn(
-                "text-xs",
-                isLimitReached ? "text-amber-700" : "text-blue-700",
+                "text-lg font-extrabold",
+                isLimitReached ? "text-amber-900" : "text-emerald-900",
               )}
             >
-              You have used <strong>{pausesUsed}</strong> of{" "}
-              <strong>{maxPauses}</strong> pause credits.
-              {isLimitReached && " (Limit Reached)"}
+              {endDate ? format(endDate, "MMMM do, yyyy") : "..."}
             </p>
           </div>
         </div>
-        <div className="text-center sm:text-right">
-          <p
-            className={cn(
-              "text-xs font-medium",
-              isLimitReached ? "text-amber-700" : "text-blue-700",
-            )}
-          >
-            New End Date
-          </p>
-          <p
-            className={cn(
-              "text-lg font-extrabold",
-              isLimitReached ? "text-amber-900" : "text-blue-900",
-            )}
-          >
-            {endDate ? format(endDate, "MMMM do, yyyy") : "..."}
-          </p>
-        </div>
-      </div>
 
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-slate-50/50 rounded-xl border border-slate-200 text-sm w-fit mx-auto md:mx-0">
-        <span className="text-slate-500 font-medium mr-2 flex items-center gap-1 hidden sm:flex">
-          <RefreshCw className="h-4 w-4" /> Cycle:
-        </span>
-        {cycleOptionsForLegend.map((option) => {
-          if (option === "PAUSE") {
-            const Icon = PAUSE_STYLE.icon;
-            return (
-              <div
-                key="PAUSE"
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full border",
-                  PAUSE_STYLE.bg,
-                  PAUSE_STYLE.color,
-                  "border-zinc-200",
-                )}
-              >
-                <Icon className="h-5 w-5 drop-shadow-sm" />
-                <span className="font-semibold text-xs md:text-sm">
-                  {PAUSE_STYLE.label}
-                </span>
-              </div>
-            );
-          }
-
-          const category = mealCategories.find((c: any) => c.code === option);
-          const style = PREF_STYLES[option] || PREF_STYLES.VEG;
-          const Icon = style.icon;
-          const label = getCategoryLabel(option, category?.name);
-
-          return (
-            <div
-              key={option}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-full border",
-                style.bg,
-                style.color,
-                style.border.split(" ")[0],
-              )}
-            >
-              <Icon className="h-5 w-5 drop-shadow-sm" />
-              <span className="font-semibold text-xs md:text-sm">{label}</span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Calendar Render */}
-      <div className="space-y-12 pb-20">
-        {Object.entries(calendarMonths).map(([monthName, daysInMonth]) => {
-          const firstDayOffset = daysInMonth[0].getDay();
-
-          return (
-            <div
-              key={monthName}
-              className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 md:p-8"
-            >
-              <h3 className="text-lg font-semibold text-slate-900 tracking-tight text-center mb-6">
-                {monthName}
-              </h3>
-              <div
-                className="grid gap-2 md:gap-4 text-center mb-2"
-                style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
-              >
-                {WEEKDAYS.map((day) => (
+        {/* Legend — "Tap to cycle" pill row, identical to the checkout
+            wizard's cycle legend (base preference gets the same ring +
+            "Base" tag treatment). */}
+        <div className="flex flex-col gap-3 rounded-3xl border border-slate-100 bg-slate-50/60 p-4 sm:flex-row sm:items-center sm:gap-4 sm:p-5">
+          <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <RefreshCw className="h-3.5 w-3.5" /> Tap to cycle
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {cycleOptionsForLegend.map((option) => {
+              if (option === "PAUSE") {
+                const Icon = PAUSE_STYLE.icon;
+                return (
                   <div
-                    key={day}
-                    className="text-xs font-medium text-slate-500 uppercase tracking-wider"
+                    key="PAUSE"
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full border bg-white px-3 py-1.5",
+                      PAUSE_STYLE.color,
+                      "border-zinc-200",
+                    )}
                   >
-                    {day}
+                    <Icon className="h-4 w-4" />
+                    <span className="text-xs font-semibold sm:text-sm">
+                      {PAUSE_STYLE.label}
+                    </span>
                   </div>
-                ))}
-              </div>
-              <div
-                className="grid gap-2 md:gap-4"
-                style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}
-              >
-                {Array.from({ length: firstDayOffset }).map((_, i) => (
-                  <div key={`empty-${i}`} className="aspect-square" />
-                ))}
+                );
+              }
 
-                {daysInMonth.map((date, index) => {
-                  const dateStr = format(date, "yyyy-MM-dd");
-                  const isPaused = pausedDates.includes(dateStr);
-                  const today = startOfDay(new Date());
-                  const isInPast = isBefore(startOfDay(date), today);
-                  const isLockedOut = isBefore(
-                    startOfDay(date),
-                    minEditableDate,
-                  );
-                  const isDisabled = isLockedOut;
+              const category = mealCategories.find(
+                (c: any) => c.code === option,
+              );
+              const style = PREF_STYLES[option] || PREF_STYLES.VEG;
+              const Icon = style.icon;
+              const label = getCategoryLabel(option, category?.name);
+              const isBasePreference = option === baseFoodType;
 
-                  const dayPrefCode = overrides[dateStr] || baseFoodType;
-                  
-                  // For past dates, show actual status with special styling
-                  let displayLabel = "";
-                  let style = PREF_STYLES.VEG;
-                  let Icon = VegSvg;
-
-                  if (isInPast) {
-                    // Past date - show what actually happened with grayed styling
-                    if (isPaused) {
-                      displayLabel = "Paused";
-                      style = {
-                        icon: PAUSE_STYLE.icon,
-                        bg: "bg-slate-50",
-                        color: "text-slate-400",
-                        border: "border-slate-200"
-                      };
-                      Icon = style.icon;
-                    } else {
-                      // Show meal type but with grayed styling like the 10th date
-                      const originalStyle = PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
-                      displayLabel = getCategoryLabel(
-                        dayPrefCode,
-                        mealCategories.find((c: any) => c.code === dayPrefCode)?.name,
-                      );
-                      style = {
-                        icon: originalStyle.icon,
-                        bg: "bg-slate-50",
-                        color: "text-slate-400", 
-                        border: "border-slate-200"
-                      };
-                      Icon = style.icon;
-                    }
-                  } else {
-                    // Future date - normal behavior
-                    style = isPaused
-                      ? PAUSE_STYLE
-                      : PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
-                    Icon = style.icon;
-                    displayLabel = isPaused
-                      ? PAUSE_STYLE.label
-                      : getCategoryLabel(
-                          dayPrefCode,
-                          mealCategories.find((c: any) => c.code === dayPrefCode)
-                            ?.name,
-                        );
-                  }
-
-                  return (
-                    <button
-                      key={index}
-                      disabled={isDisabled}
-                      onClick={() => handleToggleMeal(dateStr)}
-                      className={cn(
-                        "flex flex-col items-center justify-center aspect-square p-1 rounded-xl border transition-all duration-200 relative select-none",
-                        isInPast
-                          ? cn(style.bg, style.border, "cursor-default")
-                          : isLockedOut
-                          ? "bg-slate-100 border-slate-200 opacity-60 cursor-not-allowed grayscale"
-                          : cn(
-                              style.bg,
-                              style.border,
-                              "group hover:shadow-md hover:-translate-y-0.5",
-                            ),
-                      )}
-                    >
-                      {holidaysByDate[dateStr] && (
-                        <span className="text-[9px] md:text-[10px] font-bold leading-tight text-center line-clamp-2 max-w-full px-0.5 mb-0.5 text-zinc-700">
-                          {holidaysByDate[dateStr]}
-                        </span>
-                      )}
-                      <span
-                        className={cn(
-                          "text-lg md:text-xl font-extrabold mb-0.5 md:mb-1",
-                          isInPast ? style.color : isLockedOut ? "text-slate-400" : style.color,
-                        )}
-                      >
-                        {format(date, "d")}
+              return (
+                <div
+                  key={option}
+                  className={cn(
+                    "flex items-center gap-2 rounded-full border bg-white px-3.5 py-1.5",
+                    style.color,
+                    style.border.split(" ")[0],
+                    isBasePreference && "ring-1 ring-inset ring-current/20",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="text-xs font-semibold sm:text-sm">
+                    {label}
+                  </span>
+                  {isBasePreference && (
+                    <>
+                      <span className="h-1 w-1 rounded-full bg-current opacity-30" />
+                      <span className="text-[0.6rem] font-semibold uppercase tracking-wider opacity-70">
+                        Base
                       </span>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-                      <div
-                        className={cn(
-                          "flex flex-col items-center justify-center gap-1",
-                          isInPast ? style.color : isLockedOut ? "text-slate-400" : style.color,
-                        )}
-                      >
-                        <Icon 
-                          className={cn(
-                            "h-6 w-6 md:h-8 md:w-8 drop-shadow-sm transition-transform group-active:scale-95",
-                            isInPast ? "opacity-60" : ""
-                          )} 
-                        />
-                        <span className="text-[9px] md:text-[11px] font-bold leading-none text-center">
-                          {displayLabel}
-                        </span>
-                      </div>
+        {/* Calendar — single unified rounded-3xl card with divider lines
+            between months (checkout wizard style) instead of one separate
+            bordered card per month. Days default to a quiet, muted cell;
+            only a modified/paused day (or a past day, shown read-only)
+            picks up its meal color, so the grid reads calmly instead of as
+            a wall of identical colored tiles. */}
+        <div className="rounded-3xl border border-slate-100 bg-white shadow-sm">
+          {Object.entries(calendarMonths).map(
+            ([monthName, daysInMonth], monthIndex) => {
+              const firstDayOffset = daysInMonth[0].getDay();
 
-                      {!isLockedOut && !isInPast && (
-                        <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
-                          <RefreshCw className="h-5 w-5 text-zinc-600 opacity-20" />
+              return (
+                <div key={monthName}>
+                  {monthIndex > 0 && (
+                    <div
+                      aria-hidden="true"
+                      className="mx-5 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent sm:mx-6"
+                    />
+                  )}
+                  <div className="p-5 sm:p-6">
+                    <h3 className="mb-5 text-sm font-semibold uppercase tracking-wider text-slate-400">
+                      {monthName}
+                    </h3>
+                    <div
+                      className="grid gap-1.5 text-center mb-2 sm:gap-2.5"
+                      style={{
+                        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                      }}
+                    >
+                      {WEEKDAYS.map((day) => (
+                        <div
+                          key={day}
+                          className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-400"
+                        >
+                          {day}
                         </div>
-                      )}
+                      ))}
+                    </div>
+                    <div
+                      className="grid gap-1.5 sm:gap-2.5"
+                      style={{
+                        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                      }}
+                    >
+                      {Array.from({ length: firstDayOffset }).map((_, i) => (
+                        <div key={`empty-${i}`} className="aspect-square" />
+                      ))}
 
-                      {isLockedOut && !isInPast && (
-                        <div className="absolute top-1 right-1">
-                          <AlertCircle className="h-3 w-3 text-slate-400" />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+                      {daysInMonth.map((date, index) => {
+                        const dateStr = format(date, "yyyy-MM-dd");
+                        const isPaused = pausedDates.includes(dateStr);
+                        const today = startOfDay(new Date());
+                        const isInPast = isBefore(startOfDay(date), today);
+                        const isLockedOut = isBefore(
+                          startOfDay(date),
+                          minEditableDate,
+                        );
+                        const isDisabled = isLockedOut;
+                        const isTodayCell = isDateToday(date);
+
+                        const dayPrefCode = overrides[dateStr] || baseFoodType;
+                        const style = isPaused
+                          ? PAUSE_STYLE
+                          : PREF_STYLES[dayPrefCode] || PREF_STYLES.VEG;
+                        const Icon = style.icon;
+                        const dayLabel = isPaused
+                          ? PAUSE_STYLE.label
+                          : getCategoryLabel(
+                              dayPrefCode,
+                              mealCategories.find(
+                                (c: any) => c.code === dayPrefCode,
+                              )?.name,
+                            );
+
+                        // A day only "stands out" once it's paused or
+                        // overridden from the base plan — same rule as the
+                        // checkout wizard, so the grid stays calm instead of
+                        // competing for attention. Past days are shown
+                        // read-only in a muted gray regardless of what they
+                        // were, since they're history, not something to edit.
+                        const isModified = isPaused || Boolean(overrides[dateStr]);
+
+                        return (
+                          <button
+                            key={index}
+                            disabled={isDisabled}
+                            onClick={() => handleToggleMeal(dateStr)}
+                            className={cn(
+                              "group relative flex aspect-square select-none flex-col items-center justify-center rounded-2xl border p-1 transition-all duration-200",
+                              isInPast
+                                ? "cursor-default border-slate-100 bg-slate-50"
+                                : isLockedOut
+                                  ? "cursor-not-allowed border-slate-100 bg-slate-50 opacity-60"
+                                  : cn(
+                                      "hover:-translate-y-0.5 hover:shadow-md",
+                                      isModified ? style.bg : "bg-white",
+                                      isModified
+                                        ? style.border
+                                        : "border-slate-100 hover:border-slate-200",
+                                    ),
+                            )}
+                          >
+                            {isTodayCell && !isInPast && (
+                              <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wide text-white shadow-sm">
+                                Today
+                              </span>
+                            )}
+
+                            {holidaysByDate[dateStr] && (
+                              <span className="mb-0.5 line-clamp-2 max-w-full px-0.5 text-center text-[9px] font-bold leading-tight text-zinc-700 md:text-[10px]">
+                                {holidaysByDate[dateStr]}
+                              </span>
+                            )}
+
+                            <span
+                              className={cn(
+                                "text-base font-bold sm:text-lg",
+                                isInPast
+                                  ? "text-slate-400"
+                                  : isLockedOut
+                                    ? "text-slate-400"
+                                    : isModified
+                                      ? style.color
+                                      : "text-slate-700",
+                              )}
+                            >
+                              {format(date, "d")}
+                            </span>
+
+                            <div
+                              className={cn(
+                                "flex flex-col items-center justify-center gap-0.5",
+                                isInPast
+                                  ? "text-slate-400"
+                                  : isLockedOut
+                                    ? "text-slate-400"
+                                    : isModified
+                                      ? style.color
+                                      : "text-slate-400",
+                              )}
+                            >
+                              <Icon
+                                className={cn(
+                                  "drop-shadow-sm transition-transform group-active:scale-95",
+                                  isInPast
+                                    ? "h-4 w-4 opacity-50 sm:h-5 sm:w-5"
+                                    : isModified
+                                      ? "h-5 w-5 sm:h-6 sm:w-6"
+                                      : "h-4 w-4 opacity-60 sm:h-5 sm:w-5",
+                                )}
+                              />
+                              {(isModified || isInPast) && (
+                                <span className="hidden text-[9px] font-bold leading-none sm:block sm:text-[10px]">
+                                  {dayLabel}
+                                </span>
+                              )}
+                            </div>
+
+                            {!isLockedOut && !isInPast && (
+                              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/5 opacity-0 transition-opacity group-hover:opacity-100">
+                                <RefreshCw className="h-4 w-4 text-zinc-600 opacity-30" />
+                              </div>
+                            )}
+
+                            {isLockedOut && !isInPast && (
+                              <div className="absolute right-1 top-1">
+                                <AlertCircle className="h-3 w-3 text-slate-400" />
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            },
+          )}
+        </div>
       </div>
     </div>
   );

@@ -19,7 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/components/ui/dropdown-menu";
-import { Menu, LogOut } from "lucide-react";
+import { Menu, LogOut, Leaf } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -73,16 +73,16 @@ export function CustomerHeader({
         <SheetTrigger
           className={cn(
             buttonVariants({ variant: "outline", size: "icon" }),
-            "shrink-0 border-slate-200 bg-white shadow-sm transition-all duration-200 hover:bg-slate-50 md:hidden",
+            "shrink-0 border-emerald-100 bg-emerald-50 text-emerald-700 shadow-sm transition-all duration-200 hover:bg-emerald-100 md:hidden",
           )}
         >
           <span className="sr-only">Toggle navigation menu</span>
-          <Menu className="h-5 w-5 text-slate-700" />
+          <Menu className="h-5 w-5" />
         </SheetTrigger>
 
         <SheetContent
           side="left"
-          className="flex h-full max-h-[100dvh] w-72 flex-col gap-0 overflow-hidden border-r border-slate-200 bg-zinc-950 p-0"
+          className="flex h-full max-h-[100dvh] w-72 flex-col gap-0 overflow-hidden border-r border-white/[0.08] bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-800 p-0"
         >
           {/* Accessibility requirements */}
           <SheetHeader className="sr-only">
@@ -103,9 +103,13 @@ export function CustomerHeader({
         </SheetContent>
       </Sheet>
 
-      {/* Welcome text section */}
+      {/* Welcome text section — same time-of-day-aware voice as the
+          dashboard's JourneyHeader greeting, with a small leaf mark so the
+          header reads as a continuation of that hero rather than a plain
+          admin-panel title bar. */}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <h1 className="truncate text-base font-semibold tracking-tight text-slate-900 sm:text-lg">
+        <h1 className="flex items-center gap-1.5 truncate text-base font-semibold tracking-tight text-slate-900 sm:text-lg">
+          <Leaf className="h-4 w-4 shrink-0 text-emerald-600" />
           Welcome back{userName ? `, ${userName}` : ""}
         </h1>
         <p className="hidden text-sm text-slate-500 sm:block">
@@ -114,7 +118,7 @@ export function CustomerHeader({
       </div>
 
       {/* Right side actions */}
-      <div className="flex shrink-0 items-center gap-3 sm:gap-4">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         <CartSheet />
 
         <div className="hidden flex-col items-end sm:flex">
@@ -132,8 +136,8 @@ export function CustomerHeader({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2">
-              <Avatar className="h-9 w-9 shrink-0 cursor-pointer border shadow-sm ring-2 ring-slate-100 transition-all duration-200 hover:ring-primary/30">
-                <AvatarFallback className="bg-primary/10 font-semibold text-primary">
+              <Avatar className="h-9 w-9 shrink-0 cursor-pointer border border-emerald-200/60 shadow-sm ring-2 ring-emerald-50 transition-all duration-200 hover:ring-emerald-200">
+                <AvatarFallback className="bg-emerald-50 font-semibold text-emerald-700">
                   {initial}
                 </AvatarFallback>
               </Avatar>

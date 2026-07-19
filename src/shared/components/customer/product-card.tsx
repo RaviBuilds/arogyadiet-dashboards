@@ -5,8 +5,6 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { Product } from "@/types/product";
 import { useCartStore } from "@/store/useCartStore";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/shared/components/ui/badge";
-import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
   DialogClose,
@@ -15,7 +13,16 @@ import {
   DialogPortal,
   DialogTitle,
 } from "@/shared/components/ui/dialog";
-import { ChevronLeft, ChevronRight, Eye, Minus, Plus, X } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  Minus,
+  Plus,
+  X,
+} from "lucide-react";
 
 interface ProductCardProps {
   product: Product;
@@ -25,6 +32,9 @@ export default function ProductCard({ product }: ProductCardProps) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [quickViewOpen, setQuickViewOpen] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  // Purely cosmetic "just added" flash on the button — no cart state,
+  // logic, or persistence involved. Auto-clears itself.
+  const [justAdded, setJustAdded] = useState(false);
 
   const items = useCartStore((state) => state.items);
   const addItem = useCartStore((state) => state.addItem);
@@ -69,6 +79,15 @@ export default function ProductCard({ product }: ProductCardProps) {
       ? Math.round((1 - (product.sale_price as number) / product.original_price) * 100)
       : null;
 
+  // Some product descriptions come from a rich text editor that inserts
+  // literal &nbsp; entities between every word (instead of real spaces).
+  // That turns the whole paragraph into one unbreakable token, forcing
+  // the browser to break mid-word. Normalize them to real spaces so text
+  // wraps naturally at word boundaries.
+  const sanitizedDescription = product.description
+    ? product.description.replace(/&nbsp;/gi, " ")
+    : product.description;
+
   useEffect(() => {
     if (quickViewOpen) {
       setActiveImage(galleryImages[0] ?? "");
@@ -92,33 +111,39 @@ export default function ProductCard({ product }: ProductCardProps) {
     setCurrentImageIndex((index) => (index + 1) % imageUrls.length);
   };
 
+  const handleAddToCart = () => {
+    addItem(product);
+    setJustAdded(true);
+    window.setTimeout(() => setJustAdded(false), 1200);
+  };
+
   return (
     <article
       className={cn(
-        "overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-200",
+        "group relative overflow-hidden rounded-3xl border border-emerald-900/10 bg-white shadow-sm transition-all duration-300 ease-out",
         isOutOfStock
           ? "opacity-75"
-          : "hover:-translate-y-0.5 hover:shadow-md",
+          : "hover:-translate-y-1 hover:border-emerald-300/60 hover:shadow-xl hover:shadow-emerald-900/[0.07]",
       )}
     >
-      <div className="relative aspect-[4/3] w-full bg-slate-100">
+      <div className="relative aspect-square w-full overflow-hidden bg-gradient-to-br from-emerald-50/70 via-white to-amber-50/30">
         {primaryImage ? (
           <button
             type="button"
             onClick={() => setLightboxOpen(true)}
-            className="block h-full w-full cursor-zoom-in transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2"
+            className="block h-full w-full cursor-zoom-in overflow-hidden p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 sm:p-7"
             aria-label={`View ${product.name} images`}
           >
             <img
               src={primaryImage}
               alt={product.name}
-              className={`h-full w-full object-cover ${
-                isOutOfStock ? "grayscale" : ""
+              className={`h-full w-full object-contain transition-transform duration-500 ease-out ${
+                isOutOfStock ? "grayscale" : "group-hover:scale-[1.06]"
               }`}
             />
           </button>
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">
+          <div className="flex h-full w-full items-center justify-center text-sm text-slate-400">
             No image
           </div>
         )}
@@ -179,26 +204,37 @@ export default function ProductCard({ product }: ProductCardProps) {
         ) : null}
 
         {isOutOfStock ? (
-          <Badge className="absolute right-3 top-3 border-0 bg-slate-900 text-white hover:bg-slate-900">
+          <span className="absolute left-3 top-3 inline-flex items-center rounded-full bg-slate-900/85 px-3 py-1 text-xs font-semibold text-white shadow-sm ring-1 ring-inset ring-white/10 backdrop-blur-sm">
             Out of stock
-          </Badge>
+          </span>
         ) : isOnSale ? (
-          <Badge
-            variant="outline"
-            className="absolute right-3 top-3 border-red-200 bg-red-50 text-red-700 hover:bg-red-50"
-          >
-            Sale!
-          </Badge>
+          <span className="absolute left-3 top-3 inline-flex items-center rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground shadow-sm ring-1 ring-inset ring-white/15">
+            {discountPercent ? `-${discountPercent}%` : "Sale"}
+          </span>
         ) : null}
+
+        <button
+          type="button"
+          onClick={() => setQuickViewOpen(true)}
+          aria-label={`Quick view ${product.name}`}
+          className={cn(
+            "absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-emerald-700 shadow-md ring-1 ring-inset ring-emerald-900/10 backdrop-blur-sm transition-all duration-300 hover:bg-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2",
+            isOutOfStock
+              ? "opacity-100"
+              : "-translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100",
+          )}
+        >
+          <Eye className="h-4 w-4" />
+        </button>
       </div>
 
-      <div className="space-y-4 p-6">
+      <div className="flex flex-col gap-3 border-t border-emerald-900/10 p-4 sm:p-5">
         <div className="space-y-1">
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700/80">
             {product.category ?? "Uncategorized"}
           </p>
           <h3
-            className="text-lg font-semibold tracking-tight text-slate-900"
+            className="text-[15px] font-semibold leading-snug tracking-tight text-slate-900 sm:text-base"
             style={{
               display: "-webkit-box",
               WebkitLineClamp: 2,
@@ -210,47 +246,54 @@ export default function ProductCard({ product }: ProductCardProps) {
           </h3>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-baseline gap-2">
           {isOnSale ? (
             <>
-              <span className="text-sm line-through text-slate-400">
-                ₹{product.original_price.toFixed(2)}
-              </span>
-              <span className="text-base font-semibold text-emerald-700">
+              <span className="text-lg font-bold text-slate-900">
                 ₹{(product.sale_price as number).toFixed(2)}
+              </span>
+              <span className="text-sm text-slate-400 line-through">
+                ₹{product.original_price.toFixed(2)}
               </span>
             </>
           ) : (
-            <span className="text-base font-semibold text-slate-900">
+            <span className="text-lg font-bold text-slate-900">
               ₹{product.original_price.toFixed(2)}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div>
           {isOutOfStock ? (
-            <Button
-              type="button"
-              disabled
-              variant="secondary"
-              className="flex-1"
-            >
+            <span className="flex w-full items-center justify-center rounded-full bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-400">
               Out of stock
-            </Button>
+            </span>
           ) : !cartItem ? (
-            <Button
+            <button
               type="button"
-              onClick={() => addItem(product)}
-              className="flex-1 transition-all duration-200"
+              onClick={handleAddToCart}
+              className={cn(
+                "group/cta flex w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:brightness-105 active:scale-[0.98]",
+                justAdded && "bg-emerald-600 hover:bg-emerald-600",
+              )}
             >
-              Add to cart
-            </Button>
+              {justAdded ? (
+                <>
+                  <Check className="h-4 w-4" /> Added
+                </>
+              ) : (
+                <>
+                  Add to cart
+                  <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/cta:translate-x-0.5" />
+                </>
+              )}
+            </button>
           ) : (
-            <div className="flex flex-1 items-center justify-between rounded-lg bg-emerald-600 px-3 py-2 text-white transition-all duration-200">
+            <div className="flex w-full items-center justify-between rounded-full bg-emerald-600 px-4 py-2 text-white shadow-sm transition-all duration-200">
               <button
                 type="button"
                 onClick={() => removeItem(product.id)}
-                className="inline-flex items-center justify-center transition-all duration-200"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full transition-all duration-200 hover:bg-emerald-700"
                 aria-label="Decrease quantity"
               >
                 <Minus className="h-4 w-4" />
@@ -261,34 +304,23 @@ export default function ProductCard({ product }: ProductCardProps) {
               <button
                 type="button"
                 onClick={() => addItem(product)}
-                className="inline-flex items-center justify-center transition-all duration-200"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full transition-all duration-200 hover:bg-emerald-700"
                 aria-label="Increase quantity"
               >
                 <Plus className="h-4 w-4" />
               </button>
             </div>
           )}
-
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={() => setQuickViewOpen(true)}
-            aria-label={`Quick view ${product.name}`}
-            className="transition-all duration-200"
-          >
-            <Eye className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
       <Dialog open={quickViewOpen} onOpenChange={setQuickViewOpen}>
-        <DialogContent className="max-h-[90vh] w-full max-w-5xl overflow-y-auto p-10 sm:max-w-5xl">
+        <DialogContent className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border-emerald-900/10 p-8 sm:max-w-5xl sm:p-10">
           <DialogTitle className="sr-only">{product.name}</DialogTitle>
 
           <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
             <div>
-              <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-secondary/10 p-4">
+              <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl border border-emerald-900/10 bg-gradient-to-br from-emerald-50/70 via-white to-amber-50/30 p-8">
                 {activeImage ? (
                   <img
                     src={activeImage}
@@ -302,24 +334,24 @@ export default function ProductCard({ product }: ProductCardProps) {
                 )}
               </div>
 
-              {galleryImages.length > 0 ? (
-                <div className="flex gap-3 overflow-x-auto p-4">
+              {galleryImages.length > 1 ? (
+                <div className="flex gap-3 overflow-x-auto pt-4">
                   {galleryImages.map((url) => (
                     <button
                       key={url}
                       type="button"
                       onClick={() => setActiveImage(url)}
                       className={cn(
-                        "h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-background p-1 transition-all duration-200",
+                        "h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-emerald-900/10 bg-emerald-50/40 p-1.5 transition-all duration-200 hover:border-emerald-300",
                         activeImage === url &&
-                          "ring-2 ring-primary ring-offset-2",
+                          "border-emerald-600 ring-2 ring-emerald-600/25",
                       )}
                       aria-label="View product image"
                     >
                       <img
                         src={url}
                         alt=""
-                        className="h-full w-full object-cover"
+                        className="h-full w-full object-contain"
                       />
                     </button>
                   ))}
@@ -328,65 +360,71 @@ export default function ProductCard({ product }: ProductCardProps) {
             </div>
 
             <div className="flex flex-col">
-              <div className="space-y-2">
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  {product.category ? (
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-900/10">
+                      {product.category}
+                    </span>
+                  ) : null}
+                  {productSku ? (
+                    <span className="inline-flex items-center rounded-full bg-slate-50 px-3 py-1 font-mono text-xs font-medium text-slate-500 ring-1 ring-inset ring-slate-900/10">
+                      SKU: {productSku}
+                    </span>
+                  ) : null}
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 text-xs font-medium",
+                      product.in_stock
+                        ? "text-emerald-700"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        product.in_stock ? "bg-emerald-500" : "bg-slate-400",
+                      )}
+                    />
+                    {product.in_stock ? "In Stock" : "Out of stock"}
+                  </span>
+                </div>
                 <h2 className="text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl">
                   {product.name}
                 </h2>
-                <div className="flex flex-wrap gap-2">
-                  {product.category ? (
-                    <Badge variant="secondary">{product.category}</Badge>
-                  ) : null}
-                  {productSku ? (
-                    <Badge variant="outline">SKU: {productSku}</Badge>
-                  ) : null}
-                </div>
               </div>
 
-              <div className="mt-6 flex flex-wrap items-baseline gap-2">
-                <span className="text-3xl font-bold text-primary">
+              <div className="mt-5 flex flex-wrap items-baseline gap-2 border-t border-emerald-900/10 pt-5">
+                <span className="text-3xl font-bold text-slate-900">
                   ₹{displayPrice.toFixed(2)}
                 </span>
                 {isOnSale ? (
-                  <span className="ml-3 text-lg text-slate-400 line-through">
+                  <span className="text-lg text-slate-400 line-through">
                     ₹{product.original_price.toFixed(2)}
                   </span>
                 ) : null}
                 {discountPercent ? (
-                  <Badge
-                    variant="outline"
-                    className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50"
-                  >
-                    -{discountPercent}%
-                  </Badge>
+                  <span className="inline-flex items-center rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground ring-1 ring-inset ring-white/15">
+                    -{discountPercent}% off
+                  </span>
                 ) : null}
               </div>
 
-              <p
-                className={cn(
-                  "mt-2 text-sm font-medium",
-                  product.in_stock
-                    ? "text-emerald-700"
-                    : "text-muted-foreground",
-                )}
-              >
-                {product.in_stock ? "In Stock" : "Out of stock"}
-              </p>
-
               {typeof taxPercent === "number" && taxPercent > 0 ? (
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-xs text-slate-500">
                   Inclusive of all taxes ({taxPercent}%)
                 </p>
               ) : null}
 
-              {product.description ? (
+              {sanitizedDescription ? (
                 <div
                   className={cn(
-                    "prose prose-sm dark:prose-invert mt-6 max-w-none break-words overflow-x-hidden text-sm leading-relaxed",
+                    "prose prose-sm dark:prose-invert mt-6 max-w-none overflow-x-hidden text-sm leading-relaxed text-slate-600",
                     "[&_*]:max-w-full",
                     "[&_p]:mb-3 [&_strong]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5",
                     "[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1",
                   )}
-                  dangerouslySetInnerHTML={{ __html: product.description }}
+                  dangerouslySetInnerHTML={{ __html: sanitizedDescription }}
                 />
               ) : (
                 <p className="mt-6 text-sm text-slate-500">
@@ -396,23 +434,24 @@ export default function ProductCard({ product }: ProductCardProps) {
 
               <div className="mt-auto pt-6">
                 {isOutOfStock ? (
-                  <Button type="button" disabled className="w-full">
+                  <span className="flex w-full items-center justify-center rounded-full bg-slate-100 px-5 py-2.5 text-sm font-semibold text-slate-400">
                     Out of stock
-                  </Button>
+                  </span>
                 ) : !cartItem ? (
-                  <Button
+                  <button
                     type="button"
-                    className="w-full transition-all duration-200"
                     onClick={() => addItem(product)}
+                    className="group/cta flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:brightness-105 active:scale-[0.98]"
                   >
                     Add to cart
-                  </Button>
+                    <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/cta:translate-x-0.5" />
+                  </button>
                 ) : (
-                  <div className="flex w-full items-center justify-between rounded-lg bg-emerald-600 px-3 py-2 text-white transition-all duration-200">
+                  <div className="flex w-full items-center justify-between rounded-full bg-emerald-600 px-4 py-2 text-white shadow-sm transition-all duration-200">
                     <button
                       type="button"
                       onClick={() => removeItem(product.id)}
-                      className="inline-flex items-center justify-center rounded-md p-1 transition-all duration-200 hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      className="inline-flex items-center justify-center rounded-full p-1 transition-all duration-200 hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                       aria-label="Decrease quantity"
                     >
                       <Minus className="h-4 w-4" />
@@ -425,7 +464,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                     <button
                       type="button"
                       onClick={() => addItem(product)}
-                      className="inline-flex items-center justify-center rounded-md p-1 transition-all duration-200 hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      className="inline-flex items-center justify-center rounded-full p-1 transition-all duration-200 hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                       aria-label="Increase quantity"
                     >
                       <Plus className="h-4 w-4" />
