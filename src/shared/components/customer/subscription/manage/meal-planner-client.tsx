@@ -276,18 +276,18 @@ function getNextMealPreference(
   baseFood: string,
   limitReached: boolean,
 ): string {
-  if (currentState === "PAUSE") {
-    return baseFood;
-  }
-  if (limitReached) {
-    const idx = mealCycle.indexOf(currentState);
-    const safeIdx = idx === -1 ? 0 : idx;
-    return mealCycle[(safeIdx + 1) % mealCycle.length];
-  }
-  const fullCycle = [...mealCycle, "PAUSE"];
+  // Tap-to-cycle walks the exact order shown in the legend: every meal
+  // type in turn, then Pause (dropped once the pause-credit limit is hit).
+  // A simple linear step through this list is what makes all options
+  // reachable — the previous "PAUSE returns to base" shortcut trapped the
+  // cycle between the base food and Pause whenever the base was the last
+  // meal type, so Veg/Egg could never be tapped through.
+  const fullCycle = limitReached ? [...mealCycle] : [...mealCycle, "PAUSE"];
   const idx = fullCycle.indexOf(currentState);
-  const safeIdx = idx === -1 ? 0 : idx;
-  return fullCycle[(safeIdx + 1) % fullCycle.length];
+  // Current state not in the cycle (e.g. a paused day after the limit is
+  // reached) — restart from the first meal type.
+  if (idx === -1) return fullCycle[0] ?? baseFood;
+  return fullCycle[(idx + 1) % fullCycle.length];
 }
 
 export function MealPlannerClient({
@@ -817,14 +817,12 @@ export function MealPlannerClient({
 
                             <span
                               className={cn(
-                                "text-base font-bold sm:text-lg",
-                                isInPast
+                                "text-lg font-bold sm:text-xl",
+                                isLockedOut
                                   ? "text-slate-400"
-                                  : isLockedOut
-                                    ? "text-slate-400"
-                                    : isModified
-                                      ? style.color
-                                      : "text-slate-700",
+                                  : isModified
+                                    ? style.color
+                                    : "text-slate-700",
                               )}
                             >
                               {format(date, "d")}
@@ -833,26 +831,22 @@ export function MealPlannerClient({
                             <div
                               className={cn(
                                 "flex flex-col items-center justify-center gap-0.5",
-                                isInPast
-                                  ? "text-slate-400"
-                                  : isLockedOut
-                                    ? "text-slate-400"
-                                    : isModified
-                                      ? style.color
-                                      : "text-slate-400",
+                                // Locked / past days stay muted (a faint
+                                // "read-only" wash); every editable day shows
+                                // its meal colour at full strength so the icon
+                                // reads clearly instead of a washed-out sliver.
+                                isLockedOut ? "text-slate-300" : style.color,
                               )}
                             >
                               <Icon
                                 className={cn(
                                   "drop-shadow-sm transition-transform group-active:scale-95",
-                                  isInPast
-                                    ? "h-4 w-4 opacity-50 sm:h-5 sm:w-5"
-                                    : isModified
-                                      ? "h-5 w-5 sm:h-6 sm:w-6"
-                                      : "h-4 w-4 opacity-60 sm:h-5 sm:w-5",
+                                  isLockedOut
+                                    ? "h-6 w-6 opacity-40 sm:h-7 sm:w-7"
+                                    : "h-8 w-8 sm:h-10 sm:w-10",
                                 )}
                               />
-                              {(isModified || isInPast) && (
+                              {(isModified || isInPast || !isLockedOut) && (
                                 <span className="hidden text-[9px] font-bold leading-none sm:block sm:text-[10px]">
                                   {dayLabel}
                                 </span>

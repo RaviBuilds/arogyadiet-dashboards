@@ -115,6 +115,16 @@ export function GlobalLoader({ message }: { message?: string }) {
   const minElapsedRef = useRef(false);
   const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const firstCommitRef = useRef(true);
+  // Latest committed pathname, read inside the memoized finish() without
+  // pulling pathname into its dep array (which would recreate finish and the
+  // timers/listeners bound to it). Kept in sync via the effect below so
+  // finish() always sees the destination route at the moment the loader
+  // dismisses (route commit happens before the beacon/min-time finish, so the
+  // ref is always up to date by then).
+  const pathnameRef = useRef(pathname);
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
 
   const syncTraceBadge = useCallback((ready: boolean, minElapsed: boolean) => {
     if (!STARTUP_TRACE_ENABLED) return;
@@ -160,10 +170,27 @@ export function GlobalLoader({ message }: { message?: string }) {
     phaseRef.current = "leaving";
     setPhase("leaving");
 
-    // Cold launch flows into the full cinematic choreography; navigation gets
-    // only the light template transition.
-    if (modeRef.current === "cold") {
+    // Cold launch flows into the full cinematic choreography; navigation
+    // normally gets only the light template transition. Exception: the
+    // dashboard's signature (progress ring / journey bar / hero sweep +
+    // reveal cascade) is meant to play on EVERY arrival at /dashboard, not
+    // just cold launch — so we also replay `.app-intro` when the loader
+    // dismisses onto the dashboard via client navigation. `.app-intro` is
+    // added exactly as the loader begins dissolving (here), so the timing is
+    // identical to cold launch; clearTimers() in begin() has already cleared
+    // any stale removal timer from a previous visit, so re-adding cleanly
+    // restarts the one-shot animations.
+    const destPath = pathnameRef.current;
+    const isDashboardArrival =
+      destPath === "/dashboard" || destPath.startsWith("/dashboard/");
+    if (modeRef.current === "cold" || isDashboardArrival) {
       const root = document.documentElement;
+      // Toggle off→on across a frame so the CSS one-shot animations restart
+      // even if the class somehow lingered from a prior visit.
+      root.classList.remove("app-intro");
+      // Force reflow so the browser registers the class removal before the
+      // re-add, guaranteeing the keyframes replay on repeat dashboard visits.
+      void root.offsetWidth;
       root.classList.add("app-intro");
       addTimer(() => root.classList.remove("app-intro"), INTRO_MS);
     }
