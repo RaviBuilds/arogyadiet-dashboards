@@ -645,7 +645,7 @@ export function MealCustomization({
                             )}
                             <span
                               className={cn(
-                                "text-base font-bold sm:text-lg",
+                                "text-lg font-bold sm:text-xl",
                                 isModified ? style.color : "text-slate-700",
                               )}
                             >
@@ -655,15 +655,15 @@ export function MealCustomization({
                             <div
                               className={cn(
                                 "flex flex-col items-center justify-center gap-0.5",
-                                isModified ? style.color : "text-slate-400",
+                                isModified ? style.color : "text-slate-500",
                               )}
                             >
                               <Icon
                                 className={cn(
                                   "drop-shadow-sm transition-transform group-active:scale-95",
                                   isModified
-                                    ? "h-5 w-5 sm:h-6 sm:w-6"
-                                    : "h-4 w-4 sm:h-5 sm:w-5 opacity-60",
+                                    ? "h-8 w-8 sm:h-10 sm:w-10"
+                                    : "h-7 w-7 sm:h-9 sm:w-9",
                                 )}
                               />
                               {isModified && (
