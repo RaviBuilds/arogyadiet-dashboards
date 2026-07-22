@@ -1148,9 +1148,15 @@ export function Customer360Dashboard({
                           const subscription = Array.isArray(payment.subscriptions)
                             ? payment.subscriptions[0]
                             : payment.subscriptions;
+                          const invoiceTypeLabel =
+                            payment.invoice_type === "ADDON"
+                              ? "Shop Order"
+                              : payment.invoice_type === "SUBSCRIPTION"
+                                ? "Meal Subscription"
+                                : payment.invoice_type ?? null;
                           const planName =
                             subscription?.subscription_plans?.name ??
-                            payment.invoice_type ??
+                            invoiceTypeLabel ??
                             "Billing Record";
                           const isPaid = ["PAID", "SUCCESS", "CAPTURED"].includes(
                             payment.status,

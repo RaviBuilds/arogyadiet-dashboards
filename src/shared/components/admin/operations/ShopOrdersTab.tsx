@@ -27,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/components/ui/dialog";
-import { CalendarDays, Loader2, MoreHorizontal, ShoppingBag } from "lucide-react";
+import { CalendarDays, CheckCheck, Loader2, MoreHorizontal, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -36,7 +36,10 @@ import { DataTableCard } from "../core/DataTableCard";
 import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
-import { adminUpdateAddonOrderDeliveryDate } from "@/actions/admin-actions/customerActions";
+import {
+  adminUpdateAddonOrderDeliveryDate,
+  adminMarkAddonOrderDeliveredOffline,
+} from "@/actions/admin-actions/customerActions";
 import type { ShopOrderAdminData } from "@/shared/components/admin/customers/CustomerDashboard";
 
 /**
@@ -60,6 +63,11 @@ export function ShopOrdersTab({
     useState<ShopOrderAdminData | null>(null);
   const [shopEditDate, setShopEditDate] = useState("");
   const [isShopEditPending, startShopEditTransition] = useTransition();
+
+  // Mark-delivered-offline confirmation state
+  const [deliverTarget, setDeliverTarget] =
+    useState<ShopOrderAdminData | null>(null);
+  const [isDeliverPending, startDeliverTransition] = useTransition();
 
   const searchOptions = useMemo(
     () => [{ value: "customer_name", label: "Customer Name" }],
@@ -146,8 +154,26 @@ export function ShopOrdersTab({
     return d.toISOString().split("T")[0];
   };
 
+  const handleMarkDeliveredOffline = () => {
+    if (!deliverTarget) return;
+    startDeliverTransition(async () => {
+      const res = await adminMarkAddonOrderDeliveredOffline(deliverTarget.id);
+      if (res.success) {
+        toast.success("Order marked delivered (offline).");
+        setDeliverTarget(null);
+        router.refresh();
+      } else {
+        toast.error(res.error ?? "Failed to mark the order delivered.");
+      }
+    });
+  };
+
   const getShopOrderStatus = (order: ShopOrderAdminData) => {
-    if (order.status === "DELIVERED") return "delivered";
+    if (order.fulfillment_status === "CLINIC_PICKUP") return "clinic_pickup";
+    if (order.fulfillment_status === "DELIVERED_OFFLINE")
+      return "delivered_offline";
+    if (order.status === "DELIVERED" || order.status === "COMPLETED")
+      return "delivered";
     if (order.status === "CANCELLED") return "cancelled";
     if (order.status === "PENDING") return "pending";
     if (order.status === "PAID" && !order.delivery_order_id) return "purchased";
@@ -211,6 +237,10 @@ export function ShopOrdersTab({
               filteredShopOrders.map((order) => {
                 const orderStatus = getShopOrderStatus(order);
                 const canEdit = orderStatus === "purchased";
+                // Delivered-offline is allowed while the order is still open
+                // (purchased or scheduled) — never for already-delivered ones.
+                const canMarkDelivered =
+                  orderStatus === "purchased" || orderStatus === "scheduled";
                 const displayDate =
                   order.scheduled_delivery_date ?? order.target_delivery_date;
 
@@ -229,6 +259,14 @@ export function ShopOrdersTab({
                   delivered: {
                     label: "Delivered",
                     className: "bg-green-50 text-green-700 border border-green-200",
+                  },
+                  delivered_offline: {
+                    label: "Delivered (Offline)",
+                    className: "bg-green-50 text-green-700 border border-green-200",
+                  },
+                  clinic_pickup: {
+                    label: "Clinic Pickup",
+                    className: "bg-teal-50 text-teal-700 border border-teal-200",
                   },
                   cancelled: {
                     label: "Cancelled",
@@ -334,6 +372,20 @@ export function ShopOrdersTab({
                               </span>
                             )}
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              canMarkDelivered && setDeliverTarget(order)
+                            }
+                            disabled={!canMarkDelivered}
+                            className={cn(
+                              "cursor-pointer flex items-center",
+                              !canMarkDelivered &&
+                                "opacity-40 cursor-not-allowed",
+                            )}
+                          >
+                            <CheckCheck className="mr-2 h-4 w-4" />
+                            Mark Delivered (Offline)
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -386,6 +438,46 @@ export function ShopOrdersTab({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- MARK DELIVERED (OFFLINE) CONFIRMATION --- */}
+      <Dialog
+        open={!!deliverTarget}
+        onOpenChange={(open) => !open && setDeliverTarget(null)}
+      >
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCheck className="h-5 w-5 text-green-600" />
+              Mark Delivered (Offline)
+            </DialogTitle>
+            <DialogDescription>
+              Confirm the customer collected Order #
+              {deliverTarget ? String(deliverTarget.id).slice(-6).toUpperCase() : ""}{" "}
+              ({deliverTarget?.customer_name}) at the clinic.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-sm text-muted-foreground">
+            This marks the order as delivered and removes it from meal-delivery
+            routing. If it was already assigned to a rider, it will be unlinked so
+            the rider no longer carries it. This can&apos;t be undone.
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeliverTarget(null)}
+              disabled={isDeliverPending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleMarkDeliveredOffline} disabled={isDeliverPending}>
+              {isDeliverPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Mark Delivered
             </Button>
           </DialogFooter>
         </DialogContent>
