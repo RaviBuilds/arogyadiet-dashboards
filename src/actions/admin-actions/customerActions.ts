@@ -31,6 +31,11 @@ import {
 } from "@/lib/customers/customerArchive";
 import { checkGroupManage } from "@/lib/auth/adminAccess";
 import { resolveClinicForPincode } from "@/lib/clinic/pincode-resolver";
+import { getISTDateString } from "@/lib/dates/ist";
+import {
+  ADDON_STATUS_DELIVERED,
+  FULFILLMENT_DELIVERED_OFFLINE,
+} from "@/lib/shop/addonFulfillment";
 
 // Initialize Admin Client
 const supabaseAdmin = createAdminClient(
@@ -44,17 +49,15 @@ export async function adminUpdateAddonOrderDeliveryDate(
 ) {
   const gate = await checkGroupManage("customers");
   if (!gate.ok) return { success: false, error: gate.error };
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
-  if (newDeliveryDate < tomorrowStr) {
-    return { success: false, error: "Delivery date must be tomorrow or later." };
+  const today = getISTDateString(0);
+  if (newDeliveryDate <= today) {
+    return { success: false, error: "Delivery date must be after today." };
   }
 
   const { data: order, error: fetchError } = await supabaseAdmin
     .from("addon_orders")
-    .select("id, status, delivery_order_id")
+    .select("id, status, delivery_order_id, customer_profile_id")
     .eq("id", addonOrderId)
     .single();
 
@@ -63,6 +66,34 @@ export async function adminUpdateAddonOrderDeliveryDate(
     return { success: false, error: "Only paid orders can be rescheduled." };
   if (order.delivery_order_id)
     return { success: false, error: "This order has already been scheduled and cannot be changed." };
+
+  // The chosen date must be an ACTIVE (non-paused) delivery day that exists in
+  // the customer's upcoming preferences. Because daily preferences only span
+  // the subscription window, this single check enforces all three rules:
+  //   - it is not a paused day (is_paused = false),
+  //   - it is within the subscription (a preference row exists for the date),
+  //   - it is a real delivery day the order can ride along with.
+  const { data: pref, error: prefError } = await supabaseAdmin
+    .from("subscription_daily_preferences")
+    .select("preference_date, is_paused")
+    .eq("customer_profile_id", order.customer_profile_id)
+    .eq("preference_date", newDeliveryDate)
+    .maybeSingle();
+
+  if (prefError) return { success: false, error: prefError.message };
+  if (!pref) {
+    return {
+      success: false,
+      error:
+        "The selected date is outside the customer's subscription window.",
+    };
+  }
+  if (pref.is_paused) {
+    return {
+      success: false,
+      error: "The selected date is a paused day. Choose an active delivery day.",
+    };
+  }
 
   const { error: updateError } = await supabaseAdmin
     .from("addon_orders")
@@ -74,6 +105,65 @@ export async function adminUpdateAddonOrderDeliveryDate(
   await logAdminAction("UPDATE", "addon_order", addonOrderId, {
     target_delivery_date: newDeliveryDate,
   });
+  revalidatePath("/admin/customers");
+  revalidatePath("/admin/operations");
+  revalidatePath("/shop/orders");
+  return { success: true };
+}
+
+/**
+ * Mark a shop (addon) order as delivered OFFLINE — e.g. the customer collected
+ * the product at the clinic. This takes the order OUT of the meal-delivery
+ * routing pipeline:
+ *   - status is set to DELIVERED (so `runProductLinkingAction`, which only
+ *     links `PAID` unlinked orders, never touches it again),
+ *   - fulfillment_status is stamped `DELIVERED_OFFLINE` and `delivered_at` = now,
+ *   - if the order was already linked to a delivery, `delivery_order_id` is
+ *     cleared so no rider carries it.
+ *
+ * Available for both unscheduled ("Purchased") and already-scheduled orders.
+ * A PENDING (unpaid) or already-terminal (DELIVERED/CANCELLED) order is rejected.
+ */
+export async function adminMarkAddonOrderDeliveredOffline(addonOrderId: string) {
+  const gate = await checkGroupManage("customers");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  const { data: order, error: fetchError } = await supabaseAdmin
+    .from("addon_orders")
+    .select("id, status")
+    .eq("id", addonOrderId)
+    .single();
+
+  if (fetchError || !order) return { success: false, error: "Order not found." };
+  if (order.status === "PENDING")
+    return {
+      success: false,
+      error: "This order is not paid yet and cannot be marked delivered.",
+    };
+  if (order.status !== "PAID")
+    return {
+      success: false,
+      error: "Only a paid (undelivered) order can be marked delivered.",
+    };
+
+  const { error: updateError } = await supabaseAdmin
+    .from("addon_orders")
+    .update({
+      status: ADDON_STATUS_DELIVERED,
+      fulfillment_status: FULFILLMENT_DELIVERED_OFFLINE,
+      delivered_at: new Date().toISOString(),
+      // Unlink from any assigned delivery so no rider carries it.
+      delivery_order_id: null,
+    })
+    .eq("id", addonOrderId);
+
+  if (updateError) return { success: false, error: updateError.message };
+
+  await logAdminAction("UPDATE", "addon_order", addonOrderId, {
+    fulfillment_status: FULFILLMENT_DELIVERED_OFFLINE,
+    marked_delivered_offline: true,
+  });
+  revalidatePath("/admin/operations");
   revalidatePath("/admin/customers");
   revalidatePath("/shop/orders");
   return { success: true };

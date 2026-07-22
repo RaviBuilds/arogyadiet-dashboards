@@ -64,39 +64,47 @@ export async function runProductLinkingAction(
 
   const supabase = createAdminClient();
 
+  // Deliveries in these states can no longer carry a piggy-backed shop product,
+  // so they are never linkable. Everything else (ORDER_CREATED plus advanced
+  // states like PACKED / OUT_FOR_DELIVERY / ASSIGNED / IN_TRANSIT) is a valid
+  // link target — this is what lets a manual recovery re-run succeed after
+  // dispatch has advanced the day's deliveries past ORDER_CREATED.
+  const TERMINAL_DELIVERY_STATUSES = ["CANCELLED", "FAILED", "DELIVERED"];
+  const isLinkableStatus = (status: unknown) =>
+    !TERMINAL_DELIVERY_STATUSES.includes((status as string) ?? "");
+
   try {
-    const { data: deliveries, error: delError } = await supabase
+    // Fetch every delivery for the target date, then classify in code so we can
+    // keep ORDER_CREATED as the primary set while still linking against advanced
+    // (non-terminal) deliveries on recovery re-runs.
+    const { data: dateDeliveries, error: delError } = await supabase
       .from("delivery_orders")
-      .select("id, customer_profile_id")
-      .eq("delivery_date", targetDate)
-      .eq("status", "ORDER_CREATED");
+      .select("id, customer_profile_id, delivery_date, status")
+      .eq("delivery_date", targetDate);
 
     if (delError) {
       console.error("Error fetching delivery orders for product linking:", delError);
       return { success: false, error: delError.message };
     }
 
-    if (!deliveries?.length) {
-      await logAdminAction("UPDATE", "system_automation", "Product Linking", {
-        executed_action: "runProductLinkingAction",
-        target_date: targetDate,
-        linked: 0,
-      });
-
-      await logProductLinkingRun({
-        supabase,
-        targetDate,
-        addonsLinked: 0,
-        source,
-      });
-
-      revalidatePath("/admin/operations");
-      return { success: true, count: 0, targetDate };
-    }
+    const linkableDeliveries = (dateDeliveries ?? []).filter((d) =>
+      isLinkableStatus(d.status),
+    );
+    // Primary set first (baseline behavior), then advanced deliveries so that a
+    // recovery re-run can still link outstanding PAID orders for the day.
+    const primaryDeliveries = linkableDeliveries.filter(
+      (d) => d.status === "ORDER_CREATED",
+    );
+    const advancedDeliveries = linkableDeliveries.filter(
+      (d) => d.status !== "ORDER_CREATED",
+    );
+    const orderedDeliveries = [...primaryDeliveries, ...advancedDeliveries];
 
     let updatedCount = 0;
 
-    for (const delivery of deliveries) {
+    // Same-date linking: link each customer's own PAID, unlinked orders that
+    // target this exact date to that customer's own delivery for the date.
+    for (const delivery of orderedDeliveries) {
       const { data: updatedAddons, error: updateError } = await supabase
         .from("addon_orders")
         .update({ delivery_order_id: delivery.id })
@@ -112,6 +120,86 @@ export async function runProductLinkingAction(
       }
 
       updatedCount += updatedAddons?.length ?? 0;
+    }
+
+    // Roll-forward: any PAID order still unlinked whose target date is on/before
+    // the run date would otherwise be orphaned (the target day was paused, the
+    // subscription ended, or no delivery row was generated). Carry each such
+    // order forward to the customer's next available delivery on/after the run
+    // date and re-point its target_delivery_date so state stays consistent.
+    // Scoping stays strict: only the customer's own order is linked to the
+    // customer's own delivery.
+    const { data: strandedOrders, error: strandedError } = await supabase
+      .from("addon_orders")
+      .select("id, customer_profile_id, target_delivery_date")
+      .eq("status", "PAID")
+      .is("delivery_order_id", null)
+      .lte("target_delivery_date", targetDate);
+
+    if (strandedError) {
+      console.error("Error fetching stranded addon orders for roll-forward:", strandedError);
+      return { success: false, error: strandedError.message };
+    }
+
+    for (const order of strandedOrders ?? []) {
+      const { data: futureDeliveries, error: futureError } = await supabase
+        .from("delivery_orders")
+        .select("id, delivery_date, status")
+        .eq("customer_profile_id", order.customer_profile_id)
+        .gte("delivery_date", targetDate)
+        .order("delivery_date", { ascending: true });
+
+      if (futureError) {
+        console.error("Error fetching next delivery for roll-forward:", futureError);
+        return { success: false, error: futureError.message };
+      }
+
+      // Earliest non-terminal delivery on/after the run date.
+      const nextDelivery = (futureDeliveries ?? []).find((d) =>
+        isLinkableStatus(d.status),
+      );
+      if (!nextDelivery) continue;
+
+      const { data: rolledAddons, error: rollError } = await supabase
+        .from("addon_orders")
+        .update({
+          delivery_order_id: nextDelivery.id,
+          target_delivery_date: nextDelivery.delivery_date,
+        })
+        .eq("id", order.id)
+        .eq("customer_profile_id", order.customer_profile_id)
+        .is("delivery_order_id", null)
+        .select("id");
+
+      if (rollError) {
+        console.error("Error rolling addon order forward:", rollError);
+        return { success: false, error: rollError.message };
+      }
+
+      updatedCount += rolledAddons?.length ?? 0;
+    }
+
+    // Keep kitchen shop-product counts correct after LATE links (Defect #5).
+    // A manual recovery re-run can link outstanding PAID orders (same-date or
+    // rolled-forward) AFTER the nightly workload snapshot already ran, which
+    // would otherwise leave the kitchen count undercounting the late-linked
+    // product. Because computeClinicShopProductCounts recomputes counts from
+    // addon_orders.delivery_order_id and persistWorkloadSnapshots upserts
+    // (re-runs overwrite), re-persisting here refreshes the snapshot to include
+    // the late link. Guarded to manual re-runs that actually linked something:
+    // the nightly cron re-persists after its own linking completes (see the
+    // link-products route), so it already reflects same-run roll-forward links.
+    if (source === "manual" && updatedCount > 0) {
+      try {
+        await persistWorkloadSnapshots(targetDate);
+      } catch (snapshotError) {
+        // A snapshot refresh failure must not fail the recovery re-run itself;
+        // the linking has already been persisted.
+        console.error(
+          "Workload snapshot refresh after manual product linking failed:",
+          snapshotError,
+        );
+      }
     }
 
     await logAdminAction("UPDATE", "system_automation", "Product Linking", {

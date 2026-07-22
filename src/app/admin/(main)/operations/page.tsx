@@ -79,6 +79,8 @@ export default async function OperationsPage() {
       status,
       target_delivery_date,
       delivery_order_id,
+      delivered_at,
+      fulfillment_status,
       customer_profile_id,
       franchise_id,
       delivery_orders (delivery_date),
@@ -119,9 +121,33 @@ export default async function OperationsPage() {
       target_delivery_date: o.target_delivery_date as string | null,
       delivery_order_id: o.delivery_order_id as string | null,
       scheduled_delivery_date: (delivery?.delivery_date as string) ?? null,
+      delivered_at: (o.delivered_at as string) ?? null,
+      fulfillment_status: (o.fulfillment_status as string) ?? null,
       franchise_id: o.franchise_id ?? null,
       items,
     };
+  });
+
+  // Compact Operations view: show only orders that need attention —
+  //   - every not-yet-delivered PAID order (purchased + scheduled/assigned), and
+  //   - orders delivered within the last 3 days (by delivered_at),
+  // while hiding PENDING (never completed) and CANCELLED orders and older
+  // delivered history (still available per-customer / via export).
+  const deliveredCutoff = getISTDateString(-3);
+  const compactShopOrders = shopOrders.filter((o) => {
+    if (o.status === "PAID") return true;
+    const isDeliveredTerminal =
+      o.status === "DELIVERED" ||
+      o.status === "COMPLETED" ||
+      o.fulfillment_status === "CLINIC_PICKUP" ||
+      o.fulfillment_status === "DELIVERED_OFFLINE";
+    if (!isDeliveredTerminal) return false;
+    // Recency by delivered_at, falling back to the scheduled delivery date.
+    const deliveredOn =
+      (o.delivered_at ? o.delivered_at.slice(0, 10) : null) ??
+      o.scheduled_delivery_date ??
+      null;
+    return deliveredOn !== null && deliveredOn >= deliveredCutoff;
   });
 
   return (
@@ -136,7 +162,7 @@ export default async function OperationsPage() {
         plannedDeliveries={rawPlannedDeliveries || []}
         rosterData={initialRosterData}
         automationLogs={initialAutomationLogs}
-        shopOrders={shopOrders}
+        shopOrders={compactShopOrders}
       />
 
       {pendingFailures.length > 0 && (

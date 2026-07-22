@@ -49,6 +49,7 @@ import {
   Truck,
   MapPin,
   Navigation,
+  ShoppingBag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -123,6 +124,10 @@ export interface ShopOrderAdminData {
   target_delivery_date: string | null;
   delivery_order_id: string | null;
   scheduled_delivery_date: string | null;
+  /** When the order became delivered via an offline/clinic-pickup path. */
+  delivered_at: string | null;
+  /** e.g. 'CLINIC_PICKUP', 'DELIVERED_OFFLINE', 'UNFULFILLABLE_STOCK'. */
+  fulfillment_status: string | null;
   items: Array<{ product_name: string; quantity: number; unit_price: number }>;
 }
 
@@ -580,12 +585,25 @@ export default function CustomerDashboard({
         activeTab={activeTab}
         onTabChange={handleTabChange}
         actions={
-          <Button size="sm" className="transition-all duration-200" asChild>
-            <Link href="/customers/onboarding">
-              <UserPlus className="h-4 w-4 mr-1.5" />
-              Onboarding
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="transition-all duration-200"
+              asChild
+            >
+              <Link href="/customers/assisted-order">
+                <ShoppingBag className="h-4 w-4 mr-1.5" />
+                Shop Orders
+              </Link>
+            </Button>
+            <Button size="sm" className="transition-all duration-200" asChild>
+              <Link href="/customers/onboarding">
+                <UserPlus className="h-4 w-4 mr-1.5" />
+                Onboarding
+              </Link>
+            </Button>
+          </div>
         }
       />
 

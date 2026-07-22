@@ -13,6 +13,12 @@ import { notifyAdmins, sendNotificationToUser, buildPushPayload } from "@/lib/no
 import {
   getCustomerNameByProfileId,
 } from "@/lib/notifications/lookups";
+import { getISTDateString } from "@/lib/dates/ist";
+import {
+  evaluateFranchiseStockOutcome,
+  UNFULFILLABLE_STOCK_STATUS,
+  type ItemDecrementResult,
+} from "@/lib/shop/franchiseStockFailsafe";
 
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
@@ -70,7 +76,7 @@ export async function processStandaloneCheckout(items: CartItem[]) {
       );
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = getISTDateString(0);
     const { data: nextActiveDay, error: preferenceError } = await supabase
       .from("subscription_daily_preferences")
       .select("preference_date")
@@ -269,7 +275,7 @@ export async function createAddonCheckoutOrder(
       );
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = getISTDateString(0);
     const { data: nextActiveDay, error: preferenceError } = await supabase
       .from("subscription_daily_preferences")
       .select("preference_date")
@@ -767,11 +773,22 @@ export async function verifyAddonPayment(
       .eq("payment_id", paymentId)
       .maybeSingle();
 
+    // Defect #6 fix (Property 6 / Req 2.7): the `decrement_franchise_product_stock`
+    // RPC is the source of atomicity — it returns `false` (without decrementing)
+    // when franchise stock is insufficient (e.g. a concurrent sale). Honor that
+    // `false`/error result at the flow level instead of swallowing it: any item
+    // that could not be decremented makes the order unfulfillable, so we flag it
+    // for ops review / refund and alert admins rather than leaving it silently
+    // PAID with unavailable stock (oversell).
+    let unfulfillableProductIds: string[] = [];
+
     if (paidOrder?.franchise_id) {
       const orderItems = (paidOrder.addon_order_items ?? []) as Array<{
         product_id: string;
         quantity: number;
       }>;
+
+      const decrementResults: ItemDecrementResult[] = [];
 
       for (const orderItem of orderItems) {
         const { data: decremented, error: decError } = await supabase.rpc(
@@ -783,15 +800,63 @@ export async function verifyAddonPayment(
           },
         );
 
-        if (decError || decremented === false) {
-          // Stock could not be reduced (e.g. concurrent sale). Log for ops —
-          // payment already succeeded, so we don't fail the whole flow.
+        const ok = !decError && decremented !== false;
+
+        if (!ok) {
+          // Stock could not be reduced (e.g. concurrent sale). Keep logging for
+          // ops visibility; the order-level decision below stops it from being
+          // silently completed.
           console.error(
             "Franchise stock decrement issue:",
             decError?.message ?? "insufficient stock",
             { product_id: orderItem.product_id },
           );
         }
+
+        decrementResults.push({
+          product_id: orderItem.product_id,
+          quantity: orderItem.quantity,
+          decremented: ok,
+        });
+      }
+
+      const outcome = evaluateFranchiseStockOutcome(decrementResults);
+      unfulfillableProductIds = outcome.unfulfillableProductIds;
+
+      if (!outcome.fulfillable) {
+        // Flag the order as unfulfillable for the franchise so ops can review /
+        // refund. Scoped by payment_id (this order only). We deliberately keep
+        // `status = PAID` (the customer WAS charged) and use a dedicated
+        // `fulfillment_status` marker so the condition is explicit and never
+        // silent.
+        const { error: flagError } = await supabase
+          .from("addon_orders")
+          .update({ fulfillment_status: UNFULFILLABLE_STOCK_STATUS })
+          .eq("payment_id", paymentId);
+
+        if (flagError) {
+          console.error(
+            "Failed to flag franchise order as unfulfillable:",
+            flagError.message,
+            { payment_id: paymentId },
+          );
+        }
+
+        // Surface the oversell condition to admins for refund / manual handling.
+        const oversellTitle = "Franchise stock oversell — action needed";
+        const oversellMessage = `A franchise shop order (payment ${paymentId}) was paid but stock could not be reserved for ${unfulfillableProductIds.length} item(s). Review for refund or restock.`;
+
+        await notifyAdmins({
+          title: oversellTitle,
+          message: oversellMessage,
+          actionUrl: "/admin/customers",
+          sendEmail: false,
+          ...buildPushPayload(
+            oversellTitle,
+            oversellMessage,
+            `franchise-oversell-${paymentId}`,
+          ),
+        });
       }
     }
 
@@ -856,6 +921,17 @@ export async function verifyAddonPayment(
       sendEmail: false,
       ...buildPushPayload(adminTitle, adminMessage, `product-purchase-admin-${paymentId}`),
     });
+
+    // Payment is verified (customer was charged), but if any franchise item
+    // could not be stocked we report it as unfulfillable so callers can inform
+    // the customer / trigger a refund rather than treating this as a clean sale.
+    if (unfulfillableProductIds.length > 0) {
+      return {
+        success: true,
+        unfulfillable: true,
+        unfulfillableProductIds,
+      };
+    }
 
     return { success: true };
   } catch (error) {

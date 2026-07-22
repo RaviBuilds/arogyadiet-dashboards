@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ShoppingBag } from "lucide-react";
+import { ShoppingBag, ClipboardList } from "lucide-react";
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
+import { Button } from "@/shared/components/ui/button";
 import { getFranchiseShopProducts } from "@/actions/admin-actions/franchiseProductActions";
 import FranchiseShopProductsClient from "./FranchiseShopProductsClient";
 
@@ -42,6 +44,14 @@ export default async function FranchiseShopProductsPage() {
         title="Shop Products"
         subtitle="Set your own stock and choose which products your customers can see."
         icon={ShoppingBag}
+        actions={
+          <Button asChild>
+            <Link href="/shop-products/assisted-order">
+              <ClipboardList className="h-4 w-4" />
+              Place Assisted Order
+            </Link>
+          </Button>
+        }
       />
       <FranchiseShopProductsClient
         products={products}

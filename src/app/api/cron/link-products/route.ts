@@ -101,12 +101,19 @@ export async function GET(request: Request) {
         },
       );
 
-      if (!dispatchResult.ok) return;
-
+      // Refresh workload snapshots after ALL linking for the date completes
+      // (including roll-forward links performed inside runProductLinkingAction),
+      // so kitchen shop-product counts always reflect the linked products
+      // (Defect #5). This runs regardless of whether dispatch succeeded, since
+      // the counts are derived from the linking result (addon_orders.
+      // delivery_order_id) and not from dispatch; gating it on dispatch success
+      // would leave counts stale/undercounted whenever dispatch fails.
       await runSubTask(client, targetDate, "workload_snapshot", async () => {
         const snapshot = await persistWorkloadSnapshots(targetDate);
         return { info: `${snapshot.clinicsProcessed} clinics` };
       });
+
+      if (!dispatchResult.ok) return;
 
       await runSubTask(client, targetDate, "notify_dispatch", async () => {
         const stats = dispatchResult.value?.stats ?? {};

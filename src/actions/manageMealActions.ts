@@ -14,7 +14,8 @@ import {
 import { buildPushPayload, notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 import { notifyDeliveryAddressesUpdated } from "@/lib/customer/customerProfileNotifications";
 import { getCustomerNameBySubscriptionId } from "@/lib/notifications/lookups";
-import { isPastNextDayCutoff } from "@/lib/dates/ist";
+import { isPastNextDayCutoff, getISTDateString } from "@/lib/dates/ist";
+import { retargetUnlinkedAddonOrdersForPausedDates } from "@/lib/shop/retargetUnlinkedAddonOrders";
 import type { CustomerCategory } from "@/lib/onboarding/category";
 
 /**
@@ -679,6 +680,29 @@ export async function bulkUpdatePausePreferencesAction(
       result.customerProfileId,
       result.newEffectiveEndOn,
     );
+
+    // Shop-product delivery linking fix — Defect #3 (Req 2.4): when a customer
+    // pauses a day that is the target_delivery_date of an UNLINKED PAID shop
+    // order, re-target that order to the customer's next active delivery day
+    // immediately (rather than waiting for the nightly roll-forward). Strictly
+    // scoped to this customer; linked orders are left untouched. Best-effort:
+    // a failure here must not fail the pause, since roll-forward is a backstop.
+    try {
+      const pausedDates = updates
+        .filter((u) => u.isPaused)
+        .map((u) => u.date);
+      await retargetUnlinkedAddonOrdersForPausedDates(
+        supabaseAdmin,
+        result.customerProfileId,
+        pausedDates,
+        getISTDateString(0),
+      );
+    } catch (retargetError) {
+      console.error(
+        "Failed to re-target unlinked addon orders after pause:",
+        retargetError,
+      );
+    }
 
     await notifyCustomerMealPlannerUpdated(subscriptionId);
 
