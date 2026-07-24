@@ -203,6 +203,64 @@ describe("Accessibility (mechanical subset) — customer-mobile-onboarding scree
     await expectNoSeriousViolations();
   });
 
+  // -------------------------------------------------------------------------
+  // Restyled mandatory dialog (mandatory-profile-completion-popup, Task 6.2).
+  // MEAL/KIT customers now get the same mandatory-completion experience as
+  // ACCOMMODATION: medical history is required and the "Mark completed
+  // onboarding" button stays disabled until the medical-history notes are
+  // entered OR the "no medical history" confirmation checkbox is checked.
+  // These checks assert the restyle (Task 6.1) preserved (a) associated labels
+  // for every input and (b) a machine-readable disabled state on the complete
+  // button (Requirements 6.2, 6.3, 6.6).
+  // -------------------------------------------------------------------------
+
+  it("profile completion dialog (mandatory MEAL) — restyled dialog keeps labeled inputs, no serious/critical violations", async () => {
+    render(<ProfileCompletionDialog defaultOpen customerCategory="MEAL" />);
+
+    // Radix Dialog opens in a portal; the mandatory medical-history section is
+    // shown for MEAL customers.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+
+    // Every input in the restyled dialog still resolves to an accessible name
+    // via its associated <FieldLabel htmlFor=...> (Req 6.2). getByLabelText
+    // throws if the label/control association is missing.
+    expect(screen.getByLabelText(/date of birth/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/allergies/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/medical history notes/i)).toBeInTheDocument();
+
+    await expectNoSeriousViolations();
+  });
+
+  it("profile completion dialog (mandatory MEAL) — complete button conveys its disabled state to assistive tech until medical history is satisfied", async () => {
+    render(<ProfileCompletionDialog defaultOpen customerCategory="MEAL" />);
+
+    await screen.findByRole("dialog");
+
+    const completeButton = screen.getByRole("button", {
+      name: /mark completed onboarding/i,
+    });
+
+    // Req 1.3/6.3: with no medical-history notes and the confirmation checkbox
+    // unchecked, the complete button is disabled AND exposes that state to
+    // assistive technologies via aria-disabled.
+    expect(completeButton).toBeDisabled();
+    expect(completeButton).toHaveAttribute("aria-disabled", "true");
+
+    // Satisfy the mandatory rule by checking the "no medical history"
+    // confirmation checkbox (Req 1.2).
+    fireEvent.click(screen.getByRole("checkbox"));
+
+    // Req 6.3: once satisfied, the button becomes enabled and the disabled
+    // state is no longer conveyed to assistive technologies.
+    await waitFor(() => expect(completeButton).toBeEnabled());
+    expect(completeButton).toHaveAttribute("aria-disabled", "false");
+
+    // The restyled dialog remains free of serious/critical a11y violations in
+    // the enabled state.
+    await expectNoSeriousViolations();
+  });
+
   it("quick onboarding wizard — details step has no serious/critical violations", async () => {
     render(
       <QuickOnboardingForm

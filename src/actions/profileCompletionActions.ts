@@ -44,6 +44,21 @@ export type ProfileCompletionActionResult =
   | { success: true; completed: boolean }
   | { error: string; fieldErrors?: Record<string, string> };
 
+/**
+ * Optional medical payload threaded into `markOnboardingCompletedAction` for
+ * MEAL/KIT mandatory completion (mandatory-profile-completion-popup,
+ * Requirements 4.1–4.3). The medical documents are uploaded client-side to the
+ * `medical_records` bucket first; only lightweight `{ name, url, type }`
+ * references cross to the server here. Omitting the argument preserves the
+ * legacy optional-completion behavior for existing callers.
+ */
+export interface MarkCompletedMedicalExtras {
+  /** The "I have no medical history" confirmation (Requirement 1.2). */
+  medicalHistoryConfirmed?: boolean;
+  /** References to medical documents already uploaded to `medical_records`. */
+  medicalDocuments?: Array<{ name: string; url: string; type: string }>;
+}
+
 // ---------------------------------------------------------------------------
 // Session → identity resolution (server-trusted, never client-supplied)
 // ---------------------------------------------------------------------------
@@ -168,9 +183,19 @@ export async function saveProfileCompletionAction(
  * dialog no longer appears (Req 9.5).
  *
  * The target profile/user ids come from the session, not from `input`.
+ *
+ * The optional `medical` payload carries the MEAL/KIT mandatory-completion
+ * data (mandatory-profile-completion-popup, Requirements 4.1–4.3): the "no
+ * medical history" confirmation and references to medical documents already
+ * uploaded to the `medical_records` bucket. When supplied, it is threaded into
+ * `completeProfile` along with `requireMedicalHistory: true`, which enforces
+ * the mandatory medical-history rule server-side (Req 1.2) and persists the
+ * medical fields alongside the profile update. Existing callers that omit the
+ * argument keep the legacy optional-completion behavior unchanged.
  */
 export async function markOnboardingCompletedAction(
-  input: ProfileCompletionInput
+  input: ProfileCompletionInput,
+  medical?: MarkCompletedMedicalExtras
 ): Promise<ProfileCompletionActionResult> {
   const resolved = await resolveAuthenticatedCustomer();
   if ("error" in resolved) {
@@ -180,6 +205,9 @@ export async function markOnboardingCompletedAction(
   const result = await completeProfile(resolved.profileId, input, {
     userId: resolved.userId,
     markCompleted: true,
+    medicalHistoryConfirmed: medical?.medicalHistoryConfirmed,
+    medicalDocuments: medical?.medicalDocuments,
+    requireMedicalHistory: true,
   });
 
   if (!result.ok) {

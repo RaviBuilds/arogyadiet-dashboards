@@ -56,6 +56,7 @@ import {
   FileText,
   X as RemoveFileIcon,
   AlertCircle,
+  HeartPulse,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -227,7 +228,20 @@ export function ProfileCompletionDialog({
   const [medicalDocuments, setMedicalDocuments] = useState<File[]>([]);
   const [documentError, setDocumentError] = useState<string | null>(null);
 
+  // `isAccommodation` is retained ONLY for the stay-vs-subscription
+  // presentation choice (accommodation shows a stay block; MEAL/KIT show a
+  // subscription block).
   const isAccommodation = customerCategory === "ACCOMMODATION";
+
+  // Mandatory-completion behavior (mandatory medical history, confirmation
+  // checkbox, disabled complete button) now applies to MEAL, KIT, and
+  // ACCOMMODATION alike (Req 1.1). An unknown/null category falls back to the
+  // legacy optional behavior (defensive default; the dashboard always supplies
+  // a category when a subscription exists).
+  const requiresMandatoryCompletion =
+    customerCategory === "MEAL" ||
+    customerCategory === "KIT" ||
+    customerCategory === "ACCOMMODATION";
 
   const {
     control,
@@ -244,9 +258,12 @@ export function ProfileCompletionDialog({
   const fieldsToRender = emptyFields.filter((f) =>
     ALL_COMPLETABLE_FIELDS.includes(f),
   );
-  // Medical history is mandatory for accommodation customers, so always show
-  // it regardless of whether it was already empty (Req 6.2).
-  if (isAccommodation && !fieldsToRender.includes("medicalHistoryNotes")) {
+  // Medical history is mandatory for MEAL, KIT, and ACCOMMODATION customers,
+  // so always show it regardless of whether it was already empty (Req 1.1/1.2).
+  if (
+    requiresMandatoryCompletion &&
+    !fieldsToRender.includes("medicalHistoryNotes")
+  ) {
     fieldsToRender.push("medicalHistoryNotes");
   }
 
@@ -255,13 +272,13 @@ export function ProfileCompletionDialog({
   const medicalHistoryConfirmed = watch("medicalHistoryConfirmed");
 
   /**
-   * Req 6.3: enabled iff the textarea has ≥1 non-whitespace char OR the
+   * Req 1.2/1.3: enabled iff the textarea has ≥1 non-whitespace char OR the
    * confirmation checkbox is checked. Implemented inline (rather than
    * importing `AccommodationService.isProfileComplete`) because that module
    * also pulls in the server-only `stayRepository` and cannot be bundled into
    * a client component.
    */
-  const accommodationProfileComplete =
+  const mandatoryProfileComplete =
     medicalHistoryConfirmed ||
     (medicalHistoryNotesValue?.trim().length ?? 0) > 0;
 
@@ -395,24 +412,50 @@ export function ProfileCompletionDialog({
     return false;
   }
 
-  /** Accommodation-specific completion: mandatory medical history + documents. */
-  async function runAccommodationComplete() {
+  /**
+   * Mandatory completion for MEAL, KIT, and ACCOMMODATION customers: upload the
+   * selected medical documents client-side first, then persist completion.
+   *
+   * Documents are uploaded to the `medical_records` bucket via
+   * `uploadMedicalDocuments()` BEFORE any server action runs. If the upload
+   * throws (e.g. a storage failure), completion aborts and no status transition
+   * occurs, so `onboarding_status` stays `IN_PROGRESS` and the dialog reappears
+   * on the next /dashboard visit (Req 4.4).
+   *
+   * Only the action differs by category:
+   *   - ACCOMMODATION → the unchanged `completeAccommodationProfileAction`
+   *     (client-supplied `customerProfileId`) — Req 1.4.
+   *   - MEAL / KIT     → the session-authenticated `markOnboardingCompletedAction`
+   *     with the profile payload + medical extras (Req 2.5, 4.1, 4.5, 5.2, 5.3).
+   */
+  async function runMandatoryComplete() {
     clearErrors();
-    if (!customerProfileId) {
+    if (isAccommodation && !customerProfileId) {
       toast.error("Unable to complete onboarding: missing customer reference.");
       return;
     }
 
     setSubmitting("complete");
     try {
+      // Upload first; a throw here aborts completion before the server action
+      // runs, leaving onboarding_status as IN_PROGRESS (Req 4.4).
       const uploadedDocuments = await uploadMedicalDocuments();
       const values = getValues();
-      const result = await completeAccommodationProfileAction({
-        customerProfileId,
-        medicalHistoryNotes: values.medicalHistoryNotes,
-        medicalHistoryConfirmed: values.medicalHistoryConfirmed,
-        medicalDocuments: uploadedDocuments,
-      });
+
+      const result:
+        | ProfileCompletionActionResult
+        | AccommodationProfileCompletionActionResult = isAccommodation
+        ? await completeAccommodationProfileAction({
+            customerProfileId: customerProfileId as string,
+            medicalHistoryNotes: values.medicalHistoryNotes,
+            medicalHistoryConfirmed: values.medicalHistoryConfirmed,
+            medicalDocuments: uploadedDocuments,
+          })
+        : await markOnboardingCompletedAction(buildPayload(values), {
+            medicalHistoryConfirmed: values.medicalHistoryConfirmed,
+            medicalDocuments: uploadedDocuments,
+          });
+
       const success = applyResult(result, "complete");
       if (success) {
         router.push("/profile#medical-documents");
@@ -429,8 +472,8 @@ export function ProfileCompletionDialog({
   }
 
   async function runSubmit(intent: "save" | "complete") {
-    if (isAccommodation && intent === "complete") {
-      return runAccommodationComplete();
+    if (requiresMandatoryCompletion && intent === "complete") {
+      return runMandatoryComplete();
     }
 
     clearErrors();
@@ -480,11 +523,13 @@ export function ProfileCompletionDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="rounded-2xl sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Complete your profile</DialogTitle>
-          <DialogDescription>
-            {isAccommodation
+          <DialogTitle className="text-lg font-semibold text-slate-900">
+            Complete your profile
+          </DialogTitle>
+          <DialogDescription className="text-sm text-slate-500">
+            {requiresMandatoryCompletion
               ? "Add a few more details to finish setting up your account. Medical history is required before you can complete onboarding."
               : "Add a few more details to finish setting up your account. Every field is optional — you can fill them in now or later."}
           </DialogDescription>
@@ -492,7 +537,7 @@ export function ProfileCompletionDialog({
 
         {/* Subscription / Accommodation stay details section (Req 6.1) */}
         {isAccommodation && accommodationStay ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center gap-2">
               <div className="rounded-full bg-emerald-100 p-1.5">
                 <BedDouble className="h-4 w-4 text-emerald-600" />
@@ -533,7 +578,7 @@ export function ProfileCompletionDialog({
         ) : (
           !isAccommodation &&
           subscription && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="mb-3 flex items-center gap-2">
                 <div className="rounded-full bg-emerald-100 p-1.5">
                   <Utensils className="h-4 w-4 text-emerald-600" />
@@ -672,14 +717,31 @@ export function ProfileCompletionDialog({
           )}
 
           {fieldsToRender.includes("medicalHistoryNotes") && (
-            <Field data-invalid={!!errors.medicalHistoryNotes}>
-              <FieldLabel htmlFor="pcd-medicalHistoryNotes">
+            <Field
+              data-invalid={!!errors.medicalHistoryNotes}
+              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <div className="rounded-full bg-emerald-100 p-1.5">
+                  <HeartPulse className="h-4 w-4 text-emerald-600" />
+                </div>
+                <h4 className="text-sm font-semibold text-slate-900">
+                  Medical history
+                </h4>
+              </div>
+              <FieldLabel
+                htmlFor="pcd-medicalHistoryNotes"
+                className="text-sm text-slate-500"
+              >
                 Medical history notes
               </FieldLabel>
               <Textarea
                 id="pcd-medicalHistoryNotes"
                 placeholder="Any medical conditions or dietary restrictions?"
-                disabled={isBusy || (isAccommodation && medicalHistoryConfirmed)}
+                disabled={
+                  isBusy ||
+                  (requiresMandatoryCompletion && medicalHistoryConfirmed)
+                }
                 maxLength={2000}
                 aria-invalid={!!errors.medicalHistoryNotes}
                 {...register("medicalHistoryNotes")}
@@ -690,9 +752,9 @@ export function ProfileCompletionDialog({
                 }
               />
 
-              {/* Req 6.2/6.4/6.9: mandatory confirmation checkbox with mutual
-                  exclusion against the textarea, accommodation customers only. */}
-              {isAccommodation && (
+              {/* Req 1.2: mandatory confirmation checkbox with mutual
+                  exclusion against the textarea, for MEAL/KIT/ACCOMMODATION. */}
+              {requiresMandatoryCompletion && (
                 <Controller
                   control={control}
                   name="medicalHistoryConfirmed"
@@ -715,13 +777,25 @@ export function ProfileCompletionDialog({
                 />
               )}
 
-              {/* Req 6.5: document upload, accommodation customers only. */}
-              {isAccommodation && (
+              {/* Req 3.1: inline medical document upload for all
+                  mandatory-completion categories (MEAL/KIT/ACCOMMODATION).
+                  Type/size/count limits (Req 3.2-3.7) come from the reused
+                  MAX_MEDICAL_DOCUMENT_FILES / MAX_MEDICAL_DOCUMENT_SIZE_MB
+                  constants and handleDocumentSelect. */}
+              {requiresMandatoryCompletion && (
                 <div className="mt-3 space-y-2">
-                  <FieldLabel htmlFor="pcd-medicalDocuments">
-                    Medical documents (optional)
-                  </FieldLabel>
-                  <div className="relative rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center transition-colors hover:bg-slate-100">
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-full bg-emerald-100 p-1.5">
+                      <UploadCloud className="h-4 w-4 text-emerald-600" />
+                    </div>
+                    <FieldLabel
+                      htmlFor="pcd-medicalDocuments"
+                      className="text-sm font-semibold text-slate-900"
+                    >
+                      Medical documents (optional)
+                    </FieldLabel>
+                  </div>
+                  <div className="relative rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center transition-colors hover:bg-slate-100">
                     <input
                       id="pcd-medicalDocuments"
                       type="file"
@@ -756,7 +830,7 @@ export function ProfileCompletionDialog({
                       {medicalDocuments.map((file, index) => (
                         <div
                           key={`${file.name}-${index}`}
-                          className="flex items-center justify-between rounded-md border bg-white p-2 shadow-sm"
+                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-2 shadow-sm"
                         >
                           <div className="flex items-center gap-2 overflow-hidden">
                             <FileText className="h-3.5 w-3.5 shrink-0 text-blue-600" />
@@ -800,16 +874,19 @@ export function ProfileCompletionDialog({
           )}
         </form>
 
-        <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end">
-          {/* Req 6.6: accommodation customers rely on the Dialog's built-in
-              top-right X close button instead of "Skip for now". */}
-          {!isAccommodation && (
+        <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-2xl border-t border-slate-200 bg-slate-50/80 p-4 sm:flex-row sm:justify-end">
+          {/* Req 2.2/6.1: mandatory-completion customers (MEAL/KIT/ACCOMMODATION)
+              rely on the Dialog's built-in top-right X close button as the
+              temporary skip instead of "Skip for now". Nothing is persisted on
+              close, so the pop-up reappears on the next /dashboard visit
+              (Req 2.1). */}
+          {!requiresMandatoryCompletion && (
             <Button
               type="button"
               variant="outline"
               onClick={() => setOpen(false)}
               disabled={isBusy}
-              className="min-h-11"
+              className="min-h-11 rounded-full border-slate-200 text-slate-700"
             >
               Skip for now
             </Button>
@@ -817,8 +894,15 @@ export function ProfileCompletionDialog({
           <Button
             type="button"
             onClick={() => runSubmit("complete")}
-            disabled={isBusy || (isAccommodation && !accommodationProfileComplete)}
-            className="min-h-11"
+            disabled={
+              isBusy ||
+              (requiresMandatoryCompletion && !mandatoryProfileComplete)
+            }
+            aria-disabled={
+              isBusy ||
+              (requiresMandatoryCompletion && !mandatoryProfileComplete)
+            }
+            className="min-h-11 rounded-full"
           >
             {submitting === "complete" ? (
               <>
