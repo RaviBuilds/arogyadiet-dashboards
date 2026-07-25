@@ -1,12 +1,12 @@
-import { format } from "date-fns";
-import { Truck } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { Truck, PackageCheck, Package, CheckCircle2, ExternalLink } from "lucide-react";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/shared/components/ui/card";
-import { Badge } from "@/shared/components/ui/badge";
+import { cn } from "@/lib/utils";
 import type { ShippingInfo } from "@/types/kitShipping";
 import {
   getShippingStatus,
@@ -15,23 +15,31 @@ import {
 
 /**
  * Shipping Tracker Component
- * 
- * Displays shipping and delivery information for KIT subscriptions.
- * Reusable component that can be embedded in various customer portal views.
- * 
+ *
+ * Displays shipping and delivery information for KIT subscriptions as a
+ * three-step journey (Packed → Shipped → Delivered) so the customer can see
+ * where their kit is at a glance, in the same calm card language used across
+ * the customer dashboard.
+ *
  * Features:
- * - Courier partner name display
- * - Tracking number display
- * - Clickable tracking URL (for OTHER courier or generated URLs)
- * - Shipped and delivered timestamps
- * - Status badge with visual timeline
- * 
+ * - Visual progress rail with per-step timestamps
+ * - Courier partner + tracking number
+ * - Clickable tracking link (courier base page, or the provided URL for OTHER)
+ * - Reassuring pending state before dispatch
+ *
  * Requirements: 8.3
- * Task: 16.2
  */
 
 interface ShippingTrackerProps {
   shippingInfo: ShippingInfo | null;
+  /**
+   * The date the customer themselves confirmed the kit arrived
+   * (`subscriptions.kit_received_date`). Admins don't always fill in
+   * `delivered_at`, so without this the rail keeps claiming the package is
+   * "on the way" weeks after the customer started eating from it. Customer
+   * confirmation is proof of delivery, so it completes the final step.
+   */
+  receivedOn?: string | null;
   className?: string;
 }
 
@@ -48,53 +56,151 @@ function getTrackingUrl(shippingInfo: ShippingInfo): string | null {
 
   // Base tracking page URLs — do NOT include the tracking number
   switch (shippingInfo.courier_partner) {
-    case 'APSRTC':
+    case "APSRTC":
       return `https://apsrtcparcel.in/track`;
-    case 'TGSRTC':
+    case "TGSRTC":
       return `https://www.tsrtc.telangana.gov.in/track`;
-    case 'DTDC':
+    case "DTDC":
       return `https://www.dtdc.in/tracking`;
     default:
       return null;
   }
 }
 
-export function ShippingTracker({ shippingInfo, className }: ShippingTrackerProps) {
-  // Shipping status
-  const shippingStatus = shippingInfo ? getShippingStatus(shippingInfo) : 'Pending';
-  const shippingStatusColor = 
-    shippingStatus === 'Delivered' 
-      ? 'bg-green-50 text-green-700 border-green-200'
-      : shippingStatus === 'Shipped'
-      ? 'bg-blue-50 text-blue-700 border-blue-200'
-      : 'bg-amber-50 text-amber-700 border-amber-200';
+export function ShippingTracker({
+  shippingInfo,
+  receivedOn,
+  className,
+}: ShippingTrackerProps) {
+  const confirmedByCustomer = Boolean(receivedOn && !shippingInfo?.delivered_at);
+  const shippingStatus = confirmedByCustomer
+    ? "Delivered"
+    : shippingInfo
+      ? getShippingStatus(shippingInfo)
+      : "Pending";
 
   const trackingUrl = shippingInfo ? getTrackingUrl(shippingInfo) : null;
 
-  return (
-    <Card className={`border border-slate-200 bg-white shadow-sm ${className || ''}`}>
-      <CardHeader className="border-b border-slate-100 bg-slate-50/50 px-6 py-4">
-        <CardTitle className="text-base font-semibold text-slate-900 flex items-center gap-2">
-          <Truck className="h-5 w-5 text-primary" />
-          Shipping Information
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="p-6">
-        {shippingInfo ? (
-          <div className="space-y-6">
-            {/* Status Badge */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-600">Status:</span>
-              <Badge
-                variant="outline"
-                className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${shippingStatusColor}`}
-              >
-                {shippingStatus}
-              </Badge>
-            </div>
+  // Three-step journey. `done` drives both the rail fill and the icon chip.
+  const steps = [
+    {
+      icon: Package,
+      label: "Packed with care",
+      detail: shippingInfo
+        ? format(shippingInfo.created_at, "MMM do, yyyy")
+        : "Awaiting dispatch",
+      done: true,
+    },
+    {
+      icon: Truck,
+      label: "Handed to courier",
+      detail: shippingInfo?.shipped_at
+        ? format(shippingInfo.shipped_at, "MMM do, yyyy")
+        : confirmedByCustomer
+          ? "Dispatched"
+          : "Not shipped yet",
+      done: Boolean(shippingInfo?.shipped_at) || confirmedByCustomer,
+    },
+    {
+      icon: PackageCheck,
+      label: "Delivered to you",
+      detail: shippingInfo?.delivered_at
+        ? format(shippingInfo.delivered_at, "MMM do, yyyy")
+        : confirmedByCustomer
+          ? `Confirmed by you · ${format(parseISO(receivedOn as string), "MMM do, yyyy")}`
+          : "On the way",
+      done: Boolean(shippingInfo?.delivered_at) || confirmedByCustomer,
+    },
+  ];
 
-            {/* Shipping Details Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+  const completedSteps = steps.filter((s) => s.done).length;
+  const railProgress = ((completedSteps - 1) / (steps.length - 1)) * 100;
+
+  const statusChip =
+    shippingStatus === "Delivered"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : shippingStatus === "Shipped"
+        ? "border-blue-200 bg-blue-50 text-blue-700"
+        : "border-amber-200 bg-amber-50 text-amber-700";
+
+  return (
+    <Card
+      className={cn(
+        "overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm",
+        className,
+      )}
+    >
+      <CardHeader className="border-b border-slate-100 bg-emerald-50/40 px-6 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold text-slate-900">
+            <Truck className="h-5 w-5 text-emerald-600" />
+            Kit Delivery
+          </CardTitle>
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider",
+              statusChip,
+            )}
+          >
+            {shippingStatus === "Delivered" ? (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            ) : null}
+            {shippingStatus}
+          </span>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-6">
+        {/* Journey rail — three evenly spaced milestones */}
+        <div className="relative">
+          <div className="absolute left-0 right-0 top-5 h-1 rounded-full bg-slate-100" />
+          <div
+            className="journey-bar-anim absolute left-0 top-5 h-1 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500"
+            style={{ width: `${Math.max(0, railProgress)}%` }}
+          />
+
+          <ol className="relative grid grid-cols-3 gap-2">
+            {steps.map((step, idx) => {
+              const Icon = step.icon;
+              return (
+                <li
+                  key={idx}
+                  className={cn(
+                    "flex flex-col items-center text-center",
+                    idx === 0 && "items-start text-left",
+                    idx === steps.length - 1 && "items-end text-right",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex h-11 w-11 items-center justify-center rounded-full ring-4 ring-white transition-colors",
+                      step.done
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-400",
+                    )}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <p
+                    className={cn(
+                      "mt-3 text-xs font-semibold leading-tight sm:text-sm",
+                      step.done ? "text-slate-900" : "text-slate-500",
+                    )}
+                  >
+                    {step.label}
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-tight text-slate-500">
+                    {step.detail}
+                  </p>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+
+        {shippingInfo ? (
+          <div className="mt-7 space-y-5 border-t border-slate-100 pt-6">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <div className="space-y-1">
                 <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
                   Courier Partner
@@ -108,60 +214,33 @@ export function ShippingTracker({ shippingInfo, className }: ShippingTrackerProp
                 <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
                   Tracking Number
                 </p>
-                <p className="text-sm font-mono font-semibold text-slate-900">
+                <p className="font-mono text-sm font-semibold text-slate-900">
                   {shippingInfo.tracking_number}
                 </p>
               </div>
-
-              {shippingInfo.shipped_at && (
-                <div className="space-y-1">
-                  <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                    Shipped On
-                  </p>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {format(shippingInfo.shipped_at, "MMM do, yyyy")}
-                  </p>
-                </div>
-              )}
-
-              {shippingInfo.delivered_at && (
-                <div className="space-y-1">
-                  <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                    Delivered On
-                  </p>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {format(shippingInfo.delivered_at, "MMM do, yyyy")}
-                  </p>
-                </div>
-              )}
             </div>
 
-            {/* Tracking Link */}
-            {trackingUrl && (
-              <div className="pt-4 border-t border-slate-100">
-                <a
-                  href={trackingUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
-                >
-                  <Truck className="h-4 w-4" />
-                  Track Your Package
-                </a>
-              </div>
-            )}
+            {trackingUrl ? (
+              <a
+                href={trackingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group inline-flex w-fit items-center justify-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-semibold text-emerald-700 transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-100 active:scale-[0.98]"
+              >
+                <Truck className="h-4 w-4" />
+                Track your package
+                <ExternalLink className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+              </a>
+            ) : null}
           </div>
         ) : (
-          <div className="text-center py-8">
-            <div className="rounded-full bg-slate-100 p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-              <Truck className="h-8 w-8 text-slate-400" />
-            </div>
-            <p className="text-sm font-medium text-slate-900 mb-1">
-              Shipping Information Pending
+          <div className="mt-7 rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-5 text-center">
+            <p className="text-sm font-semibold text-slate-900">
+              Your kit is being prepared
             </p>
-            <p className="text-sm text-slate-500">
-              Your order is being processed. Shipping details will appear here once
-              your package has been dispatched.
+            <p className="mt-1 text-sm leading-relaxed text-slate-500">
+              Tracking details will appear here the moment your package is
+              dispatched. Nothing for you to do right now.
             </p>
           </div>
         )}

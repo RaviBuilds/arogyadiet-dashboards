@@ -283,6 +283,24 @@
   animation-fill-mode: forwards;
 }
 
+/* Attention halo behind an alert icon (KIT pending-logs card). Slower and
+   softer than Tailwind's animate-pulse, and — unlike it — this one honours
+   prefers-reduced-motion along with the rest of the motion system. */
+@keyframes alert-halo {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.14);
+  }
+}
+.alert-halo {
+  animation: alert-halo 2600ms ease-in-out infinite;
+}
+
 
 
 /* Resting states (before reveal / no JS): visible; the sheen strip is hidden. */
@@ -335,7 +353,8 @@
   .app-intro .hero-sheen,
   .app-intro .play-pulse-once,
   .reveal-page,
-  .story-progress-fill {
+  .story-progress-fill,
+  .alert-halo {
     animation: none;
   }
 }

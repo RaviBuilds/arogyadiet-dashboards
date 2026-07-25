@@ -210,7 +210,7 @@ export function PastDayStatusPopup({
           </p>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 max-h-[50vh] pr-3">
+        <ScrollArea className="flex-1 min-h-0 max-h-[50vh] pr-3">
           <div className="space-y-3">
             {entries.map((entry, index) => (
               <DayRow

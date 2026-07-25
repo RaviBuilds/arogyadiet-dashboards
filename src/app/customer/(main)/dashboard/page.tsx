@@ -39,7 +39,7 @@ import {
   ProfileCompletionDialog,
   type CompletableField,
 } from "@/shared/components/customer/ProfileCompletionDialog";
-import { KitDashboard } from "./KitDashboard";
+import { KitDashboard, type KitDashboardLog } from "./KitDashboard";
 import { AccommodationDashboard } from "./AccommodationDashboard";
 import { JourneyHeader } from "@/shared/components/customer/dashboard/JourneyHeader";
 import {
@@ -277,7 +277,8 @@ export default async function CustomerDashboard() {
   // Category-based view selection (Req 8.1, 8.4)
   // If customer has a KIT subscription, show KIT-specific dashboard
   if (activeSub && activeSub.customer_category === "KIT") {
-    // Fetch KIT-specific data
+    // Fetch KIT-specific data. The tracker columns and daily logs drive the
+    // journey hero, today's focus, momentum band and the kit week strip.
     const { data: kitSubscription } = await supabase
       .from("subscriptions")
       .select(
@@ -288,6 +289,9 @@ export default async function CustomerDashboard() {
         kit_duration_days,
         customer_category,
         status,
+        kit_received_date,
+        kit_tracker_end_date,
+        kit_total_skipped_days,
         kit_products (
           name,
           base_price,
@@ -312,8 +316,15 @@ export default async function CustomerDashboard() {
       );
     }
 
-    // Fetch shipping information
-    const shippingResult = await getShippingInfoAction(customerProfileId);
+    // Shipping details and the tracker logs are independent — fetch together.
+    const [shippingResult, { data: kitLogs }] = await Promise.all([
+      getShippingInfoAction(customerProfileId),
+      supabase
+        .from("kit_daily_logs")
+        .select("log_date, status")
+        .eq("subscription_id", activeSub.id)
+        .order("log_date", { ascending: true }),
+    ]);
     const shippingInfo = shippingResult.success ? (shippingResult.data ?? null) : null;
 
     // Render KIT-specific dashboard (Req 8.1, 8.3)
@@ -323,6 +334,8 @@ export default async function CustomerDashboard() {
         <KitDashboard
           subscription={kitSubscription}
           shippingInfo={shippingInfo}
+          dailyLogs={(kitLogs ?? []) as KitDashboardLog[]}
+          customerName={appUser.full_name}
         />
       </>
     );
@@ -360,6 +373,9 @@ export default async function CustomerDashboard() {
           kit_duration_days,
           customer_category,
           status,
+          kit_received_date,
+          kit_tracker_end_date,
+          kit_total_skipped_days,
           kit_products (
             name,
             base_price,
@@ -397,7 +413,84 @@ export default async function CustomerDashboard() {
             <KitDashboard
               subscription={pendingKitSubscription}
               shippingInfo={shippingInfo}
+              customerName={appUser.full_name}
               isNewKitPending
+            />
+          </>
+        );
+      }
+    }
+
+    // An EXPIRED KIT with no replacement on the way still belongs on the KIT
+    // dashboard, not on the meal-subscription empty state. Two reasons: the
+    // generic "subscribe for chef-prepared meals" copy is wrong for a KIT
+    // customer, and — more importantly — a kit can expire with meals never
+    // logged. The dashboard's recovery state is the only place those days can
+    // still be filled in (the KIT Tracker shows an expiry screen), so routing
+    // here would strand the customer with unusable meals.
+    if (expiredKit) {
+      const { data: expiredKitSubscription } = await supabase
+        .from("subscriptions")
+        .select(
+          `
+          id,
+          subscription_code,
+          starts_on,
+          kit_duration_days,
+          customer_category,
+          status,
+          kit_received_date,
+          kit_tracker_end_date,
+          kit_total_skipped_days,
+          kit_products (
+            name,
+            base_price,
+            tax_rate
+          )
+        `
+        )
+        .eq("id", expiredKit.id)
+        .single();
+
+      if (expiredKitSubscription) {
+        const [expiredShippingRow, { data: expiredKitLogs }] = await Promise.all([
+          kitLifecycleRepo.getShippingInfo(expiredKit.id),
+          supabase
+            .from("kit_daily_logs")
+            .select("log_date, status")
+            .eq("subscription_id", expiredKit.id)
+            .order("log_date", { ascending: true }),
+        ]);
+
+        let shippingInfo = null;
+        if (expiredShippingRow) {
+          const { transformShippingInfoRow } = await import("@/types/kitShipping");
+          shippingInfo = transformShippingInfoRow({
+            id: expiredShippingRow.id,
+            customer_profile_id: expiredShippingRow.customer_profile_id,
+            subscription_id: expiredShippingRow.subscription_id,
+            courier_partner: expiredShippingRow.courier_partner as
+              | "OTHER"
+              | "APSRTC"
+              | "TGSRTC"
+              | "DTDC",
+            tracking_number: expiredShippingRow.tracking_number,
+            tracking_url: expiredShippingRow.tracking_url,
+            shipped_at: expiredShippingRow.shipped_at,
+            delivered_at: expiredShippingRow.delivered_at,
+            created_at: expiredShippingRow.created_at,
+            updated_at: expiredShippingRow.created_at,
+          });
+        }
+
+        return (
+          <>
+            {profileDialog}
+            <KitDashboard
+              subscription={expiredKitSubscription}
+              shippingInfo={shippingInfo}
+              dailyLogs={(expiredKitLogs ?? []) as KitDashboardLog[]}
+              customerName={appUser.full_name}
             />
           </>
         );

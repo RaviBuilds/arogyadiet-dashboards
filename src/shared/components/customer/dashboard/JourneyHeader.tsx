@@ -31,6 +31,32 @@ type JourneyHeaderProps = {
   motivation: string;
   /** Optional identifier chip (e.g. subscription code). */
   code?: string | null;
+  /**
+   * Overrides the bold part of the headline (default: "Day {dayCurrent}").
+   * Used by journeys that haven't started counting days yet — e.g. a KIT still
+   * in transit shows "Arriving soon" instead of "Day 0".
+   */
+  headlinePrimary?: string;
+  /**
+   * Overrides the lighter trailing part of the headline
+   * (default: "of your {dayTotal}-day journey").
+   */
+  headlineSecondary?: string;
+  /** Overrides the milestone chip copy under the progress ring. */
+  milestone?: string;
+  /**
+   * Word under the ring percentage (default "Complete"). KIT passes "Logged"
+   * because its ring measures tracker adherence, not elapsed time — the label
+   * must always name what the number actually is.
+   */
+  ringLabel?: string;
+  /**
+   * An extra fact chip beside the plan and code chips. KIT uses it for
+   * "4 of 20 meals logged", which keeps that number in the hero (so the
+   * headline can never quietly disagree with it) without stretching the
+   * headline into a dense, comma-spliced sentence.
+   */
+  extraChip?: string;
 };
 
 /** A celebratory milestone line that changes as the journey progresses. */
@@ -51,6 +77,11 @@ export function JourneyHeader({
   daysRemaining,
   motivation,
   code,
+  headlinePrimary,
+  headlineSecondary,
+  milestone,
+  ringLabel = "Complete",
+  extraChip,
 }: JourneyHeaderProps) {
   const clampedProgress = Math.max(0, Math.min(100, progress));
 
@@ -151,9 +182,9 @@ export function JourneyHeader({
           </div>
 
           <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white sm:text-[2rem] sm:leading-tight">
-            Day {dayCurrent}{" "}
+            {headlinePrimary ?? `Day ${dayCurrent}`}{" "}
             <span className="text-lg font-medium text-emerald-100/80 sm:text-xl">
-              of your {dayTotal}-day journey
+              {headlineSecondary ?? `of your ${dayTotal}-day journey`}
             </span>
           </h2>
 
@@ -165,6 +196,11 @@ export function JourneyHeader({
             {planName ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-emerald-50 ring-1 ring-inset ring-white/15">
                 {planName}
+              </span>
+            ) : null}
+            {extraChip ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-emerald-50 ring-1 ring-inset ring-white/15">
+                {extraChip}
               </span>
             ) : null}
             {code ? (
@@ -184,11 +220,11 @@ export function JourneyHeader({
               </span>
             </span>
             <span className="mt-1 text-[11px] font-medium uppercase tracking-wider text-emerald-100/70">
-              Complete
+              {ringLabel}
             </span>
           </ProgressRing>
           <span className="rounded-full bg-white/12 px-3 py-1 text-center text-[11px] font-medium text-emerald-50/90 ring-1 ring-inset ring-white/10">
-            {getMilestone(clampedProgress, daysRemaining)}
+            {milestone ?? getMilestone(clampedProgress, daysRemaining)}
           </span>
         </div>
       </div>
