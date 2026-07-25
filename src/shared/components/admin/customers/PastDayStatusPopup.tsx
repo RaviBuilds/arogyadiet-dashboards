@@ -17,7 +17,6 @@ import {
   SelectValue,
 } from "@/shared/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/shared/components/ui/radio-group";
-import { ScrollArea } from "@/shared/components/ui/scroll-area";
 import { Label } from "@/shared/components/ui/label";
 import { addDaysToISODate, parseISODateString } from "@/lib/dates/ist";
 
@@ -210,7 +209,7 @@ export function PastDayStatusPopup({
           </p>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 min-h-0 max-h-[50vh] pr-3">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-3">
           <div className="space-y-3">
             {entries.map((entry, index) => (
               <DayRow
@@ -223,7 +222,7 @@ export function PastDayStatusPopup({
               />
             ))}
           </div>
-        </ScrollArea>
+        </div>
 
         <DialogFooter className="!flex-row !justify-between items-center">
           <Button
