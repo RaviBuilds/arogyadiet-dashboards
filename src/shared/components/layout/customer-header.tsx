@@ -55,6 +55,12 @@ export function CustomerHeader({
   const router = useRouter();
 
   const isKit = customerCategory === "KIT";
+  const isAccommodation = customerCategory === "ACCOMMODATION";
+
+  // The wellness-essentials shop is a MEAL-only offering, so KIT and
+  // ACCOMMODATION customers never see the cart entry point (matches the
+  // sidebar, which already hides the Shop nav group for them).
+  const showCart = !isKit && !isAccommodation;
 
   // ADDED: State to control the mobile menu sheet
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -119,7 +125,7 @@ export function CustomerHeader({
 
       {/* Right side actions */}
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-        <CartSheet />
+        {showCart ? <CartSheet /> : null}
 
         <div className="hidden flex-col items-end sm:flex">
           <span className="mb-1 text-sm font-semibold leading-none tracking-tight text-slate-900">

@@ -192,6 +192,10 @@ export interface ProfileFieldPatch {
   allergies?: string | null;
   date_of_birth?: string | null;
   medical_history_notes?: string | null;
+  /** "I have no medical history" confirmation (mandatory-completion flow). */
+  medical_history_confirmed?: boolean;
+  /** Medical-document references persisted to the JSONB column. */
+  medical_documents?: Array<{ name: string; url: string; type: string }>;
 }
 
 /**
@@ -514,6 +518,10 @@ export async function updateProfileFields(
     payload.date_of_birth = patch.date_of_birth;
   if (patch.medical_history_notes !== undefined)
     payload.medical_history_notes = patch.medical_history_notes;
+  if (patch.medical_history_confirmed !== undefined)
+    payload.medical_history_confirmed = patch.medical_history_confirmed;
+  if (patch.medical_documents !== undefined)
+    payload.medical_documents = patch.medical_documents;
 
   // Nothing to write — avoid an empty UPDATE.
   if (Object.keys(payload).length === 0) {

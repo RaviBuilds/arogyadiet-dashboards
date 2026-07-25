@@ -118,6 +118,30 @@ export interface CompleteProfileOptions {
    * in the patch, so the Test_Email can be replaced (Req 10.6/10.7/10.8).
    */
   userId?: string | null;
+  /**
+   * Enforce the mandatory medical-history rule server-side for MEAL/KIT
+   * mandatory completion (Requirement 1.2/1.3). When set, the submission is
+   * rejected with a `VALIDATION` result and a `medicalHistoryNotes` field error
+   * — persisting nothing and leaving Onboarding_Status unchanged — unless
+   * {@link medicalHistoryConfirmed} is `true` OR `input.medicalHistoryNotes`
+   * has non-whitespace content. This backs up the client-side disabled button
+   * so the rule holds even against a direct action invocation.
+   */
+  requireMedicalHistory?: boolean;
+  /**
+   * The "I have no medical history" confirmation (Requirement 1.2). When `true`
+   * the persisted `medical_history_notes` is cleared to `null` and
+   * `medical_history_confirmed` is set to `true`; otherwise the trimmed notes
+   * are persisted and `medical_history_confirmed` is set to `false`. Mirrors
+   * `completeAccommodationProfileAction`.
+   */
+  medicalHistoryConfirmed?: boolean;
+  /**
+   * Medical-document references to persist to the `customer_profiles`
+   * `medical_documents` JSONB field (Requirements 4.2/4.5). An empty or absent
+   * array persists an empty field.
+   */
+  medicalDocuments?: Array<{ name: string; url: string; type: string }>;
 }
 
 /**
@@ -674,6 +698,29 @@ export async function completeProfile(
 
   const { email, ...profileFields } = parsed.data;
 
+  // (1a) Server-side mandatory medical-history check (Req 1.2/1.3), ordered
+  //      BEFORE any persistence (email replacement + profile write) so a
+  //      rejection persists nothing and leaves Onboarding_Status unchanged.
+  //      Accepted iff the confirmation is checked OR the notes contain
+  //      non-whitespace content. Mirrors `completeAccommodationProfileAction`.
+  if (options.requireMedicalHistory) {
+    const hasNotes =
+      typeof profileFields.medicalHistoryNotes === "string" &&
+      profileFields.medicalHistoryNotes.trim().length > 0;
+    if (options.medicalHistoryConfirmed !== true && !hasNotes) {
+      return {
+        ok: false,
+        reason: "VALIDATION",
+        message:
+          "Please provide medical history notes or confirm you have no medical history to share.",
+        fieldErrors: {
+          medicalHistoryNotes:
+            "Either fill in your medical history or check the confirmation box.",
+        },
+      };
+    }
+  }
+
   // (2) Mobile-first email replacement (Req 10.6/10.7/10.8), applied BEFORE the
   //     profile write so a rejected email aborts the whole submission with no
   //     partial change and the existing Test_Email is retained unchanged.
@@ -707,6 +754,31 @@ export async function completeProfile(
   //     atomic — all provided fields persist or none do (Req 9.8). An empty
   //     patch is a no-op, so a zero-field submission still succeeds (Req 9.2).
   const patch = toProfileFieldPatch(profileFields);
+
+  // Medical-completion persistence (MEAL/KIT mandatory flow), mirroring the
+  // accommodation data model (Req 4.2/4.3/4.5). Applied only when a medical
+  // payload is in play so the legacy optional flow is unchanged.
+  const hasMedicalCompletion =
+    options.requireMedicalHistory === true ||
+    options.medicalHistoryConfirmed !== undefined ||
+    options.medicalDocuments !== undefined;
+  if (hasMedicalCompletion) {
+    if (options.medicalHistoryConfirmed === true) {
+      // Confirmation clears notes (Req 4.3, mirror of accommodation Req 6.4).
+      patch.medical_history_notes = null;
+      patch.medical_history_confirmed = true;
+    } else {
+      const trimmed =
+        typeof profileFields.medicalHistoryNotes === "string"
+          ? profileFields.medicalHistoryNotes.trim()
+          : "";
+      patch.medical_history_notes = trimmed.length > 0 ? trimmed : null;
+      patch.medical_history_confirmed = false;
+    }
+    // An empty/absent array persists an empty field (Req 4.5).
+    patch.medical_documents = options.medicalDocuments ?? [];
+  }
+
   try {
     await updateProfileFields(profileId, patch);
   } catch (err) {

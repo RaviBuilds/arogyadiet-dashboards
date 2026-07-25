@@ -5,6 +5,7 @@ import {
   Sunrise,
   PauseCircle,
   CalendarClock,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RotatingFoodImage } from "./RotatingFoodImage";
@@ -68,6 +69,24 @@ type TodayFocusCardProps = {
   pausedDescription?: string;
   pausedCtaHref?: string;
   pausedCtaLabel?: string;
+  /**
+   * Small caption above the headline in the active state. Only used when
+   * `deliveryStatus` is absent (KIT/Accommodation), since a real delivery
+   * status supplies its own eyebrow.
+   */
+  eyebrow?: string;
+  /** Supporting sentence under the headline (generic, status-free consumers). */
+  description?: string | null;
+  /** Label for the info row (defaults to the delivery-oriented "On its way to"). */
+  addressLabel?: string;
+  /** Icon for the info row (defaults to a map pin). */
+  infoIcon?: LucideIcon;
+  /** Copy inside the corner chip (defaults to "Today"). */
+  badgeLabel?: string;
+  /** Icon inside the corner chip (defaults to a sunrise). */
+  badgeIcon?: LucideIcon;
+  /** Extra content rendered directly above the CTA in the active state. */
+  children?: React.ReactNode;
 };
 
 export function TodayFocusCard({
@@ -88,6 +107,13 @@ export function TodayFocusCard({
   pausedDescription = "Your subscription is currently paused. Delivery will automatically resume on your scheduled date.",
   pausedCtaHref = "/subscription",
   pausedCtaLabel = "Manage Plan",
+  eyebrow,
+  description,
+  addressLabel: addressLabelProp,
+  infoIcon,
+  badgeLabel = "Today",
+  badgeIcon: BadgeIcon = Sunrise,
+  children,
 }: TodayFocusCardProps) {
   const showImage = state === "active" && !!images && images.length > 0;
 
@@ -95,12 +121,12 @@ export function TodayFocusCard({
   // otherwise fall back to the generic title/CTA props (KIT/Accommodation).
   const visual = deliveryStatus !== undefined ? getDeliveryStatusVisual(deliveryStatus) : null;
   const resolvedTitle = visual ? visual.headline : title;
-  const resolvedDescription = visual?.description ?? null;
+  const resolvedDescription = visual?.description ?? description ?? null;
   const resolvedCta = visual ? visual.getCta({ orderId }) : { label: ctaLabel, href: ctaHref };
   const showAddressBlock = visual ? visual.showAddress : Boolean(addressTag || addressLine);
-  const addressLabel = visual?.addressLabel ?? "On its way to";
+  const addressLabel = visual?.addressLabel ?? addressLabelProp ?? "On its way to";
   const showTagChip = visual ? visual.showMealTag : true;
-  const StatusIcon = visual?.icon ?? MapPin;
+  const StatusIcon = visual?.icon ?? infoIcon ?? MapPin;
   const isExternalCta = resolvedCta.href.startsWith("http");
   const isDelivered = deliveryStatus === "DELIVERED";
   const isFailed = deliveryStatus === "FAILED";
@@ -145,15 +171,15 @@ export function TodayFocusCard({
             />
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 to-transparent sm:bg-gradient-to-r sm:from-transparent sm:to-white/5" />
             <span className="absolute left-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary shadow-sm backdrop-blur-sm">
-              <Sunrise className="h-3.5 w-3.5" />
-              Today
+              <BadgeIcon className="h-3.5 w-3.5" />
+              {badgeLabel}
             </span>
           </div>
 
           <div className="flex flex-1 flex-col justify-center gap-4 p-6 sm:p-7">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-slate-500">
-                {visual ? visual.eyebrow : "Freshly prepared for you"}
+                {visual ? visual.eyebrow : (eyebrow ?? "Freshly prepared for you")}
               </p>
               <span className="text-xs font-medium text-slate-400">
                 {dateLabel}
@@ -208,6 +234,8 @@ export function TodayFocusCard({
               </div>
             ) : null}
 
+            {children}
+
             {ctaButton}
           </div>
         </div>
@@ -222,8 +250,8 @@ export function TodayFocusCard({
           <div className="relative">
             <div className="mb-5 flex items-center justify-between">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                <Sunrise className="h-3.5 w-3.5" />
-                Today
+                <BadgeIcon className="h-3.5 w-3.5" />
+                {badgeLabel}
               </span>
               <span className="text-xs font-medium text-slate-500">
                 {dateLabel}
@@ -272,6 +300,8 @@ export function TodayFocusCard({
                     </div>
                   </div>
                 )}
+
+                {children}
 
                 {ctaButton}
               </div>
