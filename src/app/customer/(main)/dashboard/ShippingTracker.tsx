@@ -54,14 +54,18 @@ function getTrackingUrl(shippingInfo: ShippingInfo): string | null {
     return shippingInfo.tracking_url;
   }
 
-  // Base tracking page URLs — do NOT include the tracking number
+  // Base tracking page URLs — do NOT include the tracking number.
+  // Verified against each courier's live site (2026-07-25):
+  //   APSRTC  -> official ANL/door-to-door parcel tracking portal
+  //   TGSRTC  -> official TGSRTC Logistics site (Track widget lives on this page)
+  //   DTDC    -> official DTDC shipment tracking page
   switch (shippingInfo.courier_partner) {
     case "APSRTC":
-      return `https://apsrtcparcel.in/track`;
+      return `https://cargo.apsrtconline.in/track`;
     case "TGSRTC":
-      return `https://www.tsrtc.telangana.gov.in/track`;
+      return `https://tgsrtclogistics.co.in/TSRTC/`;
     case "DTDC":
-      return `https://www.dtdc.in/tracking`;
+      return `https://www.dtdc.com/track-your-shipment/`;
     default:
       return null;
   }

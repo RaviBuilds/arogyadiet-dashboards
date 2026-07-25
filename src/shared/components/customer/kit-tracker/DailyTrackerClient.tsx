@@ -11,6 +11,7 @@ import {
   eachMonthOfInterval,
   isBefore,
   startOfDay,
+  differenceInCalendarDays,
 } from "date-fns";
 import {
   CheckCircle2,
@@ -20,6 +21,8 @@ import {
   CalendarCheck,
   SkipForward,
   Sparkles,
+  AlertCircle,
+  MinusCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DayLogDialog } from "./DayLogDialog";
@@ -246,6 +249,18 @@ export function DailyTrackerClient({
             Food Skipped
           </span>
         </div>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border bg-red-50 text-red-600 border-red-200">
+          <AlertCircle className="h-5 w-5 drop-shadow-sm" />
+          <span className="font-semibold text-xs md:text-sm">
+            Missed (recent)
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border bg-slate-100 text-slate-500 border-slate-200">
+          <MinusCircle className="h-5 w-5 drop-shadow-sm" />
+          <span className="font-semibold text-xs md:text-sm">
+            Missed (older)
+          </span>
+        </div>
       </div>
 
       {/* Calendar Render */}
@@ -338,6 +353,31 @@ export function DailyTrackerClient({
                     };
                     Icon = CalendarCheck;
                     displayLabel = "";
+                  } else if (isInPast) {
+                    // Past day, still unlogged. The "action needed" banner
+                    // above already covers the full backlog count, so we
+                    // reserve the bold red alert for the last 3 days —
+                    // enough to nudge without turning a long backlog into a
+                    // wall of alarming red. Older gaps get a quiet grey
+                    // treatment instead.
+                    const daysAgo = differenceInCalendarDays(today, day);
+                    if (daysAgo <= 3) {
+                      style = {
+                        bg: "bg-red-50",
+                        border: "border-red-200 hover:border-red-400",
+                        color: "text-red-600",
+                      };
+                      Icon = AlertCircle;
+                      displayLabel = "Missed";
+                    } else {
+                      style = {
+                        bg: "bg-slate-50",
+                        border: "border-slate-200 hover:border-slate-300",
+                        color: "text-slate-400",
+                      };
+                      Icon = MinusCircle;
+                      displayLabel = "Missed";
+                    }
                   } else {
                     style = {
                       bg: "bg-white",
