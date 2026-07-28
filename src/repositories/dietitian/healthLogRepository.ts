@@ -103,6 +103,45 @@ export interface KitAdherenceLogRow {
   status: "FOOD_TAKEN" | "FOOD_SKIPPED";
 }
 
+/**
+ * One `kit_daily_logs` row with every field the customer can submit from the
+ * KIT day-log dialog, for the Dietitian's day-by-day Self_Log view
+ * (Req 25.6 — read-only reference data).
+ */
+export interface KitSelfLogDayRow {
+  log_date: string;
+  status: "FOOD_TAKEN" | "FOOD_SKIPPED";
+  weight_kg: number | string | null;
+  step_count: number | null;
+  physical_activity_minutes: number | null;
+  physical_activity_name: string | null;
+  water_intake_liters: number | string | null;
+  buttermilk_intake: string | null;
+  fat_consumption: string | null;
+  main_dish: string | null;
+  protein_curry: string | null;
+  veg_curry: string | null;
+  soup_name_qty: string | null;
+  eggs_count: number | null;
+  salads_qty: string | null;
+}
+
+/** The governing KIT Tracker window plus every Self_Log recorded inside it. */
+export interface KitSelfLogTrackerRows {
+  subscriptionId: string;
+  /** Customer-confirmed receipt date — the tracker start, or `null` if unconfirmed. */
+  receivedDate: string | null;
+  /** Trigger-maintained tracker end date, or `null` before receipt. */
+  trackerEndDate: string | null;
+  durationDays: number | null;
+  totalSkippedDays: number;
+  status: string;
+  logs: KitSelfLogDayRow[];
+}
+
+const KIT_SELF_LOG_COLUMNS =
+  "log_date, status, weight_kg, step_count, physical_activity_minutes, physical_activity_name, water_intake_liters, buttermilk_intake, fat_consumption, main_dish, protein_curry, veg_curry, soup_name_qty, eggs_count, salads_qty";
+
 const HEALTH_LOG_COLUMNS =
   "id, customer_profile_id, log_date, author_type, author_user_id, customer_category, parameters, custom_parameters, closing_comment, submitted_at, submission_date_ist, clinic_id, franchise_id, created_at, updated_at";
 
@@ -304,6 +343,67 @@ export async function getKitAdherenceLogs(
   }
 
   return (data ?? []) as KitAdherenceLogRow[];
+}
+
+/**
+ * Read the governing KIT Tracker window for one Customer_Record together with
+ * every Self_Log the customer recorded inside it, for the Dietitian's
+ * day-by-day Self_Log view on the Log Customer page (Req 16.3, 25.6).
+ *
+ * The governing KIT subscription is the customer's most recently created `KIT`
+ * `subscriptions` row — the same "latest wins" rule
+ * `cadenceRepository.getGoverningRecords` applies — so the view always tracks
+ * the kit the cadence slots were derived from. Returns `null` when the
+ * customer holds no KIT subscription at all.
+ *
+ * Read-only: there is no companion write function anywhere in this repository
+ * for `kit_daily_logs` (Req 25.4).
+ */
+export async function getKitSelfLogTracker(
+  customerProfileId: string
+): Promise<KitSelfLogTrackerRows | null> {
+  const admin = createAdminClient();
+
+  const { data: subscription, error: subError } = await admin
+    .from("subscriptions")
+    .select(
+      "id, status, kit_received_date, kit_tracker_end_date, kit_duration_days, kit_total_skipped_days"
+    )
+    .eq("customer_profile_id", customerProfileId)
+    .eq("customer_category", "KIT")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (subError) {
+    throw new Error(
+      `Failed to resolve the KIT subscription for customer ${customerProfileId}: ${subError.message}`
+    );
+  }
+
+  if (!subscription) return null;
+
+  const { data: logs, error: logsError } = await admin
+    .from("kit_daily_logs")
+    .select(KIT_SELF_LOG_COLUMNS)
+    .eq("subscription_id", subscription.id)
+    .order("log_date", { ascending: true });
+
+  if (logsError) {
+    throw new Error(
+      `Failed to load KIT self-logs for subscription ${subscription.id}: ${logsError.message}`
+    );
+  }
+
+  return {
+    subscriptionId: subscription.id as string,
+    receivedDate: (subscription.kit_received_date as string | null) ?? null,
+    trackerEndDate: (subscription.kit_tracker_end_date as string | null) ?? null,
+    durationDays: (subscription.kit_duration_days as number | null) ?? null,
+    totalSkippedDays: (subscription.kit_total_skipped_days as number | null) ?? 0,
+    status: (subscription.status as string) ?? "",
+    logs: (logs ?? []) as unknown as KitSelfLogDayRow[],
+  };
 }
 
 /**

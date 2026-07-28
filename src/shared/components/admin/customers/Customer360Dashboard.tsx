@@ -61,6 +61,7 @@ import { ResetPinDialog } from "@/shared/components/admin/ResetPinDialog";
 import { ClinicAssignmentSelector } from "./ClinicAssignmentSelector";
 import { DietitianAssignmentSelector } from "./DietitianAssignmentSelector";
 import { CustomerHealthLogTab } from "./CustomerHealthLogTab";
+import { CustomerHistoryTab } from "./CustomerHistoryTab";
 
 import {
   BadgeIndianRupee,
@@ -333,7 +334,7 @@ export function Customer360Dashboard({
   const isMealCustomer = customerCategory === "MEAL";
   const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(
-    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription", "Accommodation", "Health Log"].includes(requestedTab)
+    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription", "Accommodation", "Health Log", "Subscription History", "KIT History", "Accommodation History"].includes(requestedTab)
       ? requestedTab
       : "Profile & Medical",
   );
@@ -657,6 +658,7 @@ export function Customer360Dashboard({
                 "Addresses",
                 "Billing",
                 "Health Log",
+                "KIT History",
                 "User Management",
               ]
             : isAccommodationCustomer
@@ -665,6 +667,7 @@ export function Customer360Dashboard({
                   "Accommodation",
                   "Billing",
                   "Health Log",
+                  "Accommodation History",
                   "User Management",
                 ]
               : [
@@ -673,6 +676,7 @@ export function Customer360Dashboard({
                   "Addresses",
                   "Billing",
                   "Coupons",
+                  "Subscription History",
                   "User Management",
                 ];
           // Req 5.10, 16.1: "User Management" (PIN reset, email change,
@@ -1420,6 +1424,23 @@ export function Customer360Dashboard({
             subscriptionPlans={initialSubscriptionData.subscriptionPlans}
             createCouponAction={createCouponAction}
             deleteCouponAction={deleteCouponAction}
+          />
+        )}
+
+        {/* Category-specific history tab — one row per subscription/KIT/stay,
+            each with the same report PDF the customer downloads themselves. */}
+        {(activeTab === "Subscription History" ||
+          activeTab === "KIT History" ||
+          activeTab === "Accommodation History") && (
+          <CustomerHistoryTab
+            customerProfileId={customer.id}
+            category={
+              isKitCustomer
+                ? "KIT"
+                : isAccommodationCustomer
+                  ? "ACCOMMODATION"
+                  : "MEAL"
+            }
           />
         )}
 

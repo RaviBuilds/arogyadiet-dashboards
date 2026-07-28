@@ -20,7 +20,7 @@
 //
 // Requirements: 15.5, 15.6, 15.9, 15.15, 18.1, 18.2, 25.6
 
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { Phone, Hash, User2, ClipboardList, FileText } from "lucide-react";
@@ -75,6 +75,19 @@ export interface HealthLogEntryWorkspaceProps {
   initialValues: DietitianLogValues | null;
   /** Whether `initialValues` (if any) is still editable today (Req 18.1, 18.2). */
   initialEditable: boolean;
+  /**
+   * Read-only view of the customer's own daily logs, rendered under the slot
+   * schedule. Server-rendered by the page and passed through as-is — today
+   * only KIT customers self-log, so it is `null` for every other category
+   * (Req 16.3, 16.4).
+   */
+  selfLogTrackerPanel?: ReactNode;
+  /**
+   * Why the slot schedule is empty, when it is. Explains the specific reason
+   * (no subscription, not active yet, tracker not started, first slot not
+   * reached) instead of the generic fallback copy.
+   */
+  slotsUnavailableReason?: string | null;
 }
 
 function categoryLabel(category: CustomerCategory): string {
@@ -100,6 +113,8 @@ export function HealthLogEntryWorkspace({
   initialSelfLogs,
   initialValues,
   initialEditable,
+  selfLogTrackerPanel = null,
+  slotsUnavailableReason = null,
 }: HealthLogEntryWorkspaceProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -201,9 +216,13 @@ export function HealthLogEntryWorkspace({
             selectedDate={selectedDate}
             onSelect={handleSelectSlot}
             loading={loading}
+            emptyMessage={slotsUnavailableReason}
           />
         </CardContent>
       </Card>
+
+      {/* The customer's own daily logs (KIT two-way logging, Req 16.3). */}
+      {selfLogTrackerPanel}
 
       {selectedDate ? (
         <>
@@ -253,7 +272,8 @@ export function HealthLogEntryWorkspace({
       ) : (
         <Card className="border-slate-200/70">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No log slots are scheduled for this customer yet.
+            {slotsUnavailableReason ??
+              "No log slots are scheduled for this customer yet."}
           </CardContent>
         </Card>
       )}

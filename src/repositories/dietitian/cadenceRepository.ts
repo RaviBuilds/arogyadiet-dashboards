@@ -10,11 +10,13 @@
 // service-role admin client, since Dietitian writes/reads route through the
 // service layer's own scope assertion rather than RLS here.
 //
-// Four batched queries regardless of list size, then pure computation (design
+// Batched queries regardless of list size, then pure computation (design
 // "Cadence flow" sequence diagram):
 //   1. getGoverningRecords          — governing subscription OR stay
 //   2. getLastDietitianLogDates     — most recent DIETITIAN `log_date`
 //   3. getPausedDatesSince          — Paused_Days after a cutoff
+//   3b. getKitSkippedDatesSince     — KIT Skipped_Self_Log dates after a cutoff
+//   3c. getNonEligibleDatesSince    — the union of 3 and 3b
 //   4. getSelfLogDatesInWindow      — Self_Log dates in a window
 //
 // A missing governing subscription/stay is reported by omitting that
@@ -58,6 +60,10 @@ interface SubscriptionRow {
   starts_on: string | null;
   ends_on: string | null;
   effective_end_on: string | null;
+  /** KIT only: the customer-confirmed package receipt date (tracker start). */
+  kit_received_date: string | null;
+  /** KIT only: receipt date + duration − 1 + skipped days (tracker end). */
+  kit_tracker_end_date: string | null;
   created_at: string;
 }
 
@@ -120,7 +126,7 @@ export async function getGoverningRecords(
   const { data: subsData, error: subsError } = await admin
     .from("subscriptions")
     .select(
-      "id, customer_profile_id, customer_category, status, starts_on, ends_on, effective_end_on, created_at",
+      "id, customer_profile_id, customer_category, status, starts_on, ends_on, effective_end_on, kit_received_date, kit_tracker_end_date, created_at",
     )
     .in("customer_profile_id", customerProfileIds);
 
@@ -171,12 +177,34 @@ export async function getGoverningRecords(
       continue;
     }
 
-    if (!sub.starts_on) continue; // no Logging_Window start — treated as non-ACTIVE
+    // KIT's Logging_Window is the KIT Tracker window, not the raw
+    // subscription dates: a KIT plan only starts running the day the customer
+    // confirms receipt (`kit_received_date`) and ends on the trigger-maintained
+    // `kit_tracker_end_date`, which already accounts for skipped days. Those
+    // columns are also the only dates a KIT row is guaranteed to carry —
+    // `starts_on`/`ends_on` stay NULL until receipt is confirmed — so reading
+    // `starts_on` alone left every KIT customer without a Logging_Window and
+    // therefore without a single Log_Slot.
+    const windowStart =
+      category === "KIT"
+        ? (sub.kit_received_date ?? sub.starts_on)
+        : sub.starts_on;
+
+    if (!windowStart) continue; // no Logging_Window start — treated as non-ACTIVE
+
+    const windowEnd =
+      category === "KIT"
+        ? (sub.kit_tracker_end_date ??
+          sub.effective_end_on ??
+          sub.ends_on ??
+          windowStart)
+        : (sub.effective_end_on ?? sub.ends_on ?? windowStart);
+
     result.set(sub.customer_profile_id, {
       customerProfileId: sub.customer_profile_id,
       category,
-      windowStart: sub.starts_on,
-      windowEnd: sub.effective_end_on ?? sub.ends_on ?? sub.starts_on,
+      windowStart,
+      windowEnd,
       status: sub.status,
     });
   }
@@ -283,6 +311,113 @@ export async function getPausedDatesSince(
   }
 
   for (const list of result.values()) list.sort();
+
+  return result;
+}
+
+/**
+ * Batched lookup of every KIT date on or after `sinceDate` the customer marked
+ * as `FOOD_SKIPPED` in `kit_daily_logs`.
+ *
+ * A skipped KIT day is the KIT equivalent of a MEAL Paused_Day: the plan does
+ * not run that day, and `trg_kit_daily_logs_sync` pushes
+ * `kit_tracker_end_date` out by one day for each of them. Counting such a day
+ * as an Eligible_Day would both inflate Days_Not_Logged and add a Log_Slot the
+ * plan never earned, so callers that need Eligible_Days use
+ * `getNonEligibleDatesSince` (which unions this with the paused dates) rather
+ * than `getPausedDatesSince` alone.
+ *
+ * Non-KIT customers resolve to an empty list — `kit_daily_logs` only ever
+ * carries rows for KIT subscriptions (enforced by
+ * `trg_kit_daily_logs_category_guard`).
+ */
+export async function getKitSkippedDatesSince(
+  customerProfileIds: readonly string[],
+  sinceDate: string,
+): Promise<Map<string, string[]>> {
+  const result = new Map<string, string[]>();
+  if (customerProfileIds.length === 0) return result;
+
+  const admin = createAdminClient();
+
+  const { data: subsData, error: subsError } = await admin
+    .from("subscriptions")
+    .select("id, customer_profile_id")
+    .in("customer_profile_id", customerProfileIds)
+    .eq("customer_category", "KIT");
+
+  if (subsError) {
+    throw new Error(
+      `Failed to resolve KIT subscriptions for skipped-date lookup: ${subsError.message}`,
+    );
+  }
+
+  const subscriptionToCustomer = new Map<string, string>();
+  for (const row of (subsData ?? []) as KitSubscriptionRow[]) {
+    subscriptionToCustomer.set(row.id, row.customer_profile_id);
+  }
+
+  const subscriptionIds = [...subscriptionToCustomer.keys()];
+  if (subscriptionIds.length === 0) return result;
+
+  const { data, error } = await admin
+    .from("kit_daily_logs")
+    .select("subscription_id, log_date")
+    .in("subscription_id", subscriptionIds)
+    .eq("status", "FOOD_SKIPPED")
+    .gte("log_date", sinceDate);
+
+  if (error) {
+    throw new Error(`Failed to load KIT skipped dates: ${error.message}`);
+  }
+
+  for (const row of (data ?? []) as Array<{
+    subscription_id: string;
+    log_date: string;
+  }>) {
+    const customerProfileId = subscriptionToCustomer.get(row.subscription_id);
+    if (!customerProfileId) continue;
+    const list = result.get(customerProfileId);
+    if (list) list.push(row.log_date);
+    else result.set(customerProfileId, [row.log_date]);
+  }
+
+  for (const list of result.values()) list.sort();
+
+  return result;
+}
+
+/**
+ * Every date on or after `sinceDate` that is NOT an Eligible_Day: the union of
+ * the MEAL Paused_Days (`getPausedDatesSince`) and the KIT skipped days
+ * (`getKitSkippedDatesSince`), de-duplicated and sorted per customer.
+ *
+ * This is what the Cadence_Engine and the Log_Slot schedule consume, so both
+ * MEAL pauses and KIT skips shift a customer's slots and cadence counters the
+ * same way. `getPausedDatesSince` stays the narrower read used by the
+ * Health_Log write gate, which is defined against Paused_Days only (Req 15.8).
+ */
+export async function getNonEligibleDatesSince(
+  customerProfileIds: readonly string[],
+  sinceDate: string,
+): Promise<Map<string, string[]>> {
+  const [pausedDates, skippedDates] = await Promise.all([
+    getPausedDatesSince(customerProfileIds, sinceDate),
+    getKitSkippedDatesSince(customerProfileIds, sinceDate),
+  ]);
+
+  const result = new Map<string, string[]>();
+  for (const source of [pausedDates, skippedDates]) {
+    for (const [customerProfileId, dates] of source) {
+      const merged = result.get(customerProfileId);
+      if (merged) merged.push(...dates);
+      else result.set(customerProfileId, [...dates]);
+    }
+  }
+
+  for (const [customerProfileId, dates] of result) {
+    result.set(customerProfileId, [...new Set(dates)].sort());
+  }
 
   return result;
 }

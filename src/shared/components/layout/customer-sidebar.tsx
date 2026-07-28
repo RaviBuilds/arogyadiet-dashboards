@@ -14,7 +14,6 @@ import {
   ShoppingBag,
   PackageSearch,
   ClipboardList,
-  Droplet,
   FileText,
   Sparkles,
   type LucideIcon,
@@ -64,13 +63,18 @@ const accommodationNavItems: NavItem[] = [
 ];
 
 const accommodationStandaloneNavItems: NavItem[] = [
-  { name: "My Health Logs", href: "/health-logs", icon: Droplet },
   { name: "Health Report", href: "/health-report", icon: FileText },
   { name: "Add-on Services", href: "/addon-services", icon: Sparkles },
 ];
 
 const bottomNavItems: NavItem[] = [
   { name: "Billing", href: "/subscription/manage/billing", icon: CreditCard },
+];
+
+// Meal-only history surface — rendered directly below Billing for MEAL
+// customers. KIT/ACCOMMODATION customers have their own history nav groups.
+const mealHistoryNavItems: NavItem[] = [
+  { name: "Subscription History", href: "/subscription-history", icon: History },
 ];
 
 function NavGroup({
@@ -182,7 +186,7 @@ function SidebarContent({
         </Link>
       </div>
 
-      <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="no-scrollbar relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="relative flex min-h-full flex-col gap-6 py-4">
           <NavGroup
             items={filteredMainNavItems}
@@ -255,6 +259,14 @@ function SidebarContent({
             pathname={pathname}
             onNavigate={onNavigate}
           />
+
+          {!isKit && !isAccommodation && (
+            <NavGroup
+              items={mealHistoryNavItems}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
+          )}
 
           {/* Spacer that only ever occupies genuinely LEFTOVER space below
               the nav (flex-1, normal flow — never absolute/fixed), so the
