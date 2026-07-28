@@ -1461,10 +1461,13 @@ function ReportFooter({ generatedAtIst }: { generatedAtIst: string }) {
  * Full KIT Report PDF document.
  *
  * Structure:
- * - Header: customer info cards, product name, duration, start date, status badge
- * - Day-wise entries: FOOD_TAKEN (green card), FOOD_SKIPPED (amber card), missing (neutral)
- * - Summary (EXPIRED only): card grid with totals and completion date
- * - Footer: generation date and branding
+ * - Header: dietitian banner, customer info cards, product, duration, status
+ * - Summary: adherence, dual log counts, weight/BP/sugar highlights, averages
+ * - Trends: weight (customer + dietitian series), blood pressure, fasting sugar
+ * - Log source legend: names both authors before either section
+ * - Customer Daily Log: FOOD_TAKEN (green), FOOD_SKIPPED (amber), collapsed gaps
+ * - Dietitian Health Log: 3-day-cadence clinical parameters + remarks
+ * - Footer: generation timestamp, page number, branding
  *
  * Validates: Requirements 9.2, 9.3, 9.4, 10.2, 10.3
  */
