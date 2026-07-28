@@ -43,7 +43,7 @@ export default async function KitHistoryPage() {
     <div className="relative z-10 max-w-5xl mx-auto space-y-6">
       {/* Page Header */}
       <div className="flex items-start gap-3">
-        <div className="rounded-full bg-primary/10 p-2.5 text-primary shrink-0">
+        <div className="rounded-full bg-emerald-50 p-2.5 text-emerald-600 shrink-0">
           <History className="h-5 w-5" />
         </div>
         <div>

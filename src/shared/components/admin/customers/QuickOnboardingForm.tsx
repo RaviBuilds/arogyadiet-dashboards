@@ -3,7 +3,7 @@
 // src/shared/components/admin/customers/QuickOnboardingForm.tsx
 // UI/UX refresh — all data logic and validation unchanged.
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -66,8 +66,16 @@ import { PastDayStatusPopup } from "@/shared/components/admin/customers/PastDayS
 import { onboardCustomerAction, checkMobileUniqueAction } from "@/actions/admin-actions/onboardingActions";
 import { onboardAccommodationCustomerAction } from "@/actions/accommodationOnboardingActions";
 import { calculateDeliveryChargeForAddressAction } from "@/actions/admin-actions/deliveryChargeActions";
+import { resolveClinicForPincodeAction, getFranchiseDietitianAction } from "@/actions/pincodeActions";
+import { listDietitiansForClinic } from "@/actions/admin-actions/dietitianAssignmentActions";
+import { listActiveDietitiansForAdmin } from "@/actions/admin-actions/customerHealthLogActions";
+import {
+  COMPLETE_ADDRESS_TO_LOAD_DIETITIANS,
+  NO_DIETITIAN_FOR_CLINIC,
+} from "@/lib/dietitian/messages";
 import { cn } from "@/lib/utils";
 import type { KitProduct } from "@/types/kitProduct";
+import type { DietitianAccount } from "@/types/dietitian";
 import {
   Tooltip,
   TooltipContent,
@@ -87,6 +95,15 @@ export interface QuickOnboardingFormProps {
   plans: OnboardingPlan[];
   kitProducts: KitProduct[];
   serviceAreaPincodes: string[];
+  /**
+   * Whether this wizard is rendered inside the Franchise Portal
+   * (dietitian-management, Req 7.6). A Franchise session shows its single
+   * active Dietitian as read-only text for MEAL onboarding instead of an
+   * editable dropdown.
+   */
+  isFranchiseSession?: boolean;
+  /** The acting Franchise's id, required when `isFranchiseSession` is true, to resolve its single Dietitian. */
+  franchiseId?: string | null;
 }
 
 const detailsSchema = z.object({
@@ -135,6 +152,7 @@ const detailsSchema = z.object({
   pastDateEnabled: z.boolean().default(false),
   pastDayStatuses: z.array(z.any()).optional().default([]),
   automationOverrideAcknowledged: z.boolean().default(false),
+  dietitianId: z.string().uuid("Select a valid dietitian.").optional(),
 });
 
 type DetailsFormValues = z.input<typeof detailsSchema>;
@@ -157,6 +175,8 @@ export function QuickOnboardingForm({
   plans,
   kitProducts,
   serviceAreaPincodes,
+  isFranchiseSession = false,
+  franchiseId = null,
 }: QuickOnboardingFormProps) {
   const router = useRouter();
   const [isSubmitting, startTransition] = useTransition();
@@ -193,6 +213,22 @@ export function QuickOnboardingForm({
   const [ratePerKm, setRatePerKm] = useState<number | null>(null);
   const [deliveryChargeError, setDeliveryChargeError] = useState<string | null>(null);
   const [isCalculatingDelivery, setIsCalculatingDelivery] = useState(false);
+
+  // ─── Dietitian Dropdown State (dietitian-management, Req 7.1–7.6, 9.1–9.5) ─
+  // MEAL (Core session): scoped to the resolved Clinic, loaded once the
+  // address step resolves a Clinic.
+  const [mealDietitians, setMealDietitians] = useState<DietitianAccount[]>([]);
+  // The last Clinic we resolved+loaded Dietitians for. Kept in a ref (not state)
+  // so updating it inside the load effect does not re-trigger the effect and
+  // cancel the in-flight `listDietitiansForClinic` call before it resolves.
+  const mealDietitianClinicIdRef = useRef<string | null>(null);
+  const [isLoadingMealDietitians, setIsLoadingMealDietitians] = useState(false);
+  // Franchise session (Req 7.6): read-only single Dietitian, resolved once
+  // from the acting Franchise rather than the address's Clinic.
+  const [franchiseDietitianName, setFranchiseDietitianName] = useState<string | null>(null);
+  // ACCOMMODATION: unscoped list of every active Dietitian (Req 9.2).
+  const [accommodationDietitians, setAccommodationDietitians] = useState<DietitianAccount[]>([]);
+  const [isLoadingAccommodationDietitians, setIsLoadingAccommodationDietitians] = useState(false);
 
   const {
     register,
@@ -231,6 +267,7 @@ export function QuickOnboardingForm({
       pastDateEnabled: false,
       pastDayStatuses: [],
       automationOverrideAcknowledged: false,
+      dietitianId: undefined,
     },
   });
 
@@ -290,6 +327,108 @@ export function QuickOnboardingForm({
       setValue("planId", plans[0].id);
     }
   }, [primaryCategory, plans, selectedPlanId, setValue]);
+
+  // ─── Dietitian dropdown: Meal onboarding, Core session (Req 7.1–7.5) ─────
+  // Resolve the Clinic from the address pincode and (re)load the Dietitian
+  // options whenever the resolved Clinic changes. Franchise sessions skip
+  // this entirely — they show a read-only single Dietitian instead (Req 7.6).
+  const dietitianId = values.dietitianId;
+  useEffect(() => {
+    if (isFranchiseSession || primaryCategory !== "MEAL") return;
+
+    let cancelled = false;
+
+    async function loadMealDietitians() {
+      const pincode = address.pincode;
+      if (!pincode) {
+        if (cancelled) return;
+        setMealDietitians([]);
+        mealDietitianClinicIdRef.current = null;
+        return;
+      }
+
+      setIsLoadingMealDietitians(true);
+      try {
+        const { clinicId } = await resolveClinicForPincodeAction(pincode);
+        if (cancelled) return;
+        if (clinicId === mealDietitianClinicIdRef.current) {
+          // Same clinic as last resolution — nothing to reload.
+          setIsLoadingMealDietitians(false);
+          return;
+        }
+        mealDietitianClinicIdRef.current = clinicId;
+        if (!clinicId) {
+          setMealDietitians([]);
+          setValue("dietitianId", undefined);
+          setIsLoadingMealDietitians(false);
+          return;
+        }
+        const result = await listDietitiansForClinic(clinicId);
+        if (cancelled) return;
+        const options = result.success ? result.data : [];
+        setMealDietitians(options);
+        // Req 7.3: clear a previously selected Dietitian not linked to the new Clinic.
+        // Req 7.4: pre-select when the Clinic has exactly one active Dietitian.
+        if (dietitianId && !options.some((d) => d.id === dietitianId)) {
+          setValue("dietitianId", undefined);
+        }
+        if (options.length === 1) {
+          setValue("dietitianId", options[0].id);
+        }
+        setIsLoadingMealDietitians(false);
+      } catch {
+        if (!cancelled) setIsLoadingMealDietitians(false);
+      }
+    }
+
+    void loadMealDietitians();
+
+    return () => {
+      cancelled = true;
+    };
+    // dietitianId intentionally omitted — read fresh from `values` inside the
+    // effect body to avoid re-running the clinic resolution on every selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address.pincode, primaryCategory, isFranchiseSession, setValue]);
+
+  // ─── Dietitian display: Meal onboarding, Franchise session (Req 7.6) ────
+  // Resolve the Franchise's single active Dietitian once and show it as
+  // read-only text; the value still flows into the submitted payload.
+  useEffect(() => {
+    if (!isFranchiseSession || primaryCategory !== "MEAL" || !franchiseId) return;
+    let cancelled = false;
+    getFranchiseDietitianAction(franchiseId).then((result) => {
+      if (cancelled) return;
+      setFranchiseDietitianName(result.dietitianName);
+      setValue("dietitianId", result.dietitianId ?? undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isFranchiseSession, primaryCategory, franchiseId, setValue]);
+
+  // ─── Dietitian dropdown: Accommodation onboarding (Req 9.1, 9.2) ─────────
+  // Unscoped list of every active Dietitian, loaded once when the category
+  // switches to ACCOMMODATION.
+  useEffect(() => {
+    if (primaryCategory !== "ACCOMMODATION") return;
+    if (accommodationDietitians.length > 0) return;
+    let cancelled = false;
+
+    async function loadAccommodationDietitians() {
+      setIsLoadingAccommodationDietitians(true);
+      const result = await listActiveDietitiansForAdmin();
+      if (cancelled) return;
+      setAccommodationDietitians(result.success ? result.data : []);
+      setIsLoadingAccommodationDietitians(false);
+    }
+
+    void loadAccommodationDietitians();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryCategory, accommodationDietitians.length]);
 
   // Reset start date to today when switching to ACCOMMODATION (no 5PM cutoff rule — Req 1.2)
   useEffect(() => {
@@ -575,6 +714,7 @@ export function QuickOnboardingForm({
         isSharedPayment: values.isSharedPayment ?? false,
         paymentHostMobile: values.isSharedPayment ? (values.paymentHostMobile || undefined) : undefined,
         tempPin,
+        dietitianUserId: values.dietitianId || undefined,
       };
 
       startTransition(async () => {
@@ -605,6 +745,9 @@ export function QuickOnboardingForm({
       kitProductId: values.primaryCategory === "KIT" ? values.kitProductId : undefined,
       kitDurationDays: values.primaryCategory === "KIT" ? values.kitDurationDays : undefined,
       planId: values.primaryCategory === "MEAL" ? values.planId : undefined,
+      // Dietitian_Link dropdown only applies to Core MEAL onboarding (Req 7.1);
+      // KIT customers are linked to a Dietitian post-onboarding (Req 8).
+      dietitianId: values.primaryCategory === "MEAL" ? values.dietitianId : undefined,
       address: {
         tag: address.tag,
         searchText: address.searchText,
@@ -1083,6 +1226,39 @@ export function QuickOnboardingForm({
                       </div>
                     )}
                   </div>
+
+                  {/* Dietitian dropdown — Accommodation onboarding (Req 9.1–9.3) */}
+                  <Field label="Dietitian" htmlFor="dietitianId" error={errors.dietitianId?.message} hint="Optional">
+                    <Controller
+                      control={control}
+                      name="dietitianId"
+                      render={({ field }) => (
+                        <Select
+                          value={field.value ?? ""}
+                          onValueChange={field.onChange}
+                          disabled={isLoadingAccommodationDietitians}
+                        >
+                          <SelectTrigger
+                            id="dietitianId"
+                            aria-label="Dietitian"
+                            className="h-9"
+                          >
+                            <SelectValue placeholder="Select a dietitian (optional)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {accommodationDietitians.map((d) => (
+                              <SelectItem key={d.id} value={d.id}>
+                                {d.fullName}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      Onboarding may continue with no dietitian selected.
+                    </p>
+                  </Field>
                 </>
               ) : (
                 <>
@@ -1292,6 +1468,55 @@ export function QuickOnboardingForm({
                     : "Complete the address: select a serviceable location on the map and enter the flat number."
                   }
                 </p>
+              )}
+
+              {/* ── Dietitian dropdown — Meal onboarding (Req 7.1–7.6) ── */}
+              {primaryCategory === "MEAL" && (
+                <Field label="Dietitian" htmlFor="dietitianId" error={errors.dietitianId?.message} hint="Optional">
+                  {isFranchiseSession ? (
+                    <p className="flex h-9 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">
+                      {franchiseDietitianName ?? "No dietitian is assigned to this franchise"}
+                    </p>
+                  ) : (
+                    <>
+                      <Controller
+                        control={control}
+                        name="dietitianId"
+                        render={({ field }) => (
+                          <Select
+                            value={field.value ?? ""}
+                            onValueChange={field.onChange}
+                            disabled={!addressResolved || isLoadingMealDietitians}
+                          >
+                            <SelectTrigger
+                              id="dietitianId"
+                              aria-label="Dietitian"
+                              className="h-9"
+                            >
+                              <SelectValue
+                                placeholder={
+                                  !addressResolved
+                                    ? COMPLETE_ADDRESS_TO_LOAD_DIETITIANS
+                                    : "Select a dietitian (optional)"
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {mealDietitians.map((d) => (
+                                <SelectItem key={d.id} value={d.id}>
+                                  {d.fullName}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                      {addressResolved && !isLoadingMealDietitians && mealDietitians.length === 0 && (
+                        <p className="mt-1 text-xs text-slate-500">{NO_DIETITIAN_FOR_CLINIC}</p>
+                      )}
+                    </>
+                  )}
+                </Field>
               )}
             </div>
           )}

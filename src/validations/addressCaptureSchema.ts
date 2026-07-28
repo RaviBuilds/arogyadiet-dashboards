@@ -30,8 +30,12 @@ export function createAddressCaptureSchema(
     // Req 5.1: address-tag selector offering exactly Home/Office, Home default.
     tag: z.enum(["Home", "Office"]).default("Home"),
 
-    // Req 5.2: location search box accepting 1-255 chars of locality text.
-    searchText: z.string().min(1).max(255).optional(),
+    // Req 5.2: location search box accepting up to 255 chars of locality text.
+    // Optional metadata: the map-drag flow resolves a valid address without ever
+    // populating the search box, so an empty string must be accepted here (the
+    // real locality data lives in area/city/state/pincode/lat/lng). Requiring a
+    // non-empty value here previously rejected map-drag-only addresses on submit.
+    searchText: z.string().max(255).optional(),
 
     // Req 5.4: flat number is required (1-50 chars); floor number optional (<=20 chars).
     flatNumber: z

@@ -29,7 +29,11 @@ import {
   checkEligibilityAction,
   priceCartAction,
   markPaidAndPlaceOrderAction,
+  markPaidAndPlaceWalkInOrderAction,
 } from "@/actions/admin-actions/assistedOrderActions";
+import { Button } from "@/shared/components/ui/button";
+import { ReceiptText } from "lucide-react";
+import Link from "next/link";
 
 export const revalidate = 0;
 
@@ -93,7 +97,14 @@ export default async function AdminAssistedOrderPage() {
     <div className="flex flex-col gap-6 pb-4">
       <AdminPageHeader
         title="Place Shop Order for Customer"
-        description="Build a cart of shop products, find an eligible core customer, review pricing, mark the order paid, and place it to ride along with their next delivery."
+        description="Build a cart of shop products, then either pick an eligible core customer so the order rides along with their next delivery, or record a walk-in buyer for a counter sale."
+        action={
+          <Button asChild variant="outline" data-variant="outline">
+            <Link href="/customers/shop-orders">
+              <ReceiptText /> See orders
+            </Link>
+          </Button>
+        }
       />
       <AssistedOrderBuilder
         products={products}
@@ -103,6 +114,7 @@ export default async function AdminAssistedOrderPage() {
           checkEligibilityAction,
           priceCartAction,
           markPaidAndPlaceOrderAction,
+          markPaidAndPlaceWalkInOrderAction,
         }}
       />
     </div>

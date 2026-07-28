@@ -50,7 +50,7 @@ export async function getFixedAssignments(
       note,
       created_at,
       customer_profile_id,
-      customer_profiles!inner ( franchise_id, users ( full_name, mobile ) ),
+      customer_profiles!inner ( franchise_id, users!customer_profiles_user_id_fkey ( full_name, mobile ) ),
       rider_profiles!inner ( id, employee_code, users ( full_name ) )
     `,
     )

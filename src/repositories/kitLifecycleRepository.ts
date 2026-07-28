@@ -11,6 +11,7 @@
 // Requirements: 1.2, 1.3, 2.1, 2.3, 8.2, 8.3, 11.5, 11.6, 11.7, 12.1
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { AdminKitRecordRow } from "@/lib/kit/adminKitOverview";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -424,6 +425,80 @@ export async function getCustomerKitSubscriptions(
   }
 
   return (data ?? []) as KitSubscriptionRow[];
+}
+
+/**
+ * Fetch every KIT subscription for a customer with its product, courier row and
+ * full daily-log set — the read model behind the admin Customer 360 KIT tab.
+ *
+ * One round-trip for the whole KIT lifecycle of a customer: nested embeds pull
+ * kit_products (to-one via kit_product_id), kit_shipping_info and
+ * kit_daily_logs (both to-many via subscription_id). Grouping into
+ * current/incoming/history is a pure transform in `@/lib/kit/adminKitOverview`.
+ *
+ * Ordered newest-first by created_at; a PENDING kit has no starts_on yet, so
+ * created_at is the only reliable recency key.
+ */
+export async function getAdminKitRecordRows(
+  customerProfileId: string
+): Promise<AdminKitRecordRow[]> {
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("subscriptions")
+    .select(
+      `id, subscription_code, status, starts_on, ends_on, effective_end_on,
+       kit_duration_days, kit_received_date, kit_tracker_end_date,
+       kit_total_skipped_days, created_at,
+       kit_products(name, base_price, tax_rate),
+       kit_shipping_info(courier_partner, tracking_number, tracking_url, shipped_at, delivered_at, created_at),
+       kit_daily_logs(log_date, status, physical_activity_minutes, physical_activity_name,
+                      weight_kg, step_count, water_intake_liters, buttermilk_intake,
+                      fat_consumption, main_dish, protein_curry, veg_curry, soup_name_qty,
+                      eggs_count, salads_qty)`
+    )
+    .eq("customer_profile_id", customerProfileId)
+    .eq("customer_category", "KIT")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(
+      `Failed to get admin KIT records for ${customerProfileId}: ${error.message}`
+    );
+  }
+
+  return (data ?? []).map((row) => {
+    const record = row as Record<string, unknown>;
+
+    const kitProduct = extractOne(record.kit_products) as {
+      name: string | null;
+      base_price: number | null;
+      tax_rate: number | null;
+    } | null;
+
+    return {
+      id: record.id as string,
+      subscription_code: (record.subscription_code as string | null) ?? null,
+      status: record.status as string,
+      starts_on: (record.starts_on as string | null) ?? null,
+      ends_on: (record.ends_on as string | null) ?? null,
+      effective_end_on: (record.effective_end_on as string | null) ?? null,
+      kit_duration_days: (record.kit_duration_days as number | null) ?? null,
+      kit_received_date: (record.kit_received_date as string | null) ?? null,
+      kit_tracker_end_date:
+        (record.kit_tracker_end_date as string | null) ?? null,
+      kit_total_skipped_days:
+        (record.kit_total_skipped_days as number | null) ?? 0,
+      created_at: (record.created_at as string | null) ?? null,
+      kit_products: kitProduct,
+      kit_shipping_info: Array.isArray(record.kit_shipping_info)
+        ? (record.kit_shipping_info as AdminKitRecordRow["kit_shipping_info"])
+        : [],
+      kit_daily_logs: Array.isArray(record.kit_daily_logs)
+        ? (record.kit_daily_logs as AdminKitRecordRow["kit_daily_logs"])
+        : [],
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

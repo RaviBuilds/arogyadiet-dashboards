@@ -31,7 +31,7 @@ export default async function FranchiseShopProductsPage() {
     .from("addon_orders")
     .select(`
       id, created_at, total_amount, status, target_delivery_date,
-      customer_profiles!inner ( franchise_id, users ( full_name ) ),
+      customer_profiles!inner ( franchise_id, users!customer_profiles_user_id_fkey ( full_name ) ),
       addon_order_items ( quantity, unit_price, products ( name ) )
     `)
     .eq("customer_profiles.franchise_id", franchiseId)

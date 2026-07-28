@@ -57,6 +57,10 @@ import {
 } from "@/lib/shop/assisted-order/pricing";
 import { resolveTargetDeliveryDate } from "@/lib/shop/assisted-order/delivery-date";
 import {
+  validateWalkInCustomer,
+  type WalkInCustomerInput,
+} from "@/lib/shop/assisted-order/walkin";
+import {
   evaluateFranchiseStockOutcome,
   UNFULFILLABLE_STOCK_STATUS,
   type ItemDecrementResult,
@@ -122,6 +126,13 @@ export type PlaceOrderOutcome = {
    * DELIVERED (fulfillment `CLINIC_PICKUP`) and excluded from routing.
    */
   clinicPickup: boolean;
+  /**
+   * `true` when the order was sold to a walk-in (non-subscriber) buyer recorded
+   * by name on the order itself instead of a `customer_profile_id`. A walk-in
+   * sale is always an immediate counter handover, so `clinicPickup` is also
+   * `true` and the order never enters routing.
+   */
+  walkIn?: boolean;
 };
 
 /**
@@ -199,7 +210,7 @@ export class AssistedOrderService {
 
     let dbQuery = this.supabase
       .from("customer_profiles")
-      .select("id, franchise_id, users!inner ( full_name, mobile )")
+      .select("id, franchise_id, users!customer_profiles_user_id_fkey!inner ( full_name, mobile )")
       .ilike(`users.${column}`, `%${normalized}%`);
 
     // Scope filter applied in SQL (Req 2.6, 2.7, 8.3, 8.4).
@@ -537,6 +548,148 @@ export class AssistedOrderService {
       };
     } catch (error: unknown) {
       // No exception escapes to the caller (Req 6.5 / error-handling contract).
+      const message =
+        error instanceof Error
+          ? error.message
+          : "An unexpected error occurred while placing the order.";
+      return { ok: false, error: message };
+    }
+  }
+
+  /**
+   * Place a WALK-IN shop order — a counter sale to a buyer who has no customer
+   * profile (they bought only a shop product, not a meal / kit / accommodation
+   * subscription).
+   *
+   * This exists so no unit ever leaves shop stock without an order row behind
+   * it. It deliberately reuses the exact same pricing, atomic RPC, and franchise
+   * stock failsafe as {@link placeOrder}; only the buyer identity and the
+   * fulfillment shape differ:
+   *
+   *   - there is no `customer_profile_id`; the buyer's name (required) plus an
+   *     optional mobile and address are recorded on the `addon_orders` row,
+   *   - eligibility and the next-delivery-day resolution do not apply — a
+   *     walk-in has no subscription and no delivery to ride along with, so the
+   *     order is recorded against today (IST) and created already DELIVERED
+   *     (`CLINIC_PICKUP`), which keeps it permanently out of routing.
+   *
+   * Every guard is re-enforced here and NO exception escapes: all failures come
+   * back as `{ ok: false, error }`.
+   *
+   * @param paymentStatus The operator-marked payment status; placement is gated
+   *   on this being PAID, exactly as for a profile-backed order.
+   */
+  async placeWalkInOrder(
+    ctx: OperatorContext,
+    cart: CartLine[],
+    walkIn: WalkInCustomerInput,
+    paymentStatus: string,
+    discount?: ShopOrderDiscount,
+  ): Promise<Result<PlaceOrderOutcome>> {
+    try {
+      // 1. PAID-only placement gate, before any read/write.
+      if (!canPlaceOrder(paymentStatus)) {
+        return { ok: false, error: NOT_PAID_ERROR };
+      }
+
+      // 2. Empty cart.
+      if (cart.length === 0) {
+        return { ok: false, error: EMPTY_CART_ERROR };
+      }
+
+      // 3. Buyer details — server-side validation is authoritative; the client
+      //    form only mirrors it for inline feedback.
+      const validated = validateWalkInCustomer(walkIn);
+      if (!validated.ok) {
+        return { ok: false, error: validated.error };
+      }
+      const buyer = validated.value;
+
+      // 4. Re-price from the server catalog; delivery fee forced to 0. Any
+      //    client-supplied price is ignored.
+      const catalog = await this.resolveCatalog(cart);
+
+      const linesResult = buildPricedLines(cart, catalog);
+      if (!linesResult.ok) {
+        return { ok: false, error: linesResult.error };
+      }
+      const lines = linesResult.lines;
+
+      const pricingResult = computeAssistedOrderPricing(lines, discount);
+      if (!pricingResult.ok) {
+        return { ok: false, error: pricingResult.error };
+      }
+      const pricing = pricingResult.pricing;
+
+      // A counter sale happens now: record it against today's IST date.
+      const targetDate = getISTDateString(0);
+
+      const franchiseId =
+        ctx.scope.kind === "FRANCHISE" ? ctx.scope.franchiseId : null;
+
+      // 5. Atomic persistence via the same SECURITY DEFINER RPC. The walk-in
+      //    branch writes customer_profile_id NULL + the buyer details, and
+      //    creates the order DELIVERED / CLINIC_PICKUP.
+      const payload = {
+        customer_profile_id: null,
+        walkin_name: buyer.name,
+        walkin_mobile: buyer.mobile,
+        walkin_address: buyer.address,
+        franchise_id: franchiseId,
+        placed_by_user_id: ctx.userId,
+        target_delivery_date: targetDate,
+        total: pricing.total,
+        base_amount: pricing.subtotal,
+        tax_amount: pricing.tax,
+        discount_amount: pricing.discount,
+        is_clinic_pickup: true,
+        items: lines.map((line: PricedLine) => ({
+          product_id: line.productId,
+          quantity: line.quantity,
+          unit_price: line.unitPrice,
+        })),
+      };
+
+      const { data: addonOrderId, error: rpcError } = await this.supabase.rpc(
+        "place_assisted_addon_order",
+        { payload },
+      );
+
+      if (rpcError || !addonOrderId) {
+        return {
+          ok: false,
+          error:
+            rpcError?.message ??
+            "Failed to place the order. No records were created.",
+        };
+      }
+
+      const newAddonOrderId = addonOrderId as string;
+
+      // 6. Franchise stock failsafe, identical to a profile-backed order. Core
+      //    orders perform no decrement.
+      let unfulfillable = false;
+      if (franchiseId) {
+        unfulfillable = await this.applyFranchiseStockFailsafe(
+          newAddonOrderId,
+          franchiseId,
+          lines,
+        );
+      }
+
+      // No linking step: the order is already DELIVERED and never rides a
+      // delivery.
+      return {
+        ok: true,
+        value: {
+          addonOrderId: newAddonOrderId,
+          unfulfillable,
+          targetDeliveryDate: targetDate,
+          clinicPickup: true,
+          walkIn: true,
+        },
+      };
+    } catch (error: unknown) {
       const message =
         error instanceof Error
           ? error.message

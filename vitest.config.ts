@@ -14,6 +14,13 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // More specific aliases first — Vite's alias resolution picks the
+      // first match, and these mirror the `paths` overrides in tsconfig.json
+      // that redirect `@/components/*` etc. away from the `@/*` -> `./src/*`
+      // default into `src/shared/components/*` and friends.
+      "@/components": path.resolve(__dirname, "./src/shared/components"),
+      "@/hooks": path.resolve(__dirname, "./src/shared/hooks"),
+      "@/utils": path.resolve(__dirname, "./src/shared/utils"),
       "@": path.resolve(__dirname, "./src"),
       // `server-only` throws when imported outside a server graph; stub it so
       // pure server utilities remain unit-testable.

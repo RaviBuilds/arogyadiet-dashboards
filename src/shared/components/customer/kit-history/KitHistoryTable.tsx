@@ -78,24 +78,33 @@ function getShippingBadge(shippingStatus: KitHistoryEntry["shippingStatus"]) {
   switch (shippingStatus) {
     case "Delivered":
       return (
-        <span className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        <Badge
+          variant="outline"
+          className="rounded-full border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700"
+        >
+          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-emerald-500" />
           Delivered
-        </span>
+        </Badge>
       );
     case "Shipped":
       return (
-        <span className="inline-flex items-center gap-1.5 text-sm text-blue-700">
-          <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+        <Badge
+          variant="outline"
+          className="rounded-full border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-blue-700"
+        >
+          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-blue-500" />
           Shipped
-        </span>
+        </Badge>
       );
     case "Not Shipped":
       return (
-        <span className="inline-flex items-center gap-1.5 text-sm text-slate-500">
-          <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+        <Badge
+          variant="outline"
+          className="rounded-full border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500"
+        >
+          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-slate-300" />
           Not Shipped
-        </span>
+        </Badge>
       );
   }
 }
@@ -181,11 +190,17 @@ export function KitHistoryTable({ history }: KitHistoryTableProps) {
                   <TableCell className="text-center">
                     <span className="inline-flex items-center justify-center h-7 min-w-[28px] rounded-md bg-emerald-50 px-2 text-sm font-semibold text-emerald-700">
                       {entry.daysTakenMeal}
+                      <span className="ml-0.5 font-normal text-emerald-600/70">
+                        /{entry.kitDays}
+                      </span>
                     </span>
                   </TableCell>
                   <TableCell className="text-center">
                     <span className="inline-flex items-center justify-center h-7 min-w-[28px] rounded-md bg-orange-50 px-2 text-sm font-semibold text-orange-600">
                       {entry.daysSkipped}
+                      <span className="ml-0.5 font-normal text-orange-500/70">
+                        /{entry.kitDays}
+                      </span>
                     </span>
                   </TableCell>
                   <TableCell>{getStatusBadge(entry.status)}</TableCell>
@@ -214,7 +229,7 @@ export function KitHistoryTable({ history }: KitHistoryTableProps) {
               {/* Card Header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/50">
                 <div className="flex items-center gap-2">
-                  <Package className="h-4 w-4 text-primary" />
+                  <Package className="h-4 w-4 text-emerald-600" />
                   <span className="text-sm font-semibold text-slate-900">
                     {entry.kitProductName}
                   </span>
@@ -239,6 +254,9 @@ export function KitHistoryTable({ history }: KitHistoryTableProps) {
                     <Utensils className="h-4 w-4 text-emerald-600 mb-1" />
                     <span className="text-lg font-semibold text-emerald-700">
                       {entry.daysTakenMeal}
+                      <span className="text-xs font-normal text-emerald-600/70">
+                        /{entry.kitDays}
+                      </span>
                     </span>
                     <span className="text-[10px] uppercase tracking-wider text-emerald-600 font-medium">
                       Meals
@@ -248,6 +266,9 @@ export function KitHistoryTable({ history }: KitHistoryTableProps) {
                     <SkipForward className="h-4 w-4 text-orange-500 mb-1" />
                     <span className="text-lg font-semibold text-orange-600">
                       {entry.daysSkipped}
+                      <span className="text-xs font-normal text-orange-500/70">
+                        /{entry.kitDays}
+                      </span>
                     </span>
                     <span className="text-[10px] uppercase tracking-wider text-orange-500 font-medium">
                       Skipped

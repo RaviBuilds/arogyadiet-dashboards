@@ -20,6 +20,8 @@ import {
   Settings2,
   ShoppingBag,
   Package,
+  ClipboardList,
+  Activity,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -37,6 +39,12 @@ import {
 } from "@/shared/components/ui/avatar";
 import { Badge } from "@/shared/components/ui/badge";
 import { createClient } from "@/lib/supabase/client";
+import {
+  isDietitianLevel,
+  landingRouteFor,
+  hasGroupAccess,
+  type AccessConfiguration,
+} from "@/lib/auth/adminAccessCore";
 
 interface FranchiseNavbarProps {
   userProfile: {
@@ -48,6 +56,13 @@ interface FranchiseNavbarProps {
     franchiseName: string;
   };
   email: string;
+  /**
+   * Resolved Access_Level configuration of the signed-in franchise user, with
+   * the Franchise_Owner override already applied by the layout (Req 21.6). Only
+   * the `dietitian` level changes what is rendered; every other level (and an
+   * absent config) keeps the full item list exactly as before.
+   */
+  config?: AccessConfiguration;
 }
 
 const NAV_ITEMS = [
@@ -61,9 +76,42 @@ const NAV_ITEMS = [
   { href: "/profile", label: "Profile", icon: User },
 ];
 
-export default function FranchiseNavbar({ userProfile, email }: FranchiseNavbarProps) {
+/**
+ * The only items a Franchise Dietitian may reach (Req 5.4, 23.1) — the same
+ * three prefixes the middleware allow-list permits.
+ */
+const DIETITIAN_NAV_ITEMS: typeof NAV_ITEMS = [
+  { href: "/customers", label: "Customers", icon: Users },
+  { href: "/log-customer", label: "Log Customer", icon: ClipboardList },
+  { href: "/profile", label: "Profile", icon: User },
+];
+
+export default function FranchiseNavbar({
+  userProfile,
+  email,
+  config,
+}: FranchiseNavbarProps) {
   const supabase = createClient();
   const pathname = usePathname();
+
+  const isDietitian = config != null && isDietitianLevel(config);
+  // Req 24.1, 24.3: the Dietitian Activity link is shown to any franchise
+  // user whose Access_Level grants the customers group (including the
+  // Franchise_Owner, whose resolved config is always full access) — never to
+  // a Franchise Dietitian, who has no group access at all.
+  const canViewDietitianActivity =
+    !isDietitian && config != null && hasGroupAccess(config, "customers");
+  const baseNavItems = canViewDietitianActivity
+    ? [
+        ...NAV_ITEMS.slice(0, 2),
+        { href: "/dietitian-activity", label: "Dietitian Activity", icon: Activity },
+        ...NAV_ITEMS.slice(2),
+      ]
+    : NAV_ITEMS;
+  const visibleNavItems = isDietitian ? DIETITIAN_NAV_ITEMS : baseNavItems;
+  // A Dietitian cannot reach /dashboard, so the brand link points at their
+  // landing route; every other level keeps /dashboard.
+  const homeHref = isDietitian ? landingRouteFor("dietitian") : "/dashboard";
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -76,7 +124,7 @@ export default function FranchiseNavbar({ userProfile, email }: FranchiseNavbarP
     <header className="sticky top-0 z-40 w-full border-b border-white/40 bg-white/70 shadow-[0_4px_30px_rgb(0,0,0,0.03)] backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Left: Brand + Franchise Name */}
-        <Link href="/dashboard" className="flex items-center gap-2.5">
+        <Link href={homeHref} className="flex items-center gap-2.5">
           <Image
             src="/logo.png"
             alt="ArogyaDiet"
@@ -91,7 +139,7 @@ export default function FranchiseNavbar({ userProfile, email }: FranchiseNavbarP
 
         {/* Center: Desktop Navigation */}
         <nav className="hidden items-center gap-1 text-sm lg:flex">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
             return (
@@ -168,7 +216,7 @@ export default function FranchiseNavbar({ userProfile, email }: FranchiseNavbarP
                 <SheetTitle>{userProfile.franchiseName}</SheetTitle>
               </SheetHeader>
               <nav className="grid gap-1 text-sm mt-4">
-                {NAV_ITEMS.map((item) => {
+                {visibleNavItems.map((item) => {
                   const Icon = item.icon;
                   const active = isActive(item.href);
                   return (

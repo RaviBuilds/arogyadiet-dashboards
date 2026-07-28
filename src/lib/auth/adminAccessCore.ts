@@ -10,14 +10,23 @@
 
 // ─── Access levels & areas ──────────────────────────────────────────────────
 
-/** The three admin access levels (sub-classification of the ADMIN role). */
+/**
+ * The admin access levels (sub-classification of the ADMIN role).
+ *
+ * `dietitian` (Req 1.1) is an ALLOW-LIST level: it grants no capability area and
+ * no operations group, and is instead gated by DIETITIAN_ALLOWED_PREFIXES.
+ */
 export const ADMIN_ACCESS_LEVELS = [
   "inventory",
   "operations",
   "inventory_operations",
+  "dietitian",
 ] as const;
 
 export type AdminAccessLevel = (typeof ADMIN_ACCESS_LEVELS)[number];
+
+/** The Dietitian access level, as a narrow literal for call sites. */
+export const DIETITIAN_ACCESS_LEVEL = "dietitian" as const;
 
 /** Capability area an admin route belongs to. */
 export type AccessArea = "operations" | "inventory";
@@ -27,6 +36,7 @@ export const ACCESS_LEVEL_LABELS: Record<AdminAccessLevel, string> = {
   inventory: "Inventory only",
   operations: "Operations only",
   inventory_operations: "Inventory + Operations (Full Access)",
+  dietitian: "Dietitian",
 };
 
 /** Backward-compatible default applied to NULL / unknown values. */
@@ -59,6 +69,7 @@ export function resolveAccessLevel(raw: unknown): AdminAccessLevel {
  *   inventory             -> inventory:true,  operations:false
  *   operations            -> inventory:false, operations:true
  *   inventory_operations  -> inventory:true,  operations:true
+ *   dietitian             -> inventory:false, operations:false  (Req 26.5, 26.6)
  */
 export function canAccess(level: AdminAccessLevel, area: AccessArea): boolean {
   switch (level) {
@@ -68,6 +79,9 @@ export function canAccess(level: AdminAccessLevel, area: AccessArea): boolean {
       return area === "operations";
     case "inventory_operations":
       return true;
+    case "dietitian":
+      // Grants no capability area; reachability is decided by the allow-list.
+      return false;
     default:
       // Unreachable for valid AdminAccessLevel; deny by default.
       return false;
@@ -155,16 +169,67 @@ export function classifyAdminPath(pathname: unknown): AccessArea | null {
  */
 
 /**
+ * Path prefixes (relative to the canonical /admin base) a Dietitian may reach
+ * (Req 5.4). The Report_Card lives at /admin/customers/[id]/report-card, so it
+ * is covered by the customers prefix.
+ */
+export const DIETITIAN_ALLOWED_PREFIXES = [
+  "/admin/customers",
+  "/admin/log-customer",
+  "/admin/profile",
+] as const;
+
+/**
+ * Is this level (or configuration) the Dietitian allow-list level?
+ * Total: never throws, returns false for anything else.
+ */
+export function isDietitianLevel(
+  levelOrConfig: AdminAccessLevel | AccessConfiguration,
+): boolean {
+  if (typeof levelOrConfig === "string") {
+    return levelOrConfig === DIETITIAN_ACCESS_LEVEL;
+  }
+  return (
+    levelOrConfig !== null &&
+    typeof levelOrConfig === "object" &&
+    levelOrConfig.level === DIETITIAN_ACCESS_LEVEL
+  );
+}
+
+/**
+ * Is the (already canonicalised, /admin-based) path inside the Dietitian
+ * allow-list? Case-sensitive, path-segment boundary matching — the same matcher
+ * the area/group classifiers use.
+ *
+ * Postcondition: non-string / empty / non-absolute input => false (deny), since
+ * a Dietitian's reachability is an allow-list rather than a deny-list.
+ */
+function isDietitianCanonicalPathAllowed(pathname: unknown): boolean {
+  if (
+    typeof pathname !== "string" ||
+    pathname.length === 0 ||
+    !pathname.startsWith("/")
+  ) {
+    return false;
+  }
+  return DIETITIAN_ALLOWED_PREFIXES.some((prefix) =>
+    matchesPrefixAtBoundary(pathname, prefix),
+  );
+}
+
+/**
  * The landing/home route for an access level.
  *
  * Postcondition (case-sensitive):
  *   - inventory             -> "/inventory"
  *   - operations            -> "/dashboard"
  *   - inventory_operations  -> "/dashboard"
+ *   - dietitian             -> "/customers"
  */
 export function landingRouteFor(
   level: AdminAccessLevel,
-): "/dashboard" | "/inventory" {
+): "/dashboard" | "/inventory" | "/customers" {
+  if (level === DIETITIAN_ACCESS_LEVEL) return "/customers";
   return level === "inventory" ? "/inventory" : "/dashboard";
 }
 
@@ -244,7 +309,8 @@ function isPermissionLevel(value: unknown): value is PermissionLevel {
  *   - level ∈ ADMIN_ACCESS_LEVELS (unknown/non-string => DEFAULT_ACCESS_LEVEL)
  *   - groups is populated ONLY when level === "operations"; each kept entry has
  *     key ∈ OPERATIONS_GROUPS and value ∈ PERMISSION_LEVELS (malformed dropped)
- *   - groups === {} for `inventory` / `inventory_operations`
+ *   - groups === {} for `inventory` / `inventory_operations` / `dietitian`
+ *     (Req 1.5)
  *   - a string `rawGroups` is parsed as JSON; parse failure => {}
  */
 export function resolveAccessConfiguration(
@@ -344,7 +410,7 @@ export function hasGroupAccess(
 ): boolean {
   if (config.level === "inventory_operations") return true;
   if (config.level === "operations") return config.groups[group] !== undefined;
-  return false; // inventory
+  return false; // inventory / dietitian
 }
 
 /** Does the configuration grant manage (write) access to the group (Req 5)? */
@@ -354,19 +420,81 @@ export function canManageGroup(
 ): boolean {
   if (config.level === "inventory_operations") return true;
   if (config.level === "operations") return config.groups[group] === "manage";
-  return false; // inventory
+  return false; // inventory / dietitian
+}
+
+// ─── Portal-neutral path gate ────────────────────────────────────────────────
+
+/** The portal bases the same Access_Level gate governs (Req 21.5). */
+export type PortalBase = "/admin" | "/franchise";
+
+/**
+ * Normalise a portal pathname onto the canonical `/admin` base so a single set
+ * of area / group / allow-list tables serves both portals.
+ *
+ * Postcondition:
+ *   - base "/admin"                      -> pathname unchanged (identity)
+ *   - "/franchise"                       -> "/admin"
+ *   - "/franchise/customers/1"           -> "/admin/customers/1"
+ *   - a path not under `base`            -> pathname unchanged
+ *
+ * The identity on "/admin" is what keeps `isAdminPathAllowed` byte-identical for
+ * every pre-existing caller and level (Req 26.5, 26.6).
+ */
+export function toCanonicalPath(
+  pathname: string,
+  base: PortalBase = "/admin",
+): string {
+  if (base === "/admin") return pathname;
+  if (pathname === base) return "/admin";
+  if (pathname.startsWith(base + "/")) {
+    return "/admin" + pathname.slice(base.length);
+  }
+  return pathname;
 }
 
 /**
- * Configuration-aware path gate. Accepts EITHER a legacy `AdminAccessLevel`
- * (coarse inventory-vs-operations area gate, preserved for existing callers)
- * OR an `AccessConfiguration` (group-aware gate).
+ * Portal-aware, configuration-aware path gate.
  *
- * Config-aware postcondition (Req 2.3, 3, 6, 8):
+ * Postcondition (Req 2.3, 3, 6, 8, 5.4, 21.5):
+ *   - dietitian level                      -> canonical path is in
+ *                                             DIETITIAN_ALLOWED_PREFIXES
+ *                                             (everything else denied)
  *   - neutral path                         -> true
  *   - inventory-area path                  -> level grants inventory
  *   - operations group page                -> hasGroupAccess(config, group)
  *   - operations-area non-group (dashboard)-> level is operations or full
+ */
+export function isPortalPathAllowed(
+  config: AccessConfiguration,
+  pathname: unknown,
+  base: PortalBase = "/admin",
+): boolean {
+  const canonical: unknown =
+    typeof pathname === "string" ? toCanonicalPath(pathname, base) : pathname;
+
+  // Dietitian short-circuits before any area / group classification.
+  if (isDietitianLevel(config)) {
+    return isDietitianCanonicalPathAllowed(canonical);
+  }
+
+  const area = classifyAdminPath(canonical);
+  if (area === null) return true; // neutral (profile, unclassified)
+  if (area === "inventory") {
+    return config.level === "inventory" || config.level === "inventory_operations";
+  }
+  // Operations area: gate by specific group when the path maps to one;
+  // otherwise it is an operations-neutral page (e.g. /admin/dashboard).
+  const group = classifyOperationsGroup(canonical);
+  if (group !== null) return hasGroupAccess(config, group);
+  return config.level === "operations" || config.level === "inventory_operations";
+}
+
+/**
+ * Admin-portal path gate. Accepts EITHER a legacy `AdminAccessLevel` (coarse
+ * inventory-vs-operations area gate, preserved verbatim for existing callers)
+ * OR an `AccessConfiguration`, in which case it is a thin `/admin` wrapper over
+ * `isPortalPathAllowed`.
  */
 export function isAdminPathAllowed(
   levelOrConfig: AdminAccessLevel | AccessConfiguration,
@@ -379,15 +507,5 @@ export function isAdminPathAllowed(
     return canAccess(levelOrConfig, area);
   }
 
-  const config = levelOrConfig;
-  const area = classifyAdminPath(pathname);
-  if (area === null) return true; // neutral (profile, unclassified)
-  if (area === "inventory") {
-    return config.level === "inventory" || config.level === "inventory_operations";
-  }
-  // Operations area: gate by specific group when the path maps to one;
-  // otherwise it is an operations-neutral page (e.g. /admin/dashboard).
-  const group = classifyOperationsGroup(pathname);
-  if (group !== null) return hasGroupAccess(config, group);
-  return config.level === "operations" || config.level === "inventory_operations";
+  return isPortalPathAllowed(levelOrConfig, pathname, "/admin");
 }

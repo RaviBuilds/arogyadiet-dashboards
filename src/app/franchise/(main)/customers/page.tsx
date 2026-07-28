@@ -1,10 +1,34 @@
 import { cookies } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { Users } from "lucide-react";
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
 import FranchiseCustomerDashboard from "./FranchiseCustomerDashboard";
 
 export const revalidate = 0;
+
+/**
+ * Resolve whether the signed-in franchise user is a Franchise Dietitian
+ * (dietitian-management, Req 23.1, 23.2) — read directly here rather than via
+ * `guardDietitianPage`/`getCurrentAdminContext`, since this page is reachable
+ * by every franchise Access_Level and must render the FULL workspace for
+ * every level except `dietitian`, not redirect them away.
+ */
+async function resolveIsFranchiseDietitian(): Promise<boolean> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { data } = await supabase
+    .from("users")
+    .select("admin_access_level")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  return data?.admin_access_level === "dietitian";
+}
 
 export default async function FranchiseCustomersPage() {
   const cookieStore = await cookies();
@@ -18,6 +42,7 @@ export default async function FranchiseCustomersPage() {
     );
   }
 
+  const isDietitian = await resolveIsFranchiseDietitian();
   const supabase = createAdminClient();
 
   // Fetch customers belonging to this franchise with full details
@@ -34,7 +59,7 @@ export default async function FranchiseCustomersPage() {
       franchise_id,
       clinic_id,
       clinics ( name ),
-      users!inner ( id, full_name, email, mobile, is_active ),
+      users!customer_profiles_user_id_fkey!inner ( id, full_name, email, mobile, is_active ),
       addresses ( pincode, is_primary ),
       subscriptions ( status, customer_category, subscription_plans ( name ), kit_products ( name ) )
     `)
@@ -116,7 +141,11 @@ export default async function FranchiseCustomersPage() {
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in duration-500">
-      <FranchiseCustomerDashboard customers={customers} franchiseId={franchiseId} />
+      <FranchiseCustomerDashboard
+        customers={customers}
+        franchiseId={franchiseId}
+        isDietitian={isDietitian}
+      />
     </div>
   );
 }

@@ -48,7 +48,7 @@ export default function FranchiseCustomers({ role, franchiseId }: FranchiseCusto
       const supabase = createClient();
       const { data } = await supabase
         .from("customer_profiles")
-        .select("id, customer_code, is_active, users(full_name, email, mobile)")
+        .select("id, customer_code, is_active, users!customer_profiles_user_id_fkey(full_name, email, mobile)")
         .eq("franchise_id", franchiseId)
         .order("created_at", { ascending: false })
         .limit(50);

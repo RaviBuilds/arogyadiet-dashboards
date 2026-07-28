@@ -73,6 +73,12 @@ export interface OnboardProfileInput {
   source?: string | null;
   franchise_id?: string | null;
   clinic_id?: string | null;
+  /**
+   * The Dietitian_Link selected at onboarding (dietitian-management, Req 7.7,
+   * 9.4). Persisted in the SAME atomic `customer_profiles` insert as the rest
+   * of the Customer_Record — not a follow-up call into AssignmentService.
+   */
+  dietitian_id?: string | null;
 }
 
 /** The `subscription` block of the RPC payload. */
@@ -267,7 +273,7 @@ export async function findCustomerByMobile(
   const { data, error } = await admin
     .from("users")
     .select(
-      "id, mobile, email, is_test_email, roles(code), customer_profiles(id, onboarding_status)"
+      "id, mobile, email, is_test_email, roles(code), customer_profiles!customer_profiles_user_id_fkey(id, onboarding_status)"
     )
     .eq("mobile", mobile);
 
@@ -315,7 +321,7 @@ export async function listByOnboardingStatus(
   let query = admin
     .from("customer_profiles")
     .select(
-      "id, customer_code, onboarding_status, franchise_id, clinic_id, created_at, users(id, full_name, mobile, email, is_test_email), subscriptions(customer_category, created_at)"
+      "id, customer_code, onboarding_status, franchise_id, clinic_id, created_at, users!customer_profiles_user_id_fkey(id, full_name, mobile, email, is_test_email), subscriptions(customer_category, created_at)"
     )
     .eq("onboarding_status", status);
 

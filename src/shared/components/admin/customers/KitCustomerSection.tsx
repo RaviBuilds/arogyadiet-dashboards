@@ -73,6 +73,8 @@ interface KitCustomerSectionProps {
   onExport: () => void;
   onEdit: (customer: CustomerData) => void;
   onDeactivate: (customer: CustomerData) => void;
+  /** Removes the mutating export/edit/deactivate controls for a Dietitian (dietitian-management, Req 16.1). */
+  isDietitian?: boolean;
 }
 
 function formatShippingDate(iso: string | null): string {
@@ -109,6 +111,7 @@ export function KitCustomerSection({
   onExport,
   onEdit,
   onDeactivate,
+  isDietitian = false,
 }: KitCustomerSectionProps) {
   const [shippingStatuses, setShippingStatuses] = useState<
     Map<string, KitCustomerShippingStatus>
@@ -239,7 +242,9 @@ export function KitCustomerSection({
       }
       actions={
         <>
-          <ExportButton onClick={onExport} disabled={customers.length === 0} />
+          {!isDietitian && (
+            <ExportButton onClick={onExport} disabled={customers.length === 0} />
+          )}
           <RefreshButton onClick={onRefresh} isLoading={isLoading} />
         </>
       }
@@ -260,6 +265,9 @@ export function KitCustomerSection({
               Clinic
             </TableHead>
             <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Dietitian
+            </TableHead>
+            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
               Shipment Status
             </TableHead>
             <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
@@ -271,7 +279,7 @@ export function KitCustomerSection({
           {(loadingExpired && showExpired) ? (
             <TableRow>
               <TableCell
-                colSpan={6}
+                colSpan={7}
                 className="text-center py-12 text-sm text-slate-500"
               >
                 <div className="flex flex-col items-center gap-1.5">
@@ -285,7 +293,7 @@ export function KitCustomerSection({
           ) : displayCustomers.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={6}
+                colSpan={7}
                 className="text-center py-12 text-sm text-slate-500"
               >
                 <div className="flex flex-col items-center gap-1.5">
@@ -380,6 +388,20 @@ export function KitCustomerSection({
                     </span>
                   </TableCell>
 
+                  {/* Dietitian */}
+                  <TableCell>
+                    <span
+                      className={cn(
+                        "text-sm",
+                        customer.dietitianName
+                          ? "text-slate-700"
+                          : "text-slate-400 italic"
+                      )}
+                    >
+                      {customer.dietitianName || "Unassigned"}
+                    </span>
+                  </TableCell>
+
                   {/* Shipment Status */}
                   <TableCell>
                     {loadingShipping ? (
@@ -444,23 +466,27 @@ export function KitCustomerSection({
                             Shipping
                           </Link>
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="cursor-pointer font-medium"
-                          onClick={() => onEdit(customer)}
-                        >
-                          <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
-                          Quick Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
-                          onClick={() => onDeactivate(customer)}
-                          disabled={!customer.isActive}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Deactivate Customer
-                        </DropdownMenuItem>
+                        {!isDietitian && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="cursor-pointer font-medium"
+                              onClick={() => onEdit(customer)}
+                            >
+                              <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
+                              Quick Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
+                              onClick={() => onDeactivate(customer)}
+                              disabled={!customer.isActive}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Deactivate Customer
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>

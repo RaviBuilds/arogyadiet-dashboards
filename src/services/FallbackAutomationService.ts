@@ -87,7 +87,7 @@ export async function runSubscriptionActivation(
   for (const sub of activated ?? []) {
     const { data: cp } = await supabaseAdmin
       .from("customer_profiles")
-      .select("users!inner(full_name)")
+      .select("users!customer_profiles_user_id_fkey!inner(full_name)")
       .eq("id", sub.customer_profile_id)
       .maybeSingle();
     activatedNames.push((cp as any)?.users?.full_name || "Unknown");
@@ -97,7 +97,7 @@ export async function runSubscriptionActivation(
   for (const sub of stopped ?? []) {
     const { data: cp } = await supabaseAdmin
       .from("customer_profiles")
-      .select("users!inner(full_name)")
+      .select("users!customer_profiles_user_id_fkey!inner(full_name)")
       .eq("id", sub.customer_profile_id)
       .maybeSingle();
     expiredNames.push((cp as any)?.users?.full_name || "Unknown");

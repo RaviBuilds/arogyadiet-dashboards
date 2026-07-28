@@ -30,6 +30,7 @@ import {
   Trash2,
   FileText,
   Navigation,
+  Users,
 } from "lucide-react";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
@@ -58,6 +59,7 @@ import InterGroupMoveDialog, {
 } from "./InterGroupMoveDialog";
 import { ClinicWiringDialog } from "./ClinicWiringDialog";
 import { AgreementDocsPanel } from "./AgreementDocsPanel";
+import { FranchiseUsersPanel } from "./FranchiseUsersPanel";
 
 // ───────────────────────────────────────────────────────────────────────────
 // Tree node shapes assembled by the Server Component (page.tsx) and passed in.
@@ -586,6 +588,23 @@ function FranchiseRow({
               aria-label="Agreement documents"
             >
               <FileText className="h-3.5 w-3.5 text-slate-400" />
+            </Button>
+          }
+        />
+        {/* dietitian-management Task 11.3: Franchise Users section, Create
+            Franchise User, Create/Edit Dietitian action. */}
+        <FranchiseUsersPanel
+          franchiseId={franchise.id}
+          franchiseName={franchise.name}
+          hasClinic={franchise.clinics.length > 0}
+          trigger={
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Franchise users"
+            >
+              <Users className="h-3.5 w-3.5 text-slate-400" />
             </Button>
           }
         />

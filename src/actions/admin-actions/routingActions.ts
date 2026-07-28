@@ -135,7 +135,7 @@ export async function getRoutingData(scope?: OperationsScope) {
     .from("delivery_orders")
     .select(`
       id, status, assigned_rider_id, delivery_date, customer_profile_id, franchise_id,
-      customer_profiles ( users ( full_name ) ),
+      customer_profiles ( users!customer_profiles_user_id_fkey ( full_name ) ),
       addresses!delivery_address_id ( pincode, lat, lng ),
       meal_categories ( name )
     `)

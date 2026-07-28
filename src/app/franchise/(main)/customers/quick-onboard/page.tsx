@@ -158,6 +158,8 @@ export default async function FranchiseQuickOnboardPage() {
         plans={plans}
         kitProducts={kitProducts}
         serviceAreaPincodes={serviceAreaPincodes}
+        isFranchiseSession
+        franchiseId={franchiseId}
       />
     </div>
   );

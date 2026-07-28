@@ -64,7 +64,7 @@ export default async function FranchiseDashboardPage() {
       .eq("status", "PENDING"),
     supabase
       .from("delivery_orders")
-      .select("id, status, customer_profiles(users(full_name)), rider_profiles(users(full_name))")
+      .select("id, status, customer_profiles(users!customer_profiles_user_id_fkey(full_name)), rider_profiles(users(full_name))")
       .eq("franchise_id", franchiseId)
       .eq("delivery_date", today)
       .order("route_sequence", { ascending: true })

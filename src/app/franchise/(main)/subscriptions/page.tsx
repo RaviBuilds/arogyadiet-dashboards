@@ -41,7 +41,7 @@ export default async function FranchiseSubscriptionsPage() {
   const subSelectFields = `
     id, starts_on, effective_end_on, ends_on, total_days, 
     pause_credits_total, pause_credits_used, status, created_at,
-    customer_profiles ( id, users ( full_name, email, mobile ) ),
+    customer_profiles ( id, users!customer_profiles_user_id_fkey ( full_name, email, mobile ) ),
     subscription_plans ( name, code )
   `;
 

@@ -115,8 +115,8 @@ export async function fetchRosterData(
 
   const cpEmbed =
     scope && scope !== "all"
-      ? "customer_profiles!inner ( franchise_id, users ( full_name ) )"
-      : "customer_profiles ( franchise_id, users ( full_name ) )";
+      ? "customer_profiles!inner ( franchise_id, users!customer_profiles_user_id_fkey ( full_name ) )"
+      : "customer_profiles ( franchise_id, users!customer_profiles_user_id_fkey ( full_name ) )";
 
   let query = supabase
     .from("subscription_daily_preferences")
@@ -255,7 +255,7 @@ export async function fetchPendingFailureApprovals(
       `
       id,
       franchise_id,
-      customer_profiles ( users ( full_name ) ),
+      customer_profiles ( users!customer_profiles_user_id_fkey ( full_name ) ),
       rider_profiles ( users ( full_name ) ),
       delivery_status_logs ( note, status, created_at )
     `,

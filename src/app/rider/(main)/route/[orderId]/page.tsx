@@ -125,7 +125,7 @@ export default async function RiderDeliveryDetailPage({
       meal_category:meal_categories ( name ),
       addon_orders ( addon_order_items ( quantity, products ( name ) ) ),
       delivery_address:addresses ( street_1, street_2, landmark, city, pincode, lat, lng ),
-      customer_profile:customer_profiles ( users ( full_name, mobile ) )
+      customer_profile:customer_profiles ( users!customer_profiles_user_id_fkey ( full_name, mobile ) )
     `,
     )
     .eq("id", orderId)

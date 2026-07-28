@@ -9,6 +9,7 @@
 // Requirements: 11.1, 11.2, 11.3, 11.4, 15.5
 
 import { useMemo, useState } from "react";
+import Image from "next/image";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
 import {
@@ -16,21 +17,15 @@ import {
   HeartPulse,
   Sparkles,
   Activity,
-  ClipboardList,
   ListChecks,
+  ArrowRight,
   type LucideIcon,
 } from "lucide-react";
 
-import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/shared/components/ui/card";
+import { Card, CardContent } from "@/shared/components/ui/card";
 import { requestAddonServiceAction } from "@/actions/addonServiceActions";
+import { cn } from "@/lib/utils";
 import type {
   AddonServiceRequest,
   AddonServiceStatus,
@@ -41,7 +36,41 @@ interface AvailableService {
   name: string;
   description: string; // max 150 chars (Req 11.1)
   icon: LucideIcon;
+  /** Visual tone — mirrors the dashboard's colour-coded quick-link cards
+   *  (blue/purple/amber) so each service reads distinctly at a glance
+   *  instead of every card looking identical. */
+  tone: "coral" | "purple" | "green";
+  /** Real photography shown full-clarity in its own band at the top of the
+   *  card (not smeared behind text — see TONE_STYLES comment below). */
+  bgImage: string;
 }
+
+const TONE_STYLES: Record<
+  AvailableService["tone"],
+  { chipBg: string; chipText: string; ring: string }
+> = {
+  coral: {
+    chipBg: "bg-primary/10",
+    chipText: "text-primary",
+    ring: "hover:border-primary/30",
+  },
+  purple: {
+    chipBg: "bg-purple-100",
+    chipText: "text-purple-600",
+    ring: "hover:border-purple-200",
+  },
+  green: {
+    chipBg: "bg-emerald-100",
+    chipText: "text-emerald-600",
+    ring: "hover:border-emerald-200",
+  },
+};
+
+/** Real photography deserves a zone of its own — a photo faded down to a
+ *  smear behind text never reads as premium, it reads as a rendering
+ *  glitch. Same lesson TodayFocusCard already applies to meal photography:
+ *  full-clarity image in its own band, gradient only where it meets the
+ *  content below. */
 
 const AVAILABLE_SERVICES: AvailableService[] = [
   {
@@ -50,6 +79,8 @@ const AVAILABLE_SERVICES: AvailableService[] = [
     description:
       "One-on-one wellness therapy session with our certified therapist.",
     icon: HeartPulse,
+    tone: "coral",
+    bgImage: "/Therapy%20Session.jpg",
   },
   {
     type: "MASSAGE",
@@ -57,6 +88,8 @@ const AVAILABLE_SERVICES: AvailableService[] = [
     description:
       "Traditional Ayurvedic massage for relaxation and rejuvenation.",
     icon: Sparkles,
+    tone: "purple",
+    bgImage: "/Ayurvedic%20massage.jpg",
   },
   {
     type: "YOGA",
@@ -64,12 +97,8 @@ const AVAILABLE_SERVICES: AvailableService[] = [
     description:
       "Personalized yoga session tailored to your wellness goals.",
     icon: Activity,
-  },
-  {
-    type: "CONSULTATION",
-    name: "Nutrition Consultation",
-    description: "One-on-one consultation with our nutrition expert.",
-    icon: ClipboardList,
+    tone: "green",
+    bgImage: "/Private%20Yoga%20Session.jpg",
   },
 ];
 
@@ -139,73 +168,136 @@ export function AddonServicesClient({
   }
 
   return (
-    <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div className="space-y-6 sm:space-y-8">
+      <div
+        className="reveal-rise grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-3"
+        style={{ ["--reveal-delay" as string]: "300ms" }}
+      >
         {AVAILABLE_SERVICES.map((service) => {
           const Icon = service.icon;
+          const tone = TONE_STYLES[service.tone];
           const isSelectedSubmitting =
             submitting && selectedService?.type === service.type;
 
           return (
-            <Card key={service.type} className="flex flex-col">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="rounded-full bg-primary/10 p-2 text-primary shrink-0">
-                    <Icon className="size-5" />
-                  </div>
-                  <CardTitle className="text-base">{service.name}</CardTitle>
+            <Card
+              key={service.type}
+              className={cn(
+                "group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white py-0 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg",
+                tone.ring,
+              )}
+            >
+              {/* Full-clarity photo band — its own zone, not smeared behind
+                  text. The icon chip overlaps the photo/content seam so the
+                  transition feels designed rather than accidental. */}
+              <div className="relative h-44 w-full overflow-hidden">
+                <Image
+                  src={service.bgImage}
+                  alt={service.name}
+                  fill
+                  sizes="(max-width: 768px) 100vw, 33vw"
+                  className="object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-white via-white/0 to-black/10" />
+              </div>
+
+              <CardContent className="relative flex flex-1 flex-col gap-3 p-5 pt-0 sm:p-6 sm:pt-0">
+                <div
+                  className={cn(
+                    "-mt-7 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-4 border-white shadow-sm",
+                    tone.chipBg,
+                    tone.chipText,
+                  )}
+                >
+                  <Icon className="h-6 w-6" />
                 </div>
-                <CardDescription>{service.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="mt-auto">
-                <Button
+                <div className="flex-1">
+                  <h3 className="text-base font-semibold text-slate-900">
+                    {service.name}
+                  </h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-slate-500">
+                    {service.description}
+                  </p>
+                </div>
+                <button
+                  type="button"
                   onClick={() => handleRequest(service)}
                   disabled={submitting || !customerProfileId}
-                  className="min-h-11 w-full"
+                  className="group mt-1 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:brightness-105 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
                 >
-                  {isSelectedSubmitting && (
-                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  {isSelectedSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      Request
+                      <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+                    </>
                   )}
-                  Request
-                </Button>
+                </button>
               </CardContent>
             </Card>
           );
         })}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ListChecks className="size-5 text-primary" />
+      <div
+        className="reveal-rise space-y-4"
+        style={{ ["--reveal-delay" as string]: "550ms" }}
+      >
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold tracking-tight text-slate-900">
             Your Requests
-          </CardTitle>
-          <CardDescription>
-            Previously submitted service requests, most recent first.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {sortedRequests.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No service requests submitted yet.
-            </p>
-          ) : (
-            <ul className="divide-y divide-border">
+          </h2>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+            {sortedRequests.length}
+          </span>
+        </div>
+
+        {sortedRequests.length === 0 ? (
+          <Card className="rounded-2xl border border-dashed border-slate-200 bg-white shadow-sm">
+            <CardContent className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                <ListChecks className="h-7 w-7" />
+              </div>
+              <p className="text-sm font-medium text-slate-600">
+                No service requests submitted yet.
+              </p>
+              <p className="max-w-xs text-xs leading-relaxed text-slate-400">
+                Pick a service above and it will show up here once requested.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <ul className="divide-y divide-slate-100">
               {sortedRequests.map((request) => {
                 const serviceMeta = AVAILABLE_SERVICES.find(
                   (s) => s.type === request.serviceType
                 );
+                const tone = serviceMeta
+                  ? TONE_STYLES[serviceMeta.tone]
+                  : TONE_STYLES.green;
+                const Icon = serviceMeta?.icon ?? ListChecks;
 
                 return (
                   <li
                     key={request.id}
-                    className="flex flex-wrap items-center justify-between gap-2 py-3 first:pt-0 last:pb-0"
+                    className="flex items-center gap-3 px-5 py-4 transition-colors hover:bg-slate-50/60 sm:px-6"
                   >
-                    <div>
-                      <p className="text-sm font-medium">
+                    <div
+                      className={cn(
+                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+                        tone.chipBg,
+                        tone.chipText,
+                      )}
+                    >
+                      <Icon className="h-[18px] w-[18px]" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900">
                         {serviceMeta?.name ?? request.serviceType}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-slate-500">
                         {format(
                           parseISO(request.requestedAt),
                           "dd MMM yyyy, hh:mm a"
@@ -214,7 +306,7 @@ export function AddonServicesClient({
                     </div>
                     <Badge
                       variant="outline"
-                      className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${
+                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${
                         STATUS_BADGE_STYLES[request.status]
                       }`}
                     >
@@ -224,9 +316,9 @@ export function AddonServicesClient({
                 );
               })}
             </ul>
-          )}
-        </CardContent>
-      </Card>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

@@ -71,7 +71,7 @@ import { CustomerOverview } from "./CustomerOverview";
 import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
 import { KitCustomerSection } from "./KitCustomerSection";
 import { AccommodationCustomerSection } from "./AccommodationCustomerSection";
-import { Plus, Upload, UserPlus } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
+import { Plus, Upload, UserPlus, Stethoscope } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
 import {
   clinicDisplayName,
   filterRowsByClinic,
@@ -98,6 +98,8 @@ export interface CustomerData {
   isActive: boolean;
   clinic_id: string | null;
   clinicName: string | null;
+  dietitianId?: string | null;
+  dietitianName?: string | null;
   hasCoords?: boolean;
 }
 
@@ -117,8 +119,20 @@ export interface ActiveSubscriptionData {
 export interface ShopOrderAdminData {
   id: string;
   created_at: string;
-  customer_profile_id: string;
+  /** `null` for a walk-in (non-subscriber) counter sale. */
+  customer_profile_id: string | null;
+  /** The subscriber's name, or the recorded walk-in buyer's name. */
   customer_name: string;
+  /** The buyer's mobile when known (subscriber or walk-in). */
+  customer_mobile?: string | null;
+  /** Set only for a walk-in sale; identifies the order as a counter sale. */
+  walkin_name?: string | null;
+  walkin_mobile?: string | null;
+  walkin_address?: string | null;
+  /** `users.id` of the admin who placed the order; `null` when self-serve. */
+  placed_by_user_id?: string | null;
+  /** Display name of the admin who placed the order, when known. */
+  placed_by_name?: string | null;
   total_amount: number | null;
   status: string | null;
   target_delivery_date: string | null;
@@ -137,12 +151,21 @@ export default function CustomerDashboard({
   pendingSubscriptions = [],
   stoppedSubscriptions = [],
   autoOpenCreate = false,
+  isDietitian = false,
 }: {
   customers?: CustomerData[];
   activeSubscriptions?: ActiveSubscriptionData[];
   pendingSubscriptions?: ActiveSubscriptionData[];
   stoppedSubscriptions?: ActiveSubscriptionData[];
   autoOpenCreate?: boolean;
+  /**
+   * Renders the read-only Dietitian workspace (dietitian-management, Req
+   * 15.1, 16.1, 16.6): replaces the Shop Orders + Onboarding CTAs with Log
+   * Customer, and removes every create/edit/deactivate/mutating-export/
+   * bulk-import control. Every other Access_Level is unaffected — this prop
+   * defaults to `false` so every existing caller keeps its current behavior.
+   */
+  isDietitian?: boolean;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Meal Customers");
@@ -154,7 +177,6 @@ export default function CustomerDashboard({
   // Filter States
   const [filterDiet, setFilterDiet] = useState<string>("ALL");
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
-  const [filterMedical, setFilterMedical] = useState<string>("ALL");
   const [showArchived, setShowArchived] = useState(false);
   const [showExpired, setShowExpired] = useState(false);
   const [clinicFilter, setClinicFilter] =
@@ -254,14 +276,8 @@ export default function CustomerDashboard({
       result = result.filter((customer) => customer.status === filterStatus);
     }
 
-    if (filterMedical === "Yes") {
-      result = result.filter((customer) => customer.hasMedicalHistory);
-    } else if (filterMedical === "No") {
-      result = result.filter((customer) => !customer.hasMedicalHistory);
-    }
-
     return result;
-  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterMedical, showArchived, clinicFilter, filterUnassignedClinic, filterNoCoords]);
+  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, showArchived, clinicFilter, filterUnassignedClinic, filterNoCoords]);
 
   // KIT Customer tab: same directory filtering pipeline, scoped to KIT category.
   const kitCustomers = useMemo(
@@ -585,32 +601,45 @@ export default function CustomerDashboard({
         activeTab={activeTab}
         onTabChange={handleTabChange}
         actions={
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="transition-all duration-200"
-              asChild
-            >
-              <Link href="/customers/assisted-order">
-                <ShoppingBag className="h-4 w-4 mr-1.5" />
-                Shop Orders
-              </Link>
-            </Button>
+          isDietitian ? (
+            // Req 15.1: Log Customer replaces the Shop Orders + Onboarding CTAs.
             <Button size="sm" className="transition-all duration-200" asChild>
-              <Link href="/customers/onboarding">
-                <UserPlus className="h-4 w-4 mr-1.5" />
-                Onboarding
+              <Link href="/log-customer">
+                <Stethoscope className="h-4 w-4 mr-1.5" />
+                Log Customer
               </Link>
             </Button>
-          </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="transition-all duration-200"
+                asChild
+              >
+                <Link href="/customers/assisted-order">
+                  <ShoppingBag className="h-4 w-4 mr-1.5" />
+                  Shop Orders
+                </Link>
+              </Button>
+              <Button size="sm" className="transition-all duration-200" asChild>
+                <Link href="/customers/onboarding">
+                  <UserPlus className="h-4 w-4 mr-1.5" />
+                  Onboarding
+                </Link>
+              </Button>
+            </div>
+          )
         }
       />
 
-      <AdminCreateCustomerModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-      />
+      {/* Req 16.1: the create-customer modal is a mutating control, never rendered for a Dietitian. */}
+      {!isDietitian && (
+        <AdminCreateCustomerModal
+          isOpen={isCreateModalOpen}
+          onClose={() => setIsCreateModalOpen(false)}
+        />
+      )}
 
       {activeTab === "Overview" ? (
         <CustomerOverview
@@ -693,10 +722,13 @@ export default function CustomerDashboard({
           }
           actions={
             <>
-              <ExportButton
-                onClick={handleExportExcel}
-                disabled={filteredCustomers.length === 0}
-              />
+              {/* Req 16.1: the mutating Excel export is removed for a Dietitian; RefreshButton is a read, so it stays. */}
+              {!isDietitian && (
+                <ExportButton
+                  onClick={handleExportExcel}
+                  disabled={filteredCustomers.length === 0}
+                />
+              )}
               <RefreshButton
                 onClick={handleRefreshISR}
                 isLoading={isLoading || isPending}
@@ -859,60 +891,8 @@ export default function CustomerDashboard({
                   </DropdownMenu>
                 </TableHead>
 
-                {/* Filterable: Medical History */}
-                <TableHead>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
-                      >
-                        <span>Medical History</span>
-                        <Filter
-                          className={cn(
-                            "ml-2 h-3.5 w-3.5",
-                            filterMedical !== "ALL"
-                              ? "text-primary fill-primary/20"
-                              : "text-muted-foreground/70",
-                          )}
-                        />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[180px]">
-                      <DropdownMenuLabel>Filter by History</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        onClick={() => setFilterMedical("ALL")}
-                        className={
-                          filterMedical === "ALL"
-                            ? "bg-accent font-semibold"
-                            : ""
-                        }
-                      >
-                        All Medical History
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterMedical("PROVIDED")}
-                        className={
-                          filterMedical === "PROVIDED"
-                            ? "bg-accent font-semibold"
-                            : ""
-                        }
-                      >
-                        Provided
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterMedical("EMPTY")}
-                        className={
-                          filterMedical === "EMPTY"
-                            ? "bg-accent font-semibold"
-                            : ""
-                        }
-                      >
-                        Empty
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                  Dietitian
                 </TableHead>
 
                 <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
@@ -1029,23 +1009,21 @@ export default function CustomerDashboard({
                       </div>
                     </TableCell>
 
-                    {/* Column 5: Medical History */}
+                    {/* Column 5: Dietitian */}
                     <TableCell>
-                      {customer.hasMedicalHistory ? (
-                        <Badge className="rounded-full border-blue-200 bg-blue-50 px-2.5 text-blue-700 shadow-none transition-all duration-200 hover:bg-blue-100">
-                          Provided
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-slate-200 bg-slate-50 px-2.5 text-slate-500 shadow-none"
-                        >
-                          Empty
-                        </Badge>
-                      )}
+                      <span
+                        className={cn(
+                          "text-sm",
+                          customer.dietitianName
+                            ? "text-slate-700"
+                            : "text-slate-400 italic",
+                        )}
+                      >
+                        {customer.dietitianName || "Unassigned"}
+                      </span>
                     </TableCell>
 
-                    {/* Column 6: Actions (Keep existing DropdownMenu code exactly as it is) */}
+                    {/* Column 7: Actions (Keep existing DropdownMenu code exactly as it is) */}
                     <TableCell>
                       {/* ... Existing DropdownMenu code ... */}
                       <DropdownMenu>
@@ -1075,23 +1053,28 @@ export default function CustomerDashboard({
                               </Link>
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="cursor-pointer font-medium"
-                            onClick={() => openEditModal(customer)}
-                          >
-                            <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
-                            Quick Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
-                            onClick={() => openDeleteModal(customer)}
-                            disabled={!customer.isActive}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Deactivate Customer
-                          </DropdownMenuItem>
+                          {/* Req 16.1: Quick Edit and Deactivate are mutating controls, removed for a Dietitian. */}
+                          {!isDietitian && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="cursor-pointer font-medium"
+                                onClick={() => openEditModal(customer)}
+                              >
+                                <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
+                                Quick Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
+                                onClick={() => openDeleteModal(customer)}
+                                disabled={!customer.isActive}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Deactivate Customer
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -1123,6 +1106,7 @@ export default function CustomerDashboard({
           onExport={handleExportExcel}
           onEdit={openEditModal}
           onDeactivate={openDeleteModal}
+          isDietitian={isDietitian}
         />
       ) : activeTab === "Accommodation Customers" ? (
         <AccommodationCustomerSection
@@ -1139,6 +1123,7 @@ export default function CustomerDashboard({
           onExport={handleExportExcel}
           onEdit={openEditModal}
           onDeactivate={openDeleteModal}
+          isDietitian={isDietitian}
         />
       ) : null}
 

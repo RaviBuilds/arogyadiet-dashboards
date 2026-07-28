@@ -1,8 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+// NOTE: the pure core module is imported directly (never `adminAccess.ts`,
+// which is `server-only`) so nothing server-only leaks into the edge bundle.
 import {
   resolveAccessConfiguration,
-  isAdminPathAllowed,
+  isPortalPathAllowed,
   landingRouteFor,
   type AccessConfiguration,
 } from "@/lib/auth/adminAccessCore";
@@ -183,7 +185,12 @@ export async function middleware(request: NextRequest) {
       userProfileResult = await supabase
         .from("users")
         .select(
-          "admin_access_level, admin_operations_access, roles(code), customer_profiles(id, onboarding_status)",
+          // `customer_profiles` has TWO foreign keys to `users` (`user_id` and
+          // the dietitian-management `dietitian_id`), so the embed MUST name the
+          // relationship or PostgREST fails with PGRST201 (ambiguous embedding),
+          // which would null out `roleCode` and bounce EVERY authenticated user
+          // to /unauthorized. We always want the customer's OWN profile here.
+          "admin_access_level, admin_operations_access, roles(code), customer_profiles!customer_profiles_user_id_fkey(id, onboarding_status)",
         )
         .eq("auth_user_id", user.id)
         .single();
@@ -326,10 +333,17 @@ export async function middleware(request: NextRequest) {
           response.headers.set("x-customer-profile-id", customerProfileId);
         }
 
-        // [Req 1.1–1.4] Resolve customer_category from active subscription and
+        // [Req 1.1–1.4] Resolve customer_category from active/pending subscription and
         // propagate via x-customer-category header. Uses the existing Supabase
         // client — no new instantiation. Falls back to empty string if no active
         // subscription or if the query fails (safe degradation per design).
+        //
+        // Mirrors the dashboard/kit-tracker pages' own fallback: a KIT customer
+        // whose kit has EXPIRED with no PENDING replacement still gets routed to
+        // the KIT dashboard/tracker recovery UI (see dashboard/page.tsx and
+        // kitLifecycleActions.getKitTrackerStateAction), so the sidebar must
+        // resolve to "KIT" in that case too — otherwise it shows the default
+        // meal-customer menu while the page content shows the KIT experience.
         let customerCategory = "";
         if (customerProfileId) {
           try {
@@ -338,11 +352,27 @@ export async function middleware(request: NextRequest) {
                 .from("subscriptions")
                 .select("customer_category")
                 .eq("customer_profile_id", customerProfileId)
-                .eq("status", "ACTIVE")
+                .in("status", ["ACTIVE", "PENDING"])
                 .order("created_at", { ascending: false })
                 .limit(1)
                 .maybeSingle();
-              customerCategory = catRow?.customer_category ?? "";
+
+              if (catRow?.customer_category) {
+                customerCategory = catRow.customer_category;
+                return;
+              }
+
+              // No active/pending subscription — check whether this customer
+              // has ever had a KIT subscription. If so, they remain a KIT
+              // customer (expired-kit recovery flow) until a new KIT is issued.
+              const { data: kitRow } = await supabase
+                .from("subscriptions")
+                .select("customer_category")
+                .eq("customer_profile_id", customerProfileId)
+                .eq("customer_category", "KIT")
+                .limit(1)
+                .maybeSingle();
+              customerCategory = kitRow?.customer_category ?? "";
             });
           } catch {
             // Query failure must not block navigation — fall back to empty string
@@ -375,7 +405,12 @@ export async function middleware(request: NextRequest) {
         const adminPath = url.pathname.startsWith("/admin")
           ? url.pathname
           : `/admin${url.pathname}`;
-        if (!isAdminPathAllowed(config, adminPath)) {
+        // [Req 5.4, 21.5] Same gate, explicit portal base. Behaviourally
+        // identical to the previous `isAdminPathAllowed(config, path)` call for
+        // every pre-existing level; `dietitian` short-circuits to its
+        // allow-list (customers / log-customer / profile) and is redirected to
+        // landingRouteFor("dietitian") === "/customers" otherwise.
+        if (!isPortalPathAllowed(config, adminPath, "/admin")) {
           return NextResponse.redirect(
             new URL(landingRouteFor(config.level), request.url),
           );
@@ -405,25 +440,29 @@ export async function middleware(request: NextRequest) {
       }
       // FRANCHISE_ADMIN with suspended franchise check
       if (currentSubdomain === "franchies" && roleCode === "FRANCHISE_ADMIN") {
+        // `id` is additive here (Req 21.6): it is compared against
+        // `franchises.owner_user_id` to resolve the Franchise_Owner override.
         const { data: franchiseUser } = await supabase
           .from("users")
-          .select("franchise_id")
+          .select("id, franchise_id")
           .eq("auth_user_id", user.id)
           .single();
 
         if (!franchiseUser?.franchise_id) {
-          // FRANCHISE_ADMIN with no franchise assigned
+          // [Req 21.9] FRANCHISE_ADMIN with no franchise assigned
           if (!url.pathname.startsWith("/unauthorized")) {
             return NextResponse.redirect(new URL("/unauthorized", request.url));
           }
         } else {
-          // Check if franchise is suspended
+          // Check if franchise is suspended. `owner_user_id` is additive
+          // (Req 21.6) and costs no extra round trip.
           const { data: franchise } = await supabase
             .from("franchises")
-            .select("status")
+            .select("status, owner_user_id")
             .eq("id", franchiseUser.franchise_id)
             .single();
 
+          // [Req 21.10]
           if (franchise?.status === "suspended" && !url.pathname.startsWith("/unauthorized")) {
             return NextResponse.redirect(new URL("/unauthorized", request.url));
           }
@@ -435,6 +474,32 @@ export async function middleware(request: NextRequest) {
             sameSite: "lax",
             path: "/",
           });
+
+          // [Req 21.5, 21.6, 21.7] Apply the SAME Access_Level path gate the
+          // admin portal uses, on the `/franchise` base. The Franchise_Owner
+          // (`franchises.owner_user_id`) is treated as `inventory_operations`,
+          // so the owner's reachability is unchanged. Every other franchise
+          // user is gated by their stored Access_Level — which, for a NULL /
+          // unrecognised value, still resolves to `inventory_operations`, so
+          // pre-existing franchise users are unaffected.
+          const isFranchiseOwner =
+            typeof franchise?.owner_user_id === "string" &&
+            franchise.owner_user_id === franchiseUser.id;
+          const franchiseConfig: AccessConfiguration = isFranchiseOwner
+            ? { level: "inventory_operations", groups: {} }
+            : config;
+          const franchisePath = url.pathname.startsWith("/franchise")
+            ? url.pathname
+            : `/franchise${url.pathname}`;
+          // Propagate the portal-based path so `(main)/layout.tsx` can re-apply
+          // the same gate as defense in depth without a second round trip
+          // (mirrors the `x-customer-*` headers set for the customer portal).
+          response.headers.set("x-portal-pathname", franchisePath);
+          if (!isPortalPathAllowed(franchiseConfig, franchisePath, "/franchise")) {
+            return NextResponse.redirect(
+              new URL(landingRouteFor(franchiseConfig.level), request.url),
+            );
+          }
         }
       }
     }

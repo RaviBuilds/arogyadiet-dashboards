@@ -38,6 +38,10 @@ export const accommodationOnboardingSchema = z
     // Admin-set temporary PIN for the customer's first login (mirrors the
     // mandatory Temp PIN field on the generic Quick Onboard flow).
     tempPin: z.string().regex(/^\d{6}$/, "Temporary PIN must be exactly 6 digits."),
+    // Optional Dietitian_Link selected in the Category & Plan step
+    // (dietitian-management, Req 9.1–9.4). Persisted atomically with the
+    // Customer_Record.
+    dietitianUserId: z.string().uuid("Select a valid dietitian.").optional(),
   })
   .superRefine((data, ctx) => {
     if (data.isSharedPayment) {

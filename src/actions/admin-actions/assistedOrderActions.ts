@@ -44,7 +44,9 @@ import {
 } from "@/services/AssistedOrderService";
 import type { AssistedOrderPricing } from "@/lib/shop/assisted-order/pricing";
 import type { CartLine } from "@/lib/shop/assisted-order/core";
+import type { WalkInCustomerInput } from "@/lib/shop/assisted-order/walkin";
 import type { ShopOrderDiscount } from "@/lib/pricing/inclusive-tax";
+import { revalidatePath } from "next/cache";
 
 // ---------------------------------------------------------------------------
 // Action result shape (consistent with existing admin/shop action conventions)
@@ -207,5 +209,47 @@ export async function markPaidAndPlaceOrderAction(
   if (!result.ok) {
     return { success: false, error: result.error };
   }
+
+  revalidatePath("/admin/customers/shop-orders");
+  revalidatePath("/admin/operations");
+  return { success: true, data: result.value };
+}
+
+/**
+ * Mark PAID and place a WALK-IN shop order — a counter sale to a buyer who has
+ * no customer profile (they purchased only a shop product, with no meal / kit /
+ * accommodation subscription).
+ *
+ * Same authorization and PAID gating as {@link markPaidAndPlaceOrderAction}; the
+ * buyer is identified by the recorded name (plus an optional mobile and address)
+ * instead of a `customer_profile_id`, so every unit that leaves shop stock still
+ * has exactly one auditable order behind it. The service validates the buyer
+ * details server-side and creates the sale already delivered (counter handover),
+ * so it never enters delivery routing.
+ */
+export async function markPaidAndPlaceWalkInOrderAction(
+  cart: CartLine[],
+  walkIn: WalkInCustomerInput,
+  discount?: ShopOrderDiscount,
+): Promise<AssistedOrderActionResult<PlaceOrderOutcome>> {
+  const resolved = await resolveAdminOperatorContext();
+  if (!resolved.ok) {
+    return { success: false, error: resolved.error };
+  }
+
+  const service = new AssistedOrderService();
+  const result = await service.placeWalkInOrder(
+    resolved.ctx,
+    cart,
+    walkIn,
+    "PAID",
+    discount,
+  );
+  if (!result.ok) {
+    return { success: false, error: result.error };
+  }
+
+  revalidatePath("/admin/customers/shop-orders");
+  revalidatePath("/admin/operations");
   return { success: true, data: result.value };
 }

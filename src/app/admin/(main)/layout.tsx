@@ -3,7 +3,12 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import AdminNavbar from "./AdminNavbar";
 import { OneSignalProvider } from "@/shared/components/notifications/OneSignalProvider";
-import { resolveAccessConfiguration, canAccess, landingRouteFor } from "@/lib/auth/adminAccess";
+import {
+  resolveAccessConfiguration,
+  canAccess,
+  landingRouteFor,
+  isDietitianLevel,
+} from "@/lib/auth/adminAccess";
 
 export default async function AdminLayout({
   children,
@@ -61,7 +66,14 @@ export default async function AdminLayout({
     userProfileData?.admin_access_level,
     userProfileData?.admin_operations_access,
   );
-  if (!canAccess(config.level, "operations")) {
+  //
+  // [Req 5.1, 5.4] A Dietitian grants NEITHER capability area, so the coarse
+  // area redirect must be skipped for `dietitian` — its landing route
+  // (/customers) lives inside this very layout group, so applying the redirect
+  // would bounce the Dietitian in a loop. Reachability for a Dietitian is
+  // decided by the allow-list gate in the middleware (and by
+  // `guardDietitianPage()` on the Dietitian-only pages) instead.
+  if (!isDietitianLevel(config) && !canAccess(config.level, "operations")) {
     return redirect(landingRouteFor(config.level));
   }
 

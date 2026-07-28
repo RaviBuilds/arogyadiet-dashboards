@@ -1,7 +1,14 @@
 "use client";
 
-import React, { useState, useTransition, useCallback, useEffect } from "react";
+import React, {
+  useState,
+  useTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+} from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { getServiceAreaPincodesAction } from "@/actions/pincodeActions";
@@ -52,10 +59,13 @@ import { ConfirmDeleteModal } from "../core/ConfirmDeleteModal";
 import { AdminMedicalUploadModal } from "./AdminMedicalUploadModal";
 import { ResetPinDialog } from "@/shared/components/admin/ResetPinDialog";
 import { ClinicAssignmentSelector } from "./ClinicAssignmentSelector";
+import { DietitianAssignmentSelector } from "./DietitianAssignmentSelector";
+import { CustomerHealthLogTab } from "./CustomerHealthLogTab";
 
 import {
   BadgeIndianRupee,
   CheckCircle2,
+  ChevronLeft,
   CreditCard,
   Download,
   Edit,
@@ -67,14 +77,12 @@ import {
   KeyRound,
   Loader2,
   MapPin,
-  Package,
   Plus,
   ReceiptText,
   Send,
   ShieldAlert,
   Star,
   Trash2,
-  Truck,
   UserCheck,
   UserX,
 } from "lucide-react";
@@ -89,8 +97,16 @@ import {
   type CouponRow,
 } from "./AdminCouponsTab";
 import { CourierForm } from "./CourierForm";
-import { AdminKitTrackerView } from "./kit-tracker/AdminKitTrackerView";
 import { KitEligibilityBadge } from "./KitEligibilityBadge";
+import { SendNewKitForm } from "./SendNewKitForm";
+import { listKitProductsAction } from "@/actions/admin-actions/kitProductActions";
+import { AdminKitOverviewPanel } from "./kit/AdminKitOverviewPanel";
+import { buildAdminKitOverview } from "@/lib/kit/adminKitOverview";
+import type {
+  AdminKitDailyLog,
+  AdminKitOverview,
+  AdminKitRecord,
+} from "@/types/kitLifecycle";
 import { AccommodationTab } from "./AccommodationTab";
 import type { ShippingInfo } from "@/types/kitShipping";
 
@@ -209,9 +225,15 @@ export function Customer360Dashboard({
   backHref = "/customers",
   customerCategory = null,
   kitSubscription = null,
+  kitOverview = null,
   existingShippingInfo = null,
   kitDailyLogs = [],
   customerClinicId = null,
+  customerDietitianId = null,
+  customerFranchiseId = null,
+  readOnlyClinicName = null,
+  readOnlyDietitianName = null,
+  isDietitian = false,
 }: {
   customer: CustomerProfile;
   initialSubscriptionData: InitialSubscriptionData;
@@ -220,20 +242,37 @@ export function Customer360Dashboard({
   hasActiveSubscription?: boolean;
   /** The customer's current Primary_Category ("MEAL" | "KIT" | "ACCOMMODATION"), if any. */
   customerCategory?: string | null;
-  /** Active KIT subscription details, present only when customerCategory is "KIT". */
+  /**
+   * The KIT subscription the Shipping tab manages — the newest dispatch, else
+   * the running KIT, else the most recent closed one. Present only when
+   * customerCategory is "KIT".
+   */
   kitSubscription?: KitSubscriptionInfo | null;
+  /**
+   * Every KIT this customer holds, grouped into current / newly dispatched /
+   * history. Drives the KIT tab. When omitted, a single-record overview is
+   * derived from `kitSubscription` + `kitDailyLogs` so older callers still work.
+   */
+  kitOverview?: AdminKitOverview | null;
   /** Existing courier/tracking info for the KIT order, if already saved. */
   existingShippingInfo?: ShippingInfo | null;
-  /** Daily logs for the KIT tracker (read-only display in admin view). */
-  kitDailyLogs?: Array<{
-    log_date: string;
-    status: "FOOD_TAKEN" | "FOOD_SKIPPED";
-    physical_activity_minutes: number | null;
-    physical_activity_name: string | null;
-    weight_kg: number | null;
-  }>;
+  /**
+   * Daily logs for the KIT tracker (read-only display in admin view). Only read
+   * when `kitOverview` is absent — the overview already carries each KIT's logs.
+   */
+  kitDailyLogs?: AdminKitDailyLog[];
   /** The customer's currently assigned clinic_id (for manual assignment on KIT customers). */
   customerClinicId?: string | null;
+  /** The customer's current Dietitian_Link (dietitian-management, Req 8.1, 9.5). */
+  customerDietitianId?: string | null;
+  /** The Customer_Record's franchise_id — non-null marks a franchise customer (Req 8.7). */
+  customerFranchiseId?: string | null;
+  /** Resolved Clinic name for the franchise read-only display (Req 8.7). */
+  readOnlyClinicName?: string | null;
+  /** Resolved Dietitian name for the franchise read-only display (Req 8.7). */
+  readOnlyDietitianName?: string | null;
+  /** Whether the VIEWING admin is a Dietitian — hides mutating controls elsewhere on this page (Req 16.1). */
+  isDietitian?: boolean;
   /**
    * Injectable server actions. Defaults to admin-scoped actions, so the admin
    * portal works unchanged. The franchise portal passes franchise-scoped
@@ -291,9 +330,10 @@ export function Customer360Dashboard({
   const [isPending, startTransition] = useTransition();
   const isKitCustomer = customerCategory === "KIT";
   const isAccommodationCustomer = customerCategory === "ACCOMMODATION";
+  const isMealCustomer = customerCategory === "MEAL";
   const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(
-    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription", "Accommodation"].includes(requestedTab)
+    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription", "Accommodation", "Health Log"].includes(requestedTab)
       ? requestedTab
       : "Profile & Medical",
   );
@@ -341,6 +381,73 @@ export function Customer360Dashboard({
     isOpen: false,
     addressId: "",
   });
+
+  // Send New KIT workflow (Req 4.1) — the form replaces the KIT subscription
+  // view inside the KIT tab. KIT products are fetched lazily on first open so
+  // the customer page doesn't pay for them on every load.
+  const [showSendNewKitForm, setShowSendNewKitForm] = useState(false);
+  const [kitProducts, setKitProducts] = useState<
+    { id: string; name: string; base_price: number }[]
+  >([]);
+  const [loadingKitProducts, setLoadingKitProducts] = useState(false);
+
+  // Callers that predate the multi-KIT overview (e.g. the franchise portal) only
+  // pass a single KIT subscription. Fold that into the same grouped shape so the
+  // KIT tab has one code path.
+  const resolvedKitOverview: AdminKitOverview = useMemo(() => {
+    if (kitOverview) return kitOverview;
+    if (!kitSubscription) {
+      return { current: null, incoming: null, history: [] };
+    }
+
+    const logs = kitDailyLogs ?? [];
+    const legacyRecord: AdminKitRecord = {
+      subscriptionId: kitSubscription.subscriptionId,
+      subscriptionCode: null,
+      kitProductName: kitSubscription.kitProductName,
+      kitDurationDays: kitSubscription.kitDurationDays,
+      status: kitSubscription.status,
+      startsOn: kitSubscription.startsOn,
+      endsOn: kitSubscription.endsOn,
+      basePrice: kitSubscription.basePrice,
+      taxRate: kitSubscription.taxRate,
+      kitReceivedDate: kitSubscription.kitReceivedDate,
+      kitTrackerEndDate: kitSubscription.kitTrackerEndDate,
+      kitTotalSkippedDays: kitSubscription.kitTotalSkippedDays,
+      createdAt: kitSubscription.startsOn,
+      shipping: null,
+      dailyLogs: logs,
+      daysTaken: logs.filter((log) => log.status === "FOOD_TAKEN").length,
+      daysSkipped: logs.filter((log) => log.status === "FOOD_SKIPPED").length,
+    };
+
+    return buildAdminKitOverview([legacyRecord]);
+  }, [kitOverview, kitSubscription, kitDailyLogs]);
+
+  const openSendNewKitForm = useCallback(() => {
+    setActiveTab("KIT");
+    setShowSendNewKitForm(true);
+
+    if (kitProducts.length > 0 || loadingKitProducts) return;
+
+    setLoadingKitProducts(true);
+    listKitProductsAction()
+      .then((result) => {
+        if (result.success) {
+          setKitProducts(
+            (result.data ?? []).map((product) => ({
+              id: product.id,
+              name: product.name,
+              base_price: Number(product.base_price),
+            })),
+          );
+        } else {
+          toast.error(result.error ?? "Failed to load KIT products.");
+        }
+      })
+      .catch(() => toast.error("Failed to load KIT products."))
+      .finally(() => setLoadingKitProducts(false));
+  }, [kitProducts.length, loadingKitProducts]);
 
   // Forms State
   const [personalForm, setPersonalForm] = useState({
@@ -541,14 +648,15 @@ export function Customer360Dashboard({
   return (
     <div className="w-full">
       <AdminSubmenuBar
-        tabs={
-          isKitCustomer
+        tabs={(() => {
+          const allTabs = isKitCustomer
             ? [
                 "Profile & Medical",
                 "KIT",
                 "Shipping",
                 "Addresses",
                 "Billing",
+                "Health Log",
                 "User Management",
               ]
             : isAccommodationCustomer
@@ -556,6 +664,7 @@ export function Customer360Dashboard({
                   "Profile & Medical",
                   "Accommodation",
                   "Billing",
+                  "Health Log",
                   "User Management",
                 ]
               : [
@@ -565,18 +674,23 @@ export function Customer360Dashboard({
                   "Billing",
                   "Coupons",
                   "User Management",
-                ]
-        }
+                ];
+          // Req 5.10, 16.1: "User Management" (PIN reset, email change,
+          // deactivate) and "Add Subscription" are pure write surfaces,
+          // removed entirely for a Dietitian's read-only workspace.
+          return isDietitian
+            ? allTabs.filter(
+                (tab) => tab !== "User Management" && tab !== "Add Subscription",
+              )
+            : allTabs;
+        })()}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         actions={
           isKitCustomer ? (
             <KitEligibilityBadge
               customerProfileId={customer.id}
-              onSendNewKit={() => {
-                setActiveTab("KIT");
-                toast.info("Send New KIT form will be available here.");
-              }}
+              onSendNewKit={openSendNewKitForm}
             />
           ) : undefined
         }
@@ -589,14 +703,17 @@ export function Customer360Dashboard({
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle>Personal Info</CardTitle>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsPersonalModalOpen(true)}
-                  className="h-8 w-8 text-muted-foreground hover:text-primary"
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
+                {/* Req 5.10, 16.1: no write control is rendered for a Dietitian. */}
+                {!isDietitian && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsPersonalModalOpen(true)}
+                    className="h-8 w-8 text-muted-foreground hover:text-primary"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                )}
               </CardHeader>
               <CardContent className="grid gap-4">
                 <div>
@@ -641,14 +758,16 @@ export function Customer360Dashboard({
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle>Dietary Profile</CardTitle>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsDietaryModalOpen(true)}
-                  className="h-8 w-8 text-muted-foreground hover:text-primary"
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
+                {!isDietitian && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsDietaryModalOpen(true)}
+                    className="h-8 w-8 text-muted-foreground hover:text-primary"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                )}
               </CardHeader>
               <CardContent className="grid gap-4">
                 <div>
@@ -670,14 +789,16 @@ export function Customer360Dashboard({
             <Card className="lg:col-span-1">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle>Medical Assessment</CardTitle>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsMedicalModalOpen(true)}
-                  className="h-8 w-8 text-muted-foreground hover:text-primary"
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
+                {!isDietitian && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsMedicalModalOpen(true)}
+                    className="h-8 w-8 text-muted-foreground hover:text-primary"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
                 <p className="text-sm font-medium text-muted-foreground mb-1">
@@ -743,7 +864,7 @@ export function Customer360Dashboard({
 
             {/* Clinic Assignment Card — for KIT customers, admin can manually assign.
                 Hidden for franchise admins since KIT customers are auto-assigned to the franchise clinic. */}
-            {isKitCustomer && !franchiseId && (
+            {isKitCustomer && !franchiseId && !customerFranchiseId && (
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle>Clinic Assignment</CardTitle>
@@ -761,10 +882,109 @@ export function Customer360Dashboard({
                   <p className="text-xs text-muted-foreground">
                     For KIT customers, the clinic must be assigned manually by the admin.
                   </p>
+                  {/* dietitian-management Req 8.1, 8.2, 8.3, 8.9 — a Dietitian
+                      dropdown scoped to the assigned Clinic's active Dietitians. */}
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground mb-2">
+                      Assigned Dietitian
+                    </p>
+                    <DietitianAssignmentSelector
+                      profileId={customer.id}
+                      currentDietitianId={customerDietitianId}
+                      mode="clinic"
+                      clinicId={customerClinicId}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Editable, clinic-scoped Dietitian dropdown for MEAL customers
+                (dietitian-management Req 7.1–7.5). MEAL customers are auto-assigned
+                to a Clinic via their address pincode, so the dropdown is scoped to
+                that Clinic's active Dietitians. Hidden for franchise MEAL customers,
+                which show the read-only card below (Req 7.6). */}
+            {isMealCustomer && !franchiseId && !customerFranchiseId && (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle>Dietitian Assignment</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground mb-2">
+                      Assigned Dietitian
+                    </p>
+                    <DietitianAssignmentSelector
+                      profileId={customer.id}
+                      currentDietitianId={customerDietitianId}
+                      mode="clinic"
+                      clinicId={customerClinicId}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Read-only Clinic + Dietitian text for a franchise KIT/MEAL customer (Req 8.7, 7.6). */}
+            {(isKitCustomer || isMealCustomer) && customerFranchiseId && (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle>Clinic Assignment</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Clinic</p>
+                    <p className="text-sm text-foreground">{readOnlyClinicName ?? "Unassigned"}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Dietitian</p>
+                    <p className="text-sm text-foreground">{readOnlyDietitianName ?? "Unassigned"}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Editable, all-Dietitians dropdown for ACCOMMODATION customers (Req 9.5). */}
+            {isAccommodationCustomer && !customerFranchiseId && (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle>Dietitian Assignment</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground mb-2">
+                      Assigned Dietitian
+                    </p>
+                    <DietitianAssignmentSelector
+                      profileId={customer.id}
+                      currentDietitianId={customerDietitianId}
+                      mode="all"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Read-only Report_Card link for KIT/ACCOMMODATION customers (Req 19.1). */}
+            {(isKitCustomer || isAccommodationCustomer) && (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle>Report Card</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`${backHref}/${customer.id}/report-card`}>
+                      View Report Card
+                    </Link>
+                  </Button>
                 </CardContent>
               </Card>
             )}
           </div>
+        )}
+
+        {activeTab === "Health Log" && (
+          <CustomerHealthLogTab customerProfileId={customer.id} />
         )}
 
         {activeTab === "Add Subscription" && (
@@ -776,109 +996,49 @@ export function Customer360Dashboard({
           />
         )}
 
-        {activeTab === "KIT" && kitSubscription && (
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight">
-                KIT Subscription
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Details of the current KIT package purchased by this customer.
-              </p>
-            </div>
+        {activeTab === "KIT" && showSendNewKitForm && (
+          <div className="space-y-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2 -ml-2 text-muted-foreground"
+              onClick={() => setShowSendNewKitForm(false)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Back to KIT details
+            </Button>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card className="border-primary/20 bg-primary/5">
-                <CardContent className="p-5 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      KIT Product
-                    </p>
-                    <p className="mt-2 text-xl font-black">
-                      {kitSubscription.kitProductName}
-                    </p>
-                  </div>
-                  <Package className="h-8 w-8 text-primary" />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-5 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      Duration
-                    </p>
-                    <p className="mt-2 text-2xl font-black">
-                      {kitSubscription.kitDurationDays}
-                      <span className="text-sm font-medium text-muted-foreground">
-                        {" "}
-                        days
-                      </span>
-                    </p>
-                  </div>
-                  <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-5 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      Status
-                    </p>
-                    <Badge
-                      variant="outline"
-                      className={
-                        kitSubscription.status === "ACTIVE"
-                          ? "mt-2 border-emerald-500 text-emerald-600 bg-emerald-50"
-                          : "mt-2 border-slate-300 text-slate-600 bg-slate-50"
-                      }
-                    >
-                      {kitSubscription.status}
-                    </Badge>
-                  </div>
-                  <BadgeIndianRupee className="h-8 w-8 text-muted-foreground/50" />
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Package Timeline</CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">
-                    Start Date
-                  </p>
-                  <p className="font-semibold">
-                    {kitSubscription.startsOn &&
-                    isValid(new Date(kitSubscription.startsOn))
-                      ? format(new Date(kitSubscription.startsOn), "PPP")
-                      : "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">
-                    End Date
-                  </p>
-                  <p className="font-semibold">
-                    {kitSubscription.endsOn &&
-                    isValid(new Date(kitSubscription.endsOn))
-                      ? format(new Date(kitSubscription.endsOn), "PPP")
-                      : "N/A"}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* KIT Tracker — read-only admin view */}
-            <AdminKitTrackerView
-              kitReceivedDate={kitSubscription.kitReceivedDate}
-              kitTrackerEndDate={kitSubscription.kitTrackerEndDate}
-              kitTotalSkippedDays={kitSubscription.kitTotalSkippedDays}
-              kitDurationDays={kitSubscription.kitDurationDays}
-              dailyLogs={kitDailyLogs ?? []}
-            />
+            {loadingKitProducts ? (
+              <div className="flex items-center gap-2 py-10 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Loading KIT products…</span>
+              </div>
+            ) : (
+              <SendNewKitForm
+                customerProfileId={customer.id}
+                kitProducts={kitProducts}
+                addresses={customer.addresses.map((address) => ({
+                  id: address.id,
+                  tag: address.tag,
+                  street_1: address.street_1,
+                  city: address.city,
+                  state: address.state,
+                  pincode: address.pincode,
+                }))}
+                onSuccess={() => {
+                  setShowSendNewKitForm(false);
+                  router.refresh();
+                }}
+              />
+            )}
           </div>
+        )}
+
+        {activeTab === "KIT" && !showSendNewKitForm && (
+          <AdminKitOverviewPanel
+            overview={resolvedKitOverview}
+            customerName={customer.full_name}
+          />
         )}
 
         {activeTab === "Shipping" && kitSubscription && (
@@ -888,7 +1048,12 @@ export function Customer360Dashboard({
                 Shipping Management
               </h2>
               <p className="text-sm text-muted-foreground">
-                Manage courier tracking for this customer&apos;s KIT order.
+                Manage courier tracking for{" "}
+                <span className="font-medium text-foreground">
+                  {kitSubscription.kitProductName}
+                </span>{" "}
+                ({kitSubscription.status.toLowerCase()}) — the customer&apos;s
+                most recent KIT order.
               </p>
             </div>
 

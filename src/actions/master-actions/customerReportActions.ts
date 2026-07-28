@@ -86,7 +86,7 @@ export async function getMasterCustomerList(): Promise<MasterCustomerRow[]> {
     .from("customer_profiles")
     .select(`
       id, is_active, dietary_preference, created_at,
-      users!inner ( id, full_name, email, mobile )
+      users!customer_profiles_user_id_fkey!inner ( id, full_name, email, mobile )
     `)
     .order("created_at", { ascending: false });
 
@@ -131,7 +131,7 @@ export async function getCustomerReportData(window: DateWindow): Promise<MasterC
     .from("customer_profiles")
     .select(`
       id, is_active, dietary_preference, created_at,
-      users!inner ( id, full_name, email, mobile )
+      users!customer_profiles_user_id_fkey!inner ( id, full_name, email, mobile )
     `)
     .gte("created_at", `${from}T00:00:00`)
     .order("created_at", { ascending: false });

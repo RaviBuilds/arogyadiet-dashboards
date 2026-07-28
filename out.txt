@@ -1,0 +1,10 @@
+﻿
+ RUN  v4.1.9 E:/Local Clients/Next.js/arogyadiet
+
+ Γ£ô src/actions/admin-actions/__tests__/__envcheck.test.ts > env check > can import assistedOrderActions 704ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  13:11:58
+   Duration  2.03s (transform 456ms, setup 544ms, import 42ms, tests 706ms, environment 0ms)
+

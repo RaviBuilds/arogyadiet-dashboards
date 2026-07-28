@@ -5,8 +5,17 @@ import { notFound } from "next/navigation";
 import { Customer360Dashboard } from "@/shared/components/admin/customers/Customer360Dashboard";
 import { Button } from "@/shared/components/ui/button";
 import { ChevronLeft } from "lucide-react";
-import { guardAdminGroup } from "@/lib/auth/adminAccess";
-import { getShippingInfoAction } from "@/actions/admin-actions/shippingActions";
+import { guardCustomersWorkspace } from "@/lib/auth/adminAccess";
+import * as kitLifecycleRepo from "@/repositories/kitLifecycleRepository";
+import {
+  buildAdminKitOverview,
+  mapAdminKitRecord,
+  resolveShippingTarget,
+} from "@/lib/kit/adminKitOverview";
+import {
+  transformShippingInfoRow,
+  type ShippingInfoRow,
+} from "@/types/kitShipping";
 
 export default async function Customer360Page({
   params,
@@ -14,7 +23,7 @@ export default async function Customer360Page({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await guardAdminGroup("customers");
+  const { isDietitian } = await guardCustomersWorkspace();
   const supabase = createAdminClient();
 
   // ── 1. Customer profile ───────────────────────────────────────────────────
@@ -31,7 +40,10 @@ export default async function Customer360Page({
       medical_history_notes,
       has_medical_history,
       clinic_id,
-      users!inner ( id, auth_user_id, full_name, email, mobile, is_active ),
+      franchise_id,
+      dietitian_id,
+      customer_code,
+      users!customer_profiles_user_id_fkey!inner ( id, auth_user_id, full_name, email, mobile, is_active ),
       addresses ( id, tag, street_1, street_2, landmark, city, state, pincode, is_primary, lat, lng, updated_at ),
       medical_documents ( id, file_name, storage_path, uploaded_at, file_size_bytes ),
       subscriptions ( id, status, starts_on, ends_on, effective_end_on, customer_category, kit_duration_days, kit_received_date, kit_tracker_end_date, kit_total_skipped_days, subscription_plans ( name ), kit_products ( name, base_price, tax_rate ) )
@@ -88,57 +100,72 @@ export default async function Customer360Page({
     })[0] ??
     null;
 
-  const customerCategory: string | null =
-    currentSubscription?.customer_category ?? null;
+  // Treat the customer as KIT whenever they hold any KIT subscription and no
+  // active subscription of another category. This keeps the KIT tabs for a
+  // lapsed KIT customer (expired kit, replacement not yet started) and for a
+  // brand-new PENDING kit, which has no starts_on to sort on — while a customer
+  // who has moved to an active MEAL/ACCOMMODATION plan still gets that portal.
+  const hasKitSubscription = allSubscriptions.some(
+    (s) => s.customer_category === "KIT",
+  );
+  const hasActiveNonKitSubscription = allSubscriptions.some(
+    (s) => s.status === "ACTIVE" && s.customer_category !== "KIT",
+  );
 
-  const kitSubscription =
-    customerCategory === "KIT" && currentSubscription
-      ? {
-          subscriptionId: currentSubscription.id as string,
-          kitProductName:
-            (currentSubscription.kit_products?.name as string) ??
-            "Unknown Product",
-          kitDurationDays: (currentSubscription.kit_duration_days as number) ?? 0,
-          status: (currentSubscription.status as string) ?? "ACTIVE",
-          startsOn: (currentSubscription.starts_on as string) ?? null,
-          endsOn:
-            (currentSubscription.effective_end_on as string) ??
-            (currentSubscription.ends_on as string) ??
-            null,
-          basePrice: (currentSubscription.kit_products?.base_price as number) ?? null,
-          taxRate: (currentSubscription.kit_products?.tax_rate as number) ?? null,
-          kitReceivedDate: (currentSubscription.kit_received_date as string) ?? null,
-          kitTrackerEndDate: (currentSubscription.kit_tracker_end_date as string) ?? null,
-          kitTotalSkippedDays: (currentSubscription.kit_total_skipped_days as number) ?? 0,
-        }
+  const customerCategory: string | null =
+    hasKitSubscription && !hasActiveNonKitSubscription
+      ? "KIT"
+      : (currentSubscription?.customer_category ?? null);
+
+  // ── 3c. Full KIT lifecycle for the KIT tab ───────────────────────────────
+  //       Every KIT the customer has held, each with its courier row and daily
+  //       logs, grouped into current / newly dispatched / history.
+  const kitOverview =
+    customerCategory === "KIT"
+      ? buildAdminKitOverview(
+          (await kitLifecycleRepo.getAdminKitRecordRows(id)).map(
+            mapAdminKitRecord,
+          ),
+        )
       : null;
 
-  // ── 3c. Fetch existing shipping info for KIT customers ────────────────────
-  const shippingResult = kitSubscription
-    ? await getShippingInfoAction(id)
+  // The Shipping tab manages one courier record at a time: the newest dispatch,
+  // else the running KIT, else the most recent closed one.
+  const shippingTarget = kitOverview ? resolveShippingTarget(kitOverview) : null;
+
+  const kitSubscription = shippingTarget
+    ? {
+        subscriptionId: shippingTarget.subscriptionId,
+        kitProductName: shippingTarget.kitProductName,
+        kitDurationDays: shippingTarget.kitDurationDays,
+        status: shippingTarget.status,
+        startsOn: shippingTarget.startsOn,
+        endsOn: shippingTarget.endsOn,
+        basePrice: shippingTarget.basePrice,
+        taxRate: shippingTarget.taxRate,
+        kitReceivedDate: shippingTarget.kitReceivedDate,
+        kitTrackerEndDate: shippingTarget.kitTrackerEndDate,
+        kitTotalSkippedDays: shippingTarget.kitTotalSkippedDays,
+      }
     : null;
-  const existingShippingInfo =
-    shippingResult?.success ? shippingResult.data ?? null : null;
 
-  // ── 3d. Fetch kit_daily_logs for the KIT subscription (admin read-only view)
-  let kitDailyLogs: Array<{
-    log_date: string;
-    status: "FOOD_TAKEN" | "FOOD_SKIPPED";
-    physical_activity_minutes: number | null;
-    physical_activity_name: string | null;
-    weight_kg: number | null;
-  }> = [];
+  // Courier details for exactly that subscription. Queried directly instead of
+  // via getShippingInfoAction(), which resolves only an ACTIVE subscription and
+  // therefore returns nothing for a pending dispatch or an expired kit.
+  let existingShippingInfo = null as ReturnType<
+    typeof transformShippingInfoRow
+  > | null;
 
-  if (kitSubscription) {
-    const { data: logsData } = await supabase
-      .from("kit_daily_logs")
-      .select(
-        "log_date, status, physical_activity_minutes, physical_activity_name, weight_kg"
-      )
-      .eq("subscription_id", kitSubscription.subscriptionId)
-      .order("log_date", { ascending: true });
+  if (shippingTarget) {
+    const { data: shippingRow } = await supabase
+      .from("kit_shipping_info")
+      .select("*")
+      .eq("subscription_id", shippingTarget.subscriptionId)
+      .maybeSingle();
 
-    kitDailyLogs = (logsData ?? []) as typeof kitDailyLogs;
+    existingShippingInfo = shippingRow
+      ? transformShippingInfoRow(shippingRow as ShippingInfoRow)
+      : null;
   }
 
   // ── 4. Fetch lookup data for the subscription form + coupons ─────────────
@@ -230,6 +257,28 @@ export default async function Customer360Page({
     (s) => s.status === "ACTIVE",
   ) ?? false;
 
+  // ── 5b. Resolve read-only Clinic/Dietitian names for a franchise customer
+  //        (Req 8.7) — the Clinic Assignment card shows plain text, not a
+  //        dropdown, when the Customer_Record carries a franchise_id.
+  const customerFranchiseId = (data as any).franchise_id ?? null;
+  const customerDietitianId = (data as any).dietitian_id ?? null;
+  const customerClinicId = (data as any).clinic_id ?? null;
+
+  let readOnlyClinicName: string | null = null;
+  let readOnlyDietitianName: string | null = null;
+  if (customerFranchiseId) {
+    const [{ data: clinicRow }, { data: dietitianRow }] = await Promise.all([
+      customerClinicId
+        ? supabase.from("clinics").select("name").eq("id", customerClinicId).maybeSingle()
+        : Promise.resolve({ data: null }),
+      customerDietitianId
+        ? supabase.from("users").select("full_name").eq("id", customerDietitianId).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    readOnlyClinicName = (clinicRow as { name: string } | null)?.name ?? null;
+    readOnlyDietitianName = (dietitianRow as { full_name: string } | null)?.full_name ?? null;
+  }
+
   // ── 6. Shape lookup data for the Add Subscription form ───────────────────
   // Compute the previous (most recent non-active) subscription's effective_end_on
   const previousSubscription = allSubscriptions
@@ -306,9 +355,14 @@ export default async function Customer360Page({
         hasActiveSubscription={hasActiveSubscription}
         customerCategory={customerCategory}
         kitSubscription={kitSubscription}
+        kitOverview={kitOverview}
         existingShippingInfo={existingShippingInfo}
-        kitDailyLogs={kitDailyLogs}
-        customerClinicId={(data as any).clinic_id ?? null}
+        customerClinicId={customerClinicId}
+        customerDietitianId={customerDietitianId}
+        customerFranchiseId={customerFranchiseId}
+        readOnlyClinicName={readOnlyClinicName}
+        readOnlyDietitianName={readOnlyDietitianName}
+        isDietitian={isDietitian}
       />
     </div>
   );

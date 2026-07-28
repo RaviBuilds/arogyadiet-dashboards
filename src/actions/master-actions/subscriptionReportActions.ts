@@ -90,7 +90,7 @@ export async function getMasterSubscriptionList(): Promise<MasterSubscriptionRow
     .select(`
       id, subscription_code, starts_on, ends_on, effective_end_on,
       status, pause_credits_used, created_at,
-      customer_profiles ( users ( full_name ) ),
+      customer_profiles ( users!customer_profiles_user_id_fkey ( full_name ) ),
       subscription_plans ( name, pause_credits )
     `)
     .order("created_at", { ascending: false })
@@ -135,7 +135,7 @@ export async function getSubscriptionReportData(window: DateWindow): Promise<Mas
     .select(`
       id, subscription_code, starts_on, ends_on, effective_end_on,
       status, pause_credits_used, created_at,
-      customer_profiles ( users ( full_name ) ),
+      customer_profiles ( users!customer_profiles_user_id_fkey ( full_name ) ),
       subscription_plans ( name, pause_credits )
     `)
     .gte("created_at", `${from}T00:00:00`)
