@@ -5,7 +5,6 @@ import {
   CalendarDays,
   Users,
   ArrowRight,
-  Droplet,
   FileText,
   Sparkles,
   MessageCircle,
@@ -452,23 +451,6 @@ export function AccommodationDashboard({
           Wellness & services
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Link href="/health-logs" className="block">
-            <Card className="h-full rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-              <CardContent className="flex items-center gap-3 p-5">
-                <div className="shrink-0 rounded-full bg-blue-100 p-2.5 text-blue-600">
-                  <Droplet className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-slate-900">
-                    My Health Logs
-                  </p>
-                  <p className="text-xs text-slate-500">Log daily activity</p>
-                </div>
-                <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" />
-              </CardContent>
-            </Card>
-          </Link>
-
           <Link href="/health-report" className="block">
             <Card className="h-full rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
               <CardContent className="flex items-center gap-3 p-5">

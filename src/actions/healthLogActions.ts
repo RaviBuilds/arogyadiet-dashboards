@@ -8,16 +8,12 @@
 //
 // Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 10.1, 13.5, 13.6
 
-import { createClient } from "@/lib/supabase/server";
 import * as healthLogRepository from "@/repositories/healthLogRepository";
 import * as stayRepository from "@/repositories/stayRepository";
 import {
-  customerHealthLogSchema,
   adminHealthLogSchema,
-  type CustomerHealthLogInput,
   type AdminHealthLogInput,
 } from "@/validations/accommodationSchema";
-import { getISTDateString } from "@/lib/dates/ist";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,112 +22,6 @@ import { getISTDateString } from "@/lib/dates/ist";
 type ActionSuccess<T> = { success: true; data: T };
 type ActionError = { error: string; fieldErrors?: Record<string, string> };
 type ActionResult<T> = ActionSuccess<T> | ActionError;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Authenticate the current customer session and resolve their customer_profile_id.
- * Mirrors the pattern from kitLifecycleActions.
- */
-async function authenticateCustomer(): Promise<
-  { success: true; customerProfileId: string } | { success: false; error: string }
-> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
-    return { success: false, error: "Unauthorized" };
-  }
-
-  const { data: dbUser } = await supabase
-    .from("users")
-    .select("id")
-    .eq("auth_user_id", user.id)
-    .single();
-
-  if (!dbUser) {
-    return { success: false, error: "User not found." };
-  }
-
-  const { data: profile } = await supabase
-    .from("customer_profiles")
-    .select("id")
-    .eq("user_id", dbUser.id)
-    .single();
-
-  if (!profile) {
-    return { success: false, error: "Customer profile not found." };
-  }
-
-  return { success: true, customerProfileId: profile.id };
-}
-
-// ---------------------------------------------------------------------------
-// 9.1, 9.2, 9.3, 9.4 — submitCustomerHealthLogAction
-// ---------------------------------------------------------------------------
-
-/**
- * Submit (upsert) a customer health log entry for today's date.
- *
- * - Authenticates the customer
- * - Validates active stay requirement
- * - Validates input with customerHealthLogSchema
- * - Upserts the log for (stay_entry_id, today IST)
- *
- * Req 9.1, 9.2, 9.3, 9.4
- */
-export async function submitCustomerHealthLogAction(
-  input: CustomerHealthLogInput
-): Promise<ActionResult<null>> {
-  try {
-    // 1. Authenticate customer
-    const auth = await authenticateCustomer();
-    if (!auth.success) {
-      return { error: auth.error };
-    }
-
-    // 2. Get customer's active stay
-    const activeStay = await stayRepository.getActiveStay(auth.customerProfileId);
-    if (!activeStay) {
-      return { error: "Health logging is available during active stays only" };
-    }
-
-    // 3. Validate input
-    const parsed = customerHealthLogSchema.safeParse(input);
-    if (!parsed.success) {
-      const fieldErrors: Record<string, string> = {};
-      for (const issue of parsed.error.issues) {
-        const field = issue.path.join(".");
-        if (field && !fieldErrors[field]) {
-          fieldErrors[field] = issue.message;
-        }
-      }
-      return { error: "Validation failed", fieldErrors };
-    }
-
-    // 4. Upsert customer health log for today (IST)
-    const todayIST = getISTDateString();
-    await healthLogRepository.upsertCustomerHealthLog({
-      stay_entry_id: activeStay.id,
-      customer_profile_id: auth.customerProfileId,
-      log_date: todayIST,
-      water_intake_liters: parsed.data.waterIntakeLiters,
-      activity_name: parsed.data.activityName ?? null,
-      activity_duration_minutes: parsed.data.activityDurationMinutes ?? null,
-    });
-
-    return { success: true, data: null };
-  } catch (err) {
-    console.error("submitCustomerHealthLogAction error:", err);
-    return { error: "Failed to save health log. Please try again." };
-  }
-}
 
 // ---------------------------------------------------------------------------
 // 10.1, 13.5 — submitAdminHealthLogAction

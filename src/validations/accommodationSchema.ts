@@ -107,43 +107,6 @@ export const createStaySchema = z.object({
 export type CreateStayInput = z.infer<typeof createStaySchema>;
 
 /**
- * Schema for customer-submitted daily health log entries.
- *
- * Includes conditional validation via superRefine:
- * - When `activityDurationMinutes` is provided, `activityName` must be
- *   non-empty (trimmed) to ensure duration always has a named activity.
- *
- * Validates: Requirements 9.1, 9.4
- */
-export const customerHealthLogSchema = z
-  .object({
-    waterIntakeLiters: z.coerce
-      .number()
-      .min(0.1)
-      .max(15.0)
-      .multipleOf(0.1),
-    activityName: z.string().max(100).optional(),
-    activityDurationMinutes: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(1440)
-      .optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.activityDurationMinutes && !data.activityName?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["activityName"],
-        message: "Activity name is required when duration is provided.",
-      });
-    }
-  });
-
-/** Inferred input type for customer health log submission. */
-export type CustomerHealthLogInput = z.infer<typeof customerHealthLogSchema>;
-
-/**
  * Schema for admin-submitted daily health monitoring data.
  *
  * All metric fields are optional — the admin may record only the metrics

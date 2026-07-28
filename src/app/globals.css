@@ -600,3 +600,14 @@
     animation: none;
   }
 }
+
+/* Hides the scrollbar chrome while keeping the element scrollable.
+   Used by the customer sidebar so the nav never shows a scrollbar,
+   yet remains reachable on very short viewports. */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE and legacy Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Edge */
+}

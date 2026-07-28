@@ -1,7 +1,7 @@
 // src/services/CadenceService.ts
 // Feature: dietitian-management — CadenceService (task 7.16).
 //
-// Assembles the four batched `cadenceRepository` queries, injects `today` via
+// Assembles the batched `cadenceRepository` queries, injects `today` via
 // `getISTDateString()`, and delegates the pure cadence math to
 // `computeCadence` (`src/lib/dietitian/cadence.ts`). This is the SINGLE place
 // every pending/overdue number and Self_Log-adherence count in the product
@@ -25,7 +25,7 @@ import { computeCadence, type CadenceSnapshot } from "@/lib/dietitian/cadence";
 import {
   getGoverningRecords,
   getLastDietitianLogDates,
-  getPausedDatesSince,
+  getNonEligibleDatesSince,
   getSelfLogDatesInWindow,
   type GoverningRecord,
   type SelfLogEntry,
@@ -59,7 +59,7 @@ export interface CadenceResult extends CadenceSnapshot {
 
 /**
  * Computes the cadence snapshot and Self_Log adherence counts for every
- * customer in `customerProfileIds`, in at most four batched repository
+ * customer in `customerProfileIds`, in a fixed handful of batched repository
  * queries regardless of list size (design "Cadence flow").
  *
  * A customer missing from `getGoverningRecords()` is reported with every
@@ -112,8 +112,11 @@ export async function computeCadenceForCustomers(
   // 2. Last DIETITIAN log_date per customer — Req 14.4, 14.6.
   const lastLogDates = await getLastDietitianLogDates(customerProfileIds);
 
-  // 3. Paused dates after the shared cutoff — Req 14.9.
-  const pausedDates = await getPausedDatesSince(
+  // 3. Non-Eligible_Days after the shared cutoff — Req 14.9. MEAL Paused_Days
+  // and KIT skipped days both land here: a skipped KIT day does not run the
+  // plan and already extends `kit_tracker_end_date`, so it is excluded from
+  // Eligible_Days exactly like a pause.
+  const pausedDates = await getNonEligibleDatesSince(
     customerProfileIds,
     earliestWindowStart,
   );

@@ -44,16 +44,6 @@ export interface AdminHealthLogRow {
   updated_at: string;
 }
 
-/** Input for upserting a customer health log entry. */
-export interface UpsertCustomerHealthLogInput {
-  stay_entry_id: string;
-  customer_profile_id: string;
-  log_date: string;
-  water_intake_liters: number;
-  activity_name?: string | null;
-  activity_duration_minutes?: number | null;
-}
-
 /** Input for inserting an admin health log entry. */
 export interface InsertAdminHealthLogInput {
   stay_entry_id: string;
@@ -67,52 +57,13 @@ export interface InsertAdminHealthLogInput {
 }
 
 // ---------------------------------------------------------------------------
-// Customer Health Logs
+// Customer Health Logs (read-only)
 // ---------------------------------------------------------------------------
-
-/**
- * Upsert a customer health log entry.
- *
- * Uses Supabase's `.upsert()` with `onConflict: 'stay_entry_id,log_date'`
- * to ensure only one entry exists per day per stay. If a record already exists
- * for the given (stay_entry_id, log_date), it is updated with the new values.
- *
- * Returns the upserted row.
- *
- * Req 9.2, 9.3
- */
-export async function upsertCustomerHealthLog(
-  input: UpsertCustomerHealthLogInput
-): Promise<CustomerHealthLogRow> {
-  const admin = createAdminClient();
-
-  const { data, error } = await admin
-    .from("customer_health_logs")
-    .upsert(
-      {
-        stay_entry_id: input.stay_entry_id,
-        customer_profile_id: input.customer_profile_id,
-        log_date: input.log_date,
-        water_intake_liters: input.water_intake_liters,
-        activity_name: input.activity_name ?? null,
-        activity_duration_minutes: input.activity_duration_minutes ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "stay_entry_id,log_date" }
-    )
-    .select(
-      "id, stay_entry_id, customer_profile_id, log_date, water_intake_liters, activity_name, activity_duration_minutes, created_at, updated_at"
-    )
-    .single();
-
-  if (error) {
-    throw new Error(
-      `Failed to upsert customer health log for stay ${input.stay_entry_id} on ${input.log_date}: ${error.message}`
-    );
-  }
-
-  return data as CustomerHealthLogRow;
-}
+//
+// Customer self-capture of health logs has been removed — accommodation
+// customers no longer submit their own logs (they only see logs authored by
+// their dietitian). This read remains because the admin Health Log form and
+// the dietitian timeline view still surface any historical customer entries.
 
 /**
  * Get all customer health logs for a stay entry, ordered by log_date descending.

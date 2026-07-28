@@ -12,12 +12,22 @@
 import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer";
 import React from "react";
 
-import { getISTDateString } from "@/lib/dates/ist";
+import { getISTDateString, istDateStringOf } from "@/lib/dates/ist";
+import { deserializeCustomParameters } from "@/lib/dietitian/customParameters";
 import { createAdminClient } from "@/lib/supabase/admin";
+import * as healthRepo from "@/repositories/healthReportRepository";
 import * as repo from "@/repositories/kitLifecycleRepository";
 import type { KitDailyLogRow } from "@/repositories/kitLifecycleRepository";
+import type { ParameterValue } from "@/types/dietitian";
 
-import { KitReportDocument, type KitReportData } from "./KitReportTemplate";
+import {
+  KitReportDocument,
+  type KitBPTrendPoint,
+  type KitDietitianLogEntry,
+  type KitReportData,
+  type KitReportTrends,
+  type KitTrendPoint,
+} from "./KitReportTemplate";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -25,6 +35,20 @@ import { KitReportDocument, type KitReportData } from "./KitReportTemplate";
 
 /** Maximum time allowed for PDF generation before timeout (ms). Req 9.6, 10.5 */
 const GENERATION_TIMEOUT_MS = 30_000;
+
+/**
+ * Cache epoch for the KIT report template.
+ *
+ * EXPIRED KIT reports are cached as rendered PDF bytes, so a template change
+ * would otherwise keep serving the old layout forever for already-expired
+ * KITs. Any cache row generated before this instant is treated as stale and
+ * re-rendered (the save is an upsert, so the stale row is overwritten in
+ * place — nothing is deleted). Bump this whenever the template's content or
+ * data shape changes.
+ *
+ * Current epoch: dual customer + dietitian log sections.
+ */
+const TEMPLATE_CACHE_EPOCH = Date.parse("2026-07-29T00:00:00Z");
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -73,10 +97,12 @@ export async function generateReport(
     throw new ReportError("KIT has not been started yet.", 400);
   }
 
-  // 2. For EXPIRED KITs, check cache first (Req 10.4)
+  // 2. For EXPIRED KITs, check cache first (Req 10.4). A cache row rendered
+  //    by an older template revision is ignored so the reader always gets the
+  //    current layout; step 4 overwrites it.
   if (subscription.status === "EXPIRED") {
     const cached = await repo.getCachedReport(subscriptionId);
-    if (cached && cached.pdf_data) {
+    if (cached && cached.pdf_data && !isCacheStale(cached.generated_at)) {
       return Buffer.from(cached.pdf_data);
     }
   }
@@ -120,15 +146,6 @@ async function generateWithTimeout(
 async function generatePdf(
   subscription: repo.KitSubscriptionRow
 ): Promise<Buffer> {
-  // Fetch daily logs for the subscription
-  const dailyLogs = await repo.getDailyLogsForSubscription(subscription.id);
-
-  // Fetch customer name
-  const customerName = await getCustomerName(subscription.customer_profile_id);
-
-  // Fetch KIT product name
-  const kitProductName = await getKitProductName(subscription.kit_product_id);
-
   // Determine date range based on status
   const startDate = subscription.kit_received_date!;
   let endDate: string;
@@ -141,6 +158,20 @@ async function generatePdf(
     endDate = getISTDateString(0);
   }
 
+  // Both log sources plus the header names, fetched in parallel — the customer's
+  // own `kit_daily_logs` and the Dietitian-authored `health_logs` inside the
+  // same tracker window, so the report shows one period from two authors.
+  const [dailyLogs, kitProductName, headerInfo, dietitianLogs] = await Promise.all([
+    repo.getDailyLogsForSubscription(subscription.id),
+    getKitProductName(subscription.kit_product_id),
+    healthRepo.getReportHeaderInfo(subscription.customer_profile_id),
+    healthRepo.getDietitianHealthLogsInWindow(
+      subscription.customer_profile_id,
+      startDate,
+      endDate,
+    ),
+  ]);
+
   // Build the full date range array
   const dateRange = buildDateRange(startDate, endDate);
 
@@ -150,10 +181,18 @@ async function generatePdf(
     dailyLogsByDate.set(log.log_date, log);
   }
 
+  const dietitianEntries: KitDietitianLogEntry[] = dietitianLogs.map((log) => ({
+    logDate: log.logDate,
+    parameters: log.parameters,
+    customParameters: deserializeCustomParameters(log.customParameters),
+    closingComment: log.closingComment,
+  }));
+
   // Assemble the report data
   const reportData: KitReportData = {
-    customerName,
+    customerName: headerInfo.customerName,
     kitProductName,
+    dietitianName: headerInfo.dietitianName,
     durationDays: subscription.kit_duration_days ?? 0,
     startDate,
     endDate: subscription.status === "EXPIRED" ? endDate : null,
@@ -161,6 +200,9 @@ async function generatePdf(
     totalSkippedDays: subscription.kit_total_skipped_days ?? 0,
     dailyLogsByDate,
     dateRange,
+    dietitianEntries,
+    trends: buildTrends(dateRange, dailyLogsByDate, dietitianLogs),
+    generatedAtIst: formatGeneratedAtIst(new Date()),
   };
 
   // Render PDF to buffer using @react-pdf/renderer
@@ -174,26 +216,85 @@ async function generatePdf(
 }
 
 /**
- * Fetch the customer's full_name via the users table.
- * Falls back to "Customer" if not found.
+ * Build the trend series the report charts.
+ *
+ * Weight is split by author: the customer's daily self-logged `weight_kg` and
+ * the Dietitian's `weight` parameter stay as separate series because they are
+ * separate measurements. BP and Fasting Sugar exist only in Dietitian logs —
+ * `kit_daily_logs` has no column for either.
  */
-async function getCustomerName(customerProfileId: string): Promise<string> {
-  const admin = createAdminClient();
+function buildTrends(
+  dateRange: readonly string[],
+  dailyLogsByDate: ReadonlyMap<string, KitDailyLogRow>,
+  dietitianLogs: readonly healthRepo.DietitianHealthLogRow[],
+): KitReportTrends {
+  const customerWeight: KitTrendPoint[] = [];
+  const dietitianWeight: KitTrendPoint[] = [];
+  const bp: KitBPTrendPoint[] = [];
+  const fastingSugar: KitTrendPoint[] = [];
 
-  const { data } = await admin
-    .from("customer_profiles")
-    .select("users!customer_profiles_user_id_fkey(full_name)")
-    .eq("id", customerProfileId)
-    .maybeSingle();
+  // dateRange is chronological, so the series come out date-ascending.
+  for (const date of dateRange) {
+    const log = dailyLogsByDate.get(date);
+    if (log && log.status === "FOOD_TAKEN" && log.weight_kg !== null) {
+      customerWeight.push({ date, value: log.weight_kg });
+    }
+  }
 
-  if (!data || !data.users) return "Customer";
+  // The repository already orders dietitian logs by log_date ascending.
+  for (const log of dietitianLogs) {
+    const params = log.parameters ?? {};
 
-  const users = data.users as
-    | { full_name?: string | null }
-    | { full_name?: string | null }[];
-  const user = Array.isArray(users) ? users[0] : users;
+    const weightValue = readNumericParameter(params.weight);
+    if (weightValue !== null) {
+      dietitianWeight.push({ date: log.logDate, value: weightValue });
+    }
 
-  return user?.full_name?.trim() || "Customer";
+    const bpValue = params.bp as ParameterValue | undefined;
+    if (bpValue && "systolic" in bpValue) {
+      bp.push({ date: log.logDate, systolic: bpValue.systolic, diastolic: bpValue.diastolic });
+    }
+
+    const sugarValue = readNumericParameter(params.fasting_sugar);
+    if (sugarValue !== null) {
+      fastingSugar.push({ date: log.logDate, value: sugarValue });
+    }
+  }
+
+  return { customerWeight, dietitianWeight, bp, fastingSugar };
+}
+
+/** Reads a numeric `ParameterValue`'s value, or `null` when absent/non-numeric. */
+function readNumericParameter(value: ParameterValue | undefined): number | null {
+  if (!value) return null;
+  if ("systolic" in value) return null;
+  if (typeof value.value === "number") return value.value;
+  return null;
+}
+
+/** Formats a generation instant as a display string in IST, mirroring the Health Report. */
+function formatGeneratedAtIst(instant: Date): string {
+  const dateStr = istDateStringOf(instant);
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const timeStr = new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(instant);
+  return `${day} ${months[month - 1]} ${year}, ${timeStr} IST`;
+}
+
+/** True when a cached PDF predates the current template revision. */
+function isCacheStale(generatedAt: string | null | undefined): boolean {
+  if (!generatedAt) return true;
+  const generatedMs = Date.parse(generatedAt);
+  if (Number.isNaN(generatedMs)) return true;
+  return generatedMs < TEMPLATE_CACHE_EPOCH;
 }
 
 /**

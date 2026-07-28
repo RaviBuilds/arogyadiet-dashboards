@@ -1,9 +1,19 @@
 // src/services/KitReportTemplate.tsx
 //
 // PDF template components for KIT report generation using @react-pdf/renderer.
-// Renders a day-wise breakdown of daily log data for a KIT subscription period.
 //
-// Premium design with clear visual hierarchy, branded colors, and organized layout.
+// DUAL LOG SOURCES: a KIT customer's tracking history has two authors and the
+// report shows both, clearly separated:
+//   1. Customer Daily Log  — `kit_daily_logs`, self-logged every day
+//                            (FOOD_TAKEN / FOOD_SKIPPED + nutrition/activity)
+//   2. Dietitian Health Log — `health_logs` with `author_type = 'DIETITIAN'`,
+//                            recorded on the 3-day KIT cadence
+//                            (clinical parameters + remarks)
+//
+// Visual identity is shared with the meal-subscription Health Report
+// (`HealthReportTemplate`): emerald/slate palette, logo header, dietitian
+// banner, faint watermark, summary card grid, SVG trend charts, fixed footer —
+// so a KIT customer's report reads as a sibling of the meal report.
 //
 // Requirements: 9.2, 9.3, 9.4, 10.2, 10.3
 
@@ -16,10 +26,16 @@ import {
   View,
   Text,
   Image,
+  Svg,
+  Polyline,
+  Circle,
+  Line,
   StyleSheet,
 } from "@react-pdf/renderer";
 
+import { fieldByKey } from "@/lib/dietitian/fieldSets";
 import type { KitDailyLogRow } from "@/repositories/kitLifecycleRepository";
+import type { CustomParameter, ParameterValue } from "@/types/dietitian";
 
 // The logo is read from the filesystem into a Buffer at module load (this
 // template only ever renders server-side via renderToBuffer in
@@ -42,18 +58,63 @@ try {
 // Types
 // ---------------------------------------------------------------------------
 
+/** One dated numeric trend point (weight, fasting sugar, ...). */
+export interface KitTrendPoint {
+  date: string; // YYYY-MM-DD
+  value: number;
+}
+
+/** One dated BP trend point — the composite parameter carries both readings. */
+export interface KitBPTrendPoint {
+  date: string; // YYYY-MM-DD
+  systolic: number;
+  diastolic: number;
+}
+
+/**
+ * Trend series drawn in the Trends band.
+ *
+ * Weight is kept as two separate series on purpose: the customer's own daily
+ * self-logged weight and the Dietitian's recorded weight are different
+ * measurements (different scale, different time of day), so averaging them
+ * into one line would invent data. Plotting both makes any drift between the
+ * two visible instead of hiding it.
+ */
+export interface KitReportTrends {
+  customerWeight: KitTrendPoint[];
+  dietitianWeight: KitTrendPoint[];
+  bp: KitBPTrendPoint[];
+  fastingSugar: KitTrendPoint[];
+}
+
+/** One Dietitian-authored health log rendered in the Dietitian Health Log section. */
+export interface KitDietitianLogEntry {
+  logDate: string; // YYYY-MM-DD
+  parameters: Record<string, ParameterValue>;
+  customParameters: CustomParameter[];
+  closingComment: string | null;
+}
+
 export interface KitReportData {
   customerName: string;
   kitProductName: string;
+  /** Assigned Dietitian, shown in the header banner. `null` when unassigned. */
+  dietitianName: string | null;
   durationDays: number;
   startDate: string; // YYYY-MM-DD
   endDate: string | null; // YYYY-MM-DD (tracker_end_date for EXPIRED)
   status: "ACTIVE" | "EXPIRED";
   totalSkippedDays: number;
-  /** All daily log rows for this subscription, keyed by log_date */
+  /** All customer daily log rows for this subscription, keyed by log_date */
   dailyLogsByDate: Map<string, KitDailyLogRow>;
   /** All dates from start to end (or current date) inclusive */
   dateRange: string[];
+  /** Dietitian-authored health logs inside the KIT tracker window, date ascending. */
+  dietitianEntries: KitDietitianLogEntry[];
+  /** Trend series derived from both log sources. */
+  trends: KitReportTrends;
+  /** Display string for the footer, e.g. "29 Jul 2026, 02:32 am IST". */
+  generatedAtIst: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +204,32 @@ const styles = StyleSheet.create({
     width: 92,
     height: 38, // 776:321 aspect ratio preserved (92 / 2.42 ≈ 38)
   },
+  // Dietitian banner — the assigned Dietitian named at the top of the body, so
+  // the reader knows who authored the Dietitian Health Log section below.
+  dietitianBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.primaryLight,
+    borderWidth: 1,
+    borderColor: COLORS.emeraldBorder,
+  },
+  dietitianBannerLabel: {
+    fontSize: 8,
+    fontWeight: "bold",
+    color: COLORS.emerald,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  dietitianBannerName: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: COLORS.slate900,
+  },
   // Info Grid
   infoGrid: {
     flexDirection: "row",
@@ -213,6 +300,53 @@ const styles = StyleSheet.create({
     color: COLORS.slate900,
     marginBottom: 8,
     marginTop: 2,
+  },
+  sectionHeaderBlock: {
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  sectionTitleTight: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: COLORS.slate900,
+    marginBottom: 2,
+  },
+  sectionSubtitle: {
+    fontSize: 7.5,
+    color: COLORS.slate500,
+  },
+  // Log-source legend — names the two authors up front so a reader never has
+  // to guess whether a value came from the customer or the Dietitian.
+  sourceLegend: {
+    flexDirection: "row",
+    gap: 14,
+    marginBottom: 12,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: COLORS.slate200,
+    borderRadius: 6,
+    backgroundColor: COLORS.slate50,
+  },
+  sourceLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flex: 1,
+  },
+  sourceLegendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  sourceLegendText: {
+    fontSize: 7,
+    color: COLORS.slate600,
+  },
+  sourceLegendStrong: {
+    fontSize: 7,
+    fontWeight: "bold",
+    color: COLORS.slate700,
   },
   // Day Entry
   dayEntry: {
@@ -449,6 +583,156 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.4,
   },
+  // Trend charts — plain SVG line charts, no chart library
+  trendContainer: {
+    marginBottom: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.slate200,
+    borderRadius: 8,
+    backgroundColor: COLORS.white,
+  },
+  trendRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  trendCard: {
+    flex: 1,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: COLORS.slate200,
+    borderRadius: 6,
+    backgroundColor: COLORS.slate50,
+  },
+  trendTitle: {
+    fontSize: 8.5,
+    fontWeight: "bold",
+    color: COLORS.slate700,
+    marginBottom: 6,
+  },
+  trendEmpty: {
+    fontSize: 8,
+    color: COLORS.slate400,
+    fontStyle: "italic",
+    paddingVertical: 18,
+    textAlign: "center",
+  },
+  trendAxisRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 2,
+  },
+  trendAxisText: {
+    fontSize: 6.5,
+    color: COLORS.slate500,
+  },
+  trendLegendRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 4,
+  },
+  trendLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  trendLegendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  trendLegendText: {
+    fontSize: 7,
+    color: COLORS.slate600,
+  },
+  // Dietitian health-log entry cards
+  dietitianEntryCard: {
+    marginBottom: 8,
+    padding: 9,
+    borderWidth: 1,
+    borderColor: COLORS.blueLight,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.blue,
+    borderRadius: 6,
+    backgroundColor: COLORS.white,
+  },
+  dietitianEntryHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+    paddingBottom: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.slate200,
+  },
+  dietitianEntryBadge: {
+    fontSize: 7,
+    fontWeight: "bold",
+    color: COLORS.blue,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: COLORS.blue,
+    backgroundColor: COLORS.blueLight,
+  },
+  // Full-width row for long free-text parameters (Dietitian/Doctor Remarks,
+  // Any Emergency Medication) so the value wraps beneath its label instead of
+  // overflowing its column into the neighbouring one.
+  fieldItemFull: {
+    width: "100%",
+    flexDirection: "column",
+    paddingVertical: 2,
+    paddingRight: 6,
+  },
+  fieldValueFull: {
+    fontSize: 7.5,
+    color: COLORS.slate900,
+    marginTop: 1,
+  },
+  noParametersText: {
+    fontSize: 7.5,
+    color: COLORS.slate400,
+    fontStyle: "italic",
+  },
+  commentBlock: {
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.slate100,
+  },
+  commentLabel: {
+    fontSize: 7,
+    fontWeight: "bold",
+    color: COLORS.slate500,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginBottom: 2,
+  },
+  commentText: {
+    fontSize: 8,
+    color: COLORS.slate700,
+    lineHeight: 1.4,
+  },
+  emptyStateCard: {
+    marginBottom: 8,
+    paddingVertical: 20,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: COLORS.slate200,
+    borderRadius: 6,
+    backgroundColor: COLORS.slate50,
+    alignItems: "center",
+  },
+  emptyStateText: {
+    fontSize: 9,
+    color: COLORS.slate500,
+    textAlign: "center",
+  },
   // Footer
   footer: {
     position: "absolute",
@@ -485,10 +769,18 @@ function ReportHeader({ data }: { data: KitReportData }) {
         <View>
           <Text style={styles.headerTitle}>KIT Report</Text>
           <Text style={styles.headerSubtitle}>
-            Daily nutrition and activity tracking report
+            Daily customer tracking and dietitian-recorded health log
           </Text>
         </View>
         {LOGO_BUFFER && <Image src={LOGO_BUFFER} style={styles.headerLogo} />}
+      </View>
+
+      {/* Assigned Dietitian — the author of the Dietitian Health Log section. */}
+      <View style={styles.dietitianBanner}>
+        <Text style={styles.dietitianBannerLabel}>Dietitian</Text>
+        <Text style={styles.dietitianBannerName}>
+          {data.dietitianName ?? "Not yet assigned"}
+        </Text>
       </View>
 
       <View style={styles.infoGrid}>
@@ -626,13 +918,17 @@ function ReportSummary({ data }: { data: KitReportData }) {
         </View>
 
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Meals Taken</Text>
-          <Text style={styles.summaryValue}>{stats.takenCount}</Text>
+          <Text style={styles.summaryLabel}>Customer Logs</Text>
+          <Text style={styles.summaryValue}>{stats.loggedDays}</Text>
+          <Text style={styles.summarySubtext}>
+            {stats.takenCount} taken · {data.totalSkippedDays} skipped
+          </Text>
         </View>
 
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Days Skipped</Text>
-          <Text style={styles.summaryValue}>{data.totalSkippedDays}</Text>
+          <Text style={styles.summaryLabel}>Dietitian Logs</Text>
+          <Text style={styles.summaryValue}>{data.dietitianEntries.length}</Text>
+          <Text style={styles.summarySubtext}>3-day cadence</Text>
         </View>
 
         <View style={styles.summaryCard}>
@@ -648,9 +944,42 @@ function ReportSummary({ data }: { data: KitReportData }) {
         </View>
 
         <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Latest Weight</Text>
+          <Text style={styles.summaryValue}>
+            {stats.latestWeight !== null ? `${stats.latestWeight} kg` : "—"}
+          </Text>
+          {stats.latestWeightSource && (
+            <Text style={styles.summarySubtext}>{stats.latestWeightSource}</Text>
+          )}
+        </View>
+
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Latest BP</Text>
+          <Text style={styles.summaryValue}>
+            {stats.latestBp ? `${stats.latestBp.systolic}/${stats.latestBp.diastolic}` : "—"}
+          </Text>
+          <Text style={styles.summarySubtext}>mmHg · dietitian</Text>
+        </View>
+
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Latest Fasting Sugar</Text>
+          <Text style={styles.summaryValue}>
+            {stats.latestFastingSugar !== null ? `${stats.latestFastingSugar}` : "—"}
+          </Text>
+          <Text style={styles.summarySubtext}>mg/dL · dietitian</Text>
+        </View>
+
+        <View style={styles.summaryCard}>
           <Text style={styles.summaryLabel}>Avg. Activity</Text>
           <Text style={styles.summaryValue}>
             {stats.avgActivityMinutes !== null ? `${stats.avgActivityMinutes} min` : "—"}
+          </Text>
+        </View>
+
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Avg. Steps</Text>
+          <Text style={styles.summaryValue}>
+            {stats.avgStepCount !== null ? formatCompactNumber(stats.avgStepCount) : "—"}
           </Text>
         </View>
 
@@ -703,16 +1032,418 @@ function ReportSummary({ data }: { data: KitReportData }) {
 }
 
 /**
+ * Names the two log authors before either section appears, so no value in the
+ * report is ambiguous about where it came from.
+ */
+function LogSourceLegend({ data }: { data: KitReportData }) {
+  const stats = { customerLogs: countCustomerLogs(data), dietitianLogs: data.dietitianEntries.length };
+  return (
+    <View style={styles.sourceLegend} wrap={false}>
+      <View style={styles.sourceLegendItem}>
+        <View style={[styles.sourceLegendDot, { backgroundColor: COLORS.emerald }]} />
+        <Text style={styles.sourceLegendStrong}>Customer Daily Log</Text>
+        <Text style={styles.sourceLegendText}>
+          self-logged daily · {stats.customerLogs} entries
+        </Text>
+      </View>
+      <View style={styles.sourceLegendItem}>
+        <View style={[styles.sourceLegendDot, { backgroundColor: COLORS.blue }]} />
+        <Text style={styles.sourceLegendStrong}>Dietitian Health Log</Text>
+        <Text style={styles.sourceLegendText}>
+          recorded every 3rd day · {stats.dietitianLogs} entries
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Trend charts — plain SVG line charts, mirroring HealthReportTemplate
+// ---------------------------------------------------------------------------
+
+const CHART_WIDTH = 150;
+const CHART_HEIGHT = 70;
+const CHART_PAD = 6;
+
+function scaleY(value: number, min: number, max: number): number {
+  if (max === min) return CHART_HEIGHT / 2;
+  const t = (value - min) / (max - min);
+  return CHART_PAD + (1 - t) * (CHART_HEIGHT - 2 * CHART_PAD);
+}
+
+function scaleX(index: number, count: number): number {
+  if (count <= 1) return CHART_WIDTH / 2;
+  return CHART_PAD + (index / (count - 1)) * (CHART_WIDTH - 2 * CHART_PAD);
+}
+
+/** Baseline drawn under every chart so a single-point series still reads as a chart. */
+function ChartBaseline() {
+  return (
+    <Line
+      x1={CHART_PAD}
+      y1={CHART_HEIGHT - CHART_PAD}
+      x2={CHART_WIDTH - CHART_PAD}
+      y2={CHART_HEIGHT - CHART_PAD}
+      stroke={COLORS.slate200}
+      strokeWidth={0.5}
+    />
+  );
+}
+
+/**
+ * Weight chart carrying both authors' series on one shared scale — the
+ * customer's daily self-logged weight and the Dietitian's recorded weight.
+ * Each series keeps its own x-spacing because the two are logged on different
+ * cadences (daily vs every 3rd day).
+ */
+function WeightTrendChart({
+  customer,
+  dietitian,
+}: {
+  customer: readonly KitTrendPoint[];
+  dietitian: readonly KitTrendPoint[];
+}) {
+  const allValues = [...customer, ...dietitian].map((p) => p.value);
+  if (allValues.length === 0) {
+    return (
+      <View style={styles.trendCard}>
+        <Text style={styles.trendTitle}>Weight</Text>
+        <Text style={styles.trendEmpty}>No data recorded</Text>
+      </View>
+    );
+  }
+
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const line = (points: readonly KitTrendPoint[]) =>
+    points.map((p, i) => `${scaleX(i, points.length)},${scaleY(p.value, min, max)}`).join(" ");
+
+  const axisDates = [...customer, ...dietitian].map((p) => p.date).sort();
+
+  return (
+    <View style={styles.trendCard} wrap={false}>
+      <Text style={styles.trendTitle}>Weight (kg)</Text>
+      <Svg width={CHART_WIDTH} height={CHART_HEIGHT} viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}>
+        <ChartBaseline />
+        {customer.length > 1 && (
+          <Polyline points={line(customer)} stroke={COLORS.emerald} strokeWidth={1.5} fill="none" />
+        )}
+        {dietitian.length > 1 && (
+          <Polyline points={line(dietitian)} stroke={COLORS.blue} strokeWidth={1.5} fill="none" />
+        )}
+        {customer.map((p, i) => (
+          <Circle
+            key={`c-${p.date}`}
+            cx={scaleX(i, customer.length)}
+            cy={scaleY(p.value, min, max)}
+            r={1.6}
+            fill={COLORS.emerald}
+          />
+        ))}
+        {dietitian.map((p, i) => (
+          <Circle
+            key={`d-${p.date}`}
+            cx={scaleX(i, dietitian.length)}
+            cy={scaleY(p.value, min, max)}
+            r={1.6}
+            fill={COLORS.blue}
+          />
+        ))}
+      </Svg>
+      <View style={styles.trendAxisRow}>
+        <Text style={styles.trendAxisText}>{formatDisplayDate(axisDates[0])}</Text>
+        <Text style={styles.trendAxisText}>
+          {formatDisplayDate(axisDates[axisDates.length - 1])}
+        </Text>
+      </View>
+      <Text style={styles.trendAxisText}>
+        Range: {min}kg – {max}kg
+      </Text>
+      <View style={styles.trendLegendRow}>
+        <View style={styles.trendLegendItem}>
+          <View style={[styles.trendLegendDot, { backgroundColor: COLORS.emerald }]} />
+          <Text style={styles.trendLegendText}>Customer</Text>
+        </View>
+        <View style={styles.trendLegendItem}>
+          <View style={[styles.trendLegendDot, { backgroundColor: COLORS.blue }]} />
+          <Text style={styles.trendLegendText}>Dietitian</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/** Single-series numeric chart (Fasting Sugar). */
+function SingleTrendChart({
+  title,
+  points,
+  color,
+  unit,
+}: {
+  title: string;
+  points: readonly KitTrendPoint[];
+  color: string;
+  unit: string;
+}) {
+  if (points.length === 0) {
+    return (
+      <View style={styles.trendCard}>
+        <Text style={styles.trendTitle}>{title}</Text>
+        <Text style={styles.trendEmpty}>No data recorded</Text>
+      </View>
+    );
+  }
+
+  const values = points.map((p) => p.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const polylinePoints = points
+    .map((p, i) => `${scaleX(i, points.length)},${scaleY(p.value, min, max)}`)
+    .join(" ");
+
+  return (
+    <View style={styles.trendCard} wrap={false}>
+      <Text style={styles.trendTitle}>{title}</Text>
+      <Svg width={CHART_WIDTH} height={CHART_HEIGHT} viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}>
+        <ChartBaseline />
+        {points.length > 1 && (
+          <Polyline points={polylinePoints} stroke={color} strokeWidth={1.5} fill="none" />
+        )}
+        {points.map((p, i) => (
+          <Circle
+            key={p.date}
+            cx={scaleX(i, points.length)}
+            cy={scaleY(p.value, min, max)}
+            r={1.6}
+            fill={color}
+          />
+        ))}
+      </Svg>
+      <View style={styles.trendAxisRow}>
+        <Text style={styles.trendAxisText}>{formatDisplayDate(points[0].date)}</Text>
+        <Text style={styles.trendAxisText}>
+          {formatDisplayDate(points[points.length - 1].date)}
+        </Text>
+      </View>
+      <Text style={styles.trendAxisText}>
+        Range: {min}
+        {unit} – {max}
+        {unit}
+      </Text>
+    </View>
+  );
+}
+
+/** Blood-pressure chart — systolic and diastolic on a shared scale. */
+function BPTrendChart({ points }: { points: readonly KitBPTrendPoint[] }) {
+  if (points.length === 0) {
+    return (
+      <View style={styles.trendCard}>
+        <Text style={styles.trendTitle}>Blood Pressure</Text>
+        <Text style={styles.trendEmpty}>No data recorded</Text>
+      </View>
+    );
+  }
+
+  const allValues = points.flatMap((p) => [p.systolic, p.diastolic]);
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const systolicLine = points
+    .map((p, i) => `${scaleX(i, points.length)},${scaleY(p.systolic, min, max)}`)
+    .join(" ");
+  const diastolicLine = points
+    .map((p, i) => `${scaleX(i, points.length)},${scaleY(p.diastolic, min, max)}`)
+    .join(" ");
+
+  return (
+    <View style={styles.trendCard} wrap={false}>
+      <Text style={styles.trendTitle}>Blood Pressure</Text>
+      <Svg width={CHART_WIDTH} height={CHART_HEIGHT} viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}>
+        <ChartBaseline />
+        {points.length > 1 && (
+          <>
+            <Polyline points={systolicLine} stroke={COLORS.amber} strokeWidth={1.5} fill="none" />
+            <Polyline points={diastolicLine} stroke={COLORS.blue} strokeWidth={1.5} fill="none" />
+          </>
+        )}
+        {points.map((p, i) => (
+          <React.Fragment key={p.date}>
+            <Circle
+              cx={scaleX(i, points.length)}
+              cy={scaleY(p.systolic, min, max)}
+              r={1.6}
+              fill={COLORS.amber}
+            />
+            <Circle
+              cx={scaleX(i, points.length)}
+              cy={scaleY(p.diastolic, min, max)}
+              r={1.6}
+              fill={COLORS.blue}
+            />
+          </React.Fragment>
+        ))}
+      </Svg>
+      <View style={styles.trendAxisRow}>
+        <Text style={styles.trendAxisText}>{formatDisplayDate(points[0].date)}</Text>
+        <Text style={styles.trendAxisText}>
+          {formatDisplayDate(points[points.length - 1].date)}
+        </Text>
+      </View>
+      <View style={styles.trendLegendRow}>
+        <View style={styles.trendLegendItem}>
+          <View style={[styles.trendLegendDot, { backgroundColor: COLORS.amber }]} />
+          <Text style={styles.trendLegendText}>Systolic</Text>
+        </View>
+        <View style={styles.trendLegendItem}>
+          <View style={[styles.trendLegendDot, { backgroundColor: COLORS.blue }]} />
+          <Text style={styles.trendLegendText}>Diastolic</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/** Trends band — rendered only when at least one series has a point. */
+function TrendChartsSection({ data }: { data: KitReportData }) {
+  const { customerWeight, dietitianWeight, bp, fastingSugar } = data.trends;
+  const hasAnyTrend =
+    customerWeight.length > 0 ||
+    dietitianWeight.length > 0 ||
+    bp.length > 0 ||
+    fastingSugar.length > 0;
+  if (!hasAnyTrend) return null;
+
+  return (
+    <View style={styles.trendContainer} wrap={false}>
+      <Text style={styles.sectionTitle}>Trends</Text>
+      <View style={styles.trendRow}>
+        <WeightTrendChart customer={customerWeight} dietitian={dietitianWeight} />
+        <BPTrendChart points={bp} />
+        <SingleTrendChart
+          title="Fasting Sugar"
+          points={fastingSugar}
+          color={COLORS.amber}
+          unit="mg/dL"
+        />
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dietitian Health Log section
+// ---------------------------------------------------------------------------
+
+/** Render one recorded Health_Log parameter value as display text. */
+function formatParameterValue(value: ParameterValue): string {
+  if ("systolic" in value) {
+    return `${value.systolic}/${value.diastolic} ${value.unit}`;
+  }
+  if (typeof value.value === "boolean") {
+    return value.value ? "Yes" : "No";
+  }
+  if (typeof value.value === "number") {
+    return value.unit ? `${value.value} ${value.unit}` : `${value.value}`;
+  }
+  return value.value;
+}
+
+function DietitianLogEntryCard({ entry }: { entry: KitDietitianLogEntry }) {
+  const allKeys = Object.keys(entry.parameters);
+  // Free-text parameters get a full-width row so long values wrap cleanly;
+  // everything else stays in the compact 3-column grid.
+  const gridKeys = allKeys.filter((key) => fieldByKey(key)?.kind !== "text");
+  const textKeys = allKeys.filter((key) => fieldByKey(key)?.kind === "text");
+  const hasCustom = entry.customParameters.length > 0;
+  const comment = entry.closingComment?.trim();
+
+  return (
+    <View style={styles.dietitianEntryCard} wrap={false}>
+      <View style={styles.dietitianEntryHeader}>
+        <Text style={styles.dayDate}>{formatDisplayDate(entry.logDate)}</Text>
+        <Text style={styles.dietitianEntryBadge}>Dietitian Log</Text>
+      </View>
+
+      {allKeys.length === 0 && !hasCustom ? (
+        <Text style={styles.noParametersText}>No parameter values recorded</Text>
+      ) : (
+        <>
+          <View style={styles.fieldsGrid}>
+            {gridKeys.map((key) => (
+              <View style={styles.fieldItem} key={key}>
+                <Text style={styles.fieldLabel}>{fieldByKey(key)?.label ?? key}:</Text>
+                <Text style={styles.fieldValue}>
+                  {formatParameterValue(entry.parameters[key])}
+                </Text>
+              </View>
+            ))}
+            {entry.customParameters.map((cp, i) => (
+              <View style={styles.fieldItem} key={`custom-${i}-${cp.label}`}>
+                <Text style={styles.fieldLabel}>{cp.label}:</Text>
+                <Text style={styles.fieldValue}>
+                  {cp.value}
+                  {cp.unit ? ` ${cp.unit}` : ""}
+                </Text>
+              </View>
+            ))}
+          </View>
+          {textKeys.map((key) => (
+            <View style={styles.fieldItemFull} key={key}>
+              <Text style={styles.fieldLabel}>{fieldByKey(key)?.label ?? key}:</Text>
+              <Text style={styles.fieldValueFull}>
+                {formatParameterValue(entry.parameters[key])}
+              </Text>
+            </View>
+          ))}
+        </>
+      )}
+
+      {comment && (
+        <View style={styles.commentBlock}>
+          <Text style={styles.commentLabel}>Dietitian Remarks</Text>
+          <Text style={styles.commentText}>{comment}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function DietitianLogSection({ data }: { data: KitReportData }) {
+  return (
+    <View>
+      {/* minPresenceAhead keeps the heading from being stranded alone at the
+          bottom of a page — it breaks to the next page unless there's room for
+          the first entry to follow it. */}
+      <View style={styles.sectionHeaderBlock} minPresenceAhead={90}>
+        <Text style={styles.sectionTitleTight}>Dietitian Health Log</Text>
+        <Text style={styles.sectionSubtitle}>
+          Clinical parameters recorded by your dietitian on the 3-day KIT cadence
+        </Text>
+      </View>
+      {data.dietitianEntries.length === 0 ? (
+        <View style={styles.emptyStateCard}>
+          <Text style={styles.emptyStateText}>
+            Your dietitian has not recorded any health logs for this KIT period yet.
+          </Text>
+        </View>
+      ) : (
+        data.dietitianEntries.map((entry, i) => (
+          <DietitianLogEntryCard entry={entry} key={`${entry.logDate}-${i}`} />
+        ))
+      )}
+    </View>
+  );
+}
+
+/**
  * Page footer with branding, generation timestamp, and page number.
  * Marked `fixed` so it repeats identically on every page @react-pdf/renderer
  * generates, instead of only appearing once wherever the content flow ends.
  */
-function ReportFooter() {
+function ReportFooter({ generatedAtIst }: { generatedAtIst: string }) {
   return (
     <View style={styles.footer} fixed>
-      <Text style={styles.footerText}>
-        Generated on {formatDisplayDate(getTodayDateString())}
-      </Text>
+      <Text style={styles.footerText}>Generated on {generatedAtIst}</Text>
       <Text
         style={styles.footerText}
         render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
@@ -730,10 +1461,13 @@ function ReportFooter() {
  * Full KIT Report PDF document.
  *
  * Structure:
- * - Header: customer info cards, product name, duration, start date, status badge
- * - Day-wise entries: FOOD_TAKEN (green card), FOOD_SKIPPED (amber card), missing (neutral)
- * - Summary (EXPIRED only): card grid with totals and completion date
- * - Footer: generation date and branding
+ * - Header: dietitian banner, customer info cards, product, duration, status
+ * - Summary: adherence, dual log counts, weight/BP/sugar highlights, averages
+ * - Trends: weight (customer + dietitian series), blood pressure, fasting sugar
+ * - Log source legend: names both authors before either section
+ * - Customer Daily Log: FOOD_TAKEN (green), FOOD_SKIPPED (amber), collapsed gaps
+ * - Dietitian Health Log: 3-day-cadence clinical parameters + remarks
+ * - Footer: generation timestamp, page number, branding
  *
  * Validates: Requirements 9.2, 9.3, 9.4, 10.2, 10.3
  */
@@ -753,7 +1487,16 @@ export function KitReportDocument({ data }: { data: KitReportData }) {
             individual daily cards. */}
         <ReportSummary data={data} />
 
-        <Text style={styles.sectionTitle}>Daily Log</Text>
+        <TrendChartsSection data={data} />
+
+        <LogSourceLegend data={data} />
+
+        <View style={styles.sectionHeaderBlock} minPresenceAhead={90}>
+          <Text style={styles.sectionTitleTight}>Customer Daily Log</Text>
+          <Text style={styles.sectionSubtitle}>
+            Nutrition and activity self-logged by the customer each day
+          </Text>
+        </View>
 
         {entries.map((entry) => {
           if (entry.kind === "taken") {
@@ -773,7 +1516,9 @@ export function KitReportDocument({ data }: { data: KitReportData }) {
           );
         })}
 
-        <ReportFooter />
+        <DietitianLogSection data={data} />
+
+        <ReportFooter generatedAtIst={data.generatedAtIst} />
       </Page>
     </Document>
   );
@@ -847,8 +1592,15 @@ interface SummaryStats {
   weightEnd: number | null;
   weightDelta: number | null;
   weightTrendLabel: string;
+  /** Most recent weight from either author, whichever is dated later. */
+  latestWeight: number | null;
+  /** Which author supplied `latestWeight` — shown as card subtext. */
+  latestWeightSource: string | null;
   avgActivityMinutes: number | null;
+  avgStepCount: number | null;
   avgWaterLiters: number | null;
+  latestBp: KitBPTrendPoint | null;
+  latestFastingSugar: number | null;
 }
 
 /** Aggregate the daily logs into report-level statistics for the summary card. */
@@ -856,8 +1608,11 @@ function computeSummaryStats(data: KitReportData): SummaryStats {
   let takenCount = 0;
   let weightStart: number | null = null;
   let weightEnd: number | null = null;
+  let weightEndDate: string | null = null;
   let activitySum = 0;
   let activityDaysCount = 0;
+  let stepSum = 0;
+  let stepDaysCount = 0;
   let waterSum = 0;
   let waterDaysCount = 0;
 
@@ -872,15 +1627,48 @@ function computeSummaryStats(data: KitReportData): SummaryStats {
     if (log.weight_kg !== null) {
       if (weightStart === null) weightStart = log.weight_kg;
       weightEnd = log.weight_kg;
+      weightEndDate = date;
     }
     if (log.physical_activity_minutes !== null) {
       activitySum += log.physical_activity_minutes;
       activityDaysCount++;
     }
+    if (log.step_count !== null) {
+      stepSum += log.step_count;
+      stepDaysCount++;
+    }
     if (log.water_intake_liters !== null) {
       waterSum += log.water_intake_liters;
       waterDaysCount++;
     }
+  }
+
+  // The Dietitian's own weight readings extend the trend window — the earliest
+  // reading from either author anchors the start, the latest anchors the end,
+  // so "Weight Trend" reflects everything recorded, not just self-logs.
+  const dietitianWeight = data.trends.dietitianWeight;
+  const firstDietitianWeight = dietitianWeight[0] ?? null;
+  const lastDietitianWeight = dietitianWeight[dietitianWeight.length - 1] ?? null;
+
+  const firstCustomerWeightDate = data.dateRange.find((date) => {
+    const log = data.dailyLogsByDate.get(date);
+    return log?.status === "FOOD_TAKEN" && log.weight_kg !== null;
+  }) ?? null;
+
+  if (
+    firstDietitianWeight &&
+    (firstCustomerWeightDate === null || firstDietitianWeight.date < firstCustomerWeightDate)
+  ) {
+    weightStart = firstDietitianWeight.value;
+  }
+
+  let latestWeightSource: string | null = weightEnd !== null ? "Customer log" : null;
+  if (
+    lastDietitianWeight &&
+    (weightEndDate === null || lastDietitianWeight.date >= weightEndDate)
+  ) {
+    weightEnd = lastDietitianWeight.value;
+    latestWeightSource = "Dietitian log";
   }
 
   const loggedDays = takenCount + data.totalSkippedDays;
@@ -901,6 +1689,9 @@ function computeSummaryStats(data: KitReportData): SummaryStats {
     else weightTrendLabel = `${weightDelta} kg gained`;
   }
 
+  const bpSeries = data.trends.bp;
+  const sugarSeries = data.trends.fastingSugar;
+
   return {
     takenCount,
     loggedDays,
@@ -912,11 +1703,25 @@ function computeSummaryStats(data: KitReportData): SummaryStats {
     weightEnd,
     weightDelta,
     weightTrendLabel,
+    latestWeight: weightEnd,
+    latestWeightSource,
     avgActivityMinutes:
       activityDaysCount > 0 ? Math.round(activitySum / activityDaysCount) : null,
+    avgStepCount: stepDaysCount > 0 ? Math.round(stepSum / stepDaysCount) : null,
     avgWaterLiters:
       waterDaysCount > 0 ? Math.round((waterSum / waterDaysCount) * 10) / 10 : null,
+    latestBp: bpSeries[bpSeries.length - 1] ?? null,
+    latestFastingSugar: sugarSeries[sugarSeries.length - 1]?.value ?? null,
   };
+}
+
+/** Count of days the customer logged anything (taken or skipped). */
+function countCustomerLogs(data: KitReportData): number {
+  let count = 0;
+  for (const date of data.dateRange) {
+    if (data.dailyLogsByDate.has(date)) count++;
+  }
+  return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -933,13 +1738,15 @@ function formatDisplayDate(dateStr: string): string {
   return `${day} ${months[month - 1]} ${year}`;
 }
 
-/** Get today's date as YYYY-MM-DD string */
-function getTodayDateString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+/**
+ * Compact a large count for a summary card, e.g. 20000 -> "20k". Step counts
+ * run into five digits and would otherwise overflow the card's fixed width.
+ */
+function formatCompactNumber(value: number): string {
+  if (value < 1000) return String(value);
+  const thousands = value / 1000;
+  const rounded = Math.round(thousands * 10) / 10;
+  return `${rounded}k`;
 }
 
 /** Render a single field item if the value is non-null */

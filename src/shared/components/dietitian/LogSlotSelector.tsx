@@ -33,6 +33,12 @@ export interface LogSlotSelectorProps {
   /** True while the newly selected slot's data is being fetched. */
   loading?: boolean;
   disabled?: boolean;
+  /**
+   * Copy shown when there are no slots. Callers pass the specific reason (no
+   * subscription, not active, tracker not started, first slot not reached);
+   * omitted, the generic fallback is used.
+   */
+  emptyMessage?: string | null;
 }
 
 function statusMeta(slot: LogSlot): {
@@ -79,11 +85,12 @@ export function LogSlotSelector({
   onSelect,
   loading = false,
   disabled = false,
+  emptyMessage = null,
 }: LogSlotSelectorProps) {
   if (slots.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-input p-6 text-center text-sm text-muted-foreground">
-        No log slots are scheduled for this customer yet.
+        {emptyMessage ?? "No log slots are scheduled for this customer yet."}
       </p>
     );
   }
