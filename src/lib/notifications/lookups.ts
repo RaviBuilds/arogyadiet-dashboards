@@ -24,7 +24,7 @@ export async function getCustomerNameByProfileId(
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("customer_profiles")
-    .select("users(full_name)")
+    .select("users!customer_profiles_user_id_fkey(full_name)")
     .eq("id", profileId)
     .maybeSingle();
 

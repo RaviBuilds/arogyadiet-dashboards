@@ -29,8 +29,10 @@ import {
   buildArchivedEmail,
   isArchivedCustomerEmail,
 } from "@/lib/customers/customerArchive";
-import { checkGroupManage } from "@/lib/auth/adminAccess";
+import { checkGroupManage, getCurrentAdminContext } from "@/lib/auth/adminAccess";
 import { resolveClinicForPincode } from "@/lib/clinic/pincode-resolver";
+import { reconcileOnClinicChange } from "@/services/AssignmentService";
+import type { CustomerCategory } from "@/types/dietitian";
 import { getISTDateString } from "@/lib/dates/ist";
 import {
   ADDON_STATUS_DELIVERED,
@@ -854,7 +856,54 @@ export async function adminAssignCustomerClinic(
     clinic_id: clinicId,
   });
 
+  // Reconcile the Dietitian_Link per the Customer_Category table (Req 8.4,
+  // 8.5, 8.6) — the single place where a Clinic change can touch a
+  // Dietitian_Link (dietitian-management design.md §"Assignment_Service").
+  // Best-effort: the clinic assignment above already succeeded, so a failure
+  // resolving the category or reconciling the link must never surface as a
+  // failure of this action.
+  try {
+    const category = await resolveCustomerGoverningCategory(profileId);
+    const { userId: actingUserId } = await getCurrentAdminContext();
+    await reconcileOnClinicChange(profileId, category, clinicId, actingUserId);
+  } catch (reconcileError) {
+    console.error(
+      "adminAssignCustomerClinic: dietitian-link reconciliation failed:",
+      reconcileError,
+    );
+  }
+
   revalidatePath(`/admin/customers/${profileId}`);
   revalidatePath("/admin/customers");
   return { success: true };
+}
+
+/**
+ * Resolve a Customer_Record's governing Customer_Category from its most
+ * recently created `subscriptions` row, defaulting to `MEAL` when none
+ * exists. Mirrors `DietitianReportService.resolveGoverningCategory` and
+ * `assignmentRepository.resolveCategoryFromEmbed` — every surface that feeds
+ * the Assignment_Service must agree on which subscription governs a customer.
+ */
+async function resolveCustomerGoverningCategory(
+  profileId: string,
+): Promise<CustomerCategory> {
+  const { data, error } = await supabaseAdmin
+    .from("subscriptions")
+    .select("customer_category, created_at")
+    .eq("customer_profile_id", profileId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `Failed to resolve governing category for customer ${profileId}: ${error.message}`,
+    );
+  }
+
+  const category = data?.customer_category as string | undefined;
+  return category === "ACCOMMODATION" || category === "KIT" || category === "MEAL"
+    ? category
+    : "MEAL";
 }

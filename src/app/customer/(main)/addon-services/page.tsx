@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
+import { Sparkles } from "lucide-react";
 
 import { getCustomerSession } from "@/lib/customer/get-session";
 import { getAddonServiceRequestsAction } from "@/actions/addonServiceActions";
 import { AddonServicesClient } from "@/shared/components/customer/addon-services/AddonServicesClient";
+import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
 import type { AddonServiceRequest } from "@/types/accommodation";
 
 /**
@@ -37,14 +39,23 @@ export default async function AddonServicesPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl p-4 md:p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">
-          Add-on Services
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Request additional wellness services to enhance your stay.
-        </p>
+    <div className="relative z-10 mx-auto max-w-5xl space-y-6 sm:space-y-8">
+      {/* Page header — same tone-tinted IconChip-beside-title convention used
+          on every other customer page (Stay History, Kit History, Health
+          Report) rather than a bare heading. */}
+      <div
+        className="reveal-rise flex items-start gap-3"
+        style={{ ["--reveal-delay" as string]: "150ms" }}
+      >
+        <IconChip icon={Sparkles} tone="amber" size="lg" />
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+            Add-on Services
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Request additional wellness services to enhance your stay.
+          </p>
+        </div>
       </div>
 
       <AddonServicesClient

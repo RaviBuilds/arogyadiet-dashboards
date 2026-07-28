@@ -60,6 +60,8 @@ interface AccommodationCustomerSectionProps {
   onExport: () => void;
   onEdit: (customer: CustomerData) => void;
   onDeactivate: (customer: CustomerData) => void;
+  /** Removes the mutating export/edit/deactivate controls for a Dietitian (dietitian-management, Req 16.1). */
+  isDietitian?: boolean;
 }
 
 // --- Filter states managed internally ---
@@ -113,6 +115,7 @@ export function AccommodationCustomerSection({
   onExport,
   onEdit,
   onDeactivate,
+  isDietitian = false,
 }: AccommodationCustomerSectionProps) {
   // Stay info fetched from server
   const [stayInfoMap, setStayInfoMap] = useState<
@@ -233,7 +236,9 @@ export function AccommodationCustomerSection({
       }
       actions={
         <>
-          <ExportButton onClick={onExport} disabled={customers.length === 0} />
+          {!isDietitian && (
+            <ExportButton onClick={onExport} disabled={customers.length === 0} />
+          )}
           <RefreshButton onClick={onRefresh} isLoading={isLoading} />
         </>
       }
@@ -259,6 +264,9 @@ export function AccommodationCustomerSection({
             <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
               Medical History
             </TableHead>
+            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Dietitian
+            </TableHead>
             <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -268,7 +276,7 @@ export function AccommodationCustomerSection({
           {loadingStayInfo ? (
             <TableRow>
               <TableCell
-                colSpan={7}
+                colSpan={8}
                 className="text-center py-12 text-sm text-slate-500"
               >
                 <div className="flex flex-col items-center gap-1.5">
@@ -282,7 +290,7 @@ export function AccommodationCustomerSection({
           ) : displayCustomers.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={7}
+                colSpan={8}
                 className="text-center py-12 text-sm text-slate-500"
               >
                 <div className="flex flex-col items-center gap-1.5">
@@ -386,6 +394,20 @@ export function AccommodationCustomerSection({
                     )}
                   </TableCell>
 
+                  {/* Dietitian */}
+                  <TableCell>
+                    <span
+                      className={cn(
+                        "text-sm",
+                        customer.dietitianName
+                          ? "text-slate-700"
+                          : "text-slate-400 italic",
+                      )}
+                    >
+                      {customer.dietitianName || "Unassigned"}
+                    </span>
+                  </TableCell>
+
                   {/* Actions */}
                   <TableCell>
                     <DropdownMenu>
@@ -407,23 +429,27 @@ export function AccommodationCustomerSection({
                             View 360 Dashboard
                           </Link>
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="cursor-pointer font-medium"
-                          onClick={() => onEdit(customer)}
-                        >
-                          <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
-                          Quick Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
-                          onClick={() => onDeactivate(customer)}
-                          disabled={!customer.isActive}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Deactivate Customer
-                        </DropdownMenuItem>
+                        {!isDietitian && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="cursor-pointer font-medium"
+                              onClick={() => onEdit(customer)}
+                            >
+                              <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
+                              Quick Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
+                              onClick={() => onDeactivate(customer)}
+                              disabled={!customer.isActive}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Deactivate Customer
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>

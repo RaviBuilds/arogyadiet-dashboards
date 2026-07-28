@@ -142,7 +142,7 @@ export async function getConflictClinicList(
     const { data, error } = await admin
       .from("delivery_orders")
       .select(
-        "customer_profile_id, clinic_id, delivery_date, customer_profiles(clinic_id, users(full_name))"
+        "customer_profile_id, clinic_id, delivery_date, customer_profiles(clinic_id, users!customer_profiles_user_id_fkey(full_name))"
       )
       .eq("delivery_date", trimmedDate);
 

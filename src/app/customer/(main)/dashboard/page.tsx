@@ -350,7 +350,7 @@ export default async function CustomerDashboard() {
     return (
       <>
         {profileDialog}
-        <AccommodationDashboard stay={stay} />
+        <AccommodationDashboard stay={stay} customerName={appUser.full_name} />
       </>
     );
   }

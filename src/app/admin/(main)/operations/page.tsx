@@ -30,7 +30,7 @@ export default async function OperationsPage() {
     .select(
       `
       id, status, delivery_date, route_sequence, payout_amount, created_at, pickup_marked_at, delivered_at, franchise_id,
-      customer_profiles ( users ( full_name, mobile ), addresses ( street_1, city, pincode ) ),
+      customer_profiles ( users!customer_profiles_user_id_fkey ( full_name, mobile ), addresses ( street_1, city, pincode ) ),
       rider_profiles ( id, emergency_contact, users ( full_name ), rider_service_areas ( area_name ) ),
       meal_categories ( name ),
       delivery_batches ( id, status, total_distance_km, expected_payout ),
@@ -47,7 +47,7 @@ export default async function OperationsPage() {
       id, 
       status, 
       franchise_id,
-      customer_profiles ( users(full_name, mobile) ), 
+      customer_profiles ( users!customer_profiles_user_id_fkey(full_name, mobile) ), 
       addresses ( street_1, city, pincode ), 
       meal_categories ( name )
     `)
@@ -83,6 +83,8 @@ export default async function OperationsPage() {
       fulfillment_status,
       customer_profile_id,
       franchise_id,
+      walkin_name,
+      walkin_mobile,
       delivery_orders (delivery_date),
       addon_order_items (
         quantity,
@@ -90,7 +92,7 @@ export default async function OperationsPage() {
         products (name)
       ),
       customer_profiles (
-        users (full_name)
+        users!customer_profiles_user_id_fkey (full_name)
       )
     `,
     )
@@ -114,8 +116,12 @@ export default async function OperationsPage() {
     return {
       id: o.id as string,
       created_at: o.created_at as string,
-      customer_profile_id: o.customer_profile_id as string,
-      customer_name: (user?.full_name as string) || "N/A",
+      customer_profile_id: (o.customer_profile_id as string) ?? null,
+      // A walk-in counter sale has no profile; its buyer name lives on the order.
+      customer_name:
+        (user?.full_name as string) || (o.walkin_name as string) || "N/A",
+      walkin_name: (o.walkin_name as string) ?? null,
+      walkin_mobile: (o.walkin_mobile as string) ?? null,
       total_amount: o.total_amount as number | null,
       status: o.status as string | null,
       target_delivery_date: o.target_delivery_date as string | null,

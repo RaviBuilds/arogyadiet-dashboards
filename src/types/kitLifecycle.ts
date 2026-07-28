@@ -88,3 +88,87 @@ export interface ExpireCronsResult {
   expired: number;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Admin Customer 360 — multi-KIT overview
+// ---------------------------------------------------------------------------
+//
+// A customer can hold several KIT subscriptions over their lifetime, and more
+// than one at a time (an ACTIVE kit still being tracked plus a freshly
+// dispatched PENDING kit). The admin KIT tab therefore renders a *set* of KIT
+// records grouped by lifecycle role rather than a single "current" kit.
+
+/**
+ * A single day's tracker entry, as displayed in the admin read-only table.
+ *
+ * Mirrors every field the customer can submit from the KIT day-log dialog
+ * (`dailyLogSchema`) — body metrics, activity, hydration and food intake — so
+ * the admin view shows exactly what was entered rather than a subset. The
+ * detail fields are optional so callers that only load the core columns still
+ * satisfy the type.
+ */
+export interface AdminKitDailyLog {
+  log_date: string;
+  status: "FOOD_TAKEN" | "FOOD_SKIPPED";
+  physical_activity_minutes: number | null;
+  physical_activity_name: string | null;
+  weight_kg: number | null;
+  step_count?: number | null;
+  water_intake_liters?: number | null;
+  buttermilk_intake?: string | null;
+  fat_consumption?: string | null;
+  main_dish?: string | null;
+  protein_curry?: string | null;
+  veg_curry?: string | null;
+  soup_name_qty?: string | null;
+  eggs_count?: number | null;
+  salads_qty?: string | null;
+}
+
+/** Courier/dispatch details attached to one KIT subscription. */
+export interface AdminKitShipping {
+  courierPartner: string;
+  trackingNumber: string;
+  trackingUrl: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+}
+
+/** One KIT subscription with everything the admin KIT tab needs to render it. */
+export interface AdminKitRecord {
+  subscriptionId: string;
+  subscriptionCode: string | null;
+  kitProductName: string;
+  kitDurationDays: number;
+  /** PENDING | ACTIVE | EXPIRED | CANCELLED | STOPPED */
+  status: string;
+  startsOn: string | null;
+  endsOn: string | null;
+  basePrice: number | null;
+  taxRate: number | null;
+  kitReceivedDate: string | null;
+  kitTrackerEndDate: string | null;
+  kitTotalSkippedDays: number;
+  createdAt: string | null;
+  shipping: AdminKitShipping | null;
+  dailyLogs: AdminKitDailyLog[];
+  /** Count of logs with status FOOD_TAKEN. */
+  daysTaken: number;
+  /** Count of logs with status FOOD_SKIPPED. */
+  daysSkipped: number;
+}
+
+/**
+ * KIT records grouped by lifecycle role.
+ *
+ * - `current`  — the ACTIVE kit being tracked right now (at most one).
+ * - `incoming` — a newly dispatched kit the customer has not started yet
+ *                (PENDING). Coexists with `current` when admin sends a new kit
+ *                before the running one expires.
+ * - `history`  — every closed kit (EXPIRED/CANCELLED/STOPPED), newest first.
+ */
+export interface AdminKitOverview {
+  current: AdminKitRecord | null;
+  incoming: AdminKitRecord | null;
+  history: AdminKitRecord[];
+}

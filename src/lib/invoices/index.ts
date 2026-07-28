@@ -84,7 +84,7 @@ export async function generateInvoiceData(
       ),
       customer_profiles (
         user_id,
-        users ( full_name, email, mobile ),
+        users!customer_profiles_user_id_fkey ( full_name, email, mobile ),
         addresses ( street_1, street_2, landmark, city, state, pincode, is_primary )
       )
     `

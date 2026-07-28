@@ -20,6 +20,8 @@ import {
   Settings2,
   ShoppingBag,
   Building2,
+  ClipboardList,
+  User,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -40,6 +42,8 @@ import { NotificationBell } from "@/components/shared/NotificationBell";
 import { FranchiseRequestNavBadge } from "@/shared/components/admin/FranchiseRequestNavBadge";
 import {
   hasGroupAccess,
+  isDietitianLevel,
+  landingRouteFor,
   type AccessConfiguration,
   type OperationsGroup,
 } from "@/lib/auth/adminAccessCore";
@@ -74,6 +78,17 @@ const NAV_ITEMS: {
   { href: "/franchises", label: "Franchises", icon: Building2, group: "franchises" },
 ];
 
+/**
+ * The only items a Dietitian may reach (Req 5.4) — the same three prefixes the
+ * middleware allow-list permits. Rendered instead of NAV_ITEMS, never merged
+ * with it, so no operations item can leak into a Dietitian's navbar.
+ */
+const DIETITIAN_NAV_ITEMS: typeof NAV_ITEMS = [
+  { href: "/customers", label: "Customers", icon: Users },
+  { href: "/log-customer", label: "Log Customer", icon: ClipboardList },
+  { href: "/profile", label: "Profile", icon: User },
+];
+
 export default function AdminNavbar({
   userProfile,
   email,
@@ -82,13 +97,23 @@ export default function AdminNavbar({
   const supabase = createClient();
   const pathname = usePathname();
 
-  // UI-only gating (server guards are the real barrier): show neutral items and
-  // any group the configuration permits; when config is absent, show neutral only.
-  const visibleNavItems = NAV_ITEMS.filter(
-    (item) =>
-      item.group == null ||
-      (config != null && hasGroupAccess(config, item.group)),
-  );
+  const isDietitian = config != null && isDietitianLevel(config);
+
+  // UI-only gating (server guards are the real barrier): a Dietitian gets the
+  // three allow-listed items; everyone else keeps the previous behavior — show
+  // neutral items and any group the configuration permits; when config is
+  // absent, show neutral only.
+  const visibleNavItems = isDietitian
+    ? DIETITIAN_NAV_ITEMS
+    : NAV_ITEMS.filter(
+        (item) =>
+          item.group == null ||
+          (config != null && hasGroupAccess(config, item.group)),
+      );
+
+  // The brand link must not point at a route the Dietitian cannot reach; every
+  // other level keeps /dashboard exactly as before.
+  const homeHref = isDietitian ? landingRouteFor("dietitian") : "/dashboard";
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -101,7 +126,7 @@ export default function AdminNavbar({
     <header className="sticky top-0 z-40 w-full border-b border-slate-200 bg-white/95 backdrop-blur-sm shadow-sm">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Left: Brand + Admin Badge */}
-        <Link href="/dashboard" className="flex items-center gap-2.5">
+        <Link href={homeHref} className="flex items-center gap-2.5">
           <Image
             src="/logo.png"
             alt="ArogyaDiet"
@@ -110,7 +135,7 @@ export default function AdminNavbar({
             className="h-auto w-auto"
           />
           <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-widest text-primary bg-primary/5 px-2 py-0.5 rounded-full border border-primary/20">
-            Admin
+            {isDietitian ? "Dietitian" : "Admin"}
           </span>
         </Link>
 

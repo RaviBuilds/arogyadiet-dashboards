@@ -48,6 +48,7 @@ import {
   Edit,
   Trash2,
   UserPlus,
+  Stethoscope,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -85,6 +86,14 @@ export interface CustomerData {
 interface Props {
   customers: CustomerData[];
   franchiseId: string;
+  /**
+   * Renders the read-only Franchise Dietitian workspace (dietitian-management,
+   * Req 23.1, 23.2, 23.3): replaces Quick Onboard + Create Customer with Log
+   * Customer and removes every create/edit/deactivate/export control. Every
+   * other Access_Level is unaffected — defaults to `false` so existing
+   * callers keep their current behavior.
+   */
+  isDietitian?: boolean;
 }
 
 const TABS = [
@@ -101,7 +110,7 @@ const SEARCH_OPTIONS = [
   { value: "primary_pincode", label: "Pincode" },
 ];
 
-export default function FranchiseCustomerDashboard({ customers, franchiseId }: Props) {
+export default function FranchiseCustomerDashboard({ customers, franchiseId, isDietitian = false }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
@@ -244,21 +253,32 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId }: P
         subtitle="Manage your franchise customers and their subscriptions."
         icon={Users}
         actions={
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/customers/quick-onboard">
-                <UserPlus className="h-4 w-4 mr-1.5" />
-                Quick Onboard
+          isDietitian ? (
+            // Req 23.3: Log Customer replaces the Quick Onboard + Create
+            // Customer calls to action for a Franchise Dietitian.
+            <Button size="sm" asChild>
+              <Link href="/log-customer">
+                <Stethoscope className="h-4 w-4 mr-1.5" />
+                Log Customer
               </Link>
             </Button>
-            <Button
-              size="sm"
-              onClick={() => setIsCreateModalOpen(true)}
-            >
-              <Plus className="h-4 w-4 mr-1.5" />
-              Create Customer
-            </Button>
-          </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/customers/quick-onboard">
+                  <UserPlus className="h-4 w-4 mr-1.5" />
+                  Quick Onboard
+                </Link>
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setIsCreateModalOpen(true)}
+              >
+                <Plus className="h-4 w-4 mr-1.5" />
+                Create Customer
+              </Button>
+            </div>
+          )
         }
       />
 
@@ -269,16 +289,19 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId }: P
         onTabChange={setActiveTab}
         actions={
           <div className="flex items-center gap-2">
-            <ExportButton
-              onClick={handleExport}
-              disabled={
-                activeTab === "overview" ||
-                activeTab === "onboarded" ||
-                (activeTab === "meal"
-                  ? filteredMealCustomers.length === 0
-                  : kitCustomers.length === 0)
-              }
-            />
+            {/* Req 23.1: the mutating Excel export is removed for a Franchise Dietitian. */}
+            {!isDietitian && (
+              <ExportButton
+                onClick={handleExport}
+                disabled={
+                  activeTab === "overview" ||
+                  activeTab === "onboarded" ||
+                  (activeTab === "meal"
+                    ? filteredMealCustomers.length === 0
+                    : kitCustomers.length === 0)
+                }
+              />
+            )}
             <RefreshButton onClick={handleRefresh} isLoading={isRefreshing} />
           </div>
         }
@@ -308,6 +331,7 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId }: P
           setShowArchived={setShowArchived}
           onEdit={setQuickEditTarget}
           onDeactivate={setDeactivateTarget}
+          isDietitian={isDietitian}
         />
       )}
 
@@ -331,6 +355,7 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId }: P
           onExport={handleExport}
           onEdit={setQuickEditTarget}
           onDeactivate={setDeactivateTarget}
+          isDietitian={isDietitian}
         />
       )}
 
@@ -338,28 +363,32 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId }: P
         <OnboardingCustomersSection status="IN_PROGRESS" />
       )}
 
-      {/* Modals */}
-      <FranchiseCreateCustomerModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        franchiseId={franchiseId}
-      />
+      {/* Modals — never rendered for a Franchise Dietitian (Req 23.1). */}
+      {!isDietitian && (
+        <>
+          <FranchiseCreateCustomerModal
+            isOpen={isCreateModalOpen}
+            onClose={() => setIsCreateModalOpen(false)}
+            franchiseId={franchiseId}
+          />
 
-      <FranchiseQuickEditModal
-        isOpen={quickEditTarget !== null}
-        onClose={() => setQuickEditTarget(null)}
-        customer={quickEditTarget}
-        onSuccess={() => router.refresh()}
-      />
+          <FranchiseQuickEditModal
+            isOpen={quickEditTarget !== null}
+            onClose={() => setQuickEditTarget(null)}
+            customer={quickEditTarget}
+            onSuccess={() => router.refresh()}
+          />
 
-      <ConfirmDeleteModal
-        isOpen={deactivateTarget !== null}
-        onClose={() => setDeactivateTarget(null)}
-        onConfirm={handleDeactivate}
-        title="Deactivate Customer"
-        description={`Deactivate ${deactivateTarget?.fullName ?? "this customer"}? Login will be blocked, but billing history is preserved. This cannot be done while the customer has an active subscription.`}
-        isPending={isPending}
-      />
+          <ConfirmDeleteModal
+            isOpen={deactivateTarget !== null}
+            onClose={() => setDeactivateTarget(null)}
+            onConfirm={handleDeactivate}
+            title="Deactivate Customer"
+            description={`Deactivate ${deactivateTarget?.fullName ?? "this customer"}? Login will be blocked, but billing history is preserved. This cannot be done while the customer has an active subscription.`}
+            isPending={isPending}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -385,6 +414,8 @@ interface MealCustomerTabProps {
   setShowArchived: (val: boolean) => void;
   onEdit: (customer: CustomerData) => void;
   onDeactivate: (customer: CustomerData) => void;
+  /** Removes the mutating edit/deactivate controls for a Franchise Dietitian (Req 23.1). */
+  isDietitian?: boolean;
 }
 
 function MealCustomerTab({
@@ -405,6 +436,7 @@ function MealCustomerTab({
   setShowArchived,
   onEdit,
   onDeactivate,
+  isDietitian = false,
 }: MealCustomerTabProps) {
   return (
     <DataTableCard
@@ -656,23 +688,27 @@ function MealCustomerTab({
                           View 360 Dashboard
                         </Link>
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="cursor-pointer font-medium"
-                        onClick={() => onEdit(customer)}
-                      >
-                        <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
-                        Quick Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
-                        onClick={() => onDeactivate(customer)}
-                        disabled={!customer.isActive}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Deactivate Customer
-                      </DropdownMenuItem>
+                      {!isDietitian && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="cursor-pointer font-medium"
+                            onClick={() => onEdit(customer)}
+                          >
+                            <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
+                            Quick Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
+                            onClick={() => onDeactivate(customer)}
+                            disabled={!customer.isActive}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Deactivate Customer
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>

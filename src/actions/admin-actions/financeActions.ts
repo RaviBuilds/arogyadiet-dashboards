@@ -94,7 +94,7 @@ export async function getSubscriptionPayments(filters?: {
     .from("payments")
     .select(
       `id, amount, status, payment_method, paid_at, created_at,
-       customer_profiles ( users ( full_name, email ) ),
+       customer_profiles ( users!customer_profiles_user_id_fkey ( full_name, email ) ),
        subscriptions ( subscription_code, plan_id, subscription_plans ( name ) )`,
     )
     .order("created_at", { ascending: false });

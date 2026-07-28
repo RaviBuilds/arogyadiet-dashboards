@@ -53,7 +53,7 @@ export async function getCustomerProfiles(options?: FranchiseQueryOptions) {
 
   let query = adminClient
     .from("customer_profiles")
-    .select("*, users(full_name, email, mobile)");
+    .select("*, users!customer_profiles_user_id_fkey(full_name, email, mobile)");
 
   query = applyFranchiseFilter(query, options);
 
@@ -70,7 +70,7 @@ export async function getSubscriptions(options?: FranchiseQueryOptions) {
 
   let query = adminClient
     .from("subscriptions")
-    .select("*, customer_profiles(*, users(full_name, email)), subscription_plans(name, code)");
+    .select("*, customer_profiles(*, users!customer_profiles_user_id_fkey(full_name, email)), subscription_plans(name, code)");
 
   query = applyFranchiseFilter(query, options);
 
@@ -90,7 +90,7 @@ export async function getDeliveryOrders(
 
   let query = adminClient
     .from("delivery_orders")
-    .select("*, customer_profiles(*, users(full_name)), rider_profiles(*, users(full_name)), addresses(*)")
+    .select("*, customer_profiles(*, users!customer_profiles_user_id_fkey(full_name)), rider_profiles(*, users(full_name)), addresses(*)")
     .eq("delivery_date", date);
 
   query = applyFranchiseFilter(query, options);

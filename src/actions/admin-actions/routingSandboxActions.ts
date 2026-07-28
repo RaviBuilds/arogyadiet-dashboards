@@ -366,7 +366,7 @@ export async function getRoutingSandboxRiderRoute(
         `
       id,
       route_sequence,
-      customer_profiles ( users ( full_name ) ),
+      customer_profiles ( users!customer_profiles_user_id_fkey ( full_name ) ),
       addresses!delivery_address_id ( lat, lng, pincode, city, state )
     `,
       )

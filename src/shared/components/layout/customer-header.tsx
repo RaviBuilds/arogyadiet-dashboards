@@ -119,7 +119,11 @@ export function CustomerHeader({
           Welcome back{userName ? `, ${userName}` : ""}
         </h1>
         <p className="hidden text-sm text-slate-500 sm:block">
-          {isKit ? "Your KIT dashboard" : "Your meal dashboard"}
+          {isKit
+            ? "Your KIT dashboard"
+            : isAccommodation
+              ? "Your stay dashboard"
+              : "Your meal dashboard"}
         </p>
       </div>
 

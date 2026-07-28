@@ -4,6 +4,7 @@ import { MessageSquareWarning } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import OverviewShell from "./OverviewShell";
 import NetworkReportSection from "./NetworkReportSection";
+import DietitianActivitySection from "./DietitianActivitySection";
 
 export const revalidate = 0;
 
@@ -46,6 +47,9 @@ export default async function MasterOverviewPage() {
 
       {/* Consolidated cross-franchise reporting (additive, Task 13.7 — Req 11.5–11.9) */}
       <NetworkReportSection />
+
+      {/* Dietitian dropdown + activity report + audit viewer (dietitian-management — Task 11.5, Req 18.8, 20.1) */}
+      <DietitianActivitySection />
     </div>
   );
 }

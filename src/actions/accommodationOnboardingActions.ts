@@ -67,7 +67,7 @@ async function validatePaymentHost(
   // Look up the payment host by mobile number via the users table
   const { data: hostUser, error: userError } = await admin
     .from("users")
-    .select("id, mobile, customer_profiles(id)")
+    .select("id, mobile, customer_profiles!customer_profiles_user_id_fkey(id)")
     .eq("mobile", paymentHostMobile)
     .maybeSingle();
 
@@ -193,7 +193,7 @@ export async function onboardAccommodationCustomerAction(
   // (2) Check if mobile number already exists in customer_profiles (Req 3.3)
   const { data: existingUser } = await admin
     .from("users")
-    .select("id, customer_profiles(id)")
+    .select("id, customer_profiles!customer_profiles_user_id_fkey(id)")
     .eq("mobile", data.mobile)
     .maybeSingle();
 
@@ -332,7 +332,9 @@ export async function onboardAccommodationCustomerAction(
       .eq("id", newUser.id);
   }
 
-  // Create the customer profile
+  // Create the customer profile — includes the Dietitian_Link selected in
+  // the Category & Plan step (dietitian-management, Req 9.4), persisted in
+  // this SAME insert as the rest of the Customer_Record for atomicity.
   const { data: newProfile, error: profileError } = await admin
     .from("customer_profiles")
     .insert({
@@ -342,6 +344,7 @@ export async function onboardAccommodationCustomerAction(
       dietary_preference: data.dietaryPreference,
       allergies: data.allergies || null,
       onboarding_status: "IN_PROGRESS",
+      dietitian_id: data.dietitianUserId ?? null,
     })
     .select("id")
     .single();

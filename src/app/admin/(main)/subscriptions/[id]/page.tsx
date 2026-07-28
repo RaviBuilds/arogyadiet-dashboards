@@ -21,7 +21,7 @@ export default async function Subscription360Page({ params }: { params: Promise<
       subscription_plans (*),
       customer_profiles (
         id, dietary_preference,
-        users ( full_name, email, mobile ),
+        users!customer_profiles_user_id_fkey ( full_name, email, mobile ),
         addresses (*)
       )
     `)

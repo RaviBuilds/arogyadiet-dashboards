@@ -116,7 +116,7 @@ export default async function RiderRoutePage() {
       meal_category:meal_categories ( name ),
       addon_orders ( addon_order_items ( quantity, products ( name ) ) ),
       delivery_address:addresses ( street_1, street_2, landmark, city, pincode ),
-      customer_profile:customer_profiles ( users ( full_name, mobile ) )
+      customer_profile:customer_profiles ( users!customer_profiles_user_id_fkey ( full_name, mobile ) )
     `,
     )
     .eq("assigned_rider_id", riderProfile.id)

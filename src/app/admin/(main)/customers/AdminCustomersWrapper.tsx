@@ -11,6 +11,8 @@ interface Props {
   pendingSubscriptions: ActiveSubscriptionData[];
   stoppedSubscriptions: ActiveSubscriptionData[];
   autoOpenCreate?: boolean;
+  /** Renders the read-only Dietitian workspace (Req 16.1) when true. */
+  isDietitian?: boolean;
 }
 
 /**
@@ -23,6 +25,7 @@ export function AdminCustomersWrapper({
   pendingSubscriptions,
   stoppedSubscriptions,
   autoOpenCreate = false,
+  isDietitian = false,
 }: Props) {
   const [scope, setScope] = useState("core");
 
@@ -65,6 +68,7 @@ export function AdminCustomersWrapper({
         pendingSubscriptions={filteredPendingSubs}
         stoppedSubscriptions={filteredStoppedSubs}
         autoOpenCreate={autoOpenCreate}
+        isDietitian={isDietitian}
       />
     </div>
   );

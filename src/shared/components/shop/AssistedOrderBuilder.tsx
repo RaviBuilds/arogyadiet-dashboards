@@ -34,6 +34,7 @@ import {
   Plus,
   Search,
   ShoppingCart,
+  Store,
   Trash2,
   UserCheck,
   UserX,
@@ -48,6 +49,7 @@ import {
   CardTitle,
 } from "@/shared/components/ui/card";
 import { Input } from "@/shared/components/ui/input";
+import { Textarea } from "@/shared/components/ui/textarea";
 import { Label } from "@/shared/components/ui/label";
 import { Badge } from "@/shared/components/ui/badge";
 import { Separator } from "@/shared/components/ui/separator";
@@ -63,6 +65,12 @@ import {
   MAX_QTY,
   type CartLine,
 } from "@/lib/shop/assisted-order/core";
+import {
+  validateWalkInCustomer,
+  MAX_WALKIN_ADDRESS_CHARS,
+  MAX_WALKIN_NAME_CHARS,
+  type WalkInCustomerInput,
+} from "@/lib/shop/assisted-order/walkin";
 import type { AssistedOrderPricing } from "@/lib/shop/assisted-order/pricing";
 import type { ShopOrderDiscount } from "@/lib/pricing/inclusive-tax";
 // Type-only imports (erased at build time) — no runtime dependency on the
@@ -117,6 +125,17 @@ export type AssistedOrderActions = {
     customerProfileId: string,
     discount?: ShopOrderDiscount,
     clinicPickup?: boolean,
+  ) => Promise<AssistedOrderActionResult<PlaceOrderOutcome>>;
+  /**
+   * Optional. When a portal injects this, the builder also offers a WALK-IN
+   * buyer mode: a counter sale to someone with no customer profile, recorded by
+   * name (plus an optional mobile and address) so the stock movement stays
+   * accountable. Portals that omit it only get the existing-customer flow.
+   */
+  markPaidAndPlaceWalkInOrderAction?: (
+    cart: CartLine[],
+    walkIn: WalkInCustomerInput,
+    discount?: ShopOrderDiscount,
   ) => Promise<AssistedOrderActionResult<PlaceOrderOutcome>>;
 };
 
@@ -205,6 +224,22 @@ export default function AssistedOrderBuilder({
   const [cart, setCart] = useState<CartLine[]>([]);
   const [cartError, setCartError] = useState<string | null>(null);
 
+  // --- Buyer mode ---------------------------------------------------------
+  // "EXISTING": an eligible subscriber, order rides along with their delivery.
+  // "WALK_IN":  a counter sale to someone with no customer profile. Only
+  //             available when the portal injected the walk-in action.
+  const walkInSupported = typeof actions.markPaidAndPlaceWalkInOrderAction === "function";
+  const [buyerMode, setBuyerMode] = useState<"EXISTING" | "WALK_IN">("EXISTING");
+  const isWalkIn = walkInSupported && buyerMode === "WALK_IN";
+
+  // --- Walk-in buyer details ---------------------------------------------
+  const [walkInName, setWalkInName] = useState("");
+  const [walkInMobile, setWalkInMobile] = useState("");
+  const [walkInAddress, setWalkInAddress] = useState("");
+  // Shown only after the operator tries to place, so the form doesn't nag while
+  // they're still typing the name.
+  const [walkInError, setWalkInError] = useState<string | null>(null);
+
   // --- Customer search state ---------------------------------------------
   const [searchKind, setSearchKind] = useState<CustomerSearchKind>("MOBILE");
   const [searchQuery, setSearchQuery] = useState("");
@@ -257,12 +292,23 @@ export default function AssistedOrderBuilder({
   // reject placement, so surface it and disable the action up front. A clinic
   // pickup does not ride a delivery, so this rule does not apply.
   const hasNoDeliveryDay =
-    !clinicPickup && !!selectedCustomer && nextDeliveryDate === null;
+    !isWalkIn && !clinicPickup && !!selectedCustomer && nextDeliveryDate === null;
+  // Mirrors the server rule so the button state matches what placement allows.
+  const walkInDetails = useMemo(
+    () =>
+      validateWalkInCustomer({
+        name: walkInName,
+        mobile: walkInMobile,
+        address: walkInAddress,
+      }),
+    [walkInName, walkInMobile, walkInAddress],
+  );
+  const hasBuyer = isWalkIn ? walkInDetails.ok : !!selectedCustomer;
   const canPlace =
     isPaid &&
     cart.length > 0 &&
-    !!selectedCustomer &&
-    (clinicPickup || !!nextDeliveryDate) &&
+    hasBuyer &&
+    (isWalkIn || clinicPickup || !!nextDeliveryDate) &&
     !placedOutcome;
 
   // Any change to the cart or the selected customer invalidates a prior
@@ -382,6 +428,26 @@ export default function AssistedOrderBuilder({
     setPlacedOutcome(null);
   }
 
+  // --- Buyer mode ---------------------------------------------------------
+
+  /**
+   * Switch between an existing subscriber and a walk-in buyer. The cart is kept
+   * (the operator has already built it), but every buyer-specific selection is
+   * cleared so no stale identity can leak into placement.
+   */
+  function handleBuyerModeChange(mode: "EXISTING" | "WALK_IN") {
+    if (mode === buyerMode) return;
+    setBuyerMode(mode);
+    setSelectedCustomer(null);
+    setEligibilityError(null);
+    setNextDeliveryDate(undefined);
+    setSearchResults([]);
+    setSearchMessage(null);
+    setHasSearched(false);
+    setWalkInError(null);
+    invalidateDownstream();
+  }
+
   // --- Pricing handler ----------------------------------------------------
 
   function handleReviewPricing() {
@@ -425,6 +491,42 @@ export default function AssistedOrderBuilder({
       setPlaceError("At least one product is required to place the order.");
       return;
     }
+
+    if (isWalkIn) {
+      const placeWalkIn = actions.markPaidAndPlaceWalkInOrderAction;
+      if (!placeWalkIn) {
+        setPlaceError("Walk-in orders are not available here.");
+        return;
+      }
+      if (!walkInDetails.ok) {
+        setWalkInError(walkInDetails.error);
+        setPlaceError(walkInDetails.error);
+        return;
+      }
+      setWalkInError(null);
+      if (!isPaid) {
+        setPlaceError("Mark the order as paid before placing it.");
+        return;
+      }
+
+      const buyer: WalkInCustomerInput = {
+        name: walkInName,
+        mobile: walkInMobile,
+        address: walkInAddress,
+      };
+
+      startPlacing(async () => {
+        const res = await placeWalkIn(cart, buyer, undefined);
+        if (!res.success) {
+          setPlaceError(res.error);
+          return;
+        }
+        setPlacedOutcome(res.data);
+        onPlaced?.(res.data);
+      });
+      return;
+    }
+
     if (!selectedCustomer) {
       setPlaceError("Select an eligible customer before placing the order.");
       return;
@@ -472,6 +574,10 @@ export default function AssistedOrderBuilder({
     setPlaceError(null);
     setPlacedOutcome(null);
     setClinicPickup(false);
+    setWalkInName("");
+    setWalkInMobile("");
+    setWalkInAddress("");
+    setWalkInError(null);
   }
 
   // ------------------------------------------------------------------------
@@ -491,7 +597,19 @@ export default function AssistedOrderBuilder({
               Order <span className="font-mono">{placedOutcome.addonOrderId}</span>{" "}
               was created and paid.
             </p>
-            {placedOutcome.clinicPickup ? (
+            {placedOutcome.walkIn ? (
+              <>
+                <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-teal-700">
+                  <Store className="size-4" />
+                  Walk-in sale recorded
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Handed over at the counter and marked delivered. The stock
+                  movement is recorded against{" "}
+                  {walkInName.trim() || "this buyer"}.
+                </p>
+              </>
+            ) : placedOutcome.clinicPickup ? (
               <>
                 <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-teal-700">
                   <ShoppingCart className="size-4" />
@@ -629,7 +747,167 @@ export default function AssistedOrderBuilder({
           </CardContent>
         </Card>
 
-        {/* Customer search + select */}
+        {/* Buyer mode: existing subscriber vs walk-in counter sale. Only
+            rendered when the portal supports walk-in orders. */}
+        {walkInSupported ? (
+          <Card>
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2">
+                <UserCheck className="size-4" /> Who is buying?
+              </CardTitle>
+              <CardDescription>
+                Pick an existing subscriber, or record a walk-in who is only
+                buying a shop product.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div
+                role="radiogroup"
+                aria-label="Buyer type"
+                className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+              >
+                {(
+                  [
+                    {
+                      mode: "EXISTING" as const,
+                      icon: UserCheck,
+                      label: "Existing customer",
+                      hint: "Has an active subscription. The order can ride along with their next delivery.",
+                    },
+                    {
+                      mode: "WALK_IN" as const,
+                      icon: Store,
+                      label: "Walk-in customer",
+                      hint: "No subscription. Sold across the counter and recorded against their name.",
+                    },
+                  ]
+                ).map(({ mode, icon: Icon, label, hint }) => {
+                  const active = buyerMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => handleBuyerModeChange(mode)}
+                      className={cn(
+                        "flex items-start gap-2.5 rounded-lg border p-3 text-left transition-colors",
+                        active
+                          ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                          : "hover:bg-muted/50",
+                      )}
+                    >
+                      <Icon
+                        className={cn(
+                          "mt-0.5 size-4 shrink-0",
+                          active ? "text-primary" : "text-muted-foreground",
+                        )}
+                      />
+                      <span className="space-y-0.5">
+                        <span className="block text-sm font-medium leading-none">
+                          {label}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {hint}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {/* Walk-in buyer details */}
+        {isWalkIn ? (
+          <Card>
+            <CardHeader className="border-b">
+              <CardTitle className="flex items-center gap-2">
+                <Store className="size-4" /> Walk-in customer details
+              </CardTitle>
+              <CardDescription>
+                The name is required so every unit leaving shop stock has a
+                record behind it. Mobile and address are optional.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="walkin-name">
+                  Customer name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="walkin-name"
+                  value={walkInName}
+                  maxLength={MAX_WALKIN_NAME_CHARS}
+                  autoComplete="off"
+                  placeholder="e.g. Ravi Kumar"
+                  aria-invalid={walkInError != null}
+                  onChange={(e) => {
+                    setWalkInName(e.target.value);
+                    setWalkInError(null);
+                    setPlaceError(null);
+                  }}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="walkin-mobile">
+                    Mobile{" "}
+                    <span className="text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Input
+                    id="walkin-mobile"
+                    value={walkInMobile}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="10-digit number"
+                    onChange={(e) => {
+                      setWalkInMobile(e.target.value);
+                      setWalkInError(null);
+                      setPlaceError(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="walkin-address">
+                  Address{" "}
+                  <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Textarea
+                  id="walkin-address"
+                  value={walkInAddress}
+                  rows={2}
+                  maxLength={MAX_WALKIN_ADDRESS_CHARS}
+                  placeholder="Locality, city — recorded for reference only"
+                  onChange={(e) => {
+                    setWalkInAddress(e.target.value);
+                    setWalkInError(null);
+                    setPlaceError(null);
+                  }}
+                />
+              </div>
+
+              {walkInError ? (
+                <p className="flex items-center gap-1.5 text-sm text-destructive">
+                  <AlertCircle className="size-4" /> {walkInError}
+                </p>
+              ) : null}
+
+              <div className="flex items-start gap-2 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-800">
+                <Store className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  This is a counter sale: it is marked delivered right away and
+                  is never sent out for delivery.
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+        /* Customer search + select */
         <Card>
           <CardHeader className="border-b">
             <CardTitle className="flex items-center gap-2">
@@ -818,6 +1096,7 @@ export default function AssistedOrderBuilder({
             ) : null}
           </CardContent>
         </Card>
+        )}
       </div>
 
       {/* ---- Right column: summary + pricing + place ---- */}
@@ -873,28 +1152,36 @@ export default function AssistedOrderBuilder({
 
           <Separator />
 
-          {/* Fulfillment mode: clinic pickup vs ride-along delivery. */}
-          <label
-            htmlFor="assisted-clinic-pickup"
-            className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
-          >
-            <Checkbox
-              id="assisted-clinic-pickup"
-              checked={clinicPickup}
-              onCheckedChange={(v) => {
-                setClinicPickup(v === true);
-                setPlaceError(null);
-              }}
-              className="mt-0.5"
-            />
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium leading-none">Clinic pickup</p>
-              <p className="text-xs text-muted-foreground">
-                Customer collects at the clinic. The order is marked delivered
-                right away and is not sent for delivery.
-              </p>
+          {/* Fulfillment mode: clinic pickup vs ride-along delivery. A walk-in
+              sale is always a counter handover, so the choice doesn't apply. */}
+          {isWalkIn ? (
+            <div className="flex items-start gap-2.5 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-800">
+              <Store className="mt-0.5 size-4 shrink-0" />
+              <span>Counter sale — marked delivered on placement.</span>
             </div>
-          </label>
+          ) : (
+            <label
+              htmlFor="assisted-clinic-pickup"
+              className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer"
+            >
+              <Checkbox
+                id="assisted-clinic-pickup"
+                checked={clinicPickup}
+                onCheckedChange={(v) => {
+                  setClinicPickup(v === true);
+                  setPlaceError(null);
+                }}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium leading-none">Clinic pickup</p>
+                <p className="text-xs text-muted-foreground">
+                  Customer collects at the clinic. The order is marked delivered
+                  right away and is not sent for delivery.
+                </p>
+              </div>
+            </label>
+          )}
 
           {/* Pricing review (Req 4.4) */}
           {pricing ? (
@@ -931,7 +1218,7 @@ export default function AssistedOrderBuilder({
               variant="outline"
               className="w-full"
               onClick={handleReviewPricing}
-              disabled={cart.length === 0 || !selectedCustomer || isPricing}
+              disabled={cart.length === 0 || !hasBuyer || isPricing}
             >
               {isPricing ? <Loader2 className="animate-spin" /> : null}
               Review pricing
@@ -944,9 +1231,11 @@ export default function AssistedOrderBuilder({
             </p>
           ) : null}
 
-          {!selectedCustomer && cart.length > 0 ? (
+          {!hasBuyer && cart.length > 0 ? (
             <p className="text-xs text-muted-foreground">
-              Select an eligible customer to review pricing.
+              {isWalkIn
+                ? "Enter the walk-in customer's name to review pricing."
+                : "Select an eligible customer to review pricing."}
             </p>
           ) : null}
 

@@ -195,7 +195,7 @@ export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
         ends_on,
         effective_end_on,
         status,
-        customer_profiles ( users ( full_name ) ),
+        customer_profiles ( users!customer_profiles_user_id_fkey ( full_name ) ),
         subscription_plans ( name )
       `,
         )
@@ -213,7 +213,7 @@ export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
         status,
         target_delivery_date,
         created_at,
-        customer_profiles ( users ( full_name ) )
+        customer_profiles ( users!customer_profiles_user_id_fkey ( full_name ) )
       `,
         )
         .eq("status", "PAID")

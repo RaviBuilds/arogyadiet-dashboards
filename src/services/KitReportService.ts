@@ -182,7 +182,7 @@ async function getCustomerName(customerProfileId: string): Promise<string> {
 
   const { data } = await admin
     .from("customer_profiles")
-    .select("users(full_name)")
+    .select("users!customer_profiles_user_id_fkey(full_name)")
     .eq("id", customerProfileId)
     .maybeSingle();
 

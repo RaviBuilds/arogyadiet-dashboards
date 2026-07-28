@@ -42,7 +42,7 @@ export default async function FranchiseOperationsPage() {
     .select(
       `
       id, status, delivery_date, route_sequence, payout_amount, created_at, pickup_marked_at, delivered_at, franchise_id,
-      customer_profiles ( users ( full_name, mobile ), addresses ( street_1, city, pincode ) ),
+      customer_profiles ( users!customer_profiles_user_id_fkey ( full_name, mobile ), addresses ( street_1, city, pincode ) ),
       rider_profiles ( id, emergency_contact, users ( full_name ), rider_service_areas ( area_name ) ),
       meal_categories ( name ),
       delivery_batches ( id, status, total_distance_km, expected_payout ),
@@ -58,7 +58,7 @@ export default async function FranchiseOperationsPage() {
     .select(
       `
       id, status, franchise_id,
-      customer_profiles ( users ( full_name, mobile ) ),
+      customer_profiles ( users!customer_profiles_user_id_fkey ( full_name, mobile ) ),
       addresses ( street_1, city, pincode ),
       meal_categories ( name )
     `,

@@ -146,6 +146,11 @@ export function createQuickOnboardingSchema(
       // Optional manual clinic assignment (for KIT customers).
       clinicId: z.string().uuid("Select a valid clinic.").optional(),
 
+      // Optional Dietitian_Link selected during onboarding (dietitian-management,
+      // Req 7.1–7.7 for MEAL, Req 9.1–9.4 for ACCOMMODATION). Persisted inside the
+      // same atomic operation that creates the Customer_Record.
+      dietitianId: z.string().uuid("Select a valid dietitian.").optional(),
+
       // Req 4.5 / 5: primary address captured via Address_Capture.
       address: createAddressCaptureSchema(serviceAreaPincodes, skipServiceabilityCheck),
 

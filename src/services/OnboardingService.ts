@@ -30,6 +30,8 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeMobile } from "@/lib/mobile/normalizeMobile";
 import { resolveClinicForPincode } from "@/lib/clinic/pincode-resolver";
+import { validateDietitianForClinic } from "@/services/AssignmentService";
+import { listActiveDietitiansForFranchise } from "@/repositories/dietitian/dietitianRepository";
 import {
   assertValidCategory,
   type CustomerCategory,
@@ -320,6 +322,36 @@ export async function onboard(
     franchiseId = await resolveFranchiseIdForClinic(clinicId);
   }
 
+  // (4b) Clinic-membership pre-check for a selected Dietitian_Link (Req 7.8,
+  // 8.8, dietitian-management). MEAL and KIT onboarding scope the Dietitian
+  // dropdown to the resolved Clinic, so a submitted Dietitian must belong to
+  // it — reject the submission before persisting anything on a mismatch.
+  // ACCOMMODATION's Dietitian dropdown is unscoped (Req 9.2), so no
+  // clinic-membership check applies there. This is a pure pre-check; the
+  // validated Dietitian is persisted inside the SAME atomic RPC call below,
+  // not by a follow-up write into AssignmentService.
+  let dietitianId = payload.dietitianId ?? null;
+  if (dietitianId && category === "MEAL") {
+    const dietitianCheck = await validateDietitianForClinic(dietitianId, clinicId);
+    if (!dietitianCheck.ok) {
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: dietitianCheck.message,
+        fieldErrors: { dietitianId: dietitianCheck.message },
+      };
+    }
+  }
+
+  // (4c) KIT onboarding in a Franchise session auto-assigns that Franchise's
+  // single active Dietitian (Req 8.8) — a KIT onboarding has no Dietitian
+  // dropdown of its own (Req 8.1 scopes the KIT dropdown to Customer_360,
+  // post-onboarding, for a Customer_Record with no franchise_id).
+  if (category === "KIT" && franchiseId) {
+    const franchiseDietitians = await listActiveDietitiansForFranchise(franchiseId);
+    dietitianId = franchiseDietitians[0]?.id ?? null;
+  }
+
   // (5) Determine the email + Test_Email flag (Req 10.1/10.2/10.3).
   const { email, isTestEmail } = resolveEmail(payload, mobile);
 
@@ -462,6 +494,10 @@ export async function onboard(
       source: "QUICK_ONBOARDING",
       franchise_id: franchiseId,
       clinic_id: clinicId,
+      // Dietitian_Link selected at onboarding (dietitian-management, Req 7.7,
+      // 8.8, 9.4) — persisted in this SAME atomic RPC call, not a follow-up
+      // write into AssignmentService.
+      dietitian_id: dietitianId,
     },
     subscription: {
       // Category-specific fields (Req 2.1, 2.2, 2.3, 4.4, 7.1)

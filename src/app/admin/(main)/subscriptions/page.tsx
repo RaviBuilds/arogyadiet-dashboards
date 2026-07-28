@@ -38,7 +38,7 @@ export default async function SubscriptionsPage() {
   // record list tabs that were moved here from the Customers portal.
   const recordSelectFields = `
     id, starts_on, effective_end_on, ends_on, total_days, pause_credits_total, pause_credits_used, status, franchise_id,
-    customer_profiles ( users ( full_name, email ) ),
+    customer_profiles ( users!customer_profiles_user_id_fkey ( full_name, email ) ),
     subscription_plans ( name )
   `;
 
