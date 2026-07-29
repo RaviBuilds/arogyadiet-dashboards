@@ -1,8 +1,29 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendPushToExternalUserIds } from "@/lib/onesignal/server";
+import {
+  resolveAccessLevel,
+  type AdminAccessLevel,
+} from "@/lib/auth/adminAccessCore";
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Constructed on first send rather than at import time: the Resend constructor
+// throws when RESEND_API_KEY is absent, which would take down every module that
+// transitively imports this one (client component graphs and tests included).
+let resendClient: Resend | null = null;
+
+function getResend(): Resend | null {
+  if (resendClient) return resendClient;
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.error("Resend is not configured — skipping notification email.");
+    return null;
+  }
+
+  resendClient = new Resend(apiKey);
+  return resendClient;
+}
+
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL || "ArogyaDiet <noreply@arogyadiet.com>";
 const SHARED_ADMIN_INBOX_FALLBACK = "arogya664@gmail.com";
@@ -36,6 +57,14 @@ export interface NotificationPayload {
   emailStrategy?: "shared" | "individual";
   /** When true, notifyAdmins skips in-app inserts (email/push only). */
   skipInApp?: boolean;
+  /**
+   * Admin access levels that must NOT receive this alert (in-app, email and
+   * push alike). Used for alerts that are irrelevant to a narrow access level —
+   * e.g. add-on service requests are hidden from `inventory` (inventory-only)
+   * and `dietitian` admins. Omit to notify every admin, which stays the
+   * default for all existing callers.
+   */
+  excludeAccessLevels?: readonly AdminAccessLevel[];
 }
 
 export function buildPushPayload(
@@ -68,6 +97,7 @@ type NotificationRow = {
 type AdminUser = {
   id: string;
   email: string | null;
+  admin_access_level?: string | null;
 };
 
 function escapeHtml(text: string): string {
@@ -91,6 +121,9 @@ async function sendNotificationEmail(
   payload: NotificationPayload,
 ): Promise<void> {
   try {
+    const resend = getResend();
+    if (!resend) return;
+
     const { error } = await resend.emails.send({
       from: FROM_EMAIL,
       to,
@@ -231,7 +264,7 @@ export async function notifyAdmins(payload: NotificationPayload): Promise<void> 
 
     const { data: adminUsers, error: usersError } = await supabaseAdmin
       .from("users")
-      .select("id, email")
+      .select("id, email, admin_access_level")
       .in("role_id", roleIds);
 
     if (usersError) {
@@ -239,7 +272,12 @@ export async function notifyAdmins(payload: NotificationPayload): Promise<void> 
       return;
     }
 
-    const admins = (adminUsers ?? []) as AdminUser[];
+    const excluded = payload.excludeAccessLevels ?? [];
+    const admins = ((adminUsers ?? []) as AdminUser[]).filter(
+      (admin) =>
+        excluded.length === 0 ||
+        !excluded.includes(resolveAccessLevel(admin.admin_access_level)),
+    );
     if (admins.length === 0) {
       return;
     }

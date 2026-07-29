@@ -71,6 +71,7 @@ import { CustomerOverview } from "./CustomerOverview";
 import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
 import { KitCustomerSection } from "./KitCustomerSection";
 import { AccommodationCustomerSection } from "./AccommodationCustomerSection";
+import { AddonServiceRequestsPanel } from "./AddonServiceRequestsPanel";
 import { Plus, Upload, UserPlus, Stethoscope } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
 import {
   clinicDisplayName,
@@ -1109,22 +1110,32 @@ export default function CustomerDashboard({
           isDietitian={isDietitian}
         />
       ) : activeTab === "Accommodation Customers" ? (
-        <AccommodationCustomerSection
-          customers={filteredAccommodationCustomers}
-          showArchived={showArchived}
-          setShowArchived={setShowArchived}
-          searchColumn={searchColumn}
-          setSearchColumn={setSearchColumn}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          searchOptions={searchOptions}
-          isLoading={isLoading || isPending}
-          onRefresh={handleRefreshISR}
-          onExport={handleExportExcel}
-          onEdit={openEditModal}
-          onDeactivate={openDeleteModal}
-          isDietitian={isDietitian}
-        />
+        <div className="space-y-6">
+          {/* Add-on wellness requests raised by accommodation customers. This
+              dashboard powers the core-business Customers page only — the
+              franchise portal renders FranchiseCustomerDashboard, which has no
+              accommodation tab — so franchise users never see this panel. */}
+          <AddonServiceRequestsPanel
+            customers={filteredAccommodationCustomers}
+            isDietitian={isDietitian}
+          />
+          <AccommodationCustomerSection
+            customers={filteredAccommodationCustomers}
+            showArchived={showArchived}
+            setShowArchived={setShowArchived}
+            searchColumn={searchColumn}
+            setSearchColumn={setSearchColumn}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            searchOptions={searchOptions}
+            isLoading={isLoading || isPending}
+            onRefresh={handleRefreshISR}
+            onExport={handleExportExcel}
+            onEdit={openEditModal}
+            onDeactivate={openDeleteModal}
+            isDietitian={isDietitian}
+          />
+        </div>
       ) : null}
 
       {/* --- EDIT CUSTOMER MODAL --- */}
