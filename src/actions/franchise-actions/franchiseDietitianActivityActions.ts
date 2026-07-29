@@ -85,15 +85,31 @@ async function resolveFranchiseDietitian(
   };
 }
 
-/** List every Customer_Record whose `franchise_id` equals the caller's Franchise (Req 24.2). */
+/**
+ * List the Customer_Records the report covers: those linked to the Franchise's
+ * Dietitian via `customer_profiles.dietitian_id` (the "linked Customer_Records"
+ * of Req 20.2–20.5), restricted to the caller's Franchise (Req 24.2).
+ *
+ * Both filters are applied so the returned set is identical to the one the
+ * Master_Portal's `listLinkedCustomers` returns for the same Dietitian, which
+ * is what makes Req 24.6 hold: a Franchise Dietitian's linked records all
+ * carry that Franchise's `franchise_id`, so the `franchise_id` filter is a
+ * defence-in-depth tenant guard rather than a widening of the set.
+ */
 async function listFranchiseCustomers(
   admin: ReturnType<typeof createAdminClient>,
   franchiseId: string,
+  dietitianUserId: string,
 ): Promise<FranchiseScopedCustomerRow[]> {
   const { data, error } = await admin
     .from("customer_profiles")
-    .select("id, dietitian_id, customer_code, users(full_name, mobile)")
-    .eq("franchise_id", franchiseId);
+    // `users` must be disambiguated: `customer_profiles` links to it via both
+    // `user_id` and `dietitian_id`.
+    .select(
+      "id, dietitian_id, customer_code, users!customer_profiles_user_id_fkey(full_name, mobile)",
+    )
+    .eq("franchise_id", franchiseId)
+    .eq("dietitian_id", dietitianUserId);
 
   if (error) {
     throw new Error(`Failed to list franchise customers: ${error.message}`);
@@ -186,7 +202,7 @@ export async function getFranchiseDietitianActivityReport(): Promise<
       return { success: true, data: null };
     }
 
-    const customers = await listFranchiseCustomers(admin, franchiseId);
+    const customers = await listFranchiseCustomers(admin, franchiseId, dietitian.id);
 
     if (customers.length === 0) {
       return {

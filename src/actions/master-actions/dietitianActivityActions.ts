@@ -13,19 +13,21 @@
 // repositories and `customer_profiles`/`users`. This file performs no direct
 // business validation of its own beyond input shape checks.
 //
-// `getDietitianActivityReport` builds the per-customer table from EVERY
-// Customer_Record the Dietitian may read (Req 20.2–20.5): for a core
-// Dietitian that is every Customer_Record linked via `dietitian_id` plus (if
-// assigned) every Customer_Record at the linked Clinic; for a Franchise
-// Dietitian it is every Customer_Record in that Franchise (Req 21.8, 22.8).
-// This mirrors the same scope predicate `checkDietitianScope` enforces for a
-// Dietitian's own reads, so the Master report and the Franchise report agree
-// with what the Dietitian can see (Req 24.6) — the two reports differ only in
-// whether the Franchise Owner's report is additionally restricted to a single
-// Franchise (Req 24.2), which is a filter on the same underlying scope, not a
-// different computation.
+// `getDietitianActivityReport` builds the per-customer table from the
+// selected Dietitian's LINKED Customer_Records only — every
+// `customer_profiles` row whose Dietitian_Link (`customer_profiles.dietitian_id`)
+// references that Dietitian (Req 20.2–20.5, 20.9, and the Req 20.7 empty-state
+// message `No customers are assigned to this dietitian`).
 //
-// Requirements: 18.8, 20.1, 20.2, 20.3, 20.4, 20.5, 20.7, 20.8
+// This is deliberately NARROWER than the read scope `checkDietitianScope`
+// grants a Dietitian for their own reads (Req 5.5: linked records PLUS every
+// Customer_Record at the linked Clinic). The two answer different questions:
+// Req 5.5 is "what may this Dietitian open", this report is "who is this
+// Dietitian accountable for". Using the Req 5.5 predicate here made the report
+// list every customer of the Clinic, which drowned the assigned handful in
+// hundreds of unrelated rows and broke the bounds invariant's intent (Req 20.9).
+//
+// Requirements: 18.8, 20.1, 20.2, 20.3, 20.4, 20.5, 20.7, 20.8, 20.9
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -38,10 +40,6 @@ import {
   generateReportCardPdf as generateReportCardPdfService,
   type ReportCardViewModel,
 } from "@/services/DietitianReportService";
-import {
-  dietitianScopeFromUser,
-  type DietitianScope,
-} from "@/lib/dietitian/scope";
 import type {
   ActionResult,
 } from "@/types/clinic";
@@ -133,41 +131,30 @@ interface ScopedCustomerRow {
 }
 
 /**
- * Resolve every Customer_Record readable by the given Dietitian's scope
- * (Req 20.2–20.5), i.e. the same set `checkDietitianScope` would admit for
- * that Dietitian's own reads:
- *   - franchise scope  → every Customer_Record whose `franchise_id` matches
- *   - core scope        → every Customer_Record linked via `dietitian_id`,
- *                          plus (if a Clinic is assigned) every Customer_Record
- *                          at that Clinic
- *
- * A franchise scope is expressed as a single `.eq` filter; a core scope
- * without a Clinic is a single `.eq`; a core scope with a Clinic is an `.or`
- * over both disjuncts — mirroring `applyDietitianScope` without importing a
- * live Supabase query builder type into this module.
+ * Resolve the selected Dietitian's linked Customer_Records — every
+ * `customer_profiles` row whose Dietitian_Link references that Dietitian
+ * (Req 20.2–20.5). The Clinic and Franchise disjuncts of the Req 5.5 read
+ * scope are intentionally NOT applied: a Clinic's other customers are
+ * readable by the Dietitian but are not that Dietitian's accountability, and
+ * including them is what made this report show every customer of the Clinic.
  */
-async function listScopedCustomers(
+async function listLinkedCustomers(
   admin: ReturnType<typeof createAdminClient>,
-  scope: DietitianScope,
+  dietitianUserId: string,
 ): Promise<ScopedCustomerRow[]> {
+  // `customer_profiles` has two FKs into `users` (`user_id` and
+  // `dietitian_id`), so the embed must name the constraint explicitly or
+  // PostgREST rejects it as ambiguous.
   const columns =
-    "id, clinic_id, franchise_id, dietitian_id, customer_code, users(full_name, mobile)";
+    "id, clinic_id, franchise_id, dietitian_id, customer_code, users!customer_profiles_user_id_fkey(full_name, mobile)";
 
-  let query = admin.from("customer_profiles").select(columns);
+  const { data, error } = await admin
+    .from("customer_profiles")
+    .select(columns)
+    .eq("dietitian_id", dietitianUserId);
 
-  if (scope.kind === "franchise") {
-    query = query.eq("franchise_id", scope.franchiseId);
-  } else if (scope.clinicId === null) {
-    query = query.eq("dietitian_id", scope.dietitianUserId);
-  } else {
-    query = query.or(
-      `dietitian_id.eq.${scope.dietitianUserId},clinic_id.eq.${scope.clinicId}`,
-    );
-  }
-
-  const { data, error } = await query;
   if (error) {
-    throw new Error(`Failed to list scoped customers: ${error.message}`);
+    throw new Error(`Failed to list linked customers: ${error.message}`);
   }
   return (data ?? []) as unknown as ScopedCustomerRow[];
 }
@@ -285,8 +272,8 @@ async function resolveClinicName(
 
 /**
  * Build the Dietitian_Activity_Report for one Dietitian (Req 20.2–20.5,
- * 20.8): resolve the Dietitian's read scope, find every Customer_Record in
- * that scope, compute cadence for all of them through `CadenceService` — the
+ * 20.8): find every Customer_Record whose Dietitian_Link references that
+ * Dietitian, compute cadence for all of them through `CadenceService` — the
  * single Cadence_Engine every activity report and list uses (Req 20.8) — and
  * aggregate the per-customer table into the three headline counts:
  *   - `customersWithPendingLogs` = count of rows with `pendingLogCount > 0`
@@ -318,10 +305,9 @@ export async function getDietitianActivityReport(
       return { success: false, error: "Dietitian not found" };
     }
 
-    const scope = dietitianScopeFromUser(dietitianRow);
     const clinicName = await resolveClinicName(admin, dietitianRow.dietitian_clinic_id);
 
-    const customers = await listScopedCustomers(admin, scope);
+    const customers = await listLinkedCustomers(admin, dietitianUserId);
 
     if (customers.length === 0) {
       return {

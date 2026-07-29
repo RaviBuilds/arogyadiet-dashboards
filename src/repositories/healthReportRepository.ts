@@ -149,6 +149,13 @@ export async function getMealSubscriptionForReport(
  * `[windowStart, windowEnd]` inclusive, ascending by date. Only
  * `author_type = 'DIETITIAN'` rows are returned — the customer report never
  * surfaces self-logged data (Req: "only data mentioned by the dietitian").
+ *
+ * Reads the `v_health_log_timeline` union view rather than `health_logs` alone, so
+ * a stay that predates the dietitian-management feature still reports the staff
+ * readings held in the legacy `admin_health_logs` table. The view projects those
+ * into the same sparse `parameters` shape (weight / bp / fasting_sugar, with
+ * `notes` as the closing comment) and marks them `DIETITIAN`, so the report body
+ * needs no special case for them.
  */
 export async function getDietitianHealthLogsInWindow(
   customerProfileId: string,
@@ -158,8 +165,10 @@ export async function getDietitianHealthLogsInWindow(
   const admin = createAdminClient();
 
   const { data, error } = await admin
-    .from("health_logs")
-    .select("id, log_date, author_user_id, parameters, custom_parameters, closing_comment, submitted_at")
+    .from("v_health_log_timeline")
+    .select(
+      "id, log_date, source, author_user_id, parameters, custom_parameters, closing_comment, submitted_at",
+    )
     .eq("customer_profile_id", customerProfileId)
     .eq("author_type", "DIETITIAN")
     .gte("log_date", windowStart)
@@ -171,7 +180,20 @@ export async function getDietitianHealthLogsInWindow(
     throw new Error(`Failed to load dietitian health logs: ${error.message}`);
   }
 
-  return ((data ?? []) as RawDietitianHealthLogRow[]).map((row) => ({
+  const rows = (data ?? []) as RawDietitianHealthLogRow[];
+
+  // A migrated stay can hold both a legacy `admin_health_logs` row and a newer
+  // `health_logs` row for the same calendar day. The report shows one entry per
+  // day, so keep the richer `health_logs` record where both exist.
+  const byDate = new Map<string, RawDietitianHealthLogRow>();
+  for (const row of rows) {
+    const existing = byDate.get(row.log_date);
+    if (!existing || (existing.source !== "health_logs" && row.source === "health_logs")) {
+      byDate.set(row.log_date, row);
+    }
+  }
+
+  return [...byDate.values()].map((row) => ({
     id: row.id,
     logDate: row.log_date,
     authorUserId: row.author_user_id ?? null,
@@ -180,6 +202,38 @@ export async function getDietitianHealthLogsInWindow(
     closingComment: row.closing_comment ?? null,
     submittedAt: row.submitted_at,
   }));
+}
+
+/**
+ * The distinct `log_date`s a Dietitian has recorded for a customer, ascending.
+ *
+ * One read that callers bucket by date window themselves — used by the stay
+ * history list to know, in a single query, which stays actually have readings
+ * behind them (and so which Health Report downloads are worth offering). Reads the
+ * same union view as {@link getDietitianHealthLogsInWindow} so the count a stay
+ * advertises always matches what its PDF contains.
+ */
+export async function getDietitianLogDates(
+  customerProfileId: string,
+): Promise<string[]> {
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("v_health_log_timeline")
+    .select("log_date")
+    .eq("customer_profile_id", customerProfileId)
+    .eq("author_type", "DIETITIAN")
+    .order("log_date", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to load dietitian log dates: ${error.message}`);
+  }
+
+  // Distinct: a migrated day can appear in both the legacy and the current table,
+  // and the report treats that as one day.
+  return [
+    ...new Set(((data ?? []) as { log_date: string }[]).map((row) => row.log_date)),
+  ];
 }
 
 /**
@@ -255,6 +309,8 @@ interface RawDietitianHealthLogRow {
   custom_parameters: unknown;
   closing_comment: string | null;
   submitted_at: string;
+  /** Which table of the union view the row came from. */
+  source: string;
 }
 
 interface RawHeaderRow {

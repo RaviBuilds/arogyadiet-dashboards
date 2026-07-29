@@ -1,19 +1,24 @@
-import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
-import { format, parseISO } from "date-fns";
-import { HeartPulse, AlertCircle } from "lucide-react";
+import Link from "next/link";
+import { AlertCircle, ArrowRight, BedDouble, HeartPulse } from "lucide-react";
 
-import { getActiveStayAction, getStayHistoryAction } from "@/actions/stayActions";
-import { getAdminHealthLogsAction } from "@/actions/healthLogActions";
-import type { AdminHealthLogRow } from "@/repositories/healthLogRepository";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
+import { getCustomerSession } from "@/lib/customer/get-session";
+import { getCustomerHealthReportAction } from "@/actions/customerHealthReportActions";
+import { HealthReportDayList } from "@/shared/components/customer/health-report/HealthReportDayList";
+import { HealthReportHero } from "@/shared/components/customer/health-report/HealthReportHero";
+import { StayHealthReportDownloadButton } from "@/shared/components/customer/health-report/StayHealthReportDownloadButton";
+import { formatDisplayDate } from "@/shared/components/customer/health-report/healthReportDisplay";
 
 /**
  * Health Report Page (Server Component)
  *
- * Displays admin-entered health data (weight, BP, sugar level, notes) for the
- * customer's active stay in a read-only, chronologically ascending format.
- * Falls back to the most recent FINISHED stay when no active stay exists.
+ * The day-wise view of the health measurements the wellness team recorded during
+ * the customer's stay: a hero in the dashboard's visual family, a vitals band with
+ * trend sparklines, one expandable card per logged day, and a PDF download.
+ *
+ * Data comes from `getCustomerHealthReportAction`, which reads Dietitian_Logs from
+ * `health_logs` scoped to the stay's date window — the same window the PDF uses,
+ * so the page and the download always agree.
  *
  * Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 15.4
  */
@@ -21,109 +26,121 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui
 export const revalidate = 0;
 
 export default async function HealthReportPage() {
-  const { user, customerProfileId, error } = await getCustomerSession();
+  const { user, error } = await getCustomerSession();
   if (error || !user) redirect("/login");
 
-  if (!customerProfileId) {
-    return (
-      <ErrorState message="Unable to load your customer profile. Please try again." />
-    );
+  const result = await getCustomerHealthReportAction();
+
+  if ("error" in result) {
+    return <ErrorState message={result.error} />;
   }
 
-  // Resolve the relevant stay: active/pending first, else most recent FINISHED
-  const activeResult = await getActiveStayAction(customerProfileId);
-  if ("error" in activeResult) {
-    return <ErrorState message={activeResult.error} />;
+  const report = result.data;
+
+  if (!report) {
+    return <NoStayState />;
   }
 
-  let stayId: string | null = null;
-  let stayIsActive = false;
-
-  if (activeResult.data && activeResult.data.status === "ACTIVE") {
-    stayId = activeResult.data.id;
-    stayIsActive = true;
-  } else {
-    // No ACTIVE stay (may have a PENDING one, which doesn't count) — fall back
-    // to the most recent FINISHED stay (Req 10.5)
-    const historyResult = await getStayHistoryAction(customerProfileId);
-    if ("error" in historyResult) {
-      return <ErrorState message={historyResult.error} />;
-    }
-
-    const finishedStays = historyResult.data
-      .filter((stay) => stay.status === "FINISHED")
-      .sort((a, b) => (a.startDate < b.startDate ? 1 : -1));
-
-    if (finishedStays.length > 0) {
-      stayId = finishedStays[0].id;
-    }
-  }
-
-  if (!stayId) {
-    return (
-      <PageShell>
-        <EmptyState message="No stay records exist." />
-      </PageShell>
-    );
-  }
-
-  const logsResult = await getAdminHealthLogsAction(stayId);
-  if ("error" in logsResult) {
-    return <ErrorState message={logsResult.error} />;
-  }
-
-  const logs = logsResult.data;
+  const { stay, days, dietitianName } = report;
+  const stayTypeLabel =
+    [stay.stayType, stay.occupancyType].filter(Boolean).join(" · ") ||
+    "Accommodation stay";
 
   return (
-    <PageShell>
-      {!stayIsActive && (
-        <p className="text-sm text-slate-500">
-          Showing health data from your most recent completed stay.
-        </p>
-      )}
-      {logs.length === 0 ? (
-        <EmptyState message="No health records available yet." />
+    <div className="relative z-10 mx-auto max-w-5xl space-y-6 sm:space-y-8">
+      <HealthReportHero
+        stayRangeLabel={`${formatDisplayDate(stay.startDate)} — ${formatDisplayDate(stay.endDate)}`}
+        stayTypeLabel={stayTypeLabel}
+        totalNights={stay.totalNights}
+        daysRecorded={days.length}
+        dietitianName={dietitianName}
+        isActive={stay.isActive}
+        action={
+          <StayHealthReportDownloadButton
+            stayId={stay.id}
+            hasRecords={days.length > 0}
+            dayCount={days.length}
+          />
+        }
+      />
+
+      {days.length === 0 ? (
+        <NoRecordsState />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {logs.map((log) => (
-            <HealthLogCard key={log.id} log={log} />
-          ))}
-        </div>
+        <HealthReportDayList
+          days={days}
+          dietitianName={dietitianName}
+          totalNights={stay.totalNights}
+          isActive={stay.isActive}
+        />
       )}
-    </PageShell>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Presentational helpers
-// ---------------------------------------------------------------------------
-
-function PageShell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="relative z-10 max-w-5xl mx-auto space-y-6">
-      <div className="flex items-start gap-3">
-        <div className="rounded-full bg-primary/10 p-2.5 text-primary shrink-0">
-          <HeartPulse className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 tracking-tight">
-            Health Report
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Health metrics recorded by our wellness team during your stay.
-          </p>
-        </div>
-      </div>
-      {children}
     </div>
   );
 }
 
-function EmptyState({ message }: { message: string }) {
+// ---------------------------------------------------------------------------
+// States
+// ---------------------------------------------------------------------------
+
+/** No readings yet, but the stay exists — keeps the hero and reassures. */
+function NoRecordsState() {
   return (
-    <div className="flex items-center justify-center min-h-[300px]">
-      <div className="text-center space-y-2">
-        <p className="text-base font-medium text-slate-600">{message}</p>
+    <div
+      className="reveal-rise relative overflow-hidden rounded-3xl border border-dashed border-slate-200 bg-white text-center shadow-sm"
+      style={{ ["--reveal-delay" as string]: "300ms" }}
+    >
+      <div className="pointer-events-none absolute -top-16 left-1/2 h-56 w-56 -translate-x-1/2 rounded-full bg-emerald-100/60 blur-3xl" />
+      <div className="relative flex flex-col items-center gap-3 px-6 py-14 sm:px-10">
+        <div className="mb-1 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
+          <HeartPulse className="h-10 w-10" aria-hidden="true" />
+        </div>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+          No readings recorded yet
+        </h2>
+        <p className="max-w-md text-sm leading-relaxed text-slate-500">
+          Your wellness team records your measurements during your stay. As soon as
+          the first check-in happens, your day-wise report will appear right here.
+        </p>
+        <Link
+          href="/stay-tracker"
+          className="group mt-3 inline-flex w-fit items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:brightness-105 active:scale-[0.98]"
+        >
+          Open Stay Tracker
+          <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+/** No stay on record at all. */
+function NoStayState() {
+  return (
+    <div className="relative z-10 mx-auto max-w-4xl">
+      <div
+        className="reveal-rise relative overflow-hidden rounded-3xl border border-dashed border-slate-200 bg-white text-center shadow-sm"
+        style={{ ["--reveal-delay" as string]: "150ms" }}
+      >
+        <div className="pointer-events-none absolute -top-16 left-1/2 h-56 w-56 -translate-x-1/2 rounded-full bg-emerald-100/60 blur-3xl" />
+        <div className="relative flex flex-col items-center gap-3 px-6 py-16 sm:px-10">
+          <div className="mb-1 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
+            <BedDouble className="h-10 w-10" aria-hidden="true" />
+          </div>
+          <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+            No stay records yet
+          </h2>
+          <p className="max-w-md text-sm leading-relaxed text-slate-500">
+            Your health report opens up once your stay begins. Everything your
+            wellness team records will be collected here, day by day.
+          </p>
+          <Link
+            href="/dashboard"
+            className="group mt-3 inline-flex w-fit items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:brightness-105 active:scale-[0.98]"
+          >
+            Back to dashboard
+            <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+          </Link>
+        </div>
       </div>
     </div>
   );
@@ -131,79 +148,18 @@ function EmptyState({ message }: { message: string }) {
 
 function ErrorState({ message }: { message: string }) {
   return (
-    <div className="relative z-10 max-w-5xl mx-auto">
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center space-y-3">
-          <div className="h-12 w-12 mx-auto bg-red-50 rounded-full flex items-center justify-center">
-            <AlertCircle className="h-6 w-6 text-red-500" />
+    <div className="relative z-10 mx-auto max-w-5xl">
+      <div className="flex min-h-[400px] items-center justify-center">
+        <div className="space-y-3 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
+            <AlertCircle className="h-6 w-6 text-red-500" aria-hidden="true" />
           </div>
           <p className="text-lg font-semibold text-slate-900">
             Unable to load Health Report
           </p>
-          <p className="text-sm text-slate-500 max-w-sm">{message}</p>
+          <p className="max-w-sm text-sm text-slate-500">{message}</p>
         </div>
       </div>
     </div>
-  );
-}
-
-type Metric = { label: string; value: string };
-
-function buildMetrics(log: AdminHealthLogRow): Metric[] {
-  const metrics: Metric[] = [];
-
-  if (log.weight_kg !== null) {
-    metrics.push({ label: "Weight", value: `${log.weight_kg} kg` });
-  }
-
-  if (log.bp_systolic !== null && log.bp_diastolic !== null) {
-    metrics.push({
-      label: "Blood Pressure",
-      value: `${log.bp_systolic}/${log.bp_diastolic} mmHg`,
-    });
-  } else if (log.bp_systolic !== null) {
-    metrics.push({ label: "BP Systolic", value: `${log.bp_systolic} mmHg` });
-  } else if (log.bp_diastolic !== null) {
-    metrics.push({ label: "BP Diastolic", value: `${log.bp_diastolic} mmHg` });
-  }
-
-  if (log.sugar_level_mgdl !== null) {
-    metrics.push({ label: "Sugar Level", value: `${log.sugar_level_mgdl} mg/dL` });
-  }
-
-  if (log.notes) {
-    metrics.push({ label: "Notes", value: log.notes });
-  }
-
-  return metrics;
-}
-
-function HealthLogCard({ log }: { log: AdminHealthLogRow }) {
-  const metrics = buildMetrics(log);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm text-slate-500">
-          {format(parseISO(log.log_date), "MMM d, yyyy")}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {metrics.length === 0 ? (
-          <p className="text-sm text-slate-500">No metrics recorded for this date.</p>
-        ) : (
-          <dl className="space-y-2">
-            {metrics.map((metric) => (
-              <div key={metric.label} className="flex items-baseline justify-between gap-2">
-                <dt className="text-xs text-slate-500">{metric.label}</dt>
-                <dd className="text-sm font-medium text-slate-900 text-right">
-                  {metric.value}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </CardContent>
-    </Card>
   );
 }
