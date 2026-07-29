@@ -33,6 +33,75 @@ function franchiseRootUrl(
   return target;
 }
 
+/**
+ * Customer-portal routes that belong to a single Customer_Category.
+ *
+ * `prefix` is the browser-visible path on the `customer` subdomain (i.e. before
+ * the `/customer` portal rewrite); `allow` lists the categories permitted to
+ * reach it. A prefix match also covers nested paths (`/kit-history/x`).
+ *
+ * Shared surfaces — `/dashboard`, `/profile`, `/subscription/manage/billing`
+ * and its `invoice/[id]` child — are deliberately absent so they stay reachable
+ * by every category.
+ *
+ * MEAL-only routes are also absent on purpose: this table is enforced only for
+ * the categories in `CATEGORY_ENFORCED_FOR` below, which currently means MEAL
+ * customers being kept out of the KIT and ACCOMMODATION surfaces. Gating KIT /
+ * ACCOMMODATION customers out of the MEAL surfaces is a separate change (and
+ * `/shop/*` already guards itself in
+ * `src/app/customer/(main)/shop/layout.tsx`).
+ */
+const CUSTOMER_CATEGORY_ROUTES: readonly {
+  prefix: string;
+  allow: readonly string[];
+}[] = [
+  { prefix: "/kit-tracker", allow: ["KIT"] },
+  { prefix: "/kit-history", allow: ["KIT"] },
+  { prefix: "/stay-tracker", allow: ["ACCOMMODATION"] },
+  { prefix: "/stay-history", allow: ["ACCOMMODATION"] },
+  { prefix: "/health-report", allow: ["ACCOMMODATION"] },
+  { prefix: "/addon-services", allow: ["ACCOMMODATION"] },
+];
+
+/**
+ * Categories whose navigation is actually enforced against
+ * `CUSTOMER_CATEGORY_ROUTES`.
+ *
+ * Scoped to `MEAL` for now. An empty category (no ACTIVE/PENDING subscription)
+ * stays unrestricted, matching how the shop layout and the sidebar already
+ * treat it — and avoiding a false denial for an ACCOMMODATION customer whose
+ * stay has finished, since the middleware category lookup has a KIT fallback
+ * but no ACCOMMODATION equivalent.
+ */
+const CATEGORY_ENFORCED_FOR: readonly string[] = ["MEAL"];
+
+/**
+ * True when `pathname` targets a category-specific customer route that
+ * `category` is not allowed to reach.
+ *
+ * `portalPath` is stripped first so a direct hit on the rewritten form
+ * (`/customer/kit-tracker`) is treated the same as the normal
+ * subdomain-relative form (`/kit-tracker`).
+ */
+function isCustomerCategoryRouteDenied(
+  pathname: string,
+  portalPath: string,
+  category: string,
+): boolean {
+  if (!CATEGORY_ENFORCED_FOR.includes(category)) return false;
+
+  const path =
+    portalPath && pathname.startsWith(`${portalPath}/`)
+      ? pathname.slice(portalPath.length)
+      : pathname;
+
+  const match = CUSTOMER_CATEGORY_ROUTES.find(
+    (route) => path === route.prefix || path.startsWith(`${route.prefix}/`),
+  );
+
+  return match ? !match.allow.includes(category) : false;
+}
+
 export async function middleware(request: NextRequest) {
   const timer = createServerTimer(`middleware ${request.nextUrl.pathname}`);
 
@@ -380,6 +449,26 @@ export async function middleware(request: NextRequest) {
           }
         }
         response.headers.set("x-customer-category", customerCategory);
+
+        // [Category route gate] Hiding a nav link is not access control — the
+        // sidebar already omits the KIT/ACCOMMODATION groups for a MEAL
+        // customer, but the URLs stayed reachable by typing them. Deny them
+        // here, where the category is already resolved, so no individual page
+        // has to repeat the subscription lookup. Shared routes (dashboard,
+        // profile, billing) are untouched; see CUSTOMER_CATEGORY_ROUTES.
+        if (
+          isCustomerCategoryRouteDenied(
+            url.pathname,
+            portalPath,
+            customerCategory,
+          )
+        ) {
+          timer.done();
+          return NextResponse.redirect(
+            new URL("/dashboard?msg=category-unavailable", request.url),
+          );
+        }
+
         timer.done();
       }
       if (currentSubdomain === "admin" && roleCode !== "ADMIN") {

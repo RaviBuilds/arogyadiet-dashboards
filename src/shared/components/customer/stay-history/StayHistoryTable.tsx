@@ -22,9 +22,16 @@ import {
 import { Card, CardContent } from "@/shared/components/ui/card";
 import { BedDouble, CalendarDays, Moon } from "lucide-react";
 import type { StayEntry } from "@/types/accommodation";
+import { StayHealthReportDownloadButton } from "@/shared/components/customer/health-report/StayHealthReportDownloadButton";
 
 interface StayHistoryTableProps {
   stays: StayEntry[];
+  /**
+   * Days of Dietitian-recorded readings per stay id, from
+   * `getStayRecordedDayCountsAction`. A stay missing from the map (or at zero)
+   * gets no download — there would be nothing in the PDF.
+   */
+  recordedDays?: Record<string, number>;
 }
 
 /**
@@ -71,7 +78,7 @@ function formatDate(dateString: string): string {
   }
 }
 
-export function StayHistoryTable({ stays }: StayHistoryTableProps) {
+export function StayHistoryTable({ stays, recordedDays = {} }: StayHistoryTableProps) {
   if (stays.length === 0) {
     return (
       <Card className="border border-dashed border-slate-200 bg-white shadow-sm">
@@ -113,8 +120,11 @@ export function StayHistoryTable({ stays }: StayHistoryTableProps) {
                 <TableHead className="text-center text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Nights
                 </TableHead>
-                <TableHead className="text-xs font-semibold uppercase tracking-wider text-slate-500 pr-6">
+                <TableHead className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Status
+                </TableHead>
+                <TableHead className="pr-6 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Health Report
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -141,7 +151,15 @@ export function StayHistoryTable({ stays }: StayHistoryTableProps) {
                       {stay.totalNights}
                     </span>
                   </TableCell>
-                  <TableCell className="pr-6">{getStatusBadge(stay.status)}</TableCell>
+                  <TableCell>{getStatusBadge(stay.status)}</TableCell>
+                  <TableCell className="pr-6 text-right">
+                    <StayHealthReportDownloadButton
+                      stayId={stay.id}
+                      hasRecords={(recordedDays[stay.id] ?? 0) > 0}
+                      dayCount={recordedDays[stay.id] ?? 0}
+                      variant="compact"
+                    />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -188,11 +206,18 @@ export function StayHistoryTable({ stays }: StayHistoryTableProps) {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs text-slate-500">
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 text-xs text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
                     {formatDate(stay.startDate)} &rarr; {formatDate(stay.endDate)}
                   </span>
+                  <StayHealthReportDownloadButton
+                    stayId={stay.id}
+                    hasRecords={(recordedDays[stay.id] ?? 0) > 0}
+                    dayCount={recordedDays[stay.id] ?? 0}
+                    variant="compact"
+                    label="Health report"
+                  />
                 </div>
               </div>
             </CardContent>

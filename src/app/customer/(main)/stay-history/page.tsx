@@ -1,6 +1,7 @@
 import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
 import { getStayHistoryAction } from "@/actions/stayActions";
+import { getStayRecordedDayCountsAction } from "@/actions/customerHealthReportActions";
 import { StayHistoryTable } from "@/shared/components/customer/stay-history/StayHistoryTable";
 import { History, AlertCircle } from "lucide-react";
 
@@ -39,7 +40,16 @@ export default async function StayHistoryPage() {
     );
   }
 
-  const result = await getStayHistoryAction(customerProfileId);
+  // The recorded-day counts decide which stays offer a Health Report download.
+  // A failure there must not take the history list down with it — the column
+  // simply falls back to "No readings".
+  const [result, recordedDaysResult] = await Promise.all([
+    getStayHistoryAction(customerProfileId),
+    getStayRecordedDayCountsAction(),
+  ]);
+
+  const recordedDays =
+    "success" in recordedDaysResult ? recordedDaysResult.data : {};
 
   if ("error" in result) {
     return (
@@ -71,12 +81,13 @@ export default async function StayHistoryPage() {
             Stay History
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            View all your past stays at ArogyaDiet.
+            View all your past stays at ArogyaDiet, and download the health report
+            for each one.
           </p>
         </div>
       </div>
 
-      <StayHistoryTable stays={result.data} />
+      <StayHistoryTable stays={result.data} recordedDays={recordedDays} />
     </div>
   );
 }
