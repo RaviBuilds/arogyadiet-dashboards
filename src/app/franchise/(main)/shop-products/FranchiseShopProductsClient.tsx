@@ -28,6 +28,7 @@ import {
   toggleFranchiseProductVisibility,
   type FranchiseShopProduct,
 } from "@/actions/admin-actions/franchiseProductActions";
+import { franchiseShopStockInAction } from "@/actions/franchise-actions/franchiseInventoryActions";
 
 interface OrderRow {
   id: string;
@@ -168,7 +169,9 @@ function ProductCard({ product }: { product: FranchiseShopProduct }) {
   const [isPending, startTransition] = useTransition();
   const [stock, setStock] = useState<string>(String(product.stock_quantity));
   const [isVisible, setIsVisible] = useState(product.is_visible);
+  const [stockInQty, setStockInQty] = useState<string>("");
 
+  const isLinked = product.inventory_product_id !== null;
   const stockChanged = Number(stock) !== product.stock_quantity;
   const inStock = product.stock_quantity > 0;
 
@@ -185,6 +188,27 @@ function ProductCard({ product }: { product: FranchiseShopProduct }) {
         router.refresh();
       } else {
         toast.error(res.error ?? "Failed to update stock.");
+      }
+    });
+  };
+
+  const handleStockIn = () => {
+    const qty = Number(stockInQty);
+    if (!Number.isInteger(qty) || qty < 1 || qty > 1000000) {
+      toast.error("Quantity must be a whole number between 1 and 1,000,000.");
+      return;
+    }
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("product_id", product.id);
+      formData.set("quantity", String(qty));
+      const res = await franchiseShopStockInAction(formData);
+      if (res.success) {
+        toast.success("Stock In complete.");
+        setStockInQty("");
+        router.refresh();
+      } else {
+        toast.error(res.error ?? "Stock-in failed.");
       }
     });
   };
@@ -282,6 +306,38 @@ function ProductCard({ product }: { product: FranchiseShopProduct }) {
           Save
         </Button>
       </div>
+
+      {/* Stock In — draws from the franchise warehouse; only for linked products (Req 18.1) */}
+      {isLinked && (
+        <div className="mt-3 flex items-end gap-2 border-t border-slate-100 pt-3">
+          <div className="flex-1">
+            <label className="text-[11px] font-medium text-slate-500">Stock In (from warehouse)</label>
+            <Input
+              type="number"
+              min={1}
+              max={1000000}
+              placeholder="Qty"
+              value={stockInQty}
+              onChange={(e) => setStockInQty(e.target.value)}
+              disabled={isPending}
+              className="h-9 rounded-lg bg-white/70 text-sm"
+            />
+          </div>
+          <Button
+            size="sm"
+            className="h-9"
+            onClick={handleStockIn}
+            disabled={isPending || stockInQty === ""}
+          >
+            {isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Package className="h-3.5 w-3.5" />
+            )}
+            Stock In
+          </Button>
+        </div>
+      )}
 
       {/* Visibility toggle */}
       <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">

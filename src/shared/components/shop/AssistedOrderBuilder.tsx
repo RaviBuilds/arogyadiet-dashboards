@@ -125,6 +125,12 @@ export type AssistedOrderActions = {
     customerProfileId: string,
     discount?: ShopOrderDiscount,
     clinicPickup?: boolean,
+    // clinic-scoped-shop-inventory Task 9.2: the admin portal's wrapper now
+    // accepts an explicit fulfilling-clinic id for an unscoped admin. No
+    // clinic-selection UI exists yet (task 9.3 wires it up), so this shared
+    // builder passes `undefined` for now — the franchise portal's wrapper
+    // ignores this parameter entirely (its scope is always FRANCHISE).
+    explicitClinicId?: string,
   ) => Promise<AssistedOrderActionResult<PlaceOrderOutcome>>;
   /**
    * Optional. When a portal injects this, the builder also offers a WALK-IN
@@ -136,6 +142,8 @@ export type AssistedOrderActions = {
     cart: CartLine[],
     walkIn: WalkInCustomerInput,
     discount?: ShopOrderDiscount,
+    // clinic-scoped-shop-inventory Task 9.2: see explicitClinicId above.
+    explicitClinicId?: string,
   ) => Promise<AssistedOrderActionResult<PlaceOrderOutcome>>;
 };
 
@@ -155,6 +163,18 @@ export type AssistedOrderProduct = {
   salePrice?: number | null;
   taxPercent?: number | null;
   imageUrl?: string | null;
+  /**
+   * The clinic/franchise/scope's currently available stock for this product,
+   * resolved server-side by the page that fetches the catalog (e.g. the
+   * clinic's Effective_Clinic_Stock for the admin portal — clinic-scoped-
+   * shop-inventory Task 9.3, or the franchise's stock for the franchise
+   * portal). The builder caps quantity entry at this figure so it can never
+   * request more than the fulfilling scope actually holds. The PRIMARY
+   * "which products can appear at all" filter is expected to happen at the
+   * page level (Req 15.1); this field's zero value is only a defensive
+   * backstop should a zero-stock product still be present.
+   */
+  availableStock: number;
 };
 
 export interface AssistedOrderBuilderProps {
@@ -322,24 +342,55 @@ export default function AssistedOrderBuilder({
 
   // --- Cart handlers ------------------------------------------------------
 
+  /**
+   * Cap for a single product's cart line: the smaller of the global MAX_QTY
+   * guard and this product's currently available stock. Falls back to
+   * MAX_QTY when the product is not found (defensive; every id passed here
+   * comes from `products`).
+   */
+  function quantityCapFor(productId: string): number {
+    const product = productById.get(productId);
+    if (!product) return MAX_QTY;
+    return Math.min(MAX_QTY, Math.max(0, product.availableStock));
+  }
+
   function handleAddProduct(productId: string) {
     setCartError(null);
+    const cap = quantityCapFor(productId);
+    if (cap <= 0) {
+      setCartError("This product is out of stock.");
+      return;
+    }
     const result = addToCart(cart, productId, 1);
     if (!result.ok) {
       setCartError(result.error);
       return;
     }
-    setCart(result.cart);
+    // addToCart clamps to MAX_QTY only; re-clamp to this product's stock cap.
+    const cart2 = result.cart.map((l) =>
+      l.productId === productId ? { ...l, quantity: Math.min(l.quantity, cap) } : l,
+    );
+    setCart(cart2);
     invalidateDownstream();
   }
 
   function handleSetQuantity(productId: string, rawQty: number) {
     setCartError(null);
-    // 0 removes the line; everything else must pass the [1, MAX_QTY] guard.
+    // 0 removes the line; everything else must pass the [1, MAX_QTY] guard
+    // plus this product's available-stock cap.
     if (rawQty !== 0) {
       const validated = validateQuantity(rawQty);
       if (!validated.ok) {
         setCartError(validated.error);
+        return;
+      }
+      const cap = quantityCapFor(productId);
+      if (validated.value > cap) {
+        setCartError(
+          cap <= 0
+            ? "This product is out of stock."
+            : `Only ${cap} in stock for this product.`,
+        );
         return;
       }
     }
@@ -516,7 +567,10 @@ export default function AssistedOrderBuilder({
       };
 
       startPlacing(async () => {
-        const res = await placeWalkIn(cart, buyer, undefined);
+        // clinic-scoped-shop-inventory Task 9.2: no clinic-selection UI exists
+        // yet (task 9.3 wires it up), so explicitClinicId is passed as
+        // `undefined` for now.
+        const res = await placeWalkIn(cart, buyer, undefined, undefined);
         if (!res.success) {
           setPlaceError(res.error);
           return;
@@ -543,11 +597,15 @@ export default function AssistedOrderBuilder({
     }
 
     startPlacing(async () => {
+      // clinic-scoped-shop-inventory Task 9.2: no clinic-selection UI exists
+      // yet (task 9.3 wires it up), so explicitClinicId is passed as
+      // `undefined` for now.
       const res = await actions.markPaidAndPlaceOrderAction(
         cart,
         selectedCustomer.customerProfileId,
         undefined,
         clinicPickup,
+        undefined,
       );
       if (!res.success) {
         setPlaceError(res.error);
@@ -686,6 +744,8 @@ export default function AssistedOrderBuilder({
                 {products.map((product) => {
                   const line = cart.find((l) => l.productId === product.id);
                   const unit = displayUnitPrice(product);
+                  const cap = quantityCapFor(product.id);
+                  const outOfStock = cap <= 0;
                   return (
                     <li
                       key={product.id}
@@ -698,6 +758,18 @@ export default function AssistedOrderBuilder({
                         <p className="text-xs text-muted-foreground">
                           {formatMoney(unit)}
                           {product.category ? ` · ${product.category}` : ""}
+                        </p>
+                        <p
+                          className={cn(
+                            "text-xs",
+                            outOfStock
+                              ? "text-destructive"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          {outOfStock
+                            ? "Out of stock"
+                            : `${product.availableStock} in stock`}
                         </p>
                       </div>
                       {line ? (
@@ -721,7 +793,7 @@ export default function AssistedOrderBuilder({
                             size="icon-sm"
                             variant="outline"
                             aria-label={`Increase ${product.name}`}
-                            disabled={line.quantity >= MAX_QTY}
+                            disabled={line.quantity >= cap}
                             onClick={() =>
                               handleSetQuantity(product.id, line.quantity + 1)
                             }
@@ -734,6 +806,7 @@ export default function AssistedOrderBuilder({
                           type="button"
                           size="sm"
                           variant="outline"
+                          disabled={outOfStock}
                           onClick={() => handleAddProduct(product.id)}
                         >
                           <Plus /> Add

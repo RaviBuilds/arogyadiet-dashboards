@@ -509,3 +509,155 @@ export function isAdminPathAllowed(
 
   return isPortalPathAllowed(levelOrConfig, pathname, "/admin");
 }
+
+// ─── Clinic scoping (clinic-scoped-shop-inventory) ────────────────────────────
+//
+// A Clinic_Scoped_Admin is an `operations`-level admin whose Clinic_Scope_
+// Assignment (`users.admin_clinic_id`) is set (Req 13 glossary). Clinic scoping
+// confines Shop Products / Clinic_Shop_Ledger reads to that one Core Clinic;
+// every other Operations_Group (customers, subscriptions, riders) stays
+// unfiltered (Req 14.1-14.3, 14.9). These primitives are pure and have no
+// database access — the Core-Clinic-only check (Req 13.12) is resolved by the
+// caller (a single DB query) and passed in as a pre-resolved boolean.
+
+/**
+ * The four Operations_Groups offered to a Clinic_Scoped_Admin (Req 13.7, 13.8).
+ * `operations` and `franchises` are deliberately excluded — Req 13.13 rejects a
+ * write that pairs either with a Clinic_Scope_Assignment.
+ */
+export const CLINIC_SCOPED_GROUPS = [
+  "customers",
+  "subscriptions",
+  "riders",
+  "shop_products",
+] as const satisfies readonly OperationsGroup[];
+
+export type ClinicScopedGroup = (typeof CLINIC_SCOPED_GROUPS)[number];
+
+/**
+ * Is this admin a Clinic_Scoped_Admin?
+ *
+ * Precondition:  `clinicId` is the admin's Clinic_Scope_Assignment
+ *                (`users.admin_clinic_id`), read alongside `cfg`.
+ * Postcondition: total, never throws.
+ *   - cfg.level === "operations" && clinicId !== null  -> true
+ *   - otherwise                                         -> false
+ */
+export function isClinicScoped(
+  cfg: AccessConfiguration,
+  clinicId: string | null,
+): boolean {
+  return cfg.level === "operations" && clinicId !== null;
+}
+
+/** A submitted clinic-level-access configuration (Requirement 13). */
+export interface ClinicScopeAssignmentCandidate {
+  level: AdminAccessLevel;
+  /** The User_Management_Form's Clinic_Access_Checkbox state. */
+  clinicAccess: boolean;
+  /** The selected Core Clinic, or `null` when the checkbox is unchecked. */
+  clinicId: string | null;
+  groups: OperationsAccess;
+  /**
+   * Whether `clinicId` (when non-null) resolves to an existing Clinic row
+   * whose `franchise_id` is `NULL`. This module has no database access, so the
+   * caller resolves this with one query before calling `validateClinicScope
+   * Assignment`; the value is ignored when `clinicId` is `null` (Req 13.12).
+   */
+  isCoreClinic: boolean | null;
+}
+
+/** Result of validating a submitted clinic-level-access configuration. */
+export type ClinicScopeAssignmentValidation =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Validate a submitted clinic-level-access configuration (Req 13.11-13.14).
+ * Total: never throws, always returns a result.
+ *
+ * Precondition:  `input` reflects one User_Management_Form submission, with
+ *                `isCoreClinic` pre-resolved by the caller for a non-null
+ *                `clinicId`.
+ * Postcondition (checked in this order):
+ *   - clinicAccess && clinicId === null             -> reject (13.11)
+ *   - clinicId !== null && level !== "operations"    -> reject (13.14)
+ *   - clinicId !== null && isCoreClinic === false     -> reject (13.12)
+ *   - clinicId !== null && groups holds "operations"
+ *     or "franchises"                                 -> reject (13.13)
+ *   - otherwise                                        -> ok
+ */
+export function validateClinicScopeAssignment(
+  input: ClinicScopeAssignmentCandidate,
+): ClinicScopeAssignmentValidation {
+  const { level, clinicAccess, clinicId, groups, isCoreClinic } = input;
+
+  if (clinicAccess && clinicId === null) {
+    return {
+      ok: false,
+      error: "A clinic must be selected for clinic level access",
+    };
+  }
+
+  if (clinicId !== null) {
+    if (level !== "operations") {
+      return {
+        ok: false,
+        error: "Clinic level access requires the operations access level",
+      };
+    }
+    if (isCoreClinic === false) {
+      return {
+        ok: false,
+        error: "The selected clinic is unavailable for clinic level access",
+      };
+    }
+    if (groups.operations !== undefined || groups.franchises !== undefined) {
+      return {
+        ok: false,
+        error:
+          "The operations and franchises groups are unavailable for clinic level access",
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+/** Result of resolving which Core Clinic a caller's read is confined to. */
+export type ReadableClinicIdResolution =
+  | { ok: true; clinicId: string | null }
+  | { ok: false; error: string };
+
+/**
+ * Resolve which Core Clinic a caller's Shop Products / ledger read is confined
+ * to, given the caller's Clinic_Scope_Assignment (`assigned`) and the Core
+ * Clinic named by the request (`requested`), if any. The single chokepoint for
+ * Req 12.9, 14.4, 14.6, 14.7.
+ *
+ * Precondition:  `assigned` is `null` for an Unscoped_Operations_Admin and the
+ *                assigned Core Clinic id for a Clinic_Scoped_Admin; `requested`
+ *                is the Core Clinic id named by the request, or `null` when
+ *                none was named.
+ * Postcondition: total, never throws.
+ *   - assigned === null                                -> ok, clinicId = requested
+ *     (`null` means "no filter"; only reachable for an unscoped admin)
+ *   - assigned !== null && (requested === null
+ *       || requested === assigned)                      -> ok, clinicId = assigned
+ *   - assigned !== null && requested !== assigned        -> reject (out of scope)
+ */
+export function resolveReadableClinicId(
+  assigned: string | null,
+  requested: string | null,
+): ReadableClinicIdResolution {
+  if (assigned === null) {
+    return { ok: true, clinicId: requested };
+  }
+  if (requested === null || requested === assigned) {
+    return { ok: true, clinicId: assigned };
+  }
+  return {
+    ok: false,
+    error: "The clinic is outside the admin's assigned scope",
+  };
+}

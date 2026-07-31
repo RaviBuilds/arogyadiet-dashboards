@@ -32,6 +32,7 @@
 
 import {
   checkGroupManage,
+  checkClinicScope,
   getCurrentAdminContext,
 } from "@/lib/auth/adminAccess";
 import {
@@ -101,6 +102,52 @@ async function resolveAdminOperatorContext(): Promise<
       scope: { kind: "CORE" },
     },
   };
+}
+
+/** Req 10.6, 15.11: no fulfilling clinic could be resolved for the order. */
+const NO_FULFILLING_CLINIC_ERROR =
+  "A fulfilling clinic must be selected before the order can be placed.";
+
+/**
+ * Resolve the fulfilling Core_Clinic for an order-placing action ONLY
+ * (`markPaidAndPlaceOrderAction` / `markPaidAndPlaceWalkInOrderAction`).
+ * Search/eligibility/pricing stay clinic-agnostic and never call this.
+ *
+ *   - A Clinic_Scoped_Admin's Clinic_Scope_Assignment IS the fulfilling
+ *     clinic — no further selection needed, and `explicitClinicId` is ignored
+ *     for that admin (Req 10.3, 10.4).
+ *   - An Unscoped_Operations_Admin must supply `explicitClinicId`, which is
+ *     re-validated server-side via {@link checkClinicScope} (Req 10.5).
+ *   - When neither yields a clinic, the whole submission is rejected before
+ *     any service call (Req 10.6, 15.11).
+ */
+export async function resolveFulfillingClinicId(
+  explicitClinicId?: string,
+): Promise<{ ok: true; clinicId: string } | { ok: false; error: string }> {
+  const { clinicId: assignedClinicId } = await getCurrentAdminContext();
+
+  // Clinic-scoped admin: the assignment is authoritative, no selection needed.
+  if (assignedClinicId) {
+    return { ok: true, clinicId: assignedClinicId };
+  }
+
+  // Unscoped admin: an explicit clinic must be supplied and is re-validated
+  // server-side (out-of-scope for a scoped admin cannot happen here since
+  // `assignedClinicId` is null, but `checkClinicScope` remains the single
+  // chokepoint for that decision).
+  if (!explicitClinicId) {
+    return { ok: false, error: NO_FULFILLING_CLINIC_ERROR };
+  }
+
+  const gate = await checkClinicScope(explicitClinicId);
+  if (!gate.ok) {
+    return { ok: false, error: gate.error };
+  }
+  if (!gate.clinicId) {
+    return { ok: false, error: NO_FULFILLING_CLINIC_ERROR };
+  }
+
+  return { ok: true, clinicId: gate.clinicId };
 }
 
 // ---------------------------------------------------------------------------
@@ -179,15 +226,31 @@ export async function priceCartAction(
  * service creates the MANUAL/PAID payment atomically with the order and gates
  * placement on that status server-side (Req 5.3, 5.6, 6.x).
  */
+/**
+ * @param explicitClinicId The fulfilling clinic selected by an
+ *   Unscoped_Operations_Admin (Req 10.5). Ignored for a Clinic_Scoped_Admin,
+ *   whose Clinic_Scope_Assignment is used instead (Req 10.3, 10.4). There is
+ *   no clinic-selection UI yet (task 9.3), so today's callers pass
+ *   `undefined`.
+ */
 export async function markPaidAndPlaceOrderAction(
   cart: CartLine[],
   customerProfileId: string,
   discount?: ShopOrderDiscount,
   clinicPickup: boolean = false,
+  explicitClinicId?: string,
 ): Promise<AssistedOrderActionResult<PlaceOrderOutcome>> {
   const resolved = await resolveAdminOperatorContext();
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
+  }
+
+  // Resolve the fulfilling clinic before any service call (Req 10.3, 10.4,
+  // 10.5, 10.6, 15.11). The admin portal's scope is always CORE, so this is
+  // always required here.
+  const clinicResolution = await resolveFulfillingClinicId(explicitClinicId);
+  if (!clinicResolution.ok) {
+    return { success: false, error: clinicResolution.error };
   }
 
   // The explicit Mark_Paid_Action: the operator marks the order PAID (no online
@@ -205,6 +268,7 @@ export async function markPaidAndPlaceOrderAction(
     paymentStatus,
     discount,
     clinicPickup,
+    clinicResolution.clinicId,
   );
   if (!result.ok) {
     return { success: false, error: result.error };
@@ -227,14 +291,28 @@ export async function markPaidAndPlaceOrderAction(
  * details server-side and creates the sale already delivered (counter handover),
  * so it never enters delivery routing.
  */
+/**
+ * @param explicitClinicId The fulfilling clinic selected by an
+ *   Unscoped_Operations_Admin (Req 10.5). Ignored for a Clinic_Scoped_Admin,
+ *   whose Clinic_Scope_Assignment is used instead (Req 10.4). There is no
+ *   clinic-selection UI yet (task 9.3), so today's callers pass `undefined`.
+ */
 export async function markPaidAndPlaceWalkInOrderAction(
   cart: CartLine[],
   walkIn: WalkInCustomerInput,
   discount?: ShopOrderDiscount,
+  explicitClinicId?: string,
 ): Promise<AssistedOrderActionResult<PlaceOrderOutcome>> {
   const resolved = await resolveAdminOperatorContext();
   if (!resolved.ok) {
     return { success: false, error: resolved.error };
+  }
+
+  // Resolve the fulfilling clinic before any service call (Req 10.4, 10.5,
+  // 10.6, 15.11).
+  const clinicResolution = await resolveFulfillingClinicId(explicitClinicId);
+  if (!clinicResolution.ok) {
+    return { success: false, error: clinicResolution.error };
   }
 
   const service = new AssistedOrderService();
@@ -244,6 +322,7 @@ export async function markPaidAndPlaceWalkInOrderAction(
     walkIn,
     "PAID",
     discount,
+    clinicResolution.clinicId,
   );
   if (!result.ok) {
     return { success: false, error: result.error };

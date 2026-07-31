@@ -2,9 +2,12 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchCatalogProducts } from "@/lib/products/catalog-queries";
-import { checkGroupManage } from "@/lib/auth/adminAccess";
+import { checkWarehouseAccess } from "@/lib/auth/adminAccess";
+import { computeAggregateStock } from "@/lib/shop/clinicStock";
+import { listOverlaysForProduct } from "@/repositories/clinic/clinicProductRepository";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { ActionResult as DataActionResult } from "@/types/clinic";
 
 export interface AdminInventoryProduct {
   id: string;
@@ -22,6 +25,8 @@ export interface AdminInventoryProduct {
   is_active: boolean;
   deleted_at: string | null;
   created_at: string;
+  /** Product_Link — the linked Master_Catalog_Product id, or `null` when unlinked. */
+  inventory_product_id: string | null;
 }
 
 const upsertProductSchema = z.object({
@@ -31,12 +36,13 @@ const upsertProductSchema = z.object({
   category: z.string().optional(),
   originalPrice: z.number().min(0, "Original price must be 0 or greater"),
   salePrice: z.number().min(0).optional().nullable(),
-  stockQuantity: z
-    .number()
-    .int()
-    .min(0, "Stock quantity must be 0 or greater"),
   taxPercent: z.number().min(0).max(100).optional().nullable(),
   description: z.string().optional(),
+  inventoryProductId: z
+    .string()
+    .uuid("Invalid Master Catalog Product ID")
+    .optional()
+    .nullable(),
 });
 
 type ActionResult = { success: boolean; error?: string };
@@ -86,10 +92,11 @@ export async function adminGetProducts(): Promise<AdminInventoryProduct[]> {
 export async function adminUpsertProduct(
   formData: FormData,
 ): Promise<ActionResult> {
-  const gate = await checkGroupManage("shop_products");
+  const gate = await checkWarehouseAccess("product_management");
   if (!gate.ok) return { success: false, error: gate.error };
 
   const idValue = getFormString(formData, "id");
+  const inventoryProductIdValue = getFormString(formData, "inventoryProductId");
 
   const parsed = upsertProductSchema.safeParse({
     id: idValue || undefined,
@@ -98,9 +105,9 @@ export async function adminUpsertProduct(
     category: getFormString(formData, "category") || undefined,
     originalPrice: Number(getFormString(formData, "originalPrice")),
     salePrice: getOptionalFormNumber(formData, "salePrice"),
-    stockQuantity: Number(getFormString(formData, "stockQuantity")),
     taxPercent: getOptionalFormNumber(formData, "taxPercent"),
     description: getFormString(formData, "description") || undefined,
+    inventoryProductId: inventoryProductIdValue || null,
   });
 
   if (!parsed.success) {
@@ -123,7 +130,7 @@ export async function adminUpsertProduct(
   if (data.id) {
     const { data: existingProduct } = await supabaseAdmin
       .from("products")
-      .select("short_description, deleted_at")
+      .select("short_description, deleted_at, inventory_product_id")
       .eq("id", data.id)
       .maybeSingle();
 
@@ -135,6 +142,52 @@ export async function adminUpsertProduct(
     }
 
     short_description = existingProduct?.short_description ?? null;
+
+    const nextInventoryProductId = data.inventoryProductId ?? null;
+    const existingInventoryProductId =
+      existingProduct?.inventory_product_id ?? null;
+
+    if (nextInventoryProductId !== existingInventoryProductId) {
+      let overlays;
+      try {
+        overlays = await listOverlaysForProduct(data.id);
+      } catch {
+        return {
+          success: false,
+          error: "The product's clinic stock could not be verified.",
+        };
+      }
+
+      if (computeAggregateStock(overlays) > 0) {
+        return {
+          success: false,
+          error:
+            "The Product Link can be changed only while every clinic holds 0 stock of this product.",
+        };
+      }
+    }
+  }
+
+  if (data.inventoryProductId) {
+    const { data: linkedProduct, error: linkedError } = await supabaseAdmin
+      .from("inventory_products")
+      .select("id")
+      .eq("id", data.inventoryProductId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (linkedError) {
+      return {
+        success: false,
+        error: "The selected Master Catalog Product could not be verified.",
+      };
+    }
+    if (!linkedProduct) {
+      return {
+        success: false,
+        error: "The selected Master Catalog Product was not found.",
+      };
+    }
   }
 
   const files = getFormFiles(formData);
@@ -183,13 +236,12 @@ export async function adminUpsertProduct(
     category: data.category?.trim() || null,
     original_price: data.originalPrice,
     sale_price: data.salePrice ?? null,
-    stock_quantity: data.stockQuantity,
     tax_percent: data.taxPercent ?? null,
     short_description,
     description: data.description?.trim() || null,
     image_urls,
     banner_image_url,
-    in_stock: data.stockQuantity > 0,
+    inventory_product_id: data.inventoryProductId ?? null,
     updated_at: new Date().toISOString(),
   };
 
@@ -212,7 +264,7 @@ export async function adminUpsertProduct(
 }
 
 export async function adminDeleteProduct(id: string): Promise<ActionResult> {
-  const gate = await checkGroupManage("shop_products");
+  const gate = await checkWarehouseAccess("product_management");
   if (!gate.ok) return { success: false, error: gate.error };
 
   const supabaseAdmin = createAdminClient();
@@ -222,7 +274,6 @@ export async function adminDeleteProduct(id: string): Promise<ActionResult> {
     .update({
       deleted_at: new Date().toISOString(),
       is_active: false,
-      in_stock: false,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -242,7 +293,7 @@ export async function adminToggleProductVisibility(
   id: string,
   currentStatus: boolean,
 ): Promise<ActionResult> {
-  const gate = await checkGroupManage("shop_products");
+  const gate = await checkWarehouseAccess("product_management");
   if (!gate.ok) return { success: false, error: gate.error };
 
   const supabaseAdmin = createAdminClient();
@@ -260,4 +311,56 @@ export async function adminToggleProductVisibility(
   revalidatePath(INVENTORY_PATH);
   revalidatePath(INVENTORY_SHOP_PRODUCTS_PATH);
   return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getMasterCatalogProductOptionsAction — Requirement 3.2, 3.3, 3.4
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One selectable Master_Catalog_Product option for `MasterCatalogProductSelector`. */
+export interface MasterCatalogProductOption {
+  id: string;
+  name: string;
+  base_uom: string;
+}
+
+/**
+ * List every Master_Catalog_Product (`inventory_products`, not deleted) by
+ * name and base unit of measure, for the Master_Catalog_Product selector
+ * offered when creating or editing a Shop_Product (Req 3.2). An empty list is
+ * a valid success result — the selector renders its own empty-state copy and
+ * offers only the "Not linked" option (Req 3.3); a load failure is
+ * distinguished via `success: false` so the selector can show the
+ * load-failure copy instead and leave any existing Product_Link untouched
+ * (Req 3.4).
+ */
+export async function getMasterCatalogProductOptionsAction(): Promise<
+  DataActionResult<MasterCatalogProductOption[]>
+> {
+  const gate = await checkWarehouseAccess("product_management");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  const supabaseAdmin = createAdminClient();
+
+  const { data, error } = await supabaseAdmin
+    .from("inventory_products")
+    .select("id, name, base_uom")
+    .is("deleted_at", null)
+    .order("name", { ascending: true });
+
+  if (error) {
+    return {
+      success: false,
+      error: "The Master Catalog Product list could not be loaded.",
+    };
+  }
+
+  return {
+    success: true,
+    data: (data ?? []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      base_uom: row.base_uom,
+    })),
+  };
 }

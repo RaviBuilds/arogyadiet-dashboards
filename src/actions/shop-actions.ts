@@ -19,6 +19,7 @@ import {
   UNFULFILLABLE_STOCK_STATUS,
   type ItemDecrementResult,
 } from "@/lib/shop/franchiseStockFailsafe";
+import { resolveEffectiveOverlay } from "@/lib/shop/clinicStock";
 
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
@@ -50,7 +51,7 @@ export async function processStandaloneCheckout(items: CartItem[]) {
 
     const { data: profile, error: profileError } = await supabase
       .from("customer_profiles")
-      .select("id, franchise_id")
+      .select("id, franchise_id, clinic_id")
       .eq("user_id", dbUser.id)
       .single();
 
@@ -60,6 +61,20 @@ export async function processStandaloneCheckout(items: CartItem[]) {
 
     const customer_profile_id = profile.id;
     const customerFranchiseId: string | null = profile.franchise_id ?? null;
+    // Aligned_Clinic (Req 10.2, 10.13): the Core Clinic fulfilling this
+    // customer's shop purchases. Only meaningful for a non-franchise customer.
+    const customerClinicId: string | null = customerFranchiseId
+      ? null
+      : (profile.clinic_id ?? null);
+
+    // A meal customer whose Aligned_Clinic is unset has no fulfilling clinic
+    // and is not a franchise customer either — reject the whole checkout
+    // before any write (Req 10.13).
+    if (!customerFranchiseId && !customerClinicId) {
+      throw new Error(
+        "Shop purchases are unavailable for your service area.",
+      );
+    }
 
     const { data: activeSubscription, error: subscriptionError } =
       await supabase
@@ -122,6 +137,24 @@ export async function processStandaloneCheckout(items: CartItem[]) {
         if ((setting.stock_quantity ?? 0) < item.quantity) {
           throw new Error("Not enough stock available for one of your items.");
         }
+      } else if (customerClinicId) {
+        // Core clinic customer: pre-check Effective_Clinic_Stock at the
+        // Aligned_Clinic before allowing checkout to proceed (Req 11.5).
+        const { data: overlay } = await supabase
+          .from("clinic_product_settings")
+          .select("stock_quantity, is_visible")
+          .eq("clinic_id", customerClinicId)
+          .eq("product_id", item.id)
+          .maybeSingle();
+
+        const effective = resolveEffectiveOverlay(overlay);
+
+        if (!effective.isVisible) {
+          throw new Error("One of your items is not available in your area.");
+        }
+        if (effective.stockQuantity < item.quantity) {
+          throw new Error("Not enough stock available for one of your items.");
+        }
       }
 
       const unitPrice = product!.sale_price ?? product!.original_price;
@@ -141,6 +174,7 @@ export async function processStandaloneCheckout(items: CartItem[]) {
       .insert({
         customer_profile_id,
         franchise_id: customerFranchiseId,
+        clinic_id: customerClinicId,
         total_amount: true_total,
         target_delivery_date: nextActiveDay.preference_date,
         status: "PENDING",
@@ -249,7 +283,7 @@ export async function createAddonCheckoutOrder(
 
     const { data: profile, error: profileError } = await supabase
       .from("customer_profiles")
-      .select("id, franchise_id")
+      .select("id, franchise_id, clinic_id")
       .eq("user_id", dbUser.id)
       .single();
 
@@ -259,6 +293,20 @@ export async function createAddonCheckoutOrder(
 
     const customer_profile_id = profile.id;
     const customerFranchiseId: string | null = profile.franchise_id ?? null;
+    // Aligned_Clinic (Req 10.2, 10.13): the Core Clinic fulfilling this
+    // customer's shop purchases. Only meaningful for a non-franchise customer.
+    const customerClinicId: string | null = customerFranchiseId
+      ? null
+      : (profile.clinic_id ?? null);
+
+    // A meal customer whose Aligned_Clinic is unset has no fulfilling clinic
+    // and is not a franchise customer either — reject the whole checkout
+    // before any write (Req 10.13).
+    if (!customerFranchiseId && !customerClinicId) {
+      throw new Error(
+        "Shop purchases are unavailable for your service area.",
+      );
+    }
 
     const { data: activeSubscription, error: subscriptionError } =
       await supabase
@@ -332,6 +380,26 @@ export async function createAddonCheckoutOrder(
           throw new Error("One of your items is not available in your area.");
         }
         if ((setting.stock_quantity ?? 0) < item.quantity) {
+          throw new Error(
+            "Not enough stock available for one of your items.",
+          );
+        }
+      } else if (customerClinicId) {
+        // Core clinic customer: pre-check Effective_Clinic_Stock at the
+        // Aligned_Clinic before allowing checkout to proceed (Req 11.5).
+        const { data: overlay } = await supabase
+          .from("clinic_product_settings")
+          .select("stock_quantity, is_visible")
+          .eq("clinic_id", customerClinicId)
+          .eq("product_id", item.id)
+          .maybeSingle();
+
+        const effective = resolveEffectiveOverlay(overlay);
+
+        if (!effective.isVisible) {
+          throw new Error("One of your items is not available in your area.");
+        }
+        if (effective.stockQuantity < item.quantity) {
           throw new Error(
             "Not enough stock available for one of your items.",
           );
@@ -410,6 +478,7 @@ export async function createAddonCheckoutOrder(
       .insert({
         customer_profile_id,
         franchise_id: customerFranchiseId,
+        clinic_id: customerClinicId,
         total_amount: total,
         target_delivery_date: nextActiveDay.preference_date,
         status: "PENDING",
@@ -766,10 +835,13 @@ export async function verifyAddonPayment(
       );
 
     // Franchise orders: deduct from the FRANCHISE's stock (never core stock).
-    // Core orders (franchise_id null) keep their existing behaviour (no decrement).
+    // Core clinic orders: deduct from the fulfilling CLINIC's stock via the
+    // authoritative clinic_shop_apply_sale RPC (Req 10.2, 11.1, 11.5, 11.6).
     const { data: paidOrder } = await supabase
       .from("addon_orders")
-      .select("id, franchise_id, addon_order_items(product_id, quantity)")
+      .select(
+        "id, franchise_id, clinic_id, addon_order_items(product_id, quantity)",
+      )
       .eq("payment_id", paymentId)
       .maybeSingle();
 
@@ -855,6 +927,109 @@ export async function verifyAddonPayment(
             oversellTitle,
             oversellMessage,
             `franchise-oversell-${paymentId}`,
+          ),
+        });
+      }
+    }
+
+    // Core clinic orders: the authoritative check-and-decrement runs inside
+    // clinic_shop_apply_sale (SECURITY DEFINER — executes under privilege
+    // regardless of this SSR client's RLS context, same as the franchise
+    // decrement RPC above). A post-capture shortfall here does not fail the
+    // order (the payment WAS captured) — it flags fulfillment_status the same
+    // way the franchise oversell path does (design.md "Residual race after
+    // payment capture").
+    if (paidOrder?.clinic_id) {
+      const orderItems = (paidOrder.addon_order_items ?? []) as Array<{
+        product_id: string;
+        quantity: number;
+      }>;
+
+      // The purchasing customer is the closest natural "actor" for a
+      // customer-app sale's ledger entry — resolved via payment ->
+      // customer_profile -> users, not invented.
+      const { data: clinicPayment } = await supabase
+        .from("payments")
+        .select("customer_profile_id")
+        .eq("id", paymentId)
+        .maybeSingle();
+
+      let clinicActorUserId: string | null = null;
+      if (clinicPayment?.customer_profile_id) {
+        const { data: purchasingProfile } = await supabase
+          .from("customer_profiles")
+          .select("user_id")
+          .eq("id", clinicPayment.customer_profile_id)
+          .maybeSingle();
+        clinicActorUserId = purchasingProfile?.user_id ?? null;
+      }
+
+      try {
+        if (!clinicActorUserId) {
+          throw new Error(
+            "CLINIC_REFERENCE_NOT_FOUND: purchasing customer's user id could not be resolved",
+          );
+        }
+
+        const { error: applySaleError } = await supabase.rpc(
+          "clinic_shop_apply_sale",
+          {
+            p_clinic_id: paidOrder.clinic_id,
+            p_addon_order_id: paidOrder.id,
+            p_lines: orderItems.map((item) => ({
+              product_id: item.product_id,
+              quantity: item.quantity,
+            })),
+            p_movement_source: "CUSTOMER_APP_SALE",
+            p_actor_user_id: clinicActorUserId,
+          },
+        );
+
+        if (applySaleError) throw new Error(applySaleError.message);
+      } catch (clinicSaleError) {
+        // Post-capture shortfall (or any RPC failure) — do not let this
+        // propagate and fail verifyAddonPayment. Flag the order instead.
+        console.error(
+          "Clinic stock apply-sale issue:",
+          clinicSaleError instanceof Error
+            ? clinicSaleError.message
+            : clinicSaleError,
+          { payment_id: paymentId },
+        );
+
+        const clinicShortfallProductIds = orderItems.map(
+          (item) => item.product_id,
+        );
+        unfulfillableProductIds = [
+          ...unfulfillableProductIds,
+          ...clinicShortfallProductIds,
+        ];
+
+        const { error: flagError } = await supabase
+          .from("addon_orders")
+          .update({ fulfillment_status: UNFULFILLABLE_STOCK_STATUS })
+          .eq("payment_id", paymentId);
+
+        if (flagError) {
+          console.error(
+            "Failed to flag clinic order as unfulfillable:",
+            flagError.message,
+            { payment_id: paymentId },
+          );
+        }
+
+        const oversellTitle = "Clinic stock oversell — action needed";
+        const oversellMessage = `A clinic shop order (payment ${paymentId}) was paid but stock could not be reserved for ${clinicShortfallProductIds.length} item(s). Review for refund or restock.`;
+
+        await notifyAdmins({
+          title: oversellTitle,
+          message: oversellMessage,
+          actionUrl: "/admin/customers",
+          sendEmail: false,
+          ...buildPushPayload(
+            oversellTitle,
+            oversellMessage,
+            `clinic-oversell-${paymentId}`,
           ),
         });
       }

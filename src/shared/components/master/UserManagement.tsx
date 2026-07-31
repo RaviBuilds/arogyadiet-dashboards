@@ -67,6 +67,7 @@ import {
   OPERATIONS_GROUPS,
   GROUP_LABELS,
   DIETITIAN_ACCESS_LEVEL,
+  CLINIC_SCOPED_GROUPS,
   resolveAccessLevel,
   resolveAccessConfiguration,
   type AdminAccessLevel,
@@ -103,6 +104,7 @@ interface AdminUser {
   created_at: string;
   admin_access_level: string | null;
   admin_operations_access: OperationsAccess | null;
+  admin_clinic_id: string | null;
 }
 
 interface UserManagementProps {
@@ -118,10 +120,14 @@ function OperationsGroupConfig({
   value,
   onChange,
   idPrefix,
+  groups = OPERATIONS_GROUPS,
 }: {
   value: OperationsAccess;
   onChange: (next: OperationsAccess) => void;
   idPrefix: string;
+  /** Req 13.7, 13.8 — a Clinic_Scoped_Admin offers exactly the four
+   * Clinic_Scoped_Groups instead of the full OPERATIONS_GROUPS set. */
+  groups?: readonly OperationsGroup[];
 }) {
   const toggle = (group: OperationsGroup, checked: boolean) => {
     const next: OperationsAccess = { ...value };
@@ -138,7 +144,7 @@ function OperationsGroupConfig({
       <p className="text-xs font-medium text-muted-foreground">
         Operations access — select groups and set each to Manage or View
       </p>
-      {OPERATIONS_GROUPS.map((group) => {
+      {groups.map((group) => {
         const selected = value[group] !== undefined;
         return (
           <div key={group} className="flex items-center justify-between gap-3">
@@ -202,7 +208,14 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
     password: "",
     accessLevel: "inventory_operations" as AdminAccessLevel,
     operationsAccess: {} as OperationsAccess,
+    // Reused for BOTH the Dietitian Assign-Clinic dropdown and the Clinic
+    // Access dropdown (Req 13.4) — accessLevel === DIETITIAN_ACCESS_LEVEL and
+    // accessLevel === "operations" are mutually exclusive, so a form is
+    // always driving exactly one of the two clinic dropdowns at a time.
     clinicId: UNASSIGNED_CLINIC,
+    // Req 13.2 — the Clinic_Access_Checkbox state, meaningful only while
+    // accessLevel === "operations".
+    clinicAccess: false,
   });
 
   // Edit dialog
@@ -213,6 +226,9 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
     mobile: "",
     accessLevel: "inventory_operations" as AdminAccessLevel,
     operationsAccess: {} as OperationsAccess,
+    // Req 13.17 — prefilled by openEdit() from admin.admin_clinic_id.
+    clinicAccess: false,
+    clinicId: UNASSIGNED_CLINIC,
   });
 
   // Delete dialog
@@ -226,6 +242,11 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
   const [dietitians, setDietitians] = useState<DietitianAccount[]>([]);
   const [clinics, setClinics] = useState<ClinicWithFranchiseName[]>([]);
   const [dietitiansLoading, setDietitiansLoading] = useState(true);
+  // Req 13.6 — tracked separately from `dietitiansLoading`/`clinics` (which
+  // silently falls back to an empty list on failure) so the Clinic Access
+  // dropdown can distinguish "load failed" from "genuinely no clinics" (Req
+  // 13.5). Both dropdowns share the one underlying `clinics` fetch.
+  const [clinicsLoadFailed, setClinicsLoadFailed] = useState(false);
   const [dietitianSearchTerm, setDietitianSearchTerm] = useState("");
 
   const [editDietitianOpen, setEditDietitianOpen] = useState(false);
@@ -248,9 +269,21 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
     setDietitiansLoading(false);
     if (dietitiansResult.success) setDietitians(dietitiansResult.data);
     else toast.error(dietitiansResult.error);
-    if (clinicsResult.success) setClinics(clinicsResult.data);
-    else toast.error(clinicsResult.error);
+    if (clinicsResult.success) {
+      setClinics(clinicsResult.data);
+      setClinicsLoadFailed(false);
+    } else {
+      setClinicsLoadFailed(true);
+      toast.error(clinicsResult.error);
+    }
   };
+
+  // Req 13.4 — the Clinic Access dropdown offers Core_Clinics only, unlike the
+  // Dietitian Assign Clinic dropdown which lists every clinic (including
+  // franchise-owned ones). `listClinicsForDietitianAssignment` already
+  // returns `franchiseId` on every row, so filtering it client-side avoids a
+  // new server action / repository function for this narrower listing.
+  const coreClinicsForAssignment = clinics.filter((c) => c.franchiseId === null);
 
   useEffect(() => {
     // `loadDietitianData` sets `dietitiansLoading`/`dietitians`/`clinics` from
@@ -309,6 +342,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
             accessLevel: "inventory_operations",
             operationsAccess: {},
             clinicId: UNASSIGNED_CLINIC,
+            clinicAccess: false,
           });
           setDietitians((prev) => [result.data, ...prev]);
         } else {
@@ -319,7 +353,12 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
     }
 
     startTransition(async () => {
-      const result = await createAdminUser(createForm);
+      const result = await createAdminUser({
+        ...createForm,
+        clinicAccess: createForm.accessLevel === "operations" && createForm.clinicAccess,
+        clinicId:
+          createForm.clinicId === UNASSIGNED_CLINIC ? null : createForm.clinicId,
+      });
       if (result.success) {
         toast.success("Admin user created successfully.");
         setCreateOpen(false);
@@ -331,6 +370,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
           accessLevel: "inventory_operations",
           operationsAccess: {},
           clinicId: UNASSIGNED_CLINIC,
+          clinicAccess: false,
         });
         // Refresh list from server would happen via revalidation; optimistic update:
         window.location.reload();
@@ -352,6 +392,10 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
       mobile: admin.mobile || "",
       accessLevel: cfg.level,
       operationsAccess: cfg.groups,
+      // Req 13.17 — checkbox checked and dropdown set to the stored
+      // Clinic_Scope_Assignment whenever one exists.
+      clinicAccess: admin.admin_clinic_id !== null,
+      clinicId: admin.admin_clinic_id ?? UNASSIGNED_CLINIC,
     });
     setEditOpen(true);
   };
@@ -359,11 +403,22 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
   const handleEdit = () => {
     if (!editTarget) return;
     startTransition(async () => {
-      const result = await updateAdminUser(editTarget.id, editForm);
+      const result = await updateAdminUser(editTarget.id, {
+        ...editForm,
+        clinicAccess: editForm.accessLevel === "operations" && editForm.clinicAccess,
+        clinicId:
+          editForm.clinicId === UNASSIGNED_CLINIC ? null : editForm.clinicId,
+      });
       if (result.success) {
         toast.success("Admin updated successfully.");
         const persistedOps =
           editForm.accessLevel === "operations" ? editForm.operationsAccess : null;
+        const persistedClinicId =
+          editForm.accessLevel === "operations" &&
+          editForm.clinicAccess &&
+          editForm.clinicId !== UNASSIGNED_CLINIC
+            ? editForm.clinicId
+            : null;
         setAdmins((prev) =>
           prev.map((a) =>
             a.id === editTarget.id
@@ -373,6 +428,7 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                   mobile: editForm.mobile || null,
                   admin_access_level: editForm.accessLevel,
                   admin_operations_access: persistedOps,
+                  admin_clinic_id: persistedClinicId,
                 }
               : a,
           ),
@@ -872,6 +928,11 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                     // Clear per-group config when leaving the operations level.
                     operationsAccess:
                       value === "operations" ? f.operationsAccess : {},
+                    // Req 13.3 — the Clinic Access checkbox (and its clinic
+                    // selection) is not presented outside `operations`.
+                    clinicAccess: value === "operations" && f.clinicAccess,
+                    clinicId:
+                      value === "operations" ? f.clinicId : UNASSIGNED_CLINIC,
                   }))
                 }
               >
@@ -887,12 +948,81 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 </SelectContent>
               </Select>
             </div>
+            {/* Req 13.2, 13.3 — Clinic Access checkbox shown only for `operations`. */}
+            {createForm.accessLevel === "operations" && (
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="create-clinic-access"
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <Checkbox
+                    id="create-clinic-access"
+                    checked={createForm.clinicAccess}
+                    onCheckedChange={(c) =>
+                      setCreateForm((f) => ({
+                        ...f,
+                        clinicAccess: c === true,
+                        // Req 13.16 (client mirror) — unchecking clears the
+                        // selected clinic back to unassigned.
+                        clinicId: c === true ? f.clinicId : UNASSIGNED_CLINIC,
+                        // Req 13.13 — operations/franchises are unavailable
+                        // once clinic access is checked.
+                        operationsAccess:
+                          c === true
+                            ? Object.fromEntries(
+                                Object.entries(f.operationsAccess).filter(
+                                  ([g]) => g !== "operations" && g !== "franchises",
+                                ),
+                              )
+                            : f.operationsAccess,
+                      }))
+                    }
+                  />
+                  This user has clinic level access
+                </label>
+                {createForm.clinicAccess && (
+                  <div className="space-y-1.5 pl-1">
+                    <Label htmlFor="create-clinic-scope">Clinic</Label>
+                    {clinicsLoadFailed ? (
+                      <p className="text-sm text-destructive">
+                        The clinic list could not be loaded.
+                      </p>
+                    ) : !dietitiansLoading && coreClinicsForAssignment.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No clinics are available for assignment.
+                      </p>
+                    ) : (
+                      <Select
+                        value={createForm.clinicId}
+                        onValueChange={(value) =>
+                          setCreateForm((f) => ({ ...f, clinicId: value }))
+                        }
+                      >
+                        <SelectTrigger id="create-clinic-scope">
+                          <SelectValue placeholder="Select a clinic" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {coreClinicsForAssignment.map((clinic) => (
+                            <SelectItem key={clinic.id} value={clinic.id}>
+                              {clinic.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {createForm.accessLevel === "operations" && (
               <OperationsGroupConfig
                 idPrefix="create-ops"
                 value={createForm.operationsAccess}
                 onChange={(next) =>
                   setCreateForm((f) => ({ ...f, operationsAccess: next }))
+                }
+                groups={
+                  createForm.clinicAccess ? CLINIC_SCOPED_GROUPS : OPERATIONS_GROUPS
                 }
               />
             )}
@@ -986,6 +1116,11 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                     accessLevel: value as AdminAccessLevel,
                     operationsAccess:
                       value === "operations" ? f.operationsAccess : {},
+                    // Req 13.3 — the Clinic Access checkbox (and its clinic
+                    // selection) is not presented outside `operations`.
+                    clinicAccess: value === "operations" && f.clinicAccess,
+                    clinicId:
+                      value === "operations" ? f.clinicId : UNASSIGNED_CLINIC,
                   }))
                 }
               >
@@ -1001,12 +1136,81 @@ export default function UserManagement({ initialAdmins }: UserManagementProps) {
                 </SelectContent>
               </Select>
             </div>
+            {/* Req 13.2, 13.3 — Clinic Access checkbox shown only for `operations`. */}
+            {editForm.accessLevel === "operations" && (
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="edit-clinic-access"
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <Checkbox
+                    id="edit-clinic-access"
+                    checked={editForm.clinicAccess}
+                    onCheckedChange={(c) =>
+                      setEditForm((f) => ({
+                        ...f,
+                        clinicAccess: c === true,
+                        // Req 13.16 (client mirror) — unchecking clears the
+                        // selected clinic back to unassigned.
+                        clinicId: c === true ? f.clinicId : UNASSIGNED_CLINIC,
+                        // Req 13.13 — operations/franchises are unavailable
+                        // once clinic access is checked.
+                        operationsAccess:
+                          c === true
+                            ? Object.fromEntries(
+                                Object.entries(f.operationsAccess).filter(
+                                  ([g]) => g !== "operations" && g !== "franchises",
+                                ),
+                              )
+                            : f.operationsAccess,
+                      }))
+                    }
+                  />
+                  This user has clinic level access
+                </label>
+                {editForm.clinicAccess && (
+                  <div className="space-y-1.5 pl-1">
+                    <Label htmlFor="edit-clinic-scope">Clinic</Label>
+                    {clinicsLoadFailed ? (
+                      <p className="text-sm text-destructive">
+                        The clinic list could not be loaded.
+                      </p>
+                    ) : !dietitiansLoading && coreClinicsForAssignment.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No clinics are available for assignment.
+                      </p>
+                    ) : (
+                      <Select
+                        value={editForm.clinicId}
+                        onValueChange={(value) =>
+                          setEditForm((f) => ({ ...f, clinicId: value }))
+                        }
+                      >
+                        <SelectTrigger id="edit-clinic-scope">
+                          <SelectValue placeholder="Select a clinic" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {coreClinicsForAssignment.map((clinic) => (
+                            <SelectItem key={clinic.id} value={clinic.id}>
+                              {clinic.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {editForm.accessLevel === "operations" && (
               <OperationsGroupConfig
                 idPrefix="edit-ops"
                 value={editForm.operationsAccess}
                 onChange={(next) =>
                   setEditForm((f) => ({ ...f, operationsAccess: next }))
+                }
+                groups={
+                  editForm.clinicAccess ? CLINIC_SCOPED_GROUPS : OPERATIONS_GROUPS
                 }
               />
             )}

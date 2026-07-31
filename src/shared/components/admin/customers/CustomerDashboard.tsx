@@ -144,6 +144,15 @@ export interface ShopOrderAdminData {
   /** e.g. 'CLINIC_PICKUP', 'DELIVERED_OFFLINE', 'UNFULFILLABLE_STOCK'. */
   fulfillment_status: string | null;
   items: Array<{ product_name: string; quantity: number; unit_price: number }>;
+  /**
+   * The Order_Clinic_Stamp (clinic-scoped-shop-inventory, Req 12.5, 12.6):
+   * the Core_Clinic whose stock fulfilled this order, or `null` when unset
+   * (the `Unassigned` grouping — e.g. a franchise order or a pre-migration
+   * legacy row).
+   */
+  clinic_id?: string | null;
+  /** Display name of the Order_Clinic_Stamp's clinic, when known (Req 12.5). */
+  clinic_name?: string | null;
 }
 
 export default function CustomerDashboard({

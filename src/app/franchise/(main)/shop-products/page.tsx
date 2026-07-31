@@ -24,7 +24,24 @@ export default async function FranchiseShopProductsPage() {
   const supabase = createAdminClient();
 
   // Shared catalog merged with this franchise's stock + visibility overlay.
-  const products = await getFranchiseShopProducts(franchiseId);
+  // A load failure is displayed with no Shop_Product rows (Req 18.12).
+  let products;
+  try {
+    products = await getFranchiseShopProducts(franchiseId);
+  } catch {
+    return (
+      <div className="flex flex-col gap-8 animate-in fade-in duration-500">
+        <PageHeader
+          title="Shop Products"
+          subtitle="Set your own stock and choose which products your customers can see."
+          icon={ShoppingBag}
+        />
+        <div className="text-center py-12 text-rose-600">
+          <p>The franchise shop stock could not be loaded.</p>
+        </div>
+      </div>
+    );
+  }
 
   // Fetch addon orders for this franchise's customers
   const { data: recentOrders } = await supabase

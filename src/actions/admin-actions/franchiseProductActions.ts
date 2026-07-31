@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveFranchiseContext } from "@/lib/franchise/context";
+import { checkWarehouseAccess } from "@/lib/auth/adminAccess";
 import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -30,11 +31,16 @@ export interface FranchiseShopProduct {
   stock_quantity: number;
   is_visible: boolean;
   has_settings: boolean;
+  // Product_Link — the linked Master_Catalog_Product id, or null when this
+  // Shop_Product is unlinked. Only a linked product gets a Stock_In action
+  // on the Franchise_Shop_Products_Page (Req 18.1).
+  inventory_product_id: string | null;
 }
 
 type ActionResult = { success: boolean; error?: string };
 
 const FRANCHISE_SHOP_PATH = "/franchise/shop-products";
+const WAREHOUSE_SHOP_PRODUCTS_PATH = "/admin/inventory/shop-products";
 
 /**
  * Resolves the franchise_id for the current FRANCHISE_ADMIN session.
@@ -62,20 +68,28 @@ export async function getFranchiseShopProducts(
   const { data: products, error } = await supabase
     .from("products")
     .select(
-      "id, sku, name, category, original_price, sale_price, image_urls, banner_image_url, is_active",
+      "id, sku, name, category, original_price, sale_price, image_urls, banner_image_url, is_active, inventory_product_id",
     )
     .is("deleted_at", null)
     .order("name", { ascending: true });
 
   if (error) {
     console.error("getFranchiseShopProducts (products):", error.message);
-    return [];
+    // Thrown (rather than returning []) so the page can distinguish a genuine
+    // empty catalogue from a load failure and display the error message
+    // Requirement 18.12 requires, showing no Shop_Product rows either way.
+    throw new Error("The franchise shop stock could not be loaded.");
   }
 
-  const { data: settings } = await supabase
+  const { data: settings, error: settingsError } = await supabase
     .from("franchise_product_settings")
     .select("product_id, stock_quantity, is_visible")
     .eq("franchise_id", franchiseId);
+
+  if (settingsError) {
+    console.error("getFranchiseShopProducts (settings):", settingsError.message);
+    throw new Error("The franchise shop stock could not be loaded.");
+  }
 
   const settingsMap = new Map(
     (settings ?? []).map((s) => [s.product_id, s]),
@@ -96,6 +110,7 @@ export async function getFranchiseShopProducts(
       stock_quantity: s?.stock_quantity ?? 0,
       is_visible: s?.is_visible ?? false,
       has_settings: Boolean(s),
+      inventory_product_id: p.inventory_product_id ?? null,
     };
   });
 }
@@ -150,16 +165,36 @@ export async function updateFranchiseProductStock(
 
 /**
  * Shows/hides a product on this franchise's customer shop (upsert).
+ *
+ * `explicitFranchiseId` (clinic-scoped-shop-inventory spec, Req 19.10) lets
+ * the Warehouse_Shop_Products_Page's Franchise_Mode name the Franchise it is
+ * toggling, since that request runs under an admin session with no franchise
+ * context of its own. It is honoured ONLY when the caller is an authorized
+ * Inventory_Admin (`checkWarehouseAccess("inventory_operations")`) — the
+ * existing franchise-session path (`resolveCallerFranchiseId`) is completely
+ * unchanged and still takes priority whenever a franchise session exists, so
+ * a franchise admin can never use this parameter to name another franchise.
  */
 export async function toggleFranchiseProductVisibility(
   productId: string,
   isVisible: boolean,
+  explicitFranchiseId?: string,
 ): Promise<ActionResult> {
   if (!z.string().uuid().safeParse(productId).success) {
     return { success: false, error: "Invalid product." };
   }
 
-  const franchiseId = await resolveCallerFranchiseId();
+  let franchiseId = await resolveCallerFranchiseId();
+
+  if (!franchiseId && explicitFranchiseId) {
+    if (!z.string().uuid().safeParse(explicitFranchiseId).success) {
+      return { success: false, error: "Invalid franchise." };
+    }
+    const gate = await checkWarehouseAccess("inventory_operations");
+    if (!gate.ok) return { success: false, error: gate.error };
+    franchiseId = explicitFranchiseId;
+  }
+
   if (!franchiseId) {
     return { success: false, error: "No franchise assigned to your account." };
   }
@@ -188,6 +223,9 @@ export async function toggleFranchiseProductVisibility(
   );
 
   revalidatePath(FRANCHISE_SHOP_PATH);
+  if (explicitFranchiseId) {
+    revalidatePath(WAREHOUSE_SHOP_PRODUCTS_PATH);
+  }
   return { success: true };
 }
 

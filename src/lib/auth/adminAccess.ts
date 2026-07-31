@@ -24,6 +24,7 @@ import {
   canManageGroup,
   isDietitianLevel,
   landingRouteFor,
+  resolveReadableClinicId,
   type AccessArea,
   type AdminAccessLevel,
   type AccessConfiguration,
@@ -53,6 +54,8 @@ export interface AdminContext {
   accessLevel: AdminAccessLevel;
   /** Fully-resolved per-group configuration (always valid). */
   config: AccessConfiguration;
+  /** The admin's Clinic_Scope_Assignment (`users.admin_clinic_id`); `null` for an unscoped admin. */
+  clinicId: string | null;
 }
 
 /**
@@ -63,7 +66,8 @@ export interface AdminContext {
  *                the session (server component / server action / route handler).
  * Postcondition: config is always valid (NULL level coerced to full, malformed
  *                groups dropped); accessLevel mirrors config.level for back-compat;
- *                userId / roleCode are null when no session can be resolved.
+ *                userId / roleCode / clinicId are null when no session can be
+ *                resolved.
  */
 export async function getCurrentAdminContext(): Promise<AdminContext> {
   // Lazy import keeps `next/headers` out of the module's top-level graph so the
@@ -81,14 +85,56 @@ export async function getCurrentAdminContext(): Promise<AdminContext> {
       roleCode: null,
       accessLevel: DEFAULT_ACCESS_LEVEL,
       config: { level: DEFAULT_ACCESS_LEVEL, groups: {} },
+      clinicId: null,
     };
   }
 
-  const { data } = await supabase
-    .from("users")
-    .select("id, admin_access_level, admin_operations_access, roles(code)")
-    .eq("auth_user_id", user.id)
-    .single();
+  // Columns that must always resolve. `admin_clinic_id` is requested on top of
+  // these, but is treated as OPTIONAL: it is introduced by
+  // `scripts/add-admin-clinic-id-to-users.sql`, and while that migration is
+  // unapplied PostgREST rejects the ENTIRE select with 42703 (undefined
+  // column). That used to null out `roleCode`, so every guard built on this
+  // context (`guardAdminGroup`, `guardAdminPage`, `guardDietitianPage`, the
+  // inventory layout) redirected a perfectly valid ADMIN to /unauthorized.
+  // Schema drift must degrade to "unscoped admin", never to "no permission".
+  const REQUIRED_COLUMNS =
+    "id, admin_access_level, admin_operations_access, roles(code)";
+
+  const selectProfile = async (columns: string) =>
+    (await supabase
+      .from("users")
+      .select(columns)
+      .eq("auth_user_id", user.id)
+      .single()) as unknown as {
+      data: {
+        id?: string | null;
+        admin_access_level?: unknown;
+        admin_operations_access?: unknown;
+        admin_clinic_id?: string | null;
+        roles?: { code: string }[] | { code: string } | null;
+      } | null;
+      error: { code?: string; message?: string } | null;
+    };
+
+  let { data, error } = await selectProfile(
+    `${REQUIRED_COLUMNS}, admin_clinic_id`,
+  );
+
+  if (error?.code === "42703") {
+    console.error(
+      "[adminAccess] users.admin_clinic_id is missing — apply scripts/add-admin-clinic-id-to-users.sql. Resolving this admin as unscoped.",
+    );
+    ({ data, error } = await selectProfile(REQUIRED_COLUMNS));
+  }
+
+  if (error) {
+    // Still surface anything else that went wrong (RLS, expired JWT, no row):
+    // the caller will deny access, and a silent denial is impossible to debug.
+    console.error(
+      "[adminAccess] failed to resolve admin profile:",
+      error.message ?? error,
+    );
+  }
 
   const roles = data?.roles as
     | { code: string }[]
@@ -107,6 +153,7 @@ export async function getCurrentAdminContext(): Promise<AdminContext> {
     roleCode: roleCode ?? null,
     accessLevel: config.level,
     config,
+    clinicId: (data?.admin_clinic_id as string | null) ?? null,
   };
 }
 
@@ -435,6 +482,69 @@ export async function checkWarehouseAccess(
     throw err;
   }
 }
+// ─── Clinic scope guards (clinic-scoped-shop-inventory) ──────────────────────
+//
+// A Clinic_Scoped_Admin's Shop Products / Clinic_Shop_Ledger reads are confined
+// to their Clinic_Scope_Assignment (`AdminContext.clinicId`); every other
+// Operations_Group (customers, subscriptions, riders) stays unfiltered (Req
+// 14.1-14.3, 14.9 — enforced simply by those pages never calling this guard).
+// `resolveReadableClinicId` (adminAccessCore) is the single chokepoint for the
+// scope decision itself; the guards below just resolve the caller's context and
+// delegate to it, mirroring the assert/check pairing used for warehouse access.
+
+/** Thrown by `assertClinicScope` when the requested clinic is out of scope. */
+export class ClinicScopeDeniedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClinicScopeDeniedError";
+  }
+}
+
+/**
+ * Throw-style guard for Shop Products / Clinic_Shop_Ledger reads. Resolves the
+ * current admin's Clinic_Scope_Assignment and reconciles it against
+ * `requestedClinicId` via `resolveReadableClinicId` (Req 14.6, 14.7).
+ *
+ * Postcondition: returns the clinic id the read is confined to when permitted
+ *                (`null` means "no filter", only reachable for an unscoped
+ *                admin); otherwise throws `ClinicScopeDeniedError` carrying the
+ *                rejection message.
+ */
+export async function assertClinicScope(
+  requestedClinicId: string | null,
+): Promise<string | null> {
+  const { clinicId } = await getCurrentAdminContext();
+  const resolution = resolveReadableClinicId(clinicId, requestedClinicId);
+  if (!resolution.ok) throw new ClinicScopeDeniedError(resolution.error);
+  return resolution.clinicId;
+}
+
+/**
+ * Result-style twin of {@link assertClinicScope} for server actions that
+ * return an `ActionResult`-shaped value (Req 14.6, 14.7, 16.5). Returns
+ * `{ ok: true, clinicId }` with the clinic the read is confined to, otherwise
+ * `{ ok: false, error }` with the rejection message.
+ *
+ * Usage:
+ *   const gate = await checkClinicScope(requestedClinicId);
+ *   if (!gate.ok) return { success: false, error: gate.error };
+ */
+export async function checkClinicScope(
+  requestedClinicId: string | null,
+): Promise<
+  { ok: true; clinicId: string | null } | { ok: false; error: string }
+> {
+  try {
+    const clinicId = await assertClinicScope(requestedClinicId);
+    return { ok: true, clinicId };
+  } catch (err) {
+    if (err instanceof ClinicScopeDeniedError) {
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
+}
+
 // ─── Dietitian guards (dietitian-management) ─────────────────────────────────
 //
 // A Dietitian is a `users` row whose resolved access level is `dietitian` and

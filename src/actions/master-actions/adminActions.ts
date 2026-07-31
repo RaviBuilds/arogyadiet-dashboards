@@ -11,12 +11,87 @@ import {
   resolveAccessLevel,
   landingRouteFor,
   validateOperationsAccessInput,
+  validateClinicScopeAssignment,
   type AdminAccessLevel,
   type OperationsAccess,
 } from "@/lib/auth/adminAccessCore";
 
 /** Zod schema rejecting any value outside the permitted access-level set. */
 const accessLevelSchema = z.enum(ADMIN_ACCESS_LEVELS);
+
+/**
+ * Clinic scope fields accepted by `createAdminUser` / `updateAdminUser`
+ * (Requirement 13). This is the convention the User_Management_Form (task 6.6)
+ * must follow when submitting the Clinic_Access_Checkbox / Core_Clinic dropdown:
+ *
+ *   - `clinicAccess` mirrors the Clinic_Access_Checkbox state. Omitted or
+ *     `false` means "no clinic level access": any submitted `clinicId` is
+ *     IGNORED and the stored Clinic_Scope_Assignment is cleared to `null`
+ *     (Req 13.16). This is also what an unscoped create (no clinic fields sent
+ *     at all) naturally resolves to.
+ *   - `clinicAccess: true` requires a non-null `clinicId`. A submission with
+ *     `clinicAccess: true` and `clinicId` omitted or `null` is rejected with
+ *     "a clinic must be selected" (Req 13.11) rather than silently clearing
+ *     the assignment — this is what lets the server enforce Requirement 13.11
+ *     through 13.14 on its own, regardless of what client-side validation
+ *     already blocks (Req 13.15).
+ *   - When `clinicAccess: true` and `clinicId` is set, the caller's `groups`
+ *     (the resolved `operationsAccess`) must hold only Clinic_Scoped_Groups —
+ *     an `operations` or `franchises` entry is rejected (Req 13.13) — and the
+ *     effective Access_Level must be `operations` (Req 13.14).
+ */
+interface ClinicScopeFormFields {
+  clinicAccess?: boolean;
+  clinicId?: string | null;
+}
+
+/**
+ * Resolve the Core_Clinic id (if any) that should be persisted as the
+ * Clinic_Scope_Assignment for a write, applying the convention documented on
+ * `ClinicScopeFormFields` and enforcing Requirements 13.11-13.14 via
+ * `validateClinicScopeAssignment`. Queries `public.clinics` once, only when a
+ * clinic id is actually being considered, to resolve the Core-Clinic-only
+ * check (Req 13.12) that `validateClinicScopeAssignment` cannot perform itself
+ * (it is pure / has no database access).
+ *
+ * A `clinicId` that does not reference any existing `clinics` row is treated
+ * the same as a franchise-owned clinic — `isCoreClinic: false` — so both
+ * halves of Requirement 13.12 ("does not exist" and "franchise_id is not
+ * NULL") produce the same rejection.
+ */
+async function resolveClinicScopeForWrite(
+  supabaseAdmin: ReturnType<typeof createAdminClient>,
+  level: AdminAccessLevel,
+  fields: ClinicScopeFormFields,
+  groups: OperationsAccess | null,
+): Promise<
+  | { ok: true; clinicIdToPersist: string | null }
+  | { ok: false; error: string }
+> {
+  const clinicAccess = fields.clinicAccess === true;
+  const clinicId = clinicAccess ? fields.clinicId ?? null : null;
+
+  let isCoreClinic: boolean | null = null;
+  if (clinicId !== null) {
+    const { data } = await supabaseAdmin
+      .from("clinics")
+      .select("franchise_id")
+      .eq("id", clinicId)
+      .maybeSingle();
+    isCoreClinic = data ? data.franchise_id === null : false;
+  }
+
+  const validation = validateClinicScopeAssignment({
+    level,
+    clinicAccess,
+    clinicId,
+    groups: groups ?? {},
+    isCoreClinic,
+  });
+  if (!validation.ok) return { ok: false, error: validation.error };
+
+  return { ok: true, clinicIdToPersist: clinicId };
+}
 
 /**
  * Resolve the per-group operations access to persist for a given level.
@@ -45,7 +120,7 @@ export async function getAdminUsers() {
   const { data, error } = await supabaseAdmin
     .from("users")
     .select(
-      "id, auth_user_id, full_name, email, mobile, is_active, created_at, admin_access_level, admin_operations_access, roles(code)",
+      "id, auth_user_id, full_name, email, mobile, is_active, created_at, admin_access_level, admin_operations_access, admin_clinic_id, roles(code)",
     )
     .eq("roles.code", "ADMIN")
     .not("roles", "is", null)
@@ -75,6 +150,8 @@ export async function createAdminUser(formData: {
   password: string;
   accessLevel?: string;
   operationsAccess?: OperationsAccess;
+  clinicAccess?: boolean;
+  clinicId?: string | null;
 }) {
   const supabaseAdmin = createAdminClient();
 
@@ -96,6 +173,20 @@ export async function createAdminUser(formData: {
   );
   if (!opsResolved.ok) return { success: false, error: opsResolved.error };
   const operationsAccessValue = opsResolved.value;
+
+  // Resolve + validate the Clinic_Scope_Assignment (Req 13.9, 13.11-13.15).
+  // Persists nothing yet — validation happens before any write, same as the
+  // access-level / operations-access checks above.
+  const clinicScopeResolved = await resolveClinicScopeForWrite(
+    supabaseAdmin,
+    accessLevel,
+    formData,
+    operationsAccessValue,
+  );
+  if (!clinicScopeResolved.ok) {
+    return { success: false, error: clinicScopeResolved.error };
+  }
+  const clinicIdToPersist = clinicScopeResolved.clinicIdToPersist;
 
   // Check for existing email
   const { data: existing } = await supabaseAdmin
@@ -126,6 +217,7 @@ export async function createAdminUser(formData: {
           mobile: formData.mobile || null,
           admin_access_level: accessLevel,
           admin_operations_access: operationsAccessValue,
+          admin_clinic_id: clinicIdToPersist,
           force_password_change: true,
           updated_at: new Date().toISOString(),
         })
@@ -139,6 +231,7 @@ export async function createAdminUser(formData: {
         email: formData.email,
         full_name: formData.fullName,
         admin_access_level: accessLevel,
+        admin_clinic_id: clinicIdToPersist,
       });
       revalidatePath("/master/user-management");
       return { success: true, accessLevel };
@@ -180,6 +273,7 @@ export async function createAdminUser(formData: {
     mobile: formData.mobile || null,
     admin_access_level: accessLevel,
     admin_operations_access: operationsAccessValue,
+    admin_clinic_id: clinicIdToPersist,
     is_active: true,
     is_email_verified: true,
   });
@@ -199,6 +293,7 @@ export async function createAdminUser(formData: {
     email: formData.email,
     full_name: formData.fullName,
     admin_access_level: accessLevel,
+    admin_clinic_id: clinicIdToPersist,
   });
   revalidatePath("/master/user-management");
   return { success: true, accessLevel };
@@ -211,6 +306,8 @@ export async function updateAdminUser(
     mobile: string;
     accessLevel?: string;
     operationsAccess?: OperationsAccess;
+    clinicAccess?: boolean;
+    clinicId?: string | null;
   },
 ) {
   const supabaseAdmin = createAdminClient();
@@ -247,6 +344,21 @@ export async function updateAdminUser(
   );
   if (!opsResolved.ok) return { success: false, error: opsResolved.error };
 
+  // Resolve + validate the Clinic_Scope_Assignment for the resulting level
+  // (Req 13.9-13.15, 13.18). Nothing is persisted before this check passes, so
+  // a rejection here leaves the stored user record, access level, and
+  // operations config exactly as they were (Req 13.10, 13.14).
+  const clinicScopeResolved = await resolveClinicScopeForWrite(
+    supabaseAdmin,
+    nextLevel,
+    formData,
+    opsResolved.value,
+  );
+  if (!clinicScopeResolved.ok) {
+    return { success: false, error: clinicScopeResolved.error };
+  }
+  const clinicIdToPersist = clinicScopeResolved.clinicIdToPersist;
+
   const { error } = await supabaseAdmin
     .from("users")
     .update({
@@ -254,6 +366,7 @@ export async function updateAdminUser(
       mobile: formData.mobile || null,
       admin_access_level: nextLevel,
       admin_operations_access: opsResolved.value,
+      admin_clinic_id: clinicIdToPersist,
       updated_at: new Date().toISOString(),
     })
     .eq("id", userId);
@@ -277,6 +390,7 @@ export async function updateAdminUser(
     full_name: formData.fullName,
     mobile: formData.mobile,
     admin_access_level: nextLevel,
+    admin_clinic_id: clinicIdToPersist,
   });
   revalidatePath("/master/user-management");
   return { success: true, accessLevel: nextLevel };
