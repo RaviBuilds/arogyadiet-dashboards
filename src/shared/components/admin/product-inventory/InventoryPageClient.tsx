@@ -25,9 +25,15 @@ import {
   adminUpsertProduct,
   AdminInventoryProduct,
 } from "@/actions/admin-actions/inventoryActions";
+import { setClinicProductVisibilityAction } from "@/actions/admin-actions/clinicShopInventoryActions";
+import { toggleFranchiseProductVisibility } from "@/actions/admin-actions/franchiseProductActions";
+import type { FranchiseShopProduct } from "@/actions/admin-actions/franchiseProductActions";
+import type { ClinicShopProductRow } from "@/types/clinicShop";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { ProductDescriptionEditor } from "@/shared/components/admin/product-inventory/ProductDescriptionEditor";
 import { ProductFranchiseAvailabilityDialog } from "@/shared/components/admin/product-inventory/ProductFranchiseAvailabilityDialog";
+import { ShopStockInDialog } from "@/shared/components/admin/product-inventory/ShopStockInDialog";
+import { ShopStockInCart } from "@/shared/components/admin/product-inventory/ShopStockInCart";
 import {
   ProductMediaGallery,
   type ProductMediaGalleryHandle,
@@ -66,8 +72,48 @@ type AccessMode = "view-only" | "full-access";
 
 const VALID_ACCESS_MODES: AccessMode[] = ["view-only", "full-access"];
 
+/**
+ * The discriminated destination mode for the Warehouse Shop Products page
+ * (clinic-scoped-shop-inventory spec — Task 7.5, design.md "UI components").
+ *
+ * - `all-clinics`: Aggregate_Stock, Global_Visibility, full CRUD, no stock
+ *   entry (Req 5.3, 5.4).
+ * - `clinic`: Effective_Clinic_Stock, exactly two row actions — a
+ *   Clinic_Visibility toggle and a Stock_In action — no create/edit/delete
+ *   (Req 5.5, 5.6, 5.7, 5.8).
+ * - `franchise`: the selected Franchise's `franchise_product_settings`
+ *   stock, exactly one row action — a visibility toggle — no stock-in, no
+ *   catalogue actions (Req 19.1, 19.2, 19.3).
+ * - `operations-view`: Effective_Clinic_Stock + Effective_Clinic_Visibility
+ *   for the selected clinic, read-only — no create/edit/delete, no
+ *   Franchises action, no Clinic_Visibility toggle, no Stock_In action (Req
+ *   9.4, 9.5, 9.11). Rendered by the Operations Shop Products page (task
+ *   10.1) via `ClinicModeTable` with `isReadOnly`; `clinicId: null` (no
+ *   selection made yet) renders nothing here — the "select a clinic" / "no
+ *   clinics configured" prompts are the page's responsibility, not this
+ *   component's (Req 9.2, 9.3).
+ */
+export type ShopProductsMode =
+  | { kind: "all-clinics" }
+  | { kind: "clinic"; clinicId: string }
+  | { kind: "franchise"; franchiseId: string }
+  | { kind: "operations-view"; clinicId: string | null };
+
 interface InventoryPageClientProps {
+  /** Aggregate-catalogue rows — used by `all-clinics` and the legacy/`operations-view` path. */
   products: AdminInventoryProduct[];
+  /** Clinic_Mode rows (Effective_Clinic_Stock + Effective_Clinic_Visibility). */
+  clinicProducts?: ClinicShopProductRow[];
+  /** Franchise_Mode rows (`franchise_product_settings` stock + visibility). */
+  franchiseProducts?: FranchiseShopProduct[];
+  /**
+   * The discriminated destination mode (Req 5.3–5.8, 19.1–19.3). Optional for
+   * backward compatibility with the one existing caller
+   * (`/admin/kitchen-shop/inventory`) that still passes the legacy
+   * `accessMode` prop; when omitted, `mode` is derived from `accessMode`.
+   */
+  mode?: ShopProductsMode;
+  /** @deprecated Prefer `mode`. Retained only for the kitchen-shop caller. */
   accessMode?: AccessMode;
   pageTitle?: string;
   pageDescription?: string;
@@ -161,8 +207,18 @@ function FormSection({
   );
 }
 
+/**
+ * Dispatcher: picks the mode-specific table component. Kept hook-free so the
+ * mode branch can vary the rendered subtree without violating the Rules of
+ * Hooks — each branch below is its own component with its own, unconditional
+ * hook calls (`ClinicModeTable`, `FranchiseModeTable`,
+ * `AggregateModeTable`).
+ */
 export default function InventoryPageClient({
   products,
+  clinicProducts = [],
+  franchiseProducts = [],
+  mode: modeProp,
   accessMode: accessModeProp,
   pageTitle = "Inventory",
   pageDescription = "Manage shop product catalog, stock levels, and availability.",
@@ -172,7 +228,85 @@ export default function InventoryPageClient({
     accessModeProp && VALID_ACCESS_MODES.includes(accessModeProp)
       ? accessModeProp
       : "full-access";
-  const isViewOnly = accessMode === "view-only";
+
+  // Backward compatibility: the kitchen-shop caller does not pass `mode` yet,
+  // only the legacy `accessMode`. Derive an equivalent mode from it so that
+  // caller keeps working unchanged (view-only -> operations-view, no clinic
+  // scope; full-access -> all-clinics).
+  const mode: ShopProductsMode =
+    modeProp ??
+    (accessMode === "view-only"
+      ? { kind: "operations-view", clinicId: null }
+      : { kind: "all-clinics" });
+
+  if (mode.kind === "clinic") {
+    return (
+      <ClinicModeTable
+        clinicId={mode.clinicId}
+        products={clinicProducts}
+        pageTitle={pageTitle}
+        pageDescription={pageDescription}
+      />
+    );
+  }
+
+  if (mode.kind === "franchise") {
+    return (
+      <FranchiseModeTable
+        franchiseId={mode.franchiseId}
+        products={franchiseProducts}
+        pageTitle={pageTitle}
+        pageDescription={pageDescription}
+      />
+    );
+  }
+
+  if (mode.kind === "operations-view") {
+    // Req 9.2: no Core_Clinic selected yet — the page itself renders the
+    // "select a clinic" prompt; this component renders nothing so no
+    // stock/ledger data is implied.
+    if (!mode.clinicId) return null;
+
+    // Req 9.4, 9.5, 9.11: clinic-scoped Effective_Clinic_Stock +
+    // Effective_Clinic_Visibility, read-only — reuses `ClinicModeTable`'s
+    // rendering with the visibility toggle and Stock_In action stripped out.
+    return (
+      <ClinicModeTable
+        clinicId={mode.clinicId}
+        products={clinicProducts}
+        pageTitle={pageTitle}
+        pageDescription={pageDescription}
+        isReadOnly
+      />
+    );
+  }
+
+  // `all-clinics`: Aggregate_Stock, Global_Visibility, full CRUD, no stock
+  // entry (Req 5.3, 5.4). The legacy `accessMode="view-only"` path (no
+  // `mode` prop supplied) also lands here via the fallback above, unchanged.
+  return (
+    <AggregateModeTable
+      products={products}
+      isViewOnly={accessMode === "view-only"}
+      pageTitle={pageTitle}
+      pageDescription={pageDescription}
+    />
+  );
+}
+
+interface AggregateModeTableProps {
+  products: AdminInventoryProduct[];
+  isViewOnly: boolean;
+  pageTitle: string;
+  pageDescription: string;
+}
+
+function AggregateModeTable({
+  products,
+  isViewOnly,
+  pageTitle,
+  pageDescription,
+}: AggregateModeTableProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [productModalOpen, setProductModalOpen] = useState(false);
@@ -697,20 +831,18 @@ export default function InventoryPageClient({
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="stockQuantity" className="text-xs font-medium text-slate-700">Stock Quantity</Label>
-                      <Input
-                        id="stockQuantity"
-                        name="stockQuantity"
-                        type="number"
-                        min="0"
-                        step="1"
-                        placeholder="0"
-                        defaultValue={editingProduct?.stock_quantity ?? 0}
-                        required
-                        className="border-slate-200 focus-visible:ring-primary/30"
-                      />
-                    </div>
+                    {/*
+                      No stock entry input in `all-clinics` mode (Req 5.4):
+                      Aggregate_Stock is derived only from per-clinic Stock_In
+                      (Requirement 7), not typed in here, and
+                      `adminUpsertProduct` no longer reads a `stockQuantity`
+                      field. The "Stock" table column above still shows the
+                      legacy/aggregate figure — that is a display concern, not
+                      a stock-entry input, and stays out of scope here.
+                      Master Catalog Product linking (Requirement 3) is task
+                      7.8's territory and is intentionally not wired into this
+                      form yet.
+                    */}
 
                     <div className="space-y-2">
                       <Label htmlFor="taxPercent" className="text-xs font-medium text-slate-700">Tax Percent (%)</Label>
@@ -779,5 +911,393 @@ export default function InventoryPageClient({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Clinic_Mode — clinic stock, exactly two row actions: a Clinic_Visibility
+ * toggle and a Stock_In action (Req 5.5, 5.6, 5.7, 5.8). No create/edit/delete,
+ * no Franchises action, no global stock entry.
+ * ───────────────────────────────────────────────────────────────────────────
+ */
+
+interface ClinicModeTableProps {
+  clinicId: string;
+  products: ClinicShopProductRow[];
+  pageTitle: string;
+  pageDescription: string;
+  /**
+   * Read-only rendering for the Operations Shop Products page's
+   * `operations-view` mode (Req 9.11): the Clinic_Visibility `Switch` is
+   * replaced by a plain Eye/EyeOff indicator and the Stock_In action column
+   * is omitted entirely, rather than duplicating this table's row-rendering
+   * logic in a second component.
+   */
+  isReadOnly?: boolean;
+}
+
+function ClinicModeTable({
+  clinicId,
+  products,
+  pageTitle,
+  pageDescription,
+  isReadOnly = false,
+}: ClinicModeTableProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const handleToggleVisibility = (product: ClinicShopProductRow) => {
+    setTogglingId(product.id);
+    const toastId = toast.loading("Updating clinic visibility...");
+
+    startTransition(async () => {
+      const result = await setClinicProductVisibilityAction(
+        clinicId,
+        product.id,
+        !product.is_visible,
+      );
+
+      if (result.success) {
+        toast.success(
+          product.is_visible
+            ? "Product hidden for this clinic."
+            : "Product is now visible for this clinic.",
+          { id: toastId },
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "Failed to update clinic visibility.", {
+          id: toastId,
+        });
+      }
+
+      setTogglingId(null);
+    });
+  };
+
+  const columns = useMemo<ColumnDef<ClinicShopProductRow>[]>(
+    () => [
+      {
+        id: "product",
+        accessorFn: (row) => row.name,
+        header: "Product",
+        cell: ({ row }) => (
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-slate-900">
+              {row.original.name}
+            </p>
+            <p className="text-xs text-slate-500">
+              {row.original.sku ?? "No SKU"}
+            </p>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "stock_quantity",
+        header: "Clinic Stock",
+        cell: ({ row }) => {
+          const qty = row.original.stock_quantity;
+          const isOut = qty === 0;
+          return (
+            <span
+              className={cn(
+                "text-sm font-semibold tabular-nums",
+                isOut ? "text-red-600" : "text-slate-900",
+              )}
+            >
+              {qty}
+            </span>
+          );
+        },
+      },
+      {
+        accessorKey: "is_visible",
+        header: "Clinic Visibility",
+        cell: ({ row }) => {
+          const product = row.original;
+          const isToggling = togglingId === product.id;
+
+          // Req 9.11, 16.6: no Clinic_Visibility toggle on the read-only
+          // Operations view — a plain indicator only.
+          if (isReadOnly) {
+            return (
+              <div className="flex items-center gap-1.5 text-sm">
+                {product.is_visible ? (
+                  <Eye className="h-3.5 w-3.5 text-emerald-600" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5 text-slate-400" />
+                )}
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    product.is_visible ? "text-emerald-600" : "text-slate-400",
+                  )}
+                >
+                  {product.is_visible ? "Visible" : "Hidden"}
+                </span>
+              </div>
+            );
+          }
+
+          return (
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={product.is_visible}
+                disabled={isToggling || isPending}
+                onCheckedChange={() => handleToggleVisibility(product)}
+                aria-label={
+                  product.is_visible
+                    ? "Hide product for this clinic"
+                    : "Show product for this clinic"
+                }
+              />
+              <div className="flex items-center gap-1.5 text-sm">
+                {isToggling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                ) : product.is_visible ? (
+                  <Eye className="h-3.5 w-3.5 text-emerald-600" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5 text-slate-400" />
+                )}
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    product.is_visible ? "text-emerald-600" : "text-slate-400",
+                  )}
+                >
+                  {product.is_visible ? "Visible" : "Hidden"}
+                </span>
+              </div>
+            </div>
+          );
+        },
+      },
+      // Req 9.11, 16.6: no Stock_In action on the read-only Operations view.
+      ...(isReadOnly
+        ? []
+        : [
+            {
+              id: "actions",
+              header: "",
+              cell: ({ row }: { row: { original: ClinicShopProductRow } }) => (
+                <div className="flex items-center justify-end gap-1.5">
+                  <ShopStockInDialog
+                    product={row.original}
+                    clinicId={clinicId}
+                  />
+                </div>
+              ),
+            } satisfies ColumnDef<ClinicShopProductRow>,
+          ]),
+    ],
+    [isPending, togglingId, clinicId, isReadOnly],
+  );
+
+  const totalProducts = products.length;
+
+  return (
+    <div className="space-y-6 p-6">
+      <AdminPageHeader title={pageTitle} description={pageDescription} />
+
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-6 py-4">
+          <h2 className="text-base font-semibold text-slate-900">
+            Clinic Shop Stock
+          </h2>
+          <p className="text-xs text-slate-500">
+            {totalProducts} product{totalProducts !== 1 ? "s" : ""} shown
+          </p>
+        </div>
+        <div className="px-6 pb-6">
+          <DataTable
+            columns={columns}
+            data={products}
+            filterColumn="product"
+            filterPlaceholder="Search products by name..."
+          />
+        </div>
+      </div>
+
+      {isReadOnly ? null : <ShopStockInCart />}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Franchise_Mode — franchise stock, exactly one row action: a visibility
+ * toggle (Req 19.1, 19.2, 19.3). No stock-in, no catalogue actions.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+interface FranchiseModeTableProps {
+  franchiseId: string;
+  products: FranchiseShopProduct[];
+  pageTitle: string;
+  pageDescription: string;
+}
+
+function FranchiseModeTable({
+  franchiseId,
+  products,
+  pageTitle,
+  pageDescription,
+}: FranchiseModeTableProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  // Optimistic visibility overrides, keyed by product id. Applied
+  // immediately on toggle and reverted on failure, since the `Switch` is
+  // otherwise driven directly by the server-fetched `products` prop.
+  const [visibilityOverrides, setVisibilityOverrides] = useState<
+    Map<string, boolean>
+  >(new Map());
+
+  const getIsVisible = (product: FranchiseShopProduct) =>
+    visibilityOverrides.get(product.id) ?? product.is_visible;
+
+  const handleToggleVisibility = (product: FranchiseShopProduct) => {
+    const previousVisible = getIsVisible(product);
+    const nextVisible = !previousVisible;
+
+    setTogglingId(product.id);
+    setVisibilityOverrides((prev) => new Map(prev).set(product.id, nextVisible));
+    const toastId = toast.loading("Updating franchise visibility...");
+
+    startTransition(async () => {
+      // `toggleFranchiseProductVisibility(productId, isVisible, franchiseId?)`
+      // — the optional explicit franchise id is honoured only for an
+      // authorized Inventory_Admin (Req 19.10, design.md "Server actions").
+      const result = await toggleFranchiseProductVisibility(
+        product.id,
+        nextVisible,
+        franchiseId,
+      );
+
+      if (result.success) {
+        toast.success(
+          previousVisible
+            ? "Product hidden for this franchise."
+            : "Product is now visible for this franchise.",
+          { id: toastId },
+        );
+        router.refresh();
+      } else {
+        // Revert the optimistic update on failure.
+        setVisibilityOverrides((prev) =>
+          new Map(prev).set(product.id, previousVisible),
+        );
+        toast.error(result.error ?? "Failed to update franchise visibility.", {
+          id: toastId,
+        });
+      }
+
+      setTogglingId(null);
+    });
+  };
+
+  const columns = useMemo<ColumnDef<FranchiseShopProduct>[]>(
+    () => [
+      {
+        id: "product",
+        accessorFn: (row) => row.name,
+        header: "Product",
+        cell: ({ row }) => (
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-slate-900">
+              {row.original.name}
+            </p>
+            <p className="text-xs text-slate-500">
+              {row.original.sku ?? "No SKU"}
+            </p>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "stock_quantity",
+        header: "Franchise Stock",
+        cell: ({ row }) => {
+          const qty = row.original.stock_quantity;
+          const isOut = qty === 0;
+          return (
+            <span
+              className={cn(
+                "text-sm font-semibold tabular-nums",
+                isOut ? "text-red-600" : "text-slate-900",
+              )}
+            >
+              {qty}
+            </span>
+          );
+        },
+      },
+      {
+        accessorKey: "is_visible",
+        header: "Franchise Visibility",
+        cell: ({ row }) => {
+          const product = row.original;
+          const isToggling = togglingId === product.id;
+          const isVisible = getIsVisible(product);
+          return (
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={isVisible}
+                disabled={isToggling || isPending}
+                onCheckedChange={() => handleToggleVisibility(product)}
+                aria-label={
+                  isVisible
+                    ? "Hide product for this franchise"
+                    : "Show product for this franchise"
+                }
+              />
+              <div className="flex items-center gap-1.5 text-sm">
+                {isToggling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                ) : isVisible ? (
+                  <Eye className="h-3.5 w-3.5 text-emerald-600" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5 text-slate-400" />
+                )}
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    isVisible ? "text-emerald-600" : "text-slate-400",
+                  )}
+                >
+                  {isVisible ? "Visible" : "Hidden"}
+                </span>
+              </div>
+            </div>
+          );
+        },
+      },
+    ],
+    [isPending, togglingId, visibilityOverrides],
+  );
+
+  const totalProducts = products.length;
+
+  return (
+    <div className="space-y-6 p-6">
+      <AdminPageHeader title={pageTitle} description={pageDescription} />
+
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-6 py-4">
+          <h2 className="text-base font-semibold text-slate-900">
+            Franchise Shop Stock
+          </h2>
+          <p className="text-xs text-slate-500">
+            {totalProducts} product{totalProducts !== 1 ? "s" : ""} shown
+          </p>
+        </div>
+        <div className="px-6 pb-6">
+          <DataTable
+            columns={columns}
+            data={products}
+            filterColumn="product"
+            filterPlaceholder="Search products by name..."
+          />
+        </div>
+      </div>
+    </div>
   );
 }

@@ -69,6 +69,13 @@ export default async function FranchiseAssistedOrderPage() {
       (Array.isArray(p.image_urls) ? p.image_urls[0] : null) ??
       p.banner_image_url ??
       null,
+    // clinic-scoped-shop-inventory Task 9.3: AssistedOrderProduct now requires
+    // `availableStock` so the shared builder can cap quantity entry. The
+    // franchise catalog here is already merged with `franchise_product_settings`
+    // by `fetchShopProductsForCustomer` (franchiseId set), so `stock_quantity`
+    // IS the franchise's own available stock — unrelated to clinic scoping
+    // (task 11), just reusing the figure this page already fetches.
+    availableStock: Number(p.stock_quantity ?? 0),
   }));
 
   return (

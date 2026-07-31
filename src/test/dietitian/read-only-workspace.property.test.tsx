@@ -83,6 +83,16 @@ vi.mock("@/actions/admin-actions/kitLifecycleActions", () => ({
 }));
 vi.mock("@/actions/admin-actions/accommodationCustomerActions", () => ({
   getBulkAccommodationStayInfoAction: vi.fn(async () => ({})),
+  getAccommodationAddonRequestsAction: vi.fn(async () => ({
+    success: true,
+    data: [],
+  })),
+}));
+vi.mock("@/actions/addonServiceActions", () => ({
+  updateAddonServiceStatusAction: vi.fn(async () => ({
+    success: true,
+    data: undefined,
+  })),
 }));
 
 vi.mock("@/actions/franchise-actions/franchiseCustomerManagementActions", () => ({

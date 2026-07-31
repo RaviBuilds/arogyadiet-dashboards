@@ -1,0 +1,3 @@
+full_name,mobile,gender,dietary_preference,email (optional),allergies (optional),kit_product,kit_duration_days,start_date (optional),initial_meal_preference (optional),address_tag (optional),address_flat_number,address_floor_number (optional),address_street (optional),address_area,address_city,address_state,address_pincode,address_lat (optional),address_lng (optional),clinic_name (optional),payment_status,temporary_pin (optional)
+Rahul Sharma,9876543210,Male,Veg,rahul@example.com,No peanuts,Weightloss Prime,30,2026-07-01,VEG,Home,4B,2nd Floor,"Emerald Heights, Road No 10",Jubilee Hills,Hyderabad,Telangana,500033,17.4326,78.4071,,PAID,123456
+Priya Nair,9123456780,Female,Non-Veg,,,Weightloss Premium,60,,,,12,,Green Park Road,Kochi,Kochi,Kerala,682001,,,,PAID,

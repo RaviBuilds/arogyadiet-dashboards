@@ -66,6 +66,15 @@ export interface DispatchResult {
   error?: string;
 }
 
+export interface FranchiseShopStockInResult {
+  success: boolean;
+  error?: string;
+  productId?: string;
+  quantity?: number;
+  stockBefore?: number;
+  stockAfter?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Product name/image resolution helper
 // ---------------------------------------------------------------------------
@@ -410,6 +419,50 @@ export async function recordStockOut(
     return { success: false, error: error.message };
   }
   return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Franchise Shop Stock-In (delegates to the atomic RPC)
+// ---------------------------------------------------------------------------
+
+/**
+ * Moves stock from the franchise warehouse into the franchise's own shop for
+ * one linked Shop_Product. Delegates the atomic FIFO depletion, settings
+ * upsert, and OUT ledger write to `franchise_shop_stock_in`
+ * (clinic-scoped-shop-inventory spec — Requirement 18).
+ */
+export async function franchiseShopStockIn(
+  franchiseId: string,
+  productId: string,
+  quantity: number,
+  actorUserId: string,
+): Promise<FranchiseShopStockInResult> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("franchise_shop_stock_in", {
+    p_franchise_id: franchiseId,
+    p_product_id: productId,
+    p_quantity: quantity,
+    p_actor_user_id: actorUserId,
+  });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  const report = data as {
+    product_id: string;
+    quantity: number;
+    stock_before: number;
+    stock_after: number;
+  } | null;
+
+  return {
+    success: true,
+    productId: report?.product_id,
+    quantity: report?.quantity,
+    stockBefore: report?.stock_before,
+    stockAfter: report?.stock_after,
+  };
 }
 
 // ---------------------------------------------------------------------------

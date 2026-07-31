@@ -21,17 +21,20 @@ import { createClient } from "@/lib/supabase/server";
 import {
   transferActionInputSchema,
   stockOutInputSchema,
+  franchiseShopStockInInputSchema,
 } from "@/validations/franchiseInventory";
 import {
   acceptTransfer,
   rejectTransfer,
   receiveTransfer,
   recordStockOut,
+  franchiseShopStockIn,
 } from "@/services/franchiseInventoryEngine";
 import type { ActionResult } from "@/types/franchise";
 import type {
   TransferActionResult,
   StockOutResult,
+  FranchiseShopStockInResult,
 } from "@/services/franchiseInventoryEngine";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +44,10 @@ import type {
 function revalidateFranchiseInventory(): void {
   revalidatePath("/franchise/inventory");
   revalidatePath("/franchise/inventory/ledger");
+}
+
+function revalidateFranchiseShopProducts(): void {
+  revalidatePath("/franchise/shop-products");
 }
 
 async function getCurrentUserId(): Promise<string | null> {
@@ -384,4 +391,78 @@ export async function bulkFranchiseDispatchAction(
   revalidateFranchiseInventory();
 
   return { success: true, processed, totalDispatched };
+}
+
+// ---------------------------------------------------------------------------
+// Franchise Shop Stock-In (Requirement 18 — clinic-scoped-shop-inventory spec)
+// ---------------------------------------------------------------------------
+
+/**
+ * Moves stock from the franchise warehouse into the franchise's own shop for
+ * one linked Shop_Product. The franchise id is resolved from `resolveScope()`
+ * and is never trusted from the client (Req 18.10, 18.11); the available-
+ * quantity check (Req 18.6) and the linked-product check (Req 18.9) are
+ * enforced server-side by the `franchise_shop_stock_in` RPC, not just by the
+ * UI gating that hides the action for an unlinked product.
+ */
+export async function franchiseShopStockInAction(
+  formData: FormData,
+): Promise<ActionResult<FranchiseShopStockInResult>> {
+  // 1. Resolve scope
+  const scopeResult = await resolveScope();
+  if (!scopeResult.ok) {
+    return {
+      success: false,
+      error:
+        scopeResult.reason === "no_franchise"
+          ? "No franchise is assigned to your account."
+          : "Unauthorized. Please log in.",
+    };
+  }
+
+  const { scope } = scopeResult;
+
+  if (scope.kind !== "franchise") {
+    return { success: false, error: "This action is restricted to franchise operators." };
+  }
+
+  // 2. Validate input with Zod schema (franchise_id is NOT accepted from the
+  //    client — scope.franchise_id is the sole authoritative source)
+  const raw = {
+    product_id: formData.get("product_id") as string,
+    quantity: Number(formData.get("quantity")),
+  };
+
+  const parsed = franchiseShopStockInInputSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      success: false,
+      error: issue?.message ?? "Invalid input.",
+      field: issue?.path[0]?.toString(),
+    };
+  }
+
+  // 3. Resolve the acting user and call the service (uses scope.franchise_id
+  //    as the authoritative franchise)
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return { success: false, error: "Unable to resolve the acting user." };
+  }
+
+  const result = await franchiseShopStockIn(
+    scope.franchise_id,
+    parsed.data.product_id,
+    parsed.data.quantity,
+    userId,
+  );
+
+  // 4. Revalidate the franchise shop products page
+  revalidateFranchiseShopProducts();
+
+  if (!result.success) {
+    return { success: false, error: result.error ?? "Stock-in failed." };
+  }
+
+  return { success: true, data: result };
 }

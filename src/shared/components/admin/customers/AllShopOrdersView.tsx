@@ -59,6 +59,7 @@ import {
   adminUpdateAddonOrderDeliveryDate,
   adminMarkAddonOrderDeliveredOffline,
 } from "@/actions/admin-actions/customerActions";
+import { clinicDisplayName } from "@/lib/clinic/visibility";
 import type { ShopOrderAdminData } from "./CustomerDashboard";
 
 type OrderSource = "CUSTOMER" | "ADMIN" | "WALK_IN";
@@ -243,6 +244,7 @@ export default function AllShopOrdersView({
       "Customer / Buyer": row.customer_name,
       Mobile: row.customer_mobile ?? "",
       "Walk-in Address": row.walkin_address ?? "",
+      Clinic: clinicDisplayName(row.clinic_name),
       Items: row.items.map((i) => `${i.product_name} x${i.quantity}`).join(", "),
       "Units": row.items.reduce((sum, i) => sum + Number(i.quantity ?? 0), 0),
       "Amount (₹)":
@@ -395,6 +397,9 @@ export default function AllShopOrdersView({
                 Source
               </TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                Clinic
+              </TableHead>
+              <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 Items
               </TableHead>
               <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
@@ -415,10 +420,15 @@ export default function AllShopOrdersView({
             {filteredOrders.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="py-12 text-center text-sm text-slate-500"
                 >
-                  No shop orders found.
+                  {/* Req 12.7: covers both a genuinely empty ledger and "no
+                      shop orders exist for the applied filter" — the server
+                      already applied the clinic filter before these rows
+                      arrived, so an empty result here always means one or
+                      the other. */}
+                  No shop orders found for the applied filter.
                 </TableCell>
               </TableRow>
             ) : (
@@ -481,6 +491,10 @@ export default function AllShopOrdersView({
                           by {order.placed_by_name}
                         </div>
                       ) : null}
+                    </TableCell>
+
+                    <TableCell className="text-sm text-slate-700">
+                      {clinicDisplayName(order.clinic_name)}
                     </TableCell>
 
                     <TableCell>

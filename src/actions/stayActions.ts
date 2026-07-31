@@ -51,6 +51,17 @@ function mapRowToStayEntry(
     endDate,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    // Payment-lifecycle columns are added by the additive migration and mapped
+    // once StayEntryRow carries them; pre-migration rows use these defaults.
+    isBackdated: false,
+    earlyCheckoutApplied: false,
+    actualNightsStayed: null,
+    originalTotalNights: null,
+    originalTotalAmount: null,
+    checkedOutAt: null,
+    finalInvoicePaymentId: null,
+    finalInvoiceGeneratedAt: null,
+    finalInvoiceError: null,
   };
 }
 

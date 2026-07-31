@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useState, useTransition } from "react";
-import Link from "next/link";
 import { useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   Download,
   FileSpreadsheet,
   Loader2,
@@ -263,16 +261,7 @@ export function BulkMigrationClient({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" asChild>
-          <Link href="/customers">
-            <ArrowLeft className="h-4 w-4 mr-1" />
-            Back to Customers
-          </Link>
-        </Button>
-      </div>
-
+    <div className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

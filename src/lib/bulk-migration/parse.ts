@@ -2,8 +2,21 @@ import * as XLSX from "xlsx";
 
 export type RawRow = Record<string, string>;
 
+/**
+ * Normalize a spreadsheet header cell into a stable row key.
+ *
+ * A trailing parenthetical annotation is stripped so a human-friendly template
+ * header such as `allergies (optional)` maps to the same key as `allergies`.
+ * This lets the collection sheets label optional fields inline without the
+ * client having to keep machine-readable headers intact.
+ */
 function normalizeHeader(key: string): string {
-  return key.trim().toLowerCase().replace(/\s+/g, "_");
+  return key
+    .trim()
+    .toLowerCase()
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .trim()
+    .replace(/\s+/g, "_");
 }
 
 function cellToString(value: unknown): string {

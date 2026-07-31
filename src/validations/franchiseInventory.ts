@@ -91,3 +91,28 @@ export const transferActionInputSchema = z.object({
 });
 
 export type TransferActionInput = z.infer<typeof transferActionInputSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Franchise Shop Stock-In Input (clinic-scoped-shop-inventory spec — Task 11.2)
+//
+// - product_id: the Shop_Product being stocked in (must carry a Product_Link
+//   to a Master_Catalog_Product — checked server-side in the RPC, Req 18.9)
+// - quantity: a whole number in 1..1,000,000 (Req 18.7, 18.8)
+//
+// franchise_id is deliberately NOT part of this schema: it is resolved from
+// resolveScope() in the server action and is never accepted from the client
+// (Req 18.10, 18.11).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const franchiseShopStockInInputSchema = z.object({
+  product_id: z.string().uuid("Invalid product ID"),
+  quantity: z
+    .number()
+    .int("Quantity must be a whole number between 1 and 1,000,000")
+    .min(1, "Quantity must be a whole number between 1 and 1,000,000")
+    .max(1000000, "Quantity must be a whole number between 1 and 1,000,000"),
+});
+
+export type FranchiseShopStockInInput = z.infer<
+  typeof franchiseShopStockInInputSchema
+>;

@@ -71,6 +71,7 @@ import { CustomerOverview } from "./CustomerOverview";
 import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
 import { KitCustomerSection } from "./KitCustomerSection";
 import { AccommodationCustomerSection } from "./AccommodationCustomerSection";
+import { AddonServiceRequestsPanel } from "./AddonServiceRequestsPanel";
 import { Plus, Upload, UserPlus, Stethoscope } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
 import {
   clinicDisplayName,
@@ -143,6 +144,15 @@ export interface ShopOrderAdminData {
   /** e.g. 'CLINIC_PICKUP', 'DELIVERED_OFFLINE', 'UNFULFILLABLE_STOCK'. */
   fulfillment_status: string | null;
   items: Array<{ product_name: string; quantity: number; unit_price: number }>;
+  /**
+   * The Order_Clinic_Stamp (clinic-scoped-shop-inventory, Req 12.5, 12.6):
+   * the Core_Clinic whose stock fulfilled this order, or `null` when unset
+   * (the `Unassigned` grouping — e.g. a franchise order or a pre-migration
+   * legacy row).
+   */
+  clinic_id?: string | null;
+  /** Display name of the Order_Clinic_Stamp's clinic, when known (Req 12.5). */
+  clinic_name?: string | null;
 }
 
 export default function CustomerDashboard({
@@ -1109,22 +1119,32 @@ export default function CustomerDashboard({
           isDietitian={isDietitian}
         />
       ) : activeTab === "Accommodation Customers" ? (
-        <AccommodationCustomerSection
-          customers={filteredAccommodationCustomers}
-          showArchived={showArchived}
-          setShowArchived={setShowArchived}
-          searchColumn={searchColumn}
-          setSearchColumn={setSearchColumn}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          searchOptions={searchOptions}
-          isLoading={isLoading || isPending}
-          onRefresh={handleRefreshISR}
-          onExport={handleExportExcel}
-          onEdit={openEditModal}
-          onDeactivate={openDeleteModal}
-          isDietitian={isDietitian}
-        />
+        <div className="space-y-6">
+          {/* Add-on wellness requests raised by accommodation customers. This
+              dashboard powers the core-business Customers page only — the
+              franchise portal renders FranchiseCustomerDashboard, which has no
+              accommodation tab — so franchise users never see this panel. */}
+          <AddonServiceRequestsPanel
+            customers={filteredAccommodationCustomers}
+            isDietitian={isDietitian}
+          />
+          <AccommodationCustomerSection
+            customers={filteredAccommodationCustomers}
+            showArchived={showArchived}
+            setShowArchived={setShowArchived}
+            searchColumn={searchColumn}
+            setSearchColumn={setSearchColumn}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            searchOptions={searchOptions}
+            isLoading={isLoading || isPending}
+            onRefresh={handleRefreshISR}
+            onExport={handleExportExcel}
+            onEdit={openEditModal}
+            onDeactivate={openDeleteModal}
+            isDietitian={isDietitian}
+          />
+        </div>
       ) : null}
 
       {/* --- EDIT CUSTOMER MODAL --- */}

@@ -68,6 +68,11 @@ import {
 import { runProductLinkingAction } from "@/actions/admin-actions/systemActions";
 import { notifyAdmins, buildPushPayload } from "@/lib/notifications";
 import type { ShopOrderDiscount } from "@/lib/pricing/inclusive-tax";
+import { listClinicOverlays } from "@/repositories/clinic/clinicProductRepository";
+import {
+  resolveEffectiveOverlay,
+  evaluateSaleSubmission,
+} from "@/lib/shop/clinicStock";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -156,6 +161,9 @@ const NOT_PAID_ERROR =
 const EMPTY_CART_ERROR = "At least one product is required to place the order.";
 const NO_DELIVERY_DAY_ERROR =
   "The customer has no upcoming active delivery days.";
+/** Req 10.6, 15.11: a CORE order with no resolved fulfilling clinic. */
+const NO_FULFILLING_CLINIC_ERROR =
+  "A fulfilling clinic must be selected before the order can be placed.";
 
 const NO_ACTIVE_SUBSCRIPTION_REASON = "No active subscription";
 const EXPIRING_TODAY_REASON = "Expiring today (no next delivery day)";
@@ -399,6 +407,11 @@ export class AssistedOrderService {
    * @param paymentStatus The operator-marked payment status; placement is gated
    *   on this being PAID (Req 5.7). The per-portal action wrapper passes the
    *   status recorded by the explicit Mark_Paid_Action.
+   * @param fulfillingClinicId The Core_Clinic resolved by the action layer to
+   *   fulfil this order (Req 10.3, 10.4, 10.5) — `null` for a FRANCHISE order
+   *   (franchise orders never touch clinic stock) and REQUIRED for a CORE
+   *   order (Req 10.6): a CORE order with no resolved clinic is rejected
+   *   before any pricing/RPC work (Req 15.11).
    */
   async placeOrder(
     ctx: OperatorContext,
@@ -407,6 +420,7 @@ export class AssistedOrderService {
     paymentStatus: string,
     discount?: ShopOrderDiscount,
     clinicPickup: boolean = false,
+    fulfillingClinicId: string | null = null,
   ): Promise<Result<PlaceOrderOutcome>> {
     try {
       // 1. PAID-only placement gate (Req 5.7). Enforced before any read/write.
@@ -417,6 +431,13 @@ export class AssistedOrderService {
       // 2. Empty cart (Req 1.11).
       if (cart.length === 0) {
         return { ok: false, error: EMPTY_CART_ERROR };
+      }
+
+      // 2b. A CORE order requires a resolved fulfilling clinic (Req 10.6,
+      //     15.11). A FRANCHISE order never carries one — that concept does
+      //     not apply to franchise orders — so this check is CORE-only.
+      if (ctx.scope.kind === "CORE" && !fulfillingClinicId) {
+        return { ok: false, error: NO_FULFILLING_CLINIC_ERROR };
       }
 
       // 3. Re-check authorization + scope and re-validate eligibility (Req 3.7,
@@ -438,6 +459,19 @@ export class AssistedOrderService {
         return { ok: false, error: linesResult.error };
       }
       const lines = linesResult.lines;
+
+      // 4b. Clinic presentation + stock validation (Req 15.9, 15.10, 10.7),
+      //     early — before pricing was consumed further and before the RPC —
+      //     mirroring how the other early-rejection checks are ordered.
+      if (ctx.scope.kind === "CORE" && fulfillingClinicId) {
+        const clinicCheck = await this.validateClinicFulfillment(
+          fulfillingClinicId,
+          lines,
+        );
+        if (!clinicCheck.ok) {
+          return { ok: false, error: clinicCheck.error };
+        }
+      }
 
       const pricingResult = computeAssistedOrderPricing(lines, discount);
       if (!pricingResult.ok) {
@@ -470,9 +504,16 @@ export class AssistedOrderService {
       const franchiseId =
         ctx.scope.kind === "FRANCHISE" ? ctx.scope.franchiseId : null;
 
+      // clinic_id / movement_source are set ONLY for a CORE order with a
+      // resolved fulfilling clinic (Req 10.3, 10.4, 10.5); a FRANCHISE order
+      // never carries these — its own stock failsafe (step 7) applies instead.
+      const clinicId = ctx.scope.kind === "CORE" ? fulfillingClinicId : null;
+
       // 6. Atomic persistence via the SECURITY DEFINER RPC (Req 6.1, 6.5, 6.6,
       //    7.2). Any write failure raises inside the function and rolls back the
-      //    whole order/items/payment transaction.
+      //    whole order/items/payment transaction. When `clinic_id` is set, the
+      //    RPC also performs the clinic decrement + ledger write inline, in the
+      //    same transaction (Req 10.8, 10.9, 10.10, 11.1, 11.2, 11.3).
       const payload = {
         customer_profile_id: customerProfileId,
         franchise_id: franchiseId,
@@ -488,6 +529,9 @@ export class AssistedOrderService {
           quantity: line.quantity,
           unit_price: line.unitPrice,
         })),
+        ...(clinicId
+          ? { clinic_id: clinicId, movement_source: "ASSISTED_SALE" }
+          : {}),
       };
 
       const { data: addonOrderId, error: rpcError } = await this.supabase.rpc(
@@ -507,7 +551,8 @@ export class AssistedOrderService {
       const newAddonOrderId = addonOrderId as string;
 
       // 7. Franchise stock failsafe (Req 7.3–7.7). Core orders skip this entirely
-      //    (no decrement — Req 7.7).
+      //    (no decrement via this path — clinic decrement, when applicable,
+      //    already happened inline inside the RPC above — Req 7.7).
       let unfulfillable = false;
       if (franchiseId) {
         unfulfillable = await this.applyFranchiseStockFailsafe(
@@ -578,6 +623,10 @@ export class AssistedOrderService {
    *
    * @param paymentStatus The operator-marked payment status; placement is gated
    *   on this being PAID, exactly as for a profile-backed order.
+   * @param fulfillingClinicId The Core_Clinic resolved by the action layer to
+   *   fulfil this walk-in sale (Req 10.4, 10.5) — `null` for a FRANCHISE order
+   *   and REQUIRED for a CORE order (Req 10.6, 15.11), rejected before any
+   *   pricing/RPC work when absent.
    */
   async placeWalkInOrder(
     ctx: OperatorContext,
@@ -585,6 +634,7 @@ export class AssistedOrderService {
     walkIn: WalkInCustomerInput,
     paymentStatus: string,
     discount?: ShopOrderDiscount,
+    fulfillingClinicId: string | null = null,
   ): Promise<Result<PlaceOrderOutcome>> {
     try {
       // 1. PAID-only placement gate, before any read/write.
@@ -595,6 +645,12 @@ export class AssistedOrderService {
       // 2. Empty cart.
       if (cart.length === 0) {
         return { ok: false, error: EMPTY_CART_ERROR };
+      }
+
+      // 2b. A CORE walk-in sale requires a resolved fulfilling clinic (Req
+      //     10.6, 15.11); a FRANCHISE order never carries one.
+      if (ctx.scope.kind === "CORE" && !fulfillingClinicId) {
+        return { ok: false, error: NO_FULFILLING_CLINIC_ERROR };
       }
 
       // 3. Buyer details — server-side validation is authoritative; the client
@@ -615,6 +671,18 @@ export class AssistedOrderService {
       }
       const lines = linesResult.lines;
 
+      // 4b. Clinic presentation + stock validation (Req 15.9, 15.10, 10.7),
+      //     early — before the RPC call.
+      if (ctx.scope.kind === "CORE" && fulfillingClinicId) {
+        const clinicCheck = await this.validateClinicFulfillment(
+          fulfillingClinicId,
+          lines,
+        );
+        if (!clinicCheck.ok) {
+          return { ok: false, error: clinicCheck.error };
+        }
+      }
+
       const pricingResult = computeAssistedOrderPricing(lines, discount);
       if (!pricingResult.ok) {
         return { ok: false, error: pricingResult.error };
@@ -627,9 +695,13 @@ export class AssistedOrderService {
       const franchiseId =
         ctx.scope.kind === "FRANCHISE" ? ctx.scope.franchiseId : null;
 
+      const clinicId = ctx.scope.kind === "CORE" ? fulfillingClinicId : null;
+
       // 5. Atomic persistence via the same SECURITY DEFINER RPC. The walk-in
       //    branch writes customer_profile_id NULL + the buyer details, and
-      //    creates the order DELIVERED / CLINIC_PICKUP.
+      //    creates the order DELIVERED / CLINIC_PICKUP. When `clinic_id` is
+      //    set, the RPC also performs the clinic decrement + ledger write
+      //    inline, in the same transaction (Req 10.8, 10.9, 10.10).
       const payload = {
         customer_profile_id: null,
         walkin_name: buyer.name,
@@ -648,6 +720,9 @@ export class AssistedOrderService {
           quantity: line.quantity,
           unit_price: line.unitPrice,
         })),
+        ...(clinicId
+          ? { clinic_id: clinicId, movement_source: "WALKIN_SALE" }
+          : {}),
       };
 
       const { data: addonOrderId, error: rpcError } = await this.supabase.rpc(
@@ -667,7 +742,8 @@ export class AssistedOrderService {
       const newAddonOrderId = addonOrderId as string;
 
       // 6. Franchise stock failsafe, identical to a profile-backed order. Core
-      //    orders perform no decrement.
+      //    orders perform no decrement via this path (the clinic decrement,
+      //    when applicable, already happened inline inside the RPC above).
       let unfulfillable = false;
       if (franchiseId) {
         unfulfillable = await this.applyFranchiseStockFailsafe(
@@ -784,6 +860,119 @@ export class AssistedOrderService {
     });
 
     return true;
+  }
+
+  /**
+   * Validate an assisted/walk-in sale's lines against the fulfilling Core
+   * Clinic before any pricing/RPC work runs (Req 15.9, 15.10, 15.11).
+   *
+   * Two categories, in order — the first with any failure decides the verdict,
+   * naming every offending product rather than just the first:
+   *   1. Presented: the product must exist, not be soft-deleted, carry
+   *      Global_Visibility (`products.is_active`), and be Effective_Clinic_
+   *      Visibility "shown" for this clinic. A product failing any of those is
+   *      reported "unavailable at the Admin's clinic" (Req 15.9).
+   *   2. Stock: every line's quantity must not exceed the clinic's current
+   *      Effective_Clinic_Stock for that product (Req 15.10, 10.7), reusing the
+   *      pure `evaluateSaleSubmission` so this decision matches the RPC's own
+   *      guard and the property-tested reference model.
+   *
+   * This is a defense-in-depth pre-check: `clinic_shop_apply_sale` (invoked
+   * inline by `place_assisted_addon_order`) re-validates and enforces the same
+   * rule under a row lock as the final backstop (Req 11.2, 11.4). This check
+   * exists so a rejection carries a clear, product-naming message instead of
+   * relying solely on the RPC's generic exception text.
+   */
+  private async validateClinicFulfillment(
+    clinicId: string,
+    lines: PricedLine[],
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const productIds = Array.from(new Set(lines.map((line) => line.productId)));
+
+    const [overlays, productsResult] = await Promise.all([
+      listClinicOverlays(clinicId),
+      this.supabase
+        .from("products")
+        .select("id, is_active, deleted_at")
+        .in("id", productIds),
+    ]);
+
+    if (productsResult.error) {
+      return {
+        ok: false,
+        error: "Failed to verify clinic product availability.",
+      };
+    }
+
+    const overlayByProduct = new Map(
+      overlays.map((overlay) => [overlay.product_id, overlay]),
+    );
+    const productMeta = new Map(
+      (productsResult.data ?? []).map((p) => [
+        p.id as string,
+        {
+          isActive: p.is_active as boolean,
+          deletedAt: (p.deleted_at as string | null) ?? null,
+        },
+      ]),
+    );
+
+    // 1. Presented check (Req 15.9): not visible, not globally active, soft
+    //    deleted, or missing entirely are all "unavailable at the clinic".
+    const unavailable: string[] = [];
+    for (const productId of productIds) {
+      const meta = productMeta.get(productId);
+      const overlay = resolveEffectiveOverlay(overlayByProduct.get(productId));
+      const presented =
+        meta !== undefined &&
+        meta.deletedAt === null &&
+        meta.isActive === true &&
+        overlay.isVisible;
+      if (!presented) {
+        unavailable.push(productId);
+      }
+    }
+    if (unavailable.length > 0) {
+      return {
+        ok: false,
+        error: `The following product(s) are unavailable at the Admin's clinic: ${unavailable.join(", ")}.`,
+      };
+    }
+
+    // 2. Stock check (Req 15.10, 10.7): reuse the pure evaluator so this
+    //    matches the RPC's own guard exactly.
+    const verdict = evaluateSaleSubmission({
+      clinicId,
+      lines: lines.map((line) => ({
+        productId: line.productId,
+        quantity: line.quantity,
+      })),
+      products: productIds.map((productId) => ({
+        productId,
+        overlay: overlayByProduct.get(productId),
+      })),
+    });
+
+    if (!verdict.ok) {
+      if (verdict.code === "INSUFFICIENT_CLINIC_STOCK") {
+        const detail = verdict.rejections
+          .map(
+            (r) =>
+              `${r.productId} (requested ${String(r.requested)}, available ${r.available})`,
+          )
+          .join("; ");
+        return {
+          ok: false,
+          error: `Insufficient clinic stock for: ${detail}.`,
+        };
+      }
+      return {
+        ok: false,
+        error: "The requested quantity is not valid for the fulfilling clinic.",
+      };
+    }
+
+    return { ok: true };
   }
 
   /**
