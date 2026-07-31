@@ -10,9 +10,9 @@ Language and stack are fixed by the design and the existing code: TypeScript 5 o
 
 ## Tasks
 
-- [ ] 1. Database, types, and validation foundation
+- [x] 1. Database, types, and validation foundation
 
-  - [-] 1.1 Create `scripts/create-stay-payment-lifecycle.sql`
+  - [x] 1.1 Create `scripts/create-stay-payment-lifecycle.sql`
     - `stay_payment_transactions` table exactly as the design specifies: `transaction_type` CHECK over ADVANCE / PARTIAL_BALANCE_PAYMENT / REFUND, `amount NUMERIC(10,2) CHECK (amount > 0)`, `transaction_date`, `comment`/`remark` VARCHAR(500), `created_by`, `updated_at` trigger, `idx_stay_payment_tx_stay`, `idx_stay_payment_tx_customer`, and the partial unique index `uniq_stay_advance_transaction` enforcing at most one ADVANCE per stay
     - `stay_entries` additive columns: `is_backdated`, `early_checkout_applied`, `actual_nights_stayed`, `original_total_nights`, `original_total_amount`, `checked_out_at`, `final_invoice_payment_id`, `final_invoice_generated_at`, `final_invoice_error`, plus `chk_stay_actual_nights`
     - `payments.stay_entry_id` FK, `idx_payments_stay_entry`, and the partial unique index `uniq_final_stay_invoice_per_stay` on `invoice_type = 'ACCOMMODATION_FINAL_INVOICE'`
@@ -22,32 +22,32 @@ Language and stack are fixed by the design and the existing code: TypeScript 5 o
     - Existing `payments` rows with `invoice_type IN ('ACCOMMODATION_STAY','ACCOMMODATION_EXTENSION')` left untouched
     - _Requirements: 3.1, 4.5, 5.5, 5.6, 5.8, 6.1, 6.2, 7.3, 7.4, 7.5, 8.1, 8.6, 8.7, 10.1, 12.6, 12.9, 12.11, 12.15_
 
-  - [-] 1.2 Extend `src/types/accommodation.ts`
+  - [x] 1.2 Extend `src/types/accommodation.ts`
     - `PaymentTransactionType`, `PAYMENT_TRANSACTION_LABELS` ("Advance" / "Partial / Balance Payment" / "Refund"), `StayPaymentTransaction`, `StayBalanceSnapshot`, `StayActionVisibility`, `StayLedgerView`, `PaymentReceiptData`, `EarlyCheckoutOutcome`
     - Add the lifecycle fields to `StayEntry`: `isBackdated`, `earlyCheckoutApplied`, `actualNightsStayed`, `originalTotalNights`, `originalTotalAmount`, `checkedOutAt`, `finalInvoicePaymentId`, `finalInvoiceGeneratedAt`, `finalInvoiceError`
     - _Requirements: 6.2, 6.3, 8.1, 10.2, 12.6, 12.15_
 
-  - [ ] 1.3 Extend `src/validations/accommodationSchema.ts`
+  - [x] 1.3 Extend `src/validations/accommodationSchema.ts`
     - `accommodationOnboardingSchema`: add `backdatedStayEnabled`, `totalStayAmount` (1–9,999,999), `advanceAmountPaid` (0–9,999,999), and the `superRefine` block covering advance > total, missing total/advance when shared payment is off, past date with the toggle off, past date beyond today − 30, a non-past date with the toggle on, and a start date beyond today + 365
     - `recordStayPaymentSchema` (amount > 0, required trimmed comment ≤ 500, optional remark ≤ 500), `recordStayRefundSchema` (amount > 0, required remark ≤ 500, optional comment), `earlyCheckoutSchema` plus the `createEarlyCheckoutSchema(bookedTotalNights)` factory bounding `actualNightsStayed` to `[1, bookedTotalNights − 1]`
     - Every range enforced server-side regardless of client-side field visibility
     - _Requirements: 1.2, 1.3, 3.4, 3.5, 4.2, 4.3, 4.4, 5.2, 5.3, 5.4, 5.6, 5.7, 12.3, 12.4, 12.5, 12.9, 12.10_
 
-  - [ ]* 1.4 Create the shared property-test arbitraries
+  - [x]* 1.4 Create the shared property-test arbitraries
     - `src/test/accommodation/paymentArbitraries.ts`: `arbMoney` (biased to 0, 1, 9,999,999, 10,000,000 and paise-bearing values), `arbTransaction` across all three types, `arbLedger` (0–20 transactions, including empty and refund-heavy), `arbISTDate`, `arbStartDateAround` (±400 days), `arbStayEntry` (status × `isBackdated` × `earlyCheckoutApplied` × shared-payment combinations), `arbEarlyCheckoutSubmission`
     - _Requirements: 6.3, 10.2, 12.8_
 
-  - [ ]* 1.5 Write property test for onboarding payment field validation
+  - [x]* 1.5 Write property test for onboarding payment field validation
     - **Property 5: Onboarding payment field validation**
     - **Validates: Requirements 4.2, 4.3, 4.4**
     - `src/validations/__tests__/accommodationOnboardingPayment.property.test.ts`
 
-  - [ ]* 1.6 Write property test for early checkout input validation
+  - [x]* 1.6 Write property test for early checkout input validation
     - **Property 20: Early checkout input validation**
     - **Validates: Requirements 12.3, 12.4, 12.5**
     - `src/validations/__tests__/earlyCheckoutSchema.property.test.ts`
 
-  - [ ]* 1.7 Write integration tests for the migration and database constraints
+  - [x]* 1.7 Write integration tests for the migration and database constraints
     - Migration runs twice with an identical resulting schema and no data change; existing accommodation `payments` rows untouched
     - `uniq_stay_advance_transaction` rejects a second ADVANCE row; `uniq_final_stay_invoice_per_stay` rejects a second final invoice; `amount > 0` and `chk_stay_actual_nights` reject direct out-of-range writes
     - _Requirements: 4.5, 6.1, 8.6, 12.6_

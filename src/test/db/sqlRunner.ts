@@ -7,8 +7,9 @@
  *
  * Deliberately does NOT read `.env.local`: that file points at the shared/live
  * Supabase project and migrations must never be applied there. A test database
- * is opted into explicitly through `DIETITIAN_TEST_DATABASE_URL`, and a remote
- * host additionally requires `DIETITIAN_TEST_DB_ALLOW_REMOTE=1`.
+ * is opted into explicitly through `TEST_DATABASE_URL` (or the original
+ * `DIETITIAN_TEST_DATABASE_URL` alias), and a remote host additionally requires
+ * `TEST_DB_ALLOW_REMOTE=1` (or `DIETITIAN_TEST_DB_ALLOW_REMOTE=1`).
  *
  * See `src/test/db/README.md` for how to run these suites.
  */
@@ -20,8 +21,18 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export const DB_URL_ENV = "DIETITIAN_TEST_DATABASE_URL";
-export const ALLOW_REMOTE_ENV = "DIETITIAN_TEST_DB_ALLOW_REMOTE";
+/**
+ * Feature-neutral names, since more than one spec now uses this harness. The
+ * `DIETITIAN_*` names stay supported as aliases so already-documented local
+ * setups keep working.
+ */
+export const DB_URL_ENV = "TEST_DATABASE_URL";
+export const ALLOW_REMOTE_ENV = "TEST_DB_ALLOW_REMOTE";
+export const DB_URL_ENV_ALIASES = [DB_URL_ENV, "DIETITIAN_TEST_DATABASE_URL"] as const;
+export const ALLOW_REMOTE_ENV_ALIASES = [
+  ALLOW_REMOTE_ENV,
+  "DIETITIAN_TEST_DB_ALLOW_REMOTE",
+] as const;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "host.docker.internal"]);
 
@@ -30,9 +41,15 @@ export type SqlOutcome =
   | { ok: false; message: string };
 
 export function databaseUrl(): string | undefined {
-  const raw = process.env[DB_URL_ENV];
-  const trimmed = raw?.trim();
-  return trimmed ? trimmed : undefined;
+  for (const name of DB_URL_ENV_ALIASES) {
+    const trimmed = process.env[name]?.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
+function remoteAllowed(): boolean {
+  return ALLOW_REMOTE_ENV_ALIASES.some((name) => process.env[name] === "1");
 }
 
 function psqlAvailable(): boolean {
@@ -66,7 +83,7 @@ export function harnessSkipReason(): string | null {
   if (host === null) {
     return `${DB_URL_ENV} is not a parseable postgres connection URL`;
   }
-  if (!LOCAL_HOSTS.has(host) && process.env[ALLOW_REMOTE_ENV] !== "1") {
+  if (!LOCAL_HOSTS.has(host) && !remoteAllowed()) {
     return `${DB_URL_ENV} points at the remote host "${host}"; set ${ALLOW_REMOTE_ENV}=1 to confirm it is a throwaway database`;
   }
   if (!psqlAvailable()) {
