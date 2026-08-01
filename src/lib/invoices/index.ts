@@ -8,6 +8,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { addDaysToISODate } from "@/lib/dates/ist";
 
 /**
  * Invoice line item representation
@@ -67,7 +68,7 @@ export async function generateInvoiceData(
 ): Promise<InvoiceData | null> {
   const supabaseAdmin = createAdminClient();
 
-  // Fetch core payment + subscription + profile
+  // Fetch core payment + subscription + profile + (possibly) linked stay entry
   const { data: payment, error } = await supabaseAdmin
     .from("payments")
     .select(
@@ -86,6 +87,18 @@ export async function generateInvoiceData(
         user_id,
         users!customer_profiles_user_id_fkey ( full_name, email, mobile ),
         addresses ( street_1, street_2, landmark, city, state, pincode, is_primary )
+      ),
+      stay_entries!payments_stay_entry_id_fkey (
+        stay_type,
+        occupancy_type,
+        start_date,
+        total_nights,
+        payment_amount,
+        base_amount,
+        tax_amount,
+        tax_percentage,
+        actual_nights_stayed,
+        early_checkout_applied
       )
     `
     )
@@ -97,16 +110,97 @@ export async function generateInvoiceData(
     return null;
   }
 
-  // Check for add-on order separately
+  const profile = payment.customer_profiles;
+  const sub = payment.subscriptions;
+  const customerUser = profile?.users;
+
+  // ─── ACCOMMODATION_FINAL_INVOICE branch (Req 8.3, 8.4, 8.5) ──────────────
+  // Checked before the addon/KIT/MEAL branching so no addon_orders lookup or
+  // subscription-based branching runs for a stay's final invoice, and no
+  // stay_payment_transactions ledger detail is ever fetched or rendered.
+  if (payment.invoice_type === "ACCOMMODATION_FINAL_INVOICE") {
+    const stay = payment.stay_entries;
+
+    if (!stay) {
+      console.error(
+        `Accommodation final invoice ${paymentId} has no linked stay_entries row`
+      );
+      return null;
+    }
+
+    const nightsForInvoice = stay.early_checkout_applied
+      ? Number(stay.actual_nights_stayed)
+      : Number(stay.total_nights);
+    const endDateForInvoice = addDaysToISODate(
+      stay.start_date,
+      nightsForInvoice - 1
+    );
+
+    const accBaseAmount = Number(stay.base_amount);
+    const accTaxAmountCalc = Number(stay.tax_amount);
+    const accTaxPercentCalc = Number(stay.tax_percentage);
+    const accDiscountAmount = 0;
+
+    const accLineItems: InvoiceLineItem[] = [
+      {
+        description: `Accommodation Stay — ${stay.stay_type} (${stay.occupancy_type})`,
+        subtitle: `${nightsForInvoice} night(s): ${stay.start_date} to ${endDateForInvoice}`,
+        amount: accBaseAmount,
+      },
+    ];
+
+    const accFinalPrice = accBaseAmount - accDiscountAmount;
+    const accTotalAmount = Number(payment.amount);
+
+    const accIsManual = payment.payment_method === "MANUAL";
+    const accMethodLabel = accIsManual ? "Manual" : payment.payment_method;
+    const accIsPending = payment.status === "PENDING";
+
+    const accPrimaryAddress =
+      profile?.addresses?.find((a: any) => a.is_primary) ||
+      profile?.addresses?.[0];
+
+    return {
+      paymentId: payment.id,
+      invoiceNumber: `INV-${payment.id.split("-")[0].toUpperCase()}`,
+      date: payment.created_at,
+      status: payment.status,
+      paymentMethod: accMethodLabel,
+      paymentReference: payment.payment_reference,
+      paymentNotes: payment.payment_notes,
+      customerName: customerUser?.full_name || "N/A",
+      customerEmail: customerUser?.email || "",
+      customerMobile: customerUser?.mobile || "",
+      address: accPrimaryAddress
+        ? {
+            street_1: accPrimaryAddress.street_1,
+            street_2: accPrimaryAddress.street_2,
+            landmark: accPrimaryAddress.landmark,
+            city: accPrimaryAddress.city,
+            state: accPrimaryAddress.state,
+            pincode: accPrimaryAddress.pincode,
+          }
+        : undefined,
+      subscriptionCode: sub?.subscription_code,
+      lineItems: accLineItems,
+      pricing: {
+        baseAmount: accBaseAmount,
+        taxAmount: accTaxAmountCalc,
+        taxPercent: accTaxPercentCalc,
+        discountAmount: accDiscountAmount,
+        finalPrice: accFinalPrice,
+        totalAmount: accTotalAmount,
+      },
+      isPending: accIsPending,
+    };
+  }
+
+  // Check for add-on order separately (only reached for non-accommodation invoices)
   const { data: addonOrder } = await supabaseAdmin
     .from("addon_orders")
     .select("id, total_amount, target_delivery_date, status")
     .eq("payment_id", paymentId)
     .maybeSingle();
-
-  const profile = payment.customer_profiles;
-  const sub = payment.subscriptions;
-  const customerUser = profile?.users;
 
   // Requirement 10.4: Validate payment status for KIT orders
   // KIT invoices can only be generated for PAID orders

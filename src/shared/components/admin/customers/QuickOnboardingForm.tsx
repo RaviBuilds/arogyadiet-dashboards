@@ -62,6 +62,11 @@ import {
   ONBOARDING_CUTOFF_HOUR_IST,
 } from "@/lib/onboarding/cutoff";
 import { istHourOf, istDateStringOf, addDaysToISODate } from "@/lib/dates/ist";
+import {
+  backdatedStayRange,
+  forwardStayRange,
+  describeBackdatedStayOutcome,
+} from "@/lib/accommodation/backdatedStay";
 import { PastDayStatusPopup } from "@/shared/components/admin/customers/PastDayStatusPopup";
 import { onboardCustomerAction, checkMobileUniqueAction } from "@/actions/admin-actions/onboardingActions";
 import { onboardAccommodationCustomerAction } from "@/actions/accommodationOnboardingActions";
@@ -142,9 +147,15 @@ const detailsSchema = z.object({
   }),
   // Accommodation-specific fields (Req 1.1–1.9, 2.1–2.8)
   totalNights: z.coerce.number().int().min(1, "Must be at least 1 night.").max(365, "Cannot exceed 365 nights.").optional(),
+  // Backdated_Stay_Toggle — unlocks Past_Stay_Start selection (Req 1.1, 1.3)
+  backdatedStayEnabled: z.boolean().default(false),
   stayType: z.enum(["AC Villa", "Village Style Hut"]).optional(),
   occupancyType: z.enum(["Single", "Double"]).optional(),
-  paymentAmount: z.coerce.number().min(1, "Amount must be at least ₹1.").max(9999999, "Amount cannot exceed ₹99,99,999.").optional(),
+  // Total_Stay_Amount inclusive of 18% GST (Req 4.2). Replaces the single
+  // `paymentAmount` field for ACCOMMODATION onboarding.
+  totalStayAmount: z.coerce.number().min(1, "Total stay amount must be at least ₹1.").max(9999999, "Total stay amount cannot exceed ₹99,99,999.").optional(),
+  // Advance_Amount collected at onboarding; 0 means "no advance" (Req 4.3).
+  advanceAmountPaid: z.coerce.number().min(0, "Advance amount cannot be negative.").max(9999999, "Advance amount cannot exceed ₹99,99,999.").optional(),
   isSharedPayment: z.boolean().default(false),
   paymentHostMobile: z.string().regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit mobile number.").optional().or(z.literal("")),
   paymentStatus: z.enum(["PAID", "PENDING"]),
@@ -153,6 +164,21 @@ const detailsSchema = z.object({
   pastDayStatuses: z.array(z.any()).optional().default([]),
   automationOverrideAcknowledged: z.boolean().default(false),
   dietitianId: z.string().uuid("Select a valid dietitian.").optional(),
+}).superRefine((data, ctx) => {
+  // Client-side rejection of advance > total with the pinned field message
+  // (Req 4.4), mirroring the server's `accommodationOnboardingSchema`.
+  if (
+    !data.isSharedPayment &&
+    data.totalStayAmount != null &&
+    data.advanceAmountPaid != null &&
+    data.advanceAmountPaid > data.totalStayAmount
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["advanceAmountPaid"],
+      message: "Advance amount cannot exceed the total stay amount.",
+    });
+  }
 });
 
 type DetailsFormValues = z.input<typeof detailsSchema>;
@@ -257,9 +283,11 @@ export function QuickOnboardingForm({
       initialMealPreference: undefined,
       // Accommodation-specific defaults
       totalNights: undefined,
+      backdatedStayEnabled: false,
       stayType: undefined,
       occupancyType: undefined,
-      paymentAmount: undefined,
+      totalStayAmount: undefined,
+      advanceAmountPaid: undefined,
       isSharedPayment: false,
       paymentHostMobile: "",
       paymentStatus: "PENDING",
@@ -288,6 +316,33 @@ export function QuickOnboardingForm({
   // Accommodation-specific derived state (Req 1.1, 1.9, 2.1, 2.8, 3.1)
   const isAccommodation = primaryCategory === "ACCOMMODATION";
   const isSharedPayment = values.isSharedPayment ?? false;
+  const backdatedStayEnabled = values.backdatedStayEnabled ?? false;
+
+  // Backdated_Stay_Toggle date range + completion alert (Req 1.2, 1.3, 2.1, 2.3, 2.5)
+  const accommodationForwardRange = useMemo(
+    () => forwardStayRange(istToday),
+    [istToday],
+  );
+  const accommodationBackdatedRange = useMemo(
+    () => backdatedStayRange(istToday),
+    [istToday],
+  );
+  const backdatedStayOutcome = useMemo(() => {
+    if (
+      !isAccommodation ||
+      !backdatedStayEnabled ||
+      !values.startDate ||
+      !values.totalNights ||
+      Number(values.totalNights) <= 0
+    ) {
+      return null;
+    }
+    return describeBackdatedStayOutcome(
+      values.startDate,
+      Number(values.totalNights),
+      istToday,
+    );
+  }, [isAccommodation, backdatedStayEnabled, values.startDate, values.totalNights, istToday]);
 
   // Determine active steps based on category
   const activeSteps = isAccommodation ? ACCOMMODATION_STEPS : STEPS;
@@ -576,7 +631,7 @@ export function QuickOnboardingForm({
         fieldsToValidate = ["primaryCategory", "startDate", "initialMealPreference", "totalNights", "stayType", "occupancyType"];
         // Conditionally validate payment fields
         if (!values.isSharedPayment) {
-          fieldsToValidate = [...fieldsToValidate, "paymentAmount"];
+          fieldsToValidate = [...fieldsToValidate, "totalStayAmount", "advanceAmountPaid"];
         } else {
           fieldsToValidate = [...fieldsToValidate, "paymentHostMobile"];
         }
@@ -707,10 +762,12 @@ export function QuickOnboardingForm({
         email: values.email && values.email.trim() !== "" ? values.email : undefined,
         startDate: values.startDate,
         totalNights: Number(values.totalNights),
+        backdatedStayEnabled: values.backdatedStayEnabled ?? false,
         stayType: values.stayType as "AC Villa" | "Village Style Hut",
         occupancyType: values.occupancyType as "Single" | "Double",
         mealPreference: values.initialMealPreference as "VEG" | "EGG" | "CHICKEN",
-        paymentAmount: values.isSharedPayment ? undefined : Number(values.paymentAmount) || undefined,
+        totalStayAmount: values.isSharedPayment ? undefined : Number(values.totalStayAmount) || undefined,
+        advanceAmountPaid: values.isSharedPayment ? undefined : Number(values.advanceAmountPaid) || 0,
         isSharedPayment: values.isSharedPayment ?? false,
         paymentHostMobile: values.isSharedPayment ? (values.paymentHostMobile || undefined) : undefined,
         tempPin,
@@ -1027,15 +1084,57 @@ export function QuickOnboardingForm({
                     <Input
                       id="startDate"
                       type="date"
-                      min={istToday}
-                      max={addDaysToISODate(istToday, 365)}
+                      min={backdatedStayEnabled ? accommodationBackdatedRange.min : accommodationForwardRange.min}
+                      max={backdatedStayEnabled ? accommodationBackdatedRange.max : accommodationForwardRange.max}
                       aria-invalid={Boolean(errors.startDate)}
                       className="h-9 max-w-xs"
                       {...register("startDate")}
                     />
                     <p className="text-xs text-slate-500">
-                      Today or any future date up to 365 days. No 5 PM cutoff applies.
+                      {backdatedStayEnabled
+                        ? `Select a past date between ${accommodationBackdatedRange.min} and ${accommodationBackdatedRange.max}.`
+                        : "Today or any future date up to 365 days. No 5 PM cutoff applies."}
                     </p>
+
+                    {/* Backdated_Stay_Toggle — Req 1.1, 1.2, 1.3, 1.4, 1.5 */}
+                    <label className="mt-2 flex cursor-pointer items-start gap-2 text-sm text-slate-600 select-none">
+                      <Controller
+                        control={control}
+                        name="backdatedStayEnabled"
+                        render={({ field }) => (
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(checked) => {
+                              const enabled = checked === true;
+                              field.onChange(enabled);
+                              // Toggling either direction clears the current
+                              // start date so the admin must re-pick within
+                              // the newly active range (Req 1.4).
+                              setValue("startDate", "");
+                            }}
+                          />
+                        )}
+                      />
+                      <span>
+                        Backdated stay entry
+                        <span className="block text-xs text-slate-500">
+                          Enable to record a stay that already started or finished.
+                        </span>
+                      </span>
+                    </label>
+
+                    {/* Backdated stay completion alert — Req 2.1, 2.2, 2.3, 2.4, 2.5 */}
+                    {backdatedStayOutcome?.showCompletionAlert && (
+                      <Alert variant="destructive" className="mt-3">
+                        <AlertTriangle />
+                        <AlertTitle>Stay will be created as finished</AlertTitle>
+                        <AlertDescription>
+                          The computed end date ({backdatedStayOutcome.computedEndDate}) has already
+                          passed. This stay will be created with status FINISHED immediately upon
+                          submission. You can still submit, or increase total nights to change this.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </Field>
 
                   {/* Total Nights (Req 1.3, 1.4) */}
@@ -1168,9 +1267,10 @@ export function QuickOnboardingForm({
                             onCheckedChange={(checked) => {
                               const enabled = checked === true;
                               field.onChange(enabled);
-                              // When toggling shared payment, clear the opposite field
+                              // When toggling shared payment, clear the opposite fields
                               if (enabled) {
-                                setValue("paymentAmount", undefined);
+                                setValue("totalStayAmount", undefined);
+                                setValue("advanceAmountPaid", undefined);
                               } else {
                                 setValue("paymentHostMobile", "");
                               }
@@ -1184,24 +1284,48 @@ export function QuickOnboardingForm({
                       </div>
                     </label>
 
-                    {/* Payment Amount — shown when NOT shared payment (Req 1.7, 2.2) */}
+                    {/* Total stay amount + advance paid — shown when NOT shared payment (Req 4.1, 4.2, 4.3) */}
                     {!isSharedPayment && (
-                      <div className="mt-4">
-                        <Field label="Payment amount (₹)" htmlFor="paymentAmount" error={errors.paymentAmount?.message} required>
+                      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <Field label="Total stay amount (₹)" htmlFor="totalStayAmount" error={errors.totalStayAmount?.message} required>
                           <Input
-                            id="paymentAmount"
+                            id="totalStayAmount"
                             type="number"
                             inputMode="numeric"
                             min="1"
                             max="9999999"
                             placeholder="e.g. 50000"
-                            aria-invalid={Boolean(errors.paymentAmount)}
+                            aria-invalid={Boolean(errors.totalStayAmount)}
                             className="h-9 max-w-xs"
-                            {...register("paymentAmount", { valueAsNumber: true })}
+                            {...register("totalStayAmount", { valueAsNumber: true })}
                           />
                           <p className="text-xs text-slate-500">
                             Total amount inclusive of 18% GST (₹1 – ₹99,99,999).
                           </p>
+                        </Field>
+
+                        <Field label="Advance amount paid (₹)" htmlFor="advanceAmountPaid" error={errors.advanceAmountPaid?.message} required>
+                          <Input
+                            id="advanceAmountPaid"
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            max={values.totalStayAmount ? Number(values.totalStayAmount) : 9999999}
+                            placeholder="e.g. 10000"
+                            aria-invalid={Boolean(errors.advanceAmountPaid)}
+                            className="h-9 max-w-xs"
+                            {...register("advanceAmountPaid", { valueAsNumber: true })}
+                          />
+                          <p className="text-xs text-slate-500">
+                            Amount collected at onboarding (₹0 if none).
+                          </p>
+                          {values.totalStayAmount != null &&
+                            values.advanceAmountPaid != null &&
+                            Number(values.advanceAmountPaid) > Number(values.totalStayAmount) && (
+                              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1 mt-1">
+                                Advance amount cannot exceed the total stay amount.
+                              </p>
+                            )}
                         </Field>
                       </div>
                     )}
@@ -1722,11 +1846,17 @@ export function QuickOnboardingForm({
                             <ReviewRow label="Payment host" value={values.paymentHostMobile || "—"} />
                           </>
                         ) : (
-                          <ReviewRow
-                            label="Amount"
-                            value={values.paymentAmount ? `₹${Number(values.paymentAmount).toLocaleString("en-IN")}` : "—"}
-                            highlight
-                          />
+                          <>
+                            <ReviewRow
+                              label="Total stay amount"
+                              value={values.totalStayAmount ? `₹${Number(values.totalStayAmount).toLocaleString("en-IN")}` : "—"}
+                              highlight
+                            />
+                            <ReviewRow
+                              label="Advance paid"
+                              value={values.advanceAmountPaid != null ? `₹${Number(values.advanceAmountPaid).toLocaleString("en-IN")}` : "₹0"}
+                            />
+                          </>
                         )}
                       </>
                     ) : (

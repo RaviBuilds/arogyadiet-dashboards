@@ -11,6 +11,7 @@
 //               6.3, 6.4, 6.5
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getCurrentAdminContext } from "@/lib/auth/adminAccess";
 import * as AccommodationService from "@/services/AccommodationService";
 import {
   accommodationOnboardingSchema,
@@ -377,6 +378,17 @@ export async function onboardAccommodationCustomerAction(
   }
 
   // (5) Create stay entry via AccommodationService (Req 3.4)
+  // Resolve admin identity for the createdBy attribution on the ADVANCE
+  // ledger row. If context resolution fails (unlikely at this stage), fall
+  // back to null rather than aborting the entire onboarding.
+  let createdByUserId: string | null = null;
+  try {
+    const ctx = await getCurrentAdminContext();
+    createdByUserId = ctx.userId ?? null;
+  } catch {
+    // Non-fatal — proceed without attribution.
+  }
+
   try {
     const stay = await AccommodationService.createStay({
       customerProfileId: newProfile.id,
@@ -385,9 +397,13 @@ export async function onboardAccommodationCustomerAction(
       stayType: data.stayType,
       occupancyType: data.occupancyType,
       mealPreference: data.mealPreference,
-      paymentAmount: data.isSharedPayment ? null : (data.paymentAmount ?? null),
+      paymentAmount: null, // deprecated — totalStayAmount takes precedence
       paymentHostProfileId,
       subscriptionId: newSub.id,
+      totalStayAmount: data.isSharedPayment ? null : (data.totalStayAmount ?? null),
+      advanceAmountPaid: data.isSharedPayment ? 0 : (data.advanceAmountPaid ?? 0),
+      backdatedStayEnabled: data.backdatedStayEnabled,
+      createdBy: createdByUserId,
     });
 
     return {

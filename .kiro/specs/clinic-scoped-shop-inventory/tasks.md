@@ -192,7 +192,7 @@ Ordering rationale: the RPCs and the pure logic are built and property-tested be
     - Each: auth gate (`checkWarehouseAccess("inventory_operations")` / `checkWarehouseAccess("product_management")` / clinic-scope check) → Zod → repository or RPC → `revalidatePath`, returning the project's existing `{ success, error? }` shape with the design's message mapping
     - _Requirements: 5.1, 5.10, 5.12, 5.14, 6.2, 6.4, 6.9, 7.6, 9.4, 9.6, 9.14, 14.4, 14.6, 14.7, 16.1, 16.2, 16.3, 16.4, 16.5, 16.8, 16.9, 19.4, 19.9_
 
-  - [ ]* 7.2 Write property test for Stock In authorization
+  - [x]* 7.2 Write property test for Stock In authorization
     - **Property 18: Stock In authorization admits only warehouse admins**
     - **Validates: Requirements 4.7, 4.8, 16.1, 16.2, 16.3, 16.4, 16.5, 16.8, 16.9, 19.4**
 
@@ -220,15 +220,15 @@ Ordering rationale: the RPCs and the pure logic are built and property-tested be
     - Drop `stockQuantity` from the schema and stop writing `stock_quantity` / `in_stock`; add `inventoryProductId` with the aggregate-stock-is-zero guard and existence check; change the gate on create/edit/delete and `adminToggleProductVisibility` to `checkWarehouseAccess("product_management")`
     - _Requirements: 3.7, 3.8, 3.9, 3.11, 3.12, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 6.8, 6.9_
 
-  - [ ]* 7.9 Write property test for product link gating
+  - [x]* 7.9 Write property test for product link gating
     - **Property 21: Product link changes are gated on zero aggregate stock**
     - **Validates: Requirements 3.1, 3.7, 3.8, 3.9, 3.11, 3.12**
 
-  - [ ]* 7.10 Write property test for visibility toggling
+  - [x]* 7.10 Write property test for visibility toggling
     - **Property 13: Visibility toggling is an involution and concurrency-safe**
     - **Validates: Requirements 6.5, 6.6**
 
-  - [ ]* 7.11 Write unit tests for form validation, error mapping, and destination branches
+  - [x]* 7.11 Write unit tests for form validation, error mapping, and destination branches
     - Missing name / SKU / price indicates each missing field; a price with three decimals, zero, or negative is rejected naming the field; each RPC exception prefix maps to the requirement's wording; `resolveDestination` on absent, `all`, valid clinic, valid franchise, unknown uuid, malformed string
     - _Requirements: 4.4, 4.5, 4.9, 4.10, 5.11, 6.7, 7.12, 7.14, 7.15_
 
@@ -253,20 +253,20 @@ Ordering rationale: the RPCs and the pure logic are built and property-tested be
     - `verifyAddonPayment`: call `clinic_shop_apply_sale` for core clinic orders alongside the existing franchise failsafe, flagging `fulfillment_status = UNFULFILLABLE_STOCK` on a post-capture shortfall
     - _Requirements: 10.2, 10.11, 10.13, 11.1, 11.5, 11.6_
 
-  - [ ]* 9.5 Write property test for oversell rejection
+  - [x]* 9.5 Write property test for oversell rejection
     - **Property 8: Oversell is rejected**
     - **Validates: Requirements 10.11, 11.1, 11.3, 11.5, 11.6, 15.10**
     - Generate the sale channel rather than splitting per channel
 
-  - [ ]* 9.6 Write property test for the order clinic stamp
+  - [x]* 9.6 Write property test for the order clinic stamp
     - **Property 7: The order clinic stamp is immutable and complete**
     - **Validates: Requirements 10.1, 10.12, 13.18**
 
-  - [ ]* 9.7 Write property test for Dispatch Stock isolation
+  - [x]* 9.7 Write property test for Dispatch Stock isolation
     - **Property 22: Dispatch Stock leaves clinic shop stock untouched**
     - **Validates: Requirements 8.1, 8.2, 8.3, 8.4, 8.5, 7.9**
 
-  - [ ]* 9.8 Write unit tests for `place_assisted_addon_order` payload construction
+  - [x]* 9.8 Write unit tests for `place_assisted_addon_order` payload construction
     - Scoped admin with a selected customer, scoped admin walk-in, unscoped admin with an explicit clinic, unscoped admin with no clinic (rejection)
     - _Requirements: 10.3, 10.4, 10.5, 10.6_
 
@@ -297,11 +297,11 @@ Ordering rationale: the RPCs and the pure logic are built and property-tested be
     - Optional explicit franchise id honoured only for an authorized Inventory_Admin, franchise-session path unchanged; creates a missing settings row at stock 0 with the submitted visibility; optimistic toggle reverts on failure
     - _Requirements: 19.1, 19.2, 19.3, 19.5, 19.6, 19.7, 19.8, 19.10_
 
-  - [ ]* 11.4 Write property test for franchise shop stock-in
+  - [x]* 11.4 Write property test for franchise shop stock-in
     - **Property 24: Franchise shop stock-in mirrors the clinic guarantees**
     - **Validates: Requirements 18.2, 18.3, 18.4, 18.5, 18.6, 18.8, 18.9, 18.10, 18.11**
 
-  - [ ]* 11.5 Write property test for franchise transfer receipt
+  - [x]* 11.5 Write property test for franchise transfer receipt
     - **Property 25: Franchise transfer receipt is atomic and idempotent**
     - **Validates: Requirements 17.1, 17.2, 17.3, 17.5, 17.6, 17.7**
 
@@ -310,16 +310,16 @@ Ordering rationale: the RPCs and the pure logic are built and property-tested be
     - `migrate_shop_stock_to_clinics()`: abort with a report when no Core Clinic exists; pre-scan and abort when any non-deleted product exceeds 1,000,000; resolve the earliest-created Core Clinic as target; `INSERT ... ON CONFLICT (clinic_id, product_id) DO NOTHING` for every (Core Clinic × non-deleted product) pair with `is_visible = products.is_active`, target stock `COALESCE(products.stock_quantity, 0)` clamped to 0 when negative or non-integral, others 0; one `MIGRATION` `IN` entry per inserted row with positive stock; return a jsonb report; leaves `products.stock_quantity`, product links, and `franchise_product_settings` untouched
     - _Requirements: 20.1, 20.2, 20.3, 20.4, 20.5, 20.6, 20.7, 20.8, 20.9, 20.10, 20.11, 20.12, 20.13_
 
-  - [ ]* 12.2 Write property test for the migration
+  - [x]* 12.2 Write property test for the migration
     - **Property 20: Migration is quantity-preserving and idempotent**
     - **Validates: Requirements 20.1, 20.4, 20.5, 20.7, 20.8, 20.9, 20.10, 20.12**
 
-  - [ ]* 12.3 Write integration test for migration idempotency
+  - [x]* 12.3 Write integration test for migration idempotency
     - `migrate_shop_stock_to_clinics()` run twice produces identical overlay quantities and ledger entries; a no-Core-Clinic run creates nothing and reports it
     - _Requirements: 20.2, 20.9, 20.10, 20.13_
 
-- [ ] 13. Accessibility coverage for the new surfaces
-  - [ ]* 13.1 Add `axe-core` checks to the new interactive components
+- [x] 13. Accessibility coverage for the new surfaces
+  - [x]* 13.1 Add `axe-core` checks to the new interactive components
     - Destination Selector, Stock In dialog, stock-in cart, clinic ledger table, Clinic Access checkbox with its dependent dropdown, using the existing `@testing-library` + `axe-core` setup
     - _Requirements: 5.1, 7.1, 7.5, 9.6, 13.2, 13.4_
 

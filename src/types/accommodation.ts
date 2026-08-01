@@ -257,3 +257,27 @@ export type EarlyCheckoutOutcome = {
   refundDue: number;
   invoiceStatus?: "GENERATED" | "PENDING_RETRY";
 };
+
+/**
+ * A single row in the payment history list displayed on the Accommodation tab.
+ * Produced by `buildPaymentHistoryRows` — sorted by (transactionDate, createdAt)
+ * non-decreasing.
+ *
+ * Requirements: 6.2, 6.5, 10.2, 10.3
+ */
+export interface PaymentHistoryRow {
+  /** The Payment_Transaction id. */
+  id: string;
+  /** Formatted transaction date for display (YYYY-MM-DD). */
+  date: string;
+  /** Transaction amount. */
+  amount: number;
+  /** Human-readable type label from PAYMENT_TRANSACTION_LABELS. */
+  typeLabel: string;
+  /** Admin comment (may be null). */
+  comment: string | null;
+  /** Admin remark (may be null). */
+  remark: string | null;
+  /** Route path to the payment receipt for this transaction. */
+  receiptLinkTarget: string;
+}

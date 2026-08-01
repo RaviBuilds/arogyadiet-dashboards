@@ -9,6 +9,7 @@ prerequisite, so `npm test` stays green on a machine with no database.
 | `src/test/dietitian/migration.integration.test.ts` | `create-dietitian-management.sql` + its RLS script |
 | `src/test/dietitian/rls-scope.integration.test.ts`, `concurrency-and-auth.integration.test.ts` | dietitian RLS and RPC behaviour |
 | `src/test/accommodation/migration.integration.test.ts` | `create-stay-payment-lifecycle.sql` — idempotence and the four constraints it installs |
+| `src/test/accommodation/rpc.integration.test.ts` | `record_stay_payment_transaction` / `finalize_stay_checkout` RPCs — concurrency, refund/shared-payment/status rejections, and balance-formula parity with `deriveStayBalance` |
 
 Each of those files also carries a "script guarantees" half that reads the
 `scripts/*.sql` text directly. That half always runs, database or not.
