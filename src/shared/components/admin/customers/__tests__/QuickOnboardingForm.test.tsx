@@ -19,13 +19,27 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // --- Force "after 5 PM IST" so the cutoff gate is active (Req 7.1). ---------
-vi.mock("@/lib/dates/ist", () => ({
-  istHourOf: () => 18, // 6 PM IST → at/after the 17:00 cutoff
-}));
-vi.mock("@/lib/onboarding/cutoff", () => ({
-  ONBOARDING_CUTOFF_HOUR_IST: 17,
-  earliestStartDate: () => "2024-03-07",
-}));
+// Overrides only the clock-dependent exports via importOriginal, so the
+// component's other imports from this module (istDateStringOf,
+// addDaysToISODate, parseISODateString, etc. — needed by the ACCOMMODATION
+// branch and PastDayStatusPopup) stay intact rather than being left
+// `undefined` by a hand-listed partial mock (accommodation-payment-lifecycle,
+// task 10.3).
+vi.mock("@/lib/dates/ist", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/dates/ist")>();
+  return {
+    ...actual,
+    istHourOf: () => 18, // 6 PM IST → at/after the 17:00 cutoff
+  };
+});
+vi.mock("@/lib/onboarding/cutoff", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/onboarding/cutoff")>();
+  return {
+    ...actual,
+    ONBOARDING_CUTOFF_HOUR_IST: 17,
+    earliestStartDate: () => "2024-03-07",
+  };
+});
 
 // --- Mock the map-based Address_Capture to report a valid, resolved address. -
 vi.mock("@/shared/components/address/AddressCaptureMap", async () => {
@@ -115,6 +129,7 @@ vi.mock("@/shared/components/ui/select", async () => {
 const onboardCustomerAction = vi.fn();
 vi.mock("@/actions/admin-actions/onboardingActions", () => ({
   onboardCustomerAction: (...a: unknown[]) => onboardCustomerAction(...a),
+  checkMobileUniqueAction: () => Promise.resolve({ available: true }),
 }));
 
 vi.mock("next/navigation", () => ({
