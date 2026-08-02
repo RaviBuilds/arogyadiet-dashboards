@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -205,6 +205,46 @@ const STEP_FIELDS: Record<number, (keyof DetailsFormValues)[]> = {
   3: ["email", "paymentStatus"],
 };
 
+/**
+ * Which wizard step owns each schema field.
+ *
+ * The per-step `STEP_FIELDS` gates only validate a subset before advancing, but
+ * the final submit validates the WHOLE schema. Without this map a failure on a
+ * field belonging to an earlier step (e.g. `dietitianId`, which renders its
+ * error on the Address step) would be invisible from the Payment & Review step
+ * and the click would look like it did nothing. `onInvalid` uses this to jump to
+ * the step that can actually fix the problem.
+ */
+const FIELD_TO_STEP: Partial<Record<keyof DetailsFormValues, StepIndex>> = {
+  fullName: 0,
+  mobile: 0,
+  gender: 0,
+  dietaryPreference: 0,
+  allergies: 0,
+  primaryCategory: 1,
+  planId: 1,
+  kitProductId: 1,
+  kitDurationDays: 1,
+  startDate: 1,
+  initialMealPreference: 1,
+  pastDateEnabled: 1,
+  pastDayStatuses: 1,
+  totalNights: 1,
+  backdatedStayEnabled: 1,
+  stayType: 1,
+  occupancyType: 1,
+  totalStayAmount: 1,
+  advanceAmountPaid: 1,
+  isSharedPayment: 1,
+  paymentHostMobile: 1,
+  dietitianId: 2,
+  email: 3,
+  isTestEmail: 3,
+  paymentStatus: 3,
+  cutoffAcknowledged: 3,
+  automationOverrideAcknowledged: 3,
+};
+
 export function QuickOnboardingForm({
   plans,
   kitProducts,
@@ -394,6 +434,21 @@ export function QuickOnboardingForm({
     (!showAutomationOverride || automationOverrideAcknowledged) &&
     (isAccommodation || addressResolved) &&
     !hasChargeErrors;
+
+  // A disabled CTA must always say why, otherwise the click just looks broken.
+  const onboardBlockedReason =
+    paymentStatus !== "PAID"
+      ? "Payment must be marked as PAID before completing onboarding"
+      : !isAccommodation && !addressResolved
+        ? "Complete the address step before completing onboarding"
+        : showAutomationOverride && !automationOverrideAcknowledged
+          ? "Acknowledge the automation override before completing onboarding"
+          : hasChargeErrors
+            ? (deliveryChargeError ??
+              miscChargeError ??
+              miscChargeLabelError ??
+              "Correct the charge details before completing onboarding")
+            : null;
 
   // Req 5.7: When start date changes away from tomorrow, reset the acknowledgment field.
   useEffect(() => {
@@ -844,16 +899,27 @@ export function QuickOnboardingForm({
       };
 
       startTransition(async () => {
-        const result = await onboardAccommodationCustomerAction(accommodationPayload);
-        if ("success" in result && result.success) {
-          toast.success("Accommodation customer onboarded successfully.");
-          router.push("/customers");
-          router.refresh();
-          return;
-        }
-        if ("error" in result) {
-          toast.error(result.error);
-          applyServerFieldErrors(result.fieldErrors);
+        try {
+          const result = await onboardAccommodationCustomerAction(accommodationPayload);
+          if ("success" in result && result.success) {
+            toast.success("Accommodation customer onboarded successfully.");
+            router.push("/customers");
+            router.refresh();
+            return;
+          }
+          if ("error" in result) {
+            toast.error(result.error);
+            applyServerFieldErrors(result.fieldErrors);
+          }
+        } catch (err) {
+          // A thrown Server Action rejects this promise. Unhandled, it would
+          // leave the wizard looking frozen with no explanation.
+          console.error("Accommodation onboarding failed:", err);
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : "Onboarding failed unexpectedly. Please try again.",
+          );
         }
       });
       return;
@@ -895,20 +961,69 @@ export function QuickOnboardingForm({
     };
 
     startTransition(async () => {
-      const result = await onboardCustomerAction(payload);
-      if (result.success) {
-        toast.success("Customer onboarded successfully.");
-        router.push("/customers");
-        router.refresh();
-        return;
+      try {
+        const result = await onboardCustomerAction(payload);
+        if (result.success) {
+          toast.success("Customer onboarded successfully.");
+          router.push("/customers");
+          router.refresh();
+          return;
+        }
+        toast.error(result.error);
+        applyServerFieldErrors(result.fieldErrors);
+      } catch (err) {
+        // A thrown Server Action rejects this promise. Unhandled, it would leave
+        // the wizard looking frozen with no explanation.
+        console.error("Quick onboarding failed:", err);
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : "Onboarding failed unexpectedly. Please try again.",
+        );
       }
-      toast.error(result.error);
-      applyServerFieldErrors(result.fieldErrors);
     });
   };
 
+  /**
+   * Runs when the final schema validation rejects. Without this, react-hook-form
+   * collects the errors and silently drops the submit — and because the failing
+   * field usually belongs to an earlier step, nothing is rendered at Payment &
+   * Review, so the button looks broken. Surface the message and navigate to the
+   * step that owns the field.
+   */
+  const onInvalid = (formErrors: FieldErrors<DetailsFormValues>) => {
+    // Logged so the exact offending field is visible in DevTools even when the
+    // message alone is not enough to act on.
+    console.warn("Quick onboarding validation failed:", formErrors);
+
+    const entries = Object.entries(formErrors) as [
+      keyof DetailsFormValues,
+      { message?: string } | undefined,
+    ][];
+
+    // Prefer an entry that actually carries a message to show the admin.
+    const target = entries.find(([, err]) => err?.message) ?? entries[0];
+
+    if (!target) {
+      toast.error("Some details are incomplete. Please review the earlier steps.");
+      return;
+    }
+
+    const [field, err] = target;
+    toast.error(
+      err?.message ?? `"${String(field)}" needs to be corrected before onboarding.`,
+    );
+
+    const owningStep = FIELD_TO_STEP[field];
+    if (owningStep === undefined) return;
+    // ACCOMMODATION skips the Address step, so fold step 2 back into step 1.
+    const destination: StepIndex =
+      isAccommodation && owningStep === 2 ? 1 : owningStep;
+    if (destination !== step) setStep(destination);
+  };
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="flex flex-col gap-6">
       {/* ── Progress Stepper ── */}
       <Stepper current={step} steps={activeSteps} icons={activeStepIcons} isAccommodation={isAccommodation} />
 
@@ -2259,9 +2374,9 @@ export function QuickOnboardingForm({
                   </Button>
                 </span>
               </TooltipTrigger>
-              {paymentStatus !== "PAID" && (
+              {onboardBlockedReason && (
                 <TooltipContent>
-                  <p>Payment must be marked as PAID before completing onboarding</p>
+                  <p>{onboardBlockedReason}</p>
                 </TooltipContent>
               )}
             </Tooltip>
