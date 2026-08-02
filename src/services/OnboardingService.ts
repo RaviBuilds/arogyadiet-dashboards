@@ -97,7 +97,19 @@ export type OnboardFailureReason =
  * persisted (the auth identity, if it was created, has been compensated away).
  */
 export type OnboardOutcome =
-  | { ok: true; ids: OnboardIds; authUserId: string }
+  | {
+      ok: true;
+      ids: OnboardIds;
+      authUserId: string;
+      /**
+       * Set when the Customer_Record was created successfully but a follow-up
+       * step AFTER the atomic RPC commit did not complete (currently only the
+       * past-date daily-preferences pass). The customer EXISTS and is usable —
+       * this flags what an admin still needs to review. Never used to describe a
+       * rollback, because nothing is rolled back once the RPC has committed.
+       */
+      warning?: string;
+    }
   | {
       ok: false;
       reason: OnboardFailureReason;
@@ -484,10 +496,25 @@ export async function onboard(
     });
 
   if (authError || !authData?.user) {
+    // Supabase reports an existing identity as "already been registered", which
+    // on its own reads like a system fault. In this wizard it almost always means
+    // the customer was already onboarded (e.g. the admin re-submitted after a
+    // partial failure), so say that plainly and point at the mobile field.
+    const rawAuthMessage = authError?.message ?? "";
+    if (/already\s+(been\s+)?registered|already\s+exists/i.test(rawAuthMessage)) {
+      return {
+        ok: false,
+        reason: "DUPLICATE_MOBILE",
+        message:
+          `A customer with mobile ${mobile} has already been onboarded. ` +
+          "Open them from the Customers list instead of onboarding again.",
+        fieldErrors: { mobile: "This mobile number is already registered." },
+      };
+    }
     return {
       ok: false,
       reason: "AUTH_FAILED",
-      message: authError?.message ?? "Failed to create the authentication identity.",
+      message: rawAuthMessage || "Failed to create the authentication identity.",
     };
   }
   const authUserId = authData.user.id;
@@ -656,18 +683,38 @@ export async function onboard(
       });
 
       // Persist the generated daily preference records.
+      //
+      // UPSERT, not INSERT: the `onboard_customer` RPC has ALREADY inserted one
+      // row per day for `starts_on..ends_on` for every MEAL subscription (see
+      // section 6 of the RPC). A plain INSERT of the same dates therefore always
+      // violated `sub_daily_prefs_unique_date (subscription_id, preference_date)`
+      // — meaning EVERY backdated onboarding failed at this step.
+      //
+      // The generated set spans `starts_on..effective_end_on`, a superset of what
+      // the RPC wrote (it is longer by `skippedCount` extension days), so a single
+      // upsert on that unique key corrects the RPC's default rows in place and
+      // appends the extension days. One statement, no delete window where the
+      // subscription would be left with no schedule.
       const admin_db = createAdminClient();
       const { error: prefsError } = await admin_db
         .from("subscription_daily_preferences")
-        .insert(prefsResult.records);
+        .upsert(prefsResult.records, {
+          onConflict: "subscription_id,preference_date",
+        });
 
       if (prefsError) {
-        // Daily preferences insertion failed — compensate the entire onboarding.
-        await safeDeleteAuthUser(authUserId);
+        // The Customer_Record is ALREADY COMMITTED by the RPC at this point, so
+        // this is NOT rolled back and must never be reported as "nothing saved".
+        // The auth identity is deliberately left intact: deleting it would strand
+        // a customer who exists but can never sign in, and would also block a
+        // retry with a misleading "email already registered" error.
         return {
-          ok: false,
-          reason: "ERROR",
-          message: "Failed to generate daily preferences. No changes were saved. Please try again.",
+          ok: true,
+          ids: result.ids,
+          authUserId,
+          warning:
+            "Customer created, but the past-day delivery schedule could not be applied. " +
+            "Open the customer and review their daily preferences.",
         };
       }
 
@@ -683,31 +730,30 @@ export async function onboard(
           .eq("id", result.ids.subscription_id);
 
         if (subUpdateError) {
-          // Subscription update failed — compensate.
-          await safeDeleteAuthUser(authUserId);
+          // Committed record — report the truth rather than a false rollback.
           return {
-            ok: false,
-            reason: "ERROR",
-            message: "Failed to update subscription end date. No changes were saved. Please try again.",
+            ok: true,
+            ids: result.ids,
+            authUserId,
+            warning:
+              "Customer created, but the subscription end date was not extended for the skipped days. " +
+              "Open the customer and correct the end date.",
           };
         }
       }
     } catch (err) {
-      if (err instanceof RecordCountMismatchError) {
-        // Record count validation failed — this is a logic error, not a DB error.
-        await safeDeleteAuthUser(authUserId);
-        return {
-          ok: false,
-          reason: "ERROR",
-          message: err.message,
-        };
-      }
-      // Unexpected error during daily preferences generation.
-      await safeDeleteAuthUser(authUserId);
+      // Same reasoning as above: the Customer_Record is already committed, so
+      // surface a warning against the created customer instead of claiming a
+      // rollback that never happened.
+      const detail =
+        err instanceof RecordCountMismatchError ? err.message : describeError(err);
       return {
-        ok: false,
-        reason: "ERROR",
-        message: describeError(err),
+        ok: true,
+        ids: result.ids,
+        authUserId,
+        warning:
+          `Customer created, but the past-day delivery schedule could not be applied (${detail}). ` +
+          "Open the customer and review their daily preferences.",
       };
     }
   }

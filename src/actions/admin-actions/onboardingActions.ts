@@ -81,7 +81,15 @@ import { logAdminAction } from "@/lib/logger";
  * flag each invalid input and retain the admin's entered values (Req 4.6).
  */
 export type OnboardCustomerActionResult =
-  | { success: true; ids: OnboardIds }
+  | {
+      success: true;
+      ids: OnboardIds;
+      /**
+       * The customer WAS created, but a post-commit step needs admin attention.
+       * Shown as a warning rather than a success so nothing is silently wrong.
+       */
+      warning?: string;
+    }
   | { success: false; error: string; fieldErrors?: Record<string, string> };
 
 /** Result of the dashboard list reads (Req 6.9/6.10). */
@@ -417,7 +425,7 @@ export async function onboardCustomerAction(
   // (7) Refresh the Customers dashboard sections (Req 6.9).
   revalidatePath(ADMIN_CUSTOMERS_PATH);
 
-  return { success: true, ids: outcome.ids };
+  return { success: true, ids: outcome.ids, warning: outcome.warning };
 }
 
 // ---------------------------------------------------------------------------
