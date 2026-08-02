@@ -349,7 +349,9 @@ export async function onboard(
   // clinic-membership check applies there. This is a pure pre-check; the
   // validated Dietitian is persisted inside the SAME atomic RPC call below,
   // not by a follow-up write into AssignmentService.
-  let dietitianId = payload.dietitianId ?? null;
+  // `||` (not `??`) so an empty string from an untouched dropdown becomes null
+  // rather than being treated as a selected Dietitian.
+  let dietitianId = payload.dietitianId || null;
   if (dietitianId && category === "MEAL") {
     const dietitianCheck = await validateDietitianForClinic(dietitianId, clinicId);
     if (!dietitianCheck.ok) {

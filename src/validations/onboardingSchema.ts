@@ -149,7 +149,14 @@ export function createQuickOnboardingSchema(
       // Optional Dietitian_Link selected during onboarding (dietitian-management,
       // Req 7.1–7.7 for MEAL, Req 9.1–9.4 for ACCOMMODATION). Persisted inside the
       // same atomic operation that creates the Customer_Record.
-      dietitianId: z.string().uuid("Select a valid dietitian.").optional(),
+      // OPTIONAL. `.optional()` alone only permits `undefined`, so an empty
+      // string from an untouched dropdown would reach `.uuid()` and reject the
+      // whole onboarding. Empty is normalised to "no dietitian" downstream.
+      dietitianId: z
+        .string()
+        .uuid("Select a valid dietitian.")
+        .optional()
+        .or(z.literal("")),
 
       // Req 4.5 / 5: primary address captured via Address_Capture.
       address: createAddressCaptureSchema(serviceAreaPincodes, skipServiceabilityCheck),

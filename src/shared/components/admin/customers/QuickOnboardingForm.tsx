@@ -171,7 +171,14 @@ const detailsSchema = z.object({
   pastDateEnabled: z.boolean().default(false),
   pastDayStatuses: z.array(z.any()).optional().default([]),
   automationOverrideAcknowledged: z.boolean().default(false),
-  dietitianId: z.string().uuid("Select a valid dietitian.").optional(),
+  // Dietitian selection is OPTIONAL. `.optional()` alone only permits
+  // `undefined`, so the empty string the Select holds while nothing is picked
+  // would fall through to `.uuid()` and reject a perfectly valid submission.
+  dietitianId: z
+    .string()
+    .uuid("Select a valid dietitian.")
+    .optional()
+    .or(z.literal("")),
 }).superRefine((data, ctx) => {
   // Client-side rejection of advance > total with the pinned field message
   // (Req 4.4), mirroring the server's `accommodationOnboardingSchema`.
@@ -939,7 +946,11 @@ export function QuickOnboardingForm({
       planId: values.primaryCategory === "MEAL" ? values.planId : undefined,
       // Dietitian_Link dropdown only applies to Core MEAL onboarding (Req 7.1);
       // KIT customers are linked to a Dietitian post-onboarding (Req 8).
-      dietitianId: values.primaryCategory === "MEAL" ? values.dietitianId : undefined,
+      // `|| undefined` collapses an untouched dropdown's "" into "not selected".
+      dietitianId:
+        values.primaryCategory === "MEAL"
+          ? values.dietitianId || undefined
+          : undefined,
       address: {
         tag: address.tag,
         searchText: address.searchText,

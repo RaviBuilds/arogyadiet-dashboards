@@ -87,7 +87,14 @@ export const accommodationOnboardingSchema = z
     // Optional Dietitian_Link selected in the Category & Plan step
     // (dietitian-management, Req 9.1–9.4). Persisted atomically with the
     // Customer_Record.
-    dietitianUserId: z.string().uuid("Select a valid dietitian.").optional(),
+    // OPTIONAL. `.optional()` alone only permits `undefined`, so an empty string
+    // from an untouched dropdown would reach `.uuid()` and reject the whole
+    // onboarding. Empty is normalised to "no dietitian" downstream.
+    dietitianUserId: z
+      .string()
+      .uuid("Select a valid dietitian.")
+      .optional()
+      .or(z.literal("")),
   })
   .superRefine((data, ctx) => {
     // ── Payment split (Req 4.2, 4.3, 4.4) ────────────────────────────────────
