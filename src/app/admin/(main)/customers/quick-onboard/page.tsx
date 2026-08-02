@@ -49,7 +49,7 @@ export default async function QuickOnboardPage() {
   const kitProducts = kitProductsResult.success ? kitProductsResult.data ?? [] : [];
 
   return (
-    <div className="flex flex-col gap-6 pb-4">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-4">
       <AdminPageHeader
         title="Quick Onboard Customer"
         description="Rapidly create a customer with priority details, a subscription, a map-captured address, and collected payment."
