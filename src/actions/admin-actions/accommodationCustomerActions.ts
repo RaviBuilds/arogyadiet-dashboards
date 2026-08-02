@@ -14,6 +14,8 @@ export interface AccommodationCustomerStayInfo {
   customerProfileId: string;
   stayStatus: string | null;
   stayType: string | null;
+  startDate: string | null;
+  totalNights: number | null;
 }
 
 /** An add-on wellness service request, as listed on the Accommodation tab. */
@@ -47,7 +49,7 @@ export async function getBulkAccommodationStayInfoAction(
     // We query all stays for these customers and pick the latest per customer
     const { data, error } = await admin
       .from("stay_entries")
-      .select("customer_profile_id, status, stay_type, created_at")
+      .select("customer_profile_id, status, stay_type, start_date, total_nights, created_at")
       .in("customer_profile_id", customerProfileIds)
       .order("created_at", { ascending: false });
 
@@ -63,6 +65,8 @@ export async function getBulkAccommodationStayInfoAction(
           customerProfileId: row.customer_profile_id,
           stayStatus: row.status,
           stayType: row.stay_type,
+          startDate: row.start_date ?? null,
+          totalNights: row.total_nights ?? null,
         });
       }
     }
@@ -74,6 +78,8 @@ export async function getBulkAccommodationStayInfoAction(
           customerProfileId: id,
           stayStatus: null,
           stayType: null,
+          startDate: null,
+          totalNights: null,
         }
     );
 

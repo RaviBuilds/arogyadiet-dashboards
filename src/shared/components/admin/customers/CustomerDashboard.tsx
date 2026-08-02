@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useTransition, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -58,6 +58,7 @@ import * as XLSX from "xlsx";
 import { DataTableCard } from "../core/DataTableCard";
 import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
+import { TablePagination } from "../core/TablePagination";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
 import { AdminSubmenuBar } from "../core/AdminSubmenuBar";
@@ -178,7 +179,7 @@ export default function CustomerDashboard({
   isDietitian?: boolean;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("Meal Customers");
+  const [activeTab, setActiveTab] = useState("Overview");
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [searchColumn, setSearchColumn] = useState("fullName");
@@ -187,12 +188,19 @@ export default function CustomerDashboard({
   // Filter States
   const [filterDiet, setFilterDiet] = useState<string>("ALL");
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
+  const [filterDietitian, setFilterDietitian] = useState<string>("ALL");
+  const [filterMedicalRecord, setFilterMedicalRecord] = useState<string>("ALL");
   const [showArchived, setShowArchived] = useState(false);
   const [showExpired, setShowExpired] = useState(false);
   const [clinicFilter, setClinicFilter] =
     useState<ClinicFilterSelection>(ALL_CLINICS);
   const [filterUnassignedClinic, setFilterUnassignedClinic] = useState(false);
   const [filterNoCoords, setFilterNoCoords] = useState(false);
+  const [expiringInDays, setExpiringInDays] = useState<number | null>(null);
+
+  // ── Pagination state for Meal Customers table ─────────────────────────────
+  const [mealPage, setMealPage] = useState(0);
+  const MEAL_PAGE_SIZE = 20;
 
   // Distinct clinics present in the loaded customer rows, for the filter control.
   const clinicOptions = useMemo(() => {
@@ -212,6 +220,25 @@ export default function CustomerDashboard({
     const plans = new Set(customers.map(c => c.activePlanName).filter((p): p is string => Boolean(p)));
     return Array.from(plans);
   }, [customers]);
+
+  // Dynamically extract unique dietitian names for the filter dropdown
+  const uniqueDietitians = useMemo(() => {
+    const names = new Set(customers.map(c => c.dietitianName).filter((n): n is string => Boolean(n)));
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+
+  // Build a lookup: customer email → earliest subscription end date (for expiring-soon filter).
+  const customerEndDateMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const sub of activeSubscriptions) {
+      if (!sub.ends_on) continue;
+      const existing = map.get(sub.email);
+      if (!existing || new Date(sub.ends_on) < new Date(existing)) {
+        map.set(sub.email, sub.ends_on);
+      }
+    }
+    return map;
+  }, [activeSubscriptions]);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(autoOpenCreate);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -257,7 +284,10 @@ export default function CustomerDashboard({
       result = result.filter((customer) => !customer.hasCoords);
     }
 
-    if (!showArchived) {
+    if (showArchived) {
+      // Strictly show only archived (inactive) customers
+      result = result.filter((customer) => !customer.isActive);
+    } else {
       result = result.filter((customer) => customer.isActive);
     }
 
@@ -286,8 +316,46 @@ export default function CustomerDashboard({
       result = result.filter((customer) => customer.status === filterStatus);
     }
 
+    if (filterDietitian !== "ALL") {
+      if (filterDietitian === "UNASSIGNED") {
+        result = result.filter((customer) => !customer.dietitianName);
+      } else {
+        result = result.filter((customer) => customer.dietitianName === filterDietitian);
+      }
+    }
+
+    if (filterMedicalRecord !== "ALL") {
+      if (filterMedicalRecord === "YES") {
+        result = result.filter((customer) => customer.hasMedicalHistory);
+      } else {
+        result = result.filter((customer) => !customer.hasMedicalHistory);
+      }
+    }
+
+    // Expiring-in-days filter: only show customers whose active subscription ends within N days
+    if (expiringInDays !== null) {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + expiringInDays * 24 * 60 * 60 * 1000);
+      result = result.filter((customer) => {
+        const endDate = customerEndDateMap.get(customer.email);
+        if (!endDate) return false;
+        const end = new Date(endDate);
+        return end >= now && end <= cutoff;
+      });
+    }
+
     return result;
-  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, showArchived, clinicFilter, filterUnassignedClinic, filterNoCoords]);
+  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterDietitian, filterMedicalRecord, showArchived, clinicFilter, filterUnassignedClinic, filterNoCoords, expiringInDays, customerEndDateMap]);
+
+  // Reset meal page when filters change
+  useEffect(() => {
+    setMealPage(0);
+  }, [searchTerm, filterDiet, filterStatus, filterDietitian, filterMedicalRecord, showArchived, clinicFilter, filterUnassignedClinic, filterNoCoords, expiringInDays]);
+
+  const paginatedMealCustomers = useMemo(() => {
+    const start = mealPage * MEAL_PAGE_SIZE;
+    return filteredCustomers.slice(start, start + MEAL_PAGE_SIZE);
+  }, [filteredCustomers, mealPage, MEAL_PAGE_SIZE]);
 
   // KIT Customer tab: same directory filtering pipeline, scoped to KIT category.
   const kitCustomers = useMemo(
@@ -662,6 +730,16 @@ export default function CustomerDashboard({
       ) : activeTab === "Meal Customers" ? (
         <DataTableCard
           header={<SectionHeader title="Meal Customers" icon={Users} />}
+          footer={
+            filteredCustomers.length > 0 ? (
+              <TablePagination
+                totalRecords={filteredCustomers.length}
+                pageSize={MEAL_PAGE_SIZE}
+                currentPage={mealPage}
+                onPageChange={setMealPage}
+              />
+            ) : undefined
+          }
           controls={
             <div className="flex flex-wrap items-center gap-4">
               <DataSearchFilter
@@ -728,6 +806,21 @@ export default function CustomerDashboard({
               >
                 {showArchived ? "Showing Archived" : "Show Archived"}
               </Button>
+              <Select
+                value={expiringInDays === null ? "ALL" : String(expiringInDays)}
+                onValueChange={(val) => setExpiringInDays(val === "ALL" ? null : Number(val))}
+              >
+                <SelectTrigger className="w-[160px] border-slate-200 bg-white transition-all duration-200">
+                  <SelectValue placeholder="Expiring in..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Expiry</SelectItem>
+                  <SelectItem value="2">Expiring in 2 days</SelectItem>
+                  <SelectItem value="5">Expiring in 5 days</SelectItem>
+                  <SelectItem value="10">Expiring in 10 days</SelectItem>
+                  <SelectItem value="15">Expiring in 15 days</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           }
           actions={
@@ -902,7 +995,97 @@ export default function CustomerDashboard({
                 </TableHead>
 
                 <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                  Dietitian
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
+                      >
+                        <span>Medical Record</span>
+                        <Filter
+                          className={cn(
+                            "ml-2 h-3.5 w-3.5",
+                            filterMedicalRecord !== "ALL"
+                              ? "text-primary fill-primary/20"
+                              : "text-muted-foreground/70",
+                          )}
+                        />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-[180px]">
+                      <DropdownMenuLabel>Filter by Medical Record</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        onClick={() => setFilterMedicalRecord("ALL")}
+                        className={filterMedicalRecord === "ALL" ? "bg-accent font-semibold" : ""}
+                      >
+                        All
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterMedicalRecord("YES")}
+                        className={filterMedicalRecord === "YES" ? "bg-accent font-semibold" : ""}
+                      >
+                        Has Medical Record
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterMedicalRecord("NO")}
+                        className={filterMedicalRecord === "NO" ? "bg-accent font-semibold" : ""}
+                      >
+                        No Medical Record
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableHead>
+
+                <TableHead>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
+                      >
+                        <span>Dietitian</span>
+                        <Filter
+                          className={cn(
+                            "ml-2 h-3.5 w-3.5",
+                            filterDietitian !== "ALL"
+                              ? "text-primary fill-primary/20"
+                              : "text-muted-foreground/70",
+                          )}
+                        />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-[180px]">
+                      <DropdownMenuLabel>Filter by Dietitian</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        onClick={() => setFilterDietitian("ALL")}
+                        className={filterDietitian === "ALL" ? "bg-accent font-semibold" : ""}
+                      >
+                        All Dietitians
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setFilterDietitian("UNASSIGNED")}
+                        className={filterDietitian === "UNASSIGNED" ? "bg-accent font-semibold" : ""}
+                      >
+                        Unassigned
+                      </DropdownMenuItem>
+                      {uniqueDietitians.length > 0 && (
+                        <>
+                          <DropdownMenuSeparator />
+                          {uniqueDietitians.map((name) => (
+                            <DropdownMenuItem
+                              key={name}
+                              onClick={() => setFilterDietitian(name)}
+                              className={filterDietitian === name ? "bg-accent font-semibold" : ""}
+                            >
+                              {name}
+                            </DropdownMenuItem>
+                          ))}
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </TableHead>
 
                 <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
@@ -914,14 +1097,14 @@ export default function CustomerDashboard({
               {filteredCustomers.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-center py-12 text-sm text-slate-500"
                   >
                     No customers match your criteria.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredCustomers.map((customer) => (
+                paginatedMealCustomers.map((customer) => (
                   <TableRow key={customer.id} className="hover:bg-slate-50 transition-colors duration-200">
                     {/* Column 1: Customer Info */}
                     <TableCell>
@@ -1019,7 +1202,22 @@ export default function CustomerDashboard({
                       </div>
                     </TableCell>
 
-                    {/* Column 5: Dietitian */}
+                    {/* Column 5: Medical Record */}
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full px-2.5 text-xs",
+                          customer.hasMedicalHistory
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-50 text-slate-500",
+                        )}
+                      >
+                        {customer.hasMedicalHistory ? "Available" : "None"}
+                      </Badge>
+                    </TableCell>
+
+                    {/* Column 6: Dietitian */}
                     <TableCell>
                       <span
                         className={cn(
@@ -1117,6 +1315,7 @@ export default function CustomerDashboard({
           onEdit={openEditModal}
           onDeactivate={openDeleteModal}
           isDietitian={isDietitian}
+          customerEndDateMap={customerEndDateMap}
         />
       ) : activeTab === "Accommodation Customers" ? (
         <div className="space-y-6">

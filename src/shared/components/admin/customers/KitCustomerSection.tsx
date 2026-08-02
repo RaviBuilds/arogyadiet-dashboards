@@ -40,6 +40,8 @@ import { cn } from "@/lib/utils";
 import { DataTableCard } from "../core/DataTableCard";
 import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
+import { TableColumnFilter } from "../core/TableColumnFilter";
+import { TablePagination } from "../core/TablePagination";
 import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
 import {
@@ -75,6 +77,8 @@ interface KitCustomerSectionProps {
   onDeactivate: (customer: CustomerData) => void;
   /** Removes the mutating export/edit/deactivate controls for a Dietitian (dietitian-management, Req 16.1). */
   isDietitian?: boolean;
+  /** Map of customer email → earliest active subscription end date (for expiry filter). */
+  customerEndDateMap?: Map<string, string>;
 }
 
 function formatShippingDate(iso: string | null): string {
@@ -112,11 +116,22 @@ export function KitCustomerSection({
   onEdit,
   onDeactivate,
   isDietitian = false,
+  customerEndDateMap = new Map(),
 }: KitCustomerSectionProps) {
   const [shippingStatuses, setShippingStatuses] = useState<
     Map<string, KitCustomerShippingStatus>
   >(new Map());
+  const [expiringInDays, setExpiringInDays] = useState<number | null>(null);
   const [loadingShipping, setLoadingShipping] = useState(false);
+
+  // ── Column filter state ─────────────────────────────────────────────────
+  const [filterStatus, setFilterStatus] = useState("ALL");
+  const [filterDietitian, setFilterDietitian] = useState("ALL");
+  const [filterShipment, setFilterShipment] = useState("ALL");
+
+  // ── Pagination state ────────────────────────────────────────────────────
+  const [currentPage, setCurrentPage] = useState(0);
+  const PAGE_SIZE = 20;
 
   // Expired KIT customers state
   const [expiredCustomerIds, setExpiredCustomerIds] = useState<Set<string>>(new Set());
@@ -145,13 +160,18 @@ export function KitCustomerSection({
 
   // Determine which customers to display based on toggle states
   // - Default (neither toggle): show customers list as-is (active/pending from parent)
+  // - Show Archived only: strictly show only archived (inactive) customers
   // - Show Expired only: filter to only expired customers from the full customer set
-  // - Show Archived only: handled by parent via showArchived (includes inactive)
   // - Both active: union of archived + expired, each appearing at most once
   const displayCustomers = useMemo(() => {
-    if (!showExpired) {
-      // No expired filter active — show the parent-filtered list as-is
+    if (!showArchived && !showExpired) {
+      // No filter active — show the parent-filtered (active) list as-is
       return customers;
+    }
+
+    if (showArchived && !showExpired) {
+      // Strictly show only archived (inactive) customers
+      return customers.filter((c) => !c.isActive);
     }
 
     if (showExpired && !showArchived) {
@@ -167,15 +187,28 @@ export function KitCustomerSection({
     );
   }, [customers, showExpired, showArchived, expiredCustomerIds]);
 
+  // Apply expiring-in-days filter on top of display list
+  const expiryFilteredCustomers = useMemo(() => {
+    if (expiringInDays === null) return displayCustomers;
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + expiringInDays * 24 * 60 * 60 * 1000);
+    return displayCustomers.filter((c) => {
+      const endDate = customerEndDateMap.get(c.email);
+      if (!endDate) return false;
+      const end = new Date(endDate);
+      return end >= now && end <= cutoff;
+    });
+  }, [displayCustomers, expiringInDays, customerEndDateMap]);
+
   // Fetch shipping statuses for all visible KIT customers
   const fetchShippingStatuses = useCallback(async () => {
-    if (displayCustomers.length === 0) {
+    if (expiryFilteredCustomers.length === 0) {
       setShippingStatuses(new Map());
       return;
     }
 
     setLoadingShipping(true);
-    const ids = displayCustomers.map((c) => c.id);
+    const ids = expiryFilteredCustomers.map((c) => c.id);
     const result = await getBulkKitShippingStatusAction(ids);
 
     if (result.success) {
@@ -186,15 +219,71 @@ export function KitCustomerSection({
       setShippingStatuses(map);
     }
     setLoadingShipping(false);
-  }, [displayCustomers]);
+  }, [expiryFilteredCustomers]);
 
   useEffect(() => {
     fetchShippingStatuses();
   }, [fetchShippingStatuses]);
 
+  // ── Derived list with column filters + pagination ─────────────────────────
+  const filteredDisplayCustomers = useMemo(() => {
+    let result = expiryFilteredCustomers;
+
+    if (filterStatus !== "ALL") {
+      result = result.filter((c) => c.status === filterStatus);
+    }
+
+    if (filterDietitian !== "ALL") {
+      if (filterDietitian === "UNASSIGNED") {
+        result = result.filter((c) => !c.dietitianName);
+      } else {
+        result = result.filter((c) => c.dietitianName === filterDietitian);
+      }
+    }
+
+    if (filterShipment !== "ALL") {
+      result = result.filter((c) => {
+        const shipping = shippingStatuses.get(c.id);
+        const shipmentStatus = shipping?.status ?? "Not Shipped";
+        return shipmentStatus === filterShipment;
+      });
+    }
+
+    return result;
+  }, [expiryFilteredCustomers, filterStatus, filterDietitian, filterShipment, shippingStatuses]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [filterStatus, filterDietitian, filterShipment, searchTerm, showArchived, showExpired]);
+
+  const paginatedCustomers = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return filteredDisplayCustomers.slice(start, start + PAGE_SIZE);
+  }, [filteredDisplayCustomers, currentPage, PAGE_SIZE]);
+
+  // Unique dietitian names for filter options
+  const dietitianOptions = useMemo(() => {
+    const names = new Set<string>();
+    expiryFilteredCustomers.forEach((c) => {
+      if (c.dietitianName) names.add(c.dietitianName);
+    });
+    return Array.from(names).sort();
+  }, [expiryFilteredCustomers]);
+
   return (
     <DataTableCard
       header={<SectionHeader title="KIT Customers" icon={Package} />}
+      footer={
+        filteredDisplayCustomers.length > 0 ? (
+          <TablePagination
+            totalRecords={filteredDisplayCustomers.length}
+            pageSize={PAGE_SIZE}
+            currentPage={currentPage}
+            onPageChange={setCurrentPage}
+          />
+        ) : undefined
+      }
       controls={
         <div className="flex flex-wrap items-center gap-4">
           <DataSearchFilter
@@ -238,6 +327,21 @@ export function KitCustomerSection({
           >
             {showExpired ? "Showing Expired" : "Show Expired"}
           </Button>
+          <Select
+            value={expiringInDays === null ? "ALL" : String(expiringInDays)}
+            onValueChange={(val) => setExpiringInDays(val === "ALL" ? null : Number(val))}
+          >
+            <SelectTrigger className="w-[160px] border-slate-200 bg-white transition-all duration-200">
+              <SelectValue placeholder="Expiring in..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Expiry</SelectItem>
+              <SelectItem value="2">Expiring in 2 days</SelectItem>
+              <SelectItem value="5">Expiring in 5 days</SelectItem>
+              <SelectItem value="10">Expiring in 10 days</SelectItem>
+              <SelectItem value="15">Expiring in 15 days</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       }
       actions={
@@ -258,17 +362,70 @@ export function KitCustomerSection({
             <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
               Contact
             </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Status
+            <TableHead>
+              <TableColumnFilter
+                mode="single"
+                title="Status"
+                value={filterStatus}
+                onChange={setFilterStatus}
+                allValue="ALL"
+                sections={[
+                  {
+                    label: "Filter by Status",
+                    options: [
+                      { value: "ALL", label: "All Statuses" },
+                      { value: "Active", label: "Active" },
+                      { value: "Pending", label: "Pending" },
+                      { value: "Expired", label: "Expired" },
+                      { value: "Stopped", label: "Stopped" },
+                      { value: "No Plan", label: "No Plan" },
+                    ],
+                  },
+                ]}
+              />
             </TableHead>
             <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
               Clinic
             </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Dietitian
+            <TableHead>
+              <TableColumnFilter
+                mode="single"
+                title="Dietitian"
+                value={filterDietitian}
+                onChange={setFilterDietitian}
+                allValue="ALL"
+                contentClassName="w-[200px]"
+                sections={[
+                  {
+                    label: "Filter by Dietitian",
+                    options: [
+                      { value: "ALL", label: "All Dietitians" },
+                      { value: "UNASSIGNED", label: "Unassigned" },
+                      ...dietitianOptions.map((name) => ({ value: name, label: name })),
+                    ],
+                  },
+                ]}
+              />
             </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Shipment Status
+            <TableHead>
+              <TableColumnFilter
+                mode="single"
+                title="Shipment Status"
+                value={filterShipment}
+                onChange={setFilterShipment}
+                allValue="ALL"
+                sections={[
+                  {
+                    label: "Filter by Shipment",
+                    options: [
+                      { value: "ALL", label: "All Shipments" },
+                      { value: "Not Shipped", label: "Not Shipped" },
+                      { value: "Shipped", label: "Shipped" },
+                      { value: "Delivered", label: "Delivered" },
+                    ],
+                  },
+                ]}
+              />
             </TableHead>
             <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
               <span className="sr-only">Actions</span>
@@ -290,7 +447,7 @@ export function KitCustomerSection({
                 </div>
               </TableCell>
             </TableRow>
-          ) : displayCustomers.length === 0 ? (
+          ) : filteredDisplayCustomers.length === 0 ? (
             <TableRow>
               <TableCell
                 colSpan={7}
@@ -308,7 +465,7 @@ export function KitCustomerSection({
               </TableCell>
             </TableRow>
           ) : (
-            displayCustomers.map((customer) => {
+            paginatedCustomers.map((customer) => {
               const shipping = shippingStatuses.get(customer.id);
               const shipmentStatus = shipping?.status ?? "Not Shipped";
               const shipmentDate = shipping?.statusUpdatedAt ?? null;
