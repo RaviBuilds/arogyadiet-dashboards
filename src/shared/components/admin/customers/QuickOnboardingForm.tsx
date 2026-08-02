@@ -975,7 +975,14 @@ export function QuickOnboardingForm({
       try {
         const result = await onboardCustomerAction(payload);
         if (result.success) {
-          toast.success("Customer onboarded successfully.");
+          // The customer exists either way — navigate away so the admin never
+          // re-submits an already-created customer. A warning means a follow-up
+          // step needs their attention, not that onboarding failed.
+          if (result.warning) {
+            toast.warning(result.warning, { duration: 10000 });
+          } else {
+            toast.success("Customer onboarded successfully.");
+          }
           router.push("/customers");
           router.refresh();
           return;
