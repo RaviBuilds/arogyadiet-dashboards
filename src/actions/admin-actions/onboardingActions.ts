@@ -61,8 +61,13 @@ import {
   type ActivateAddOnResult,
   type AddOnActivationPayment,
   type DeliveryChargeContext,
+  type MiscChargeContext,
 } from "@/services/OnboardingService";
 import { isValidPinFormat } from "@/lib/pin/pinUtils";
+import {
+  MISC_CHARGE_MAX,
+  MISC_CHARGE_LABEL_MAX_LENGTH,
+} from "@/lib/onboarding/miscCharge";
 import { hashPin } from "@/services/PinService";
 import { logAdminAction } from "@/lib/logger";
 
@@ -338,11 +343,54 @@ export async function onboardCustomerAction(
         }
       : undefined;
 
+  // (6a) Miscellaneous charge — an optional, ad-hoc amount (additional
+  // products, one-off services) with an admin-supplied name that the invoice
+  // prints verbatim. Read from the raw payload like `deliveryCharge`/`tempPin`.
+  const rawMiscCharge = typeof rawPayload.miscCharge === "number"
+    ? rawPayload.miscCharge
+    : typeof rawPayload.miscCharge === "string" && rawPayload.miscCharge.trim() !== ""
+      ? Number(rawPayload.miscCharge)
+      : 0;
+  const rawMiscChargeLabel = typeof rawPayload.miscChargeLabel === "string"
+    ? rawPayload.miscChargeLabel.trim()
+    : "";
+
+  if (!Number.isFinite(rawMiscCharge) || rawMiscCharge < 0) {
+    return {
+      success: false,
+      error: "Enter a valid miscellaneous charge amount (0 or more).",
+    };
+  }
+  if (rawMiscCharge > MISC_CHARGE_MAX) {
+    return {
+      success: false,
+      error: `Miscellaneous charge cannot exceed ₹${MISC_CHARGE_MAX.toLocaleString("en-IN")}.`,
+    };
+  }
+  if (rawMiscCharge > 0 && rawMiscChargeLabel === "") {
+    return {
+      success: false,
+      error: "Enter a name for the miscellaneous charge (e.g. Additional product charges).",
+    };
+  }
+  if (rawMiscChargeLabel.length > MISC_CHARGE_LABEL_MAX_LENGTH) {
+    return {
+      success: false,
+      error: `The miscellaneous charge name must be at most ${MISC_CHARGE_LABEL_MAX_LENGTH} characters.`,
+    };
+  }
+
+  const miscContext: MiscChargeContext | undefined =
+    rawMiscCharge > 0
+      ? { miscCharge: rawMiscCharge, miscChargeLabel: rawMiscChargeLabel }
+      : undefined;
+
   const outcome = await serviceOnboard(
     input,
     { adminUserId },
     { pinHash, isTempPin: true },
     deliveryContext,
+    miscContext,
   );
   if (!outcome.ok) {
     return {

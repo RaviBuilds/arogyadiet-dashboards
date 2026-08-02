@@ -31,6 +31,11 @@ import { format, parseISO } from "date-fns";
 
 import { TempPinField } from "@/shared/components/admin/TempPinField";
 import { isValidPinFormat } from "@/lib/pin/pinUtils";
+import {
+  MISC_CHARGE_LABEL_MAX_LENGTH,
+  validateMiscChargeAmount,
+  validateMiscChargeLabel,
+} from "@/lib/onboarding/miscCharge";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
@@ -243,6 +248,16 @@ export function QuickOnboardingForm({
   const [deliveryChargeError, setDeliveryChargeError] = useState<string | null>(null);
   const [isCalculatingDelivery, setIsCalculatingDelivery] = useState(false);
 
+  // ─── Miscellaneous Charge State ───────────────────────────────────────────
+  // An optional, ad-hoc charge the admin adds on top of the plan and delivery
+  // amounts (e.g. additional products). The admin-entered NAME is what the
+  // customer's invoice prints, so it is mandatory once an amount is entered.
+  const [miscChargeInput, setMiscChargeInput] = useState<string>("");
+  const [miscCharge, setMiscCharge] = useState<number | null>(null);
+  const [miscChargeLabel, setMiscChargeLabel] = useState<string>("");
+  const [miscChargeError, setMiscChargeError] = useState<string | null>(null);
+  const [miscChargeLabelError, setMiscChargeLabelError] = useState<string | null>(null);
+
   // ─── Dietitian Dropdown State (dietitian-management, Req 7.1–7.6, 9.1–9.5) ─
   // MEAL (Core session): scoped to the resolved Clinic, loaded once the
   // address step resolves a Clinic.
@@ -358,12 +373,27 @@ export function QuickOnboardingForm({
   // Req 5.2: Show automation override checkbox when after cutoff AND start date is tomorrow.
   const showAutomationOverride = isAfterCutoff && startDate === tomorrowIST;
 
+  // A charge the admin typed must be valid before onboarding can proceed —
+  // otherwise the server would reject the submission after the fact.
+  const hasChargeErrors =
+    Boolean(deliveryChargeError) ||
+    Boolean(miscChargeError) ||
+    Boolean(miscChargeLabelError);
+
+  // Live payable breakup: plan + delivery + miscellaneous. Recomputed on every
+  // keystroke from local state, so no page refresh is needed.
+  const planAmount = selectedPlan?.price ?? 0;
+  const deliveryAmount = deliveryCharge ?? 0;
+  const miscAmount = miscCharge ?? 0;
+  const totalPayable = planAmount + deliveryAmount + miscAmount;
+
   // Req 5.4, 5.5: Disable Onboard CTA when override checkbox visible but unchecked.
   const canOnboard =
     !isSubmitting &&
     paymentStatus === "PAID" &&
     (!showAutomationOverride || automationOverrideAcknowledged) &&
-    (isAccommodation || addressResolved);
+    (isAccommodation || addressResolved) &&
+    !hasChargeErrors;
 
   // Req 5.7: When start date changes away from tomorrow, reset the acknowledgment field.
   useEffect(() => {
@@ -535,6 +565,30 @@ export function QuickOnboardingForm({
 
     setDeliveryCharge(parsed);
     setDeliveryChargeError(null);
+  };
+
+  /**
+   * Validates and sets the miscellaneous charge amount from manual input.
+   * Bounds mirror the server action and the DB CHECK constraint.
+   */
+  const handleMiscChargeInput = (rawValue: string) => {
+    setMiscChargeInput(rawValue);
+
+    const amountError = validateMiscChargeAmount(rawValue);
+    setMiscChargeError(amountError);
+
+    const nextAmount =
+      amountError !== null || rawValue.trim() === "" ? null : Number(rawValue);
+    setMiscCharge(nextAmount);
+
+    // The name becomes mandatory the moment an amount is charged, so re-check it.
+    setMiscChargeLabelError(validateMiscChargeLabel(miscChargeLabel, nextAmount));
+  };
+
+  /** Validates and sets the admin-supplied name shown on the invoice. */
+  const handleMiscChargeLabelInput = (rawValue: string) => {
+    setMiscChargeLabel(rawValue);
+    setMiscChargeLabelError(validateMiscChargeLabel(rawValue, miscCharge));
   };
 
   /**
@@ -754,6 +808,18 @@ export function QuickOnboardingForm({
       return;
     }
 
+    // A miscellaneous amount without a name would have no invoice description,
+    // and the DB CHECK constraint rejects it — surface it inline instead.
+    if (!isAccommodation) {
+      const labelError = validateMiscChargeLabel(miscChargeLabel, miscCharge);
+      if (labelError || miscChargeError || deliveryChargeError) {
+        setMiscChargeLabelError(labelError);
+        setStep(3);
+        toast.error(labelError ?? miscChargeError ?? deliveryChargeError ?? "");
+        return;
+      }
+    }
+
     // ACCOMMODATION flow: call onboardAccommodationCustomerAction (Req 1.9, 3.1)
     if (isAccommodation) {
       const accommodationPayload = {
@@ -824,6 +890,8 @@ export function QuickOnboardingForm({
       tempPin,
       deliveryCharge: deliveryCharge ?? 0,
       calculatedDeliveryCharge: calculatedDeliveryCharge,
+      miscCharge: miscCharge ?? 0,
+      miscChargeLabel: miscCharge && miscCharge > 0 ? miscChargeLabel.trim() : "",
     };
 
     startTransition(async () => {
@@ -1816,14 +1884,109 @@ export function QuickOnboardingForm({
                     </p>
                   )}
 
-                  {selectedPlan && (
-                    <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
-                      <p className="text-xs font-medium text-emerald-800">
-                        Total Payable: ₹{(selectedPlan.price + (deliveryCharge ?? 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {/* ── Miscellaneous charge: admin-named, optional ── */}
+                  <div className="space-y-3 border-t border-slate-100 pt-3">
+                    <div className="flex items-center gap-2">
+                      <Wallet className="h-4 w-4 text-slate-500" />
+                      <p className="text-sm font-semibold text-slate-800">
+                        Miscellaneous Charges
                       </p>
-                      <span className="text-xs text-emerald-600">
-                        (Plan ₹{selectedPlan.price.toLocaleString("en-IN")} + Delivery ₹{(deliveryCharge ?? 0).toFixed(2)})
-                      </span>
+                      <span className="text-xs text-slate-400">Optional</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+                      <div className="space-y-1">
+                        <label
+                          htmlFor="miscChargeLabel"
+                          className="text-xs font-medium text-slate-500"
+                        >
+                          Charge name
+                        </label>
+                        <Input
+                          id="miscChargeLabel"
+                          type="text"
+                          placeholder="e.g. Additional product charges"
+                          maxLength={MISC_CHARGE_LABEL_MAX_LENGTH}
+                          className="h-9"
+                          aria-invalid={Boolean(miscChargeLabelError)}
+                          aria-describedby="miscChargeLabel-help"
+                          value={miscChargeLabel}
+                          onChange={(e) => handleMiscChargeLabelInput(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="space-y-1 sm:w-40">
+                        <label
+                          htmlFor="miscCharge"
+                          className="text-xs font-medium text-slate-500"
+                        >
+                          Amount (₹)
+                        </label>
+                        <Input
+                          id="miscCharge"
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="0.00"
+                          className="h-9"
+                          aria-invalid={Boolean(miscChargeError)}
+                          value={miscChargeInput}
+                          onChange={(e) => handleMiscChargeInput(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <p id="miscChargeLabel-help" className="text-xs text-slate-500">
+                      This name is printed on the customer&apos;s invoice exactly as
+                      typed.
+                    </p>
+
+                    {miscChargeLabelError && (
+                      <p className="text-xs text-destructive">{miscChargeLabelError}</p>
+                    )}
+                    {miscChargeError && (
+                      <p className="text-xs text-destructive">{miscChargeError}</p>
+                    )}
+                  </div>
+
+                  {/* ── Live payable breakup ── */}
+                  {selectedPlan && (
+                    <div className="space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-emerald-600">
+                        Amount breakup
+                      </p>
+
+                      <AmountRow
+                        label={`${selectedPlan.name} (${selectedPlan.durationDays} days)`}
+                        amount={planAmount}
+                      />
+                      <AmountRow
+                        label="Delivery charges"
+                        amount={deliveryAmount}
+                        note={
+                          distanceKm !== null && ratePerKm !== null
+                            ? `${distanceKm.toFixed(2)} km × ₹${ratePerKm.toFixed(2)}/km × ${selectedPlan.durationDays} days`
+                            : undefined
+                        }
+                      />
+                      {miscAmount > 0 && (
+                        <AmountRow
+                          label={miscChargeLabel.trim() || "Miscellaneous charges"}
+                          amount={miscAmount}
+                        />
+                      )}
+
+                      <div className="flex items-baseline justify-between border-t border-emerald-200 pt-1.5">
+                        <span className="text-sm font-semibold text-emerald-900">
+                          Total Payable
+                        </span>
+                        <span className="text-sm font-bold text-emerald-900 tabular-nums">
+                          ₹
+                          {totalPayable.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1935,16 +2098,21 @@ export function QuickOnboardingForm({
                               : "—"
                           }
                         />
-                        {deliveryCharge !== null && deliveryCharge > 0 && (
+                        {/* Full breakup so the total is never an unexplained figure. */}
+                        <ReviewRow
+                          label="Delivery"
+                          value={`₹${deliveryAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        />
+                        {miscAmount > 0 && (
                           <ReviewRow
-                            label="Delivery"
-                            value={`₹${deliveryCharge.toFixed(2)}`}
+                            label={miscChargeLabel.trim() || "Miscellaneous"}
+                            value={`₹${miscAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                           />
                         )}
-                        {selectedPlan && deliveryCharge !== null && deliveryCharge > 0 && (
+                        {selectedPlan && (
                           <ReviewRow
                             label="Total"
-                            value={`₹${(selectedPlan.price + deliveryCharge).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            value={`₹${totalPayable.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                             highlight
                           />
                         )}
@@ -2257,6 +2425,39 @@ function ReviewRow({
       >
         {value || "—"}
       </dd>
+    </div>
+  );
+}
+
+/**
+ * A single line of the live payable breakup on the Payment & Review step.
+ * `note` carries the derivation (e.g. the distance × rate × days for delivery)
+ * so an admin can see how each figure was arrived at.
+ */
+function AmountRow({
+  label,
+  amount,
+  note,
+}: {
+  label: string;
+  amount: number;
+  note?: string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-xs text-emerald-800">
+        {label}
+        {note && (
+          <span className="ml-1 text-emerald-600">({note})</span>
+        )}
+      </span>
+      <span className="text-xs font-medium text-emerald-900 tabular-nums">
+        ₹
+        {amount.toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
+      </span>
     </div>
   );
 }
