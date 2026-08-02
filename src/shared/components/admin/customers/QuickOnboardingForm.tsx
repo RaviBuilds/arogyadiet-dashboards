@@ -24,7 +24,10 @@ import {
   Eye,
   EyeOff,
   Truck,
+  Wallet,
+  CalendarCheck,
 } from "lucide-react";
+import { format, parseISO } from "date-fns";
 
 import { TempPinField } from "@/shared/components/admin/TempPinField";
 import { isValidPinFormat } from "@/lib/pin/pinUtils";
@@ -842,10 +845,10 @@ export function QuickOnboardingForm({
       <Stepper current={step} steps={activeSteps} icons={activeStepIcons} isAccommodation={isAccommodation} />
 
       {/* ── Step panel ── */}
-      <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-2xl border border-slate-200 bg-white shadow-sm shadow-primary/5 overflow-hidden">
 
         {/* Step header stripe */}
-        <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/70 px-6 py-4">
+        <div className="flex items-center gap-3 border-b border-slate-100 bg-linear-to-r from-slate-50 to-white px-6 py-4">
           {(() => {
             const Icon = STEP_ICONS[step];
             return (
@@ -864,7 +867,7 @@ export function QuickOnboardingForm({
         </div>
 
         {/* Step content */}
-        <div className="p-6">
+        <div className="p-6 sm:p-8">
 
           {/* ── STEP 1: Details ── */}
           {step === 0 && (
@@ -1049,11 +1052,13 @@ export function QuickOnboardingForm({
                     />
                     {/* Selected KIT product preview */}
                     {selectedKitProduct && (
-                      <div className="mt-2 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                        <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                        <p className="text-xs text-emerald-800 font-medium">
-                          {selectedKitProduct.name} · Total: ₹{selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (incl. 5% tax)
-                        </p>
+                      <div className="mt-1.5 inline-flex w-fit items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 py-1 pr-3 pl-2 text-xs">
+                        <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                        <span className="font-medium text-emerald-700">{selectedKitProduct.name}</span>
+                        <span className="font-semibold text-emerald-900 tabular-nums">
+                          ₹{selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-emerald-600">incl. 5% tax</span>
                       </div>
                     )}
                   </Field>
@@ -1080,7 +1085,7 @@ export function QuickOnboardingForm({
                   {/* ── ACCOMMODATION-SPECIFIC FIELDS (Req 1.1–1.9, 2.1–2.8) ── */}
 
                   {/* Stay Start Date — no 5 PM cutoff for accommodation (Req 1.2) */}
-                  <Field label="Stay start date" htmlFor="startDate" error={errors.startDate?.message} required>
+                  <Field label="Stay check-in date" htmlFor="startDate" error={errors.startDate?.message} required>
                     <Input
                       id="startDate"
                       type="date"
@@ -1097,7 +1102,7 @@ export function QuickOnboardingForm({
                     </p>
 
                     {/* Backdated_Stay_Toggle — Req 1.1, 1.2, 1.3, 1.4, 1.5 */}
-                    <label className="mt-2 flex cursor-pointer items-start gap-2 text-sm text-slate-600 select-none">
+                    <label className="mt-2 inline-flex w-fit cursor-pointer items-start gap-2 text-sm text-slate-600 select-none">
                       <Controller
                         control={control}
                         name="backdatedStayEnabled"
@@ -1155,6 +1160,28 @@ export function QuickOnboardingForm({
                         ⚠️ Recommended minimum stay is 7 nights for the best wellness experience.
                       </p>
                     )}
+
+                    {/* Checkout date preview — compact inline chip once start date + nights are set */}
+                    {values.startDate &&
+                      values.totalNights != null &&
+                      Number(values.totalNights) >= 1 &&
+                      Number(values.totalNights) <= 365 && (
+                        <div className="mt-1.5 inline-flex w-fit items-center gap-2 rounded-full border border-sky-200 bg-sky-50 py-1 pr-3 pl-2 text-xs">
+                          <CalendarCheck className="h-3.5 w-3.5 shrink-0 text-sky-600" aria-hidden="true" />
+                          <span className="font-medium text-sky-700">Checkout</span>
+                          <span className="font-semibold text-sky-900 tabular-nums">
+                            {format(
+                              parseISO(
+                                addDaysToISODate(
+                                  values.startDate,
+                                  Number(values.totalNights),
+                                ),
+                              ),
+                              "EEE, dd MMM yyyy",
+                            )}
+                          </span>
+                        </div>
+                      )}
                   </Field>
 
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -1257,7 +1284,7 @@ export function QuickOnboardingForm({
 
                   {/* Shared Payment Checkbox (Req 2.1, 2.8) */}
                   <div className="rounded-xl border border-slate-200 p-4">
-                    <label className="flex cursor-pointer items-center gap-3 select-none">
+                    <label className="inline-flex w-fit cursor-pointer items-center gap-3 select-none">
                       <Controller
                         control={control}
                         name="isSharedPayment"
@@ -1327,6 +1354,24 @@ export function QuickOnboardingForm({
                               </p>
                             )}
                         </Field>
+
+                        {/* Balance amount highlight — shown when both amounts are valid (Req 4.6) */}
+                        {values.totalStayAmount != null &&
+                          values.advanceAmountPaid != null &&
+                          Number(values.totalStayAmount) >= 1 &&
+                          Number(values.advanceAmountPaid) >= 0 &&
+                          Number(values.advanceAmountPaid) <= Number(values.totalStayAmount) && (
+                            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 py-1 pr-3 pl-2 text-xs sm:col-span-2">
+                              <Wallet className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                              <span className="font-medium text-emerald-700">Balance to collect later</span>
+                              <span className="font-semibold text-emerald-900 tabular-nums">
+                                ₹
+                                {(
+                                  Number(values.totalStayAmount) - Number(values.advanceAmountPaid)
+                                ).toLocaleString("en-IN")}
+                              </span>
+                            </div>
+                          )}
                       </div>
                     )}
 
@@ -1420,11 +1465,11 @@ export function QuickOnboardingForm({
                     />
                     {/* Selected plan preview */}
                     {selectedPlan && (
-                      <div className="mt-2 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                        <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                        <p className="text-xs text-emerald-800 font-medium">
-                          {selectedPlan.name} · {selectedPlan.durationDays} days · ₹{selectedPlan.price.toLocaleString("en-IN")}
-                        </p>
+                      <div className="mt-1.5 inline-flex w-fit items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 py-1 pr-3 pl-2 text-xs">
+                        <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                        <span className="font-medium text-emerald-700">{selectedPlan.name}</span>
+                        <span className="text-emerald-600">{selectedPlan.durationDays} days</span>
+                        <span className="font-semibold text-emerald-900 tabular-nums">₹{selectedPlan.price.toLocaleString("en-IN")}</span>
                       </div>
                     )}
                   </Field>
@@ -1839,6 +1884,17 @@ export function QuickOnboardingForm({
                         <ReviewRow label="Stay type" value={values.stayType} />
                         <ReviewRow label="Occupancy" value={values.occupancyType} />
                         <ReviewRow label="Total nights" value={values.totalNights ? `${values.totalNights} nights` : "—"} />
+                        <ReviewRow
+                          label="Checkout date"
+                          value={
+                            values.startDate && values.totalNights != null && Number(values.totalNights) >= 1
+                              ? format(
+                                  parseISO(addDaysToISODate(values.startDate, Number(values.totalNights))),
+                                  "EEE, dd MMM yyyy",
+                                )
+                              : "—"
+                          }
+                        />
                         <ReviewRow label="Meal preference" value={values.initialMealPreference} />
                         {isSharedPayment ? (
                           <>
@@ -1856,6 +1912,15 @@ export function QuickOnboardingForm({
                               label="Advance paid"
                               value={values.advanceAmountPaid != null ? `₹${Number(values.advanceAmountPaid).toLocaleString("en-IN")}` : "₹0"}
                             />
+                            {values.totalStayAmount != null &&
+                              values.advanceAmountPaid != null &&
+                              Number(values.advanceAmountPaid) <= Number(values.totalStayAmount) && (
+                                <ReviewRow
+                                  label="Balance to collect"
+                                  value={`₹${(Number(values.totalStayAmount) - Number(values.advanceAmountPaid)).toLocaleString("en-IN")}`}
+                                  highlight
+                                />
+                              )}
                           </>
                         )}
                       </>
@@ -1938,7 +2003,7 @@ export function QuickOnboardingForm({
                   <AlertTriangle />
                   <AlertTitle>Automation override confirmation</AlertTitle>
                   <AlertDescription>
-                    <label className="mt-2 flex cursor-pointer items-start gap-2">
+                    <label className="mt-2 inline-flex w-fit cursor-pointer items-start gap-2">
                       <Controller
                         control={control}
                         name="automationOverrideAcknowledged"
@@ -1972,7 +2037,7 @@ export function QuickOnboardingForm({
       </div>{/* /step panel */}
 
       {/* ── Navigation ── */}
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
+      <div className="sticky bottom-4 z-20 flex items-center justify-between rounded-2xl border border-slate-200 bg-white/90 px-5 py-3 shadow-sm shadow-primary/5 backdrop-blur">
         <Button
           type="button"
           variant="outline"
