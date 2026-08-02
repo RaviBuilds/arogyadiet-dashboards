@@ -95,6 +95,10 @@ export interface OnboardSubscriptionInput {
   total_days?: number | null;
   pause_credits_total?: number | null;
   delivery_charge?: number | null;
+  /** Optional admin-entered miscellaneous charge (additional products, one-off services). */
+  misc_charge?: number | null;
+  /** Admin-supplied name for `misc_charge`, printed verbatim on the invoice. */
+  misc_charge_label?: string | null;
   franchise_id?: string | null;
   initial_meal_category_id?: string | null;  // NEW: For daily preferences generation
 }
@@ -107,6 +111,10 @@ export interface OnboardPaymentInput {
   tax_amount?: number | null;
   discount_amount?: number | null;
   delivery_charge?: number | null;
+  /** Optional admin-entered miscellaneous charge included in `amount`. */
+  misc_charge?: number | null;
+  /** Admin-supplied name for `misc_charge`, printed verbatim as an invoice line item. */
+  misc_charge_label?: string | null;
   payment_method?: string | null;
   paid_at?: string | null;
   payment_reference?: string | null;

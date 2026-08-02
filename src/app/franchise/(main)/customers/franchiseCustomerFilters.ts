@@ -106,12 +106,15 @@ export function filterByAllergy<T extends FilterableCustomer>(
   );
 }
 
-/** Filter out archived (inactive) customers when toggle is off. */
+/**
+ * When the toggle is on, strictly show only archived (inactive) customers.
+ * When off, show only active customers.
+ */
 export function filterByArchived<T extends FilterableCustomer>(
   customers: T[],
   showArchived: boolean,
 ): T[] {
-  if (showArchived) return customers;
+  if (showArchived) return customers.filter((c) => !c.isActive);
   return customers.filter((c) => c.isActive);
 }
 

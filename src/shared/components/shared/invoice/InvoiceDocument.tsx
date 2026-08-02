@@ -42,6 +42,11 @@ export function InvoiceDocument({
   const totalLabel = isPending ? "Amount Due" : "Total Paid";
   const isManual = paymentMethod === "Manual";
 
+  // Optional extra charges. Absent on invoices recorded before these were
+  // itemised, so default to 0 and render nothing.
+  const deliveryCharge = pricing.deliveryCharge ?? 0;
+  const miscCharge = pricing.miscCharge ?? 0;
+
   return (
     <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
       {/* Auto-print trigger only for paid invoices */}
@@ -208,10 +213,25 @@ export function InvoiceDocument({
                 <span>₹{pricing.finalPrice.toFixed(2)}</span>
               </div>
             )}
-            <div className="flex justify-between py-2 text-sm text-zinc-600 border-b pb-4 mb-2">
+            <div className="flex justify-between py-2 text-sm text-zinc-600">
               <span>GST ({pricing.taxPercent.toFixed(0)}%)</span>
               <span>₹{pricing.taxAmount.toFixed(2)}</span>
             </div>
+            {/* Extra charges are itemised so the rows add up to the total. */}
+            {deliveryCharge > 0 && (
+              <div className="flex justify-between py-2 text-sm text-zinc-600">
+                <span>Delivery Charges</span>
+                <span>₹{deliveryCharge.toFixed(2)}</span>
+              </div>
+            )}
+            {miscCharge > 0 && (
+              <div className="flex justify-between py-2 text-sm text-zinc-600">
+                {/* Shows the name the admin entered, not "Miscellaneous". */}
+                <span>{pricing.miscChargeLabel || "Additional Charges"}</span>
+                <span>₹{miscCharge.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="border-b pb-2 mb-2" />
             <div className="flex justify-between py-2 text-xl font-black text-zinc-900">
               <span>{totalLabel}</span>
               <span>₹{pricing.totalAmount.toFixed(2)}</span>

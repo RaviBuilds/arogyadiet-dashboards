@@ -178,11 +178,16 @@ export function calculateDeliveryCharge(input: ChargeInput): ChargeResult {
 // ─── Total payable ───────────────────────────────────────────────────────────
 
 /**
- * Computes Total_Payable = roundHalfUp(planPrice + totalDeliveryCharge, 2).
+ * Computes Total_Payable = roundHalfUp(planPrice + totalDeliveryCharge + miscCharge, 2).
+ *
+ * `miscCharge` is the optional admin-entered miscellaneous charge (additional
+ * products, one-off services). It defaults to 0 so existing two-argument
+ * callers keep their previous behaviour exactly.
  */
 export function calculateTotalPayable(
   planPrice: number,
   totalDeliveryCharge: number,
+  miscCharge: number = 0,
 ): number {
-  return roundHalfUp(planPrice + totalDeliveryCharge, 2);
+  return roundHalfUp(planPrice + totalDeliveryCharge + miscCharge, 2);
 }

@@ -29,6 +29,21 @@ export interface InvoicePricing {
   discountAmount: number;
   finalPrice: number;
   totalAmount: number;
+  /**
+   * Delivery charge folded into `totalAmount`. Shown as its own row so
+   * base + GST + delivery + misc reconciles to the total. 0 when not charged.
+   */
+  deliveryCharge?: number;
+  /**
+   * Admin-entered miscellaneous charge folded into `totalAmount`. 0 when not
+   * charged.
+   */
+  miscCharge?: number;
+  /**
+   * The admin-supplied NAME for `miscCharge` (e.g. "Additional product
+   * charges"). This is what is rendered — never the word "Miscellaneous".
+   */
+  miscChargeLabel?: string | null;
 }
 
 /**
@@ -287,6 +302,35 @@ export async function generateInvoiceData(
     });
   }
 
+  // ─── Extra charges folded into payment.amount ───────────────────────────
+  // Itemised so the invoice reconciles: base + GST + delivery + misc = total.
+  // Both default to 0, so invoices recorded without them render exactly as
+  // before (no empty rows).
+  const deliveryChargeAmount = Number(payment.delivery_charge ?? 0) || 0;
+  const miscChargeAmount = Number(payment.misc_charge ?? 0) || 0;
+  const miscChargeLabel =
+    typeof payment.misc_charge_label === "string" &&
+    payment.misc_charge_label.trim() !== ""
+      ? payment.misc_charge_label.trim()
+      : null;
+
+  if (deliveryChargeAmount > 0) {
+    lineItems.push({
+      description: "Delivery Charges",
+      subtitle: `Distance-based delivery for the ${sub?.total_days ?? 0}-day subscription period.`,
+      amount: deliveryChargeAmount,
+    });
+  }
+
+  if (miscChargeAmount > 0) {
+    lineItems.push({
+      // The admin-supplied name is the description — never "Miscellaneous".
+      description: miscChargeLabel ?? "Additional Charges",
+      subtitle: "Additional charges applied at the time of onboarding.",
+      amount: miscChargeAmount,
+    });
+  }
+
   const finalPrice = baseAmount - discountAmount;
   const totalAmount = Number(payment.amount);
 
@@ -327,6 +371,9 @@ export async function generateInvoiceData(
       discountAmount,
       finalPrice,
       totalAmount,
+      deliveryCharge: deliveryChargeAmount,
+      miscCharge: miscChargeAmount,
+      miscChargeLabel,
     },
     isPending,
   };

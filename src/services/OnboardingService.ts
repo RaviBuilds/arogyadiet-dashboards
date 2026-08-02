@@ -53,6 +53,7 @@ import {
   type ProfileCompletionInput,
 } from "@/validations/profileCompletionSchema";
 import { pastDayStatusBoundary } from "@/lib/onboarding/cutoff";
+import { calculateTotalPayable } from "@/lib/delivery/deliveryCharge";
 import {
   generateDailyPreferences,
   RecordCountMismatchError,
@@ -220,6 +221,21 @@ export interface DeliveryChargeContext {
   calculatedDeliveryCharge?: number | null;
 }
 
+/**
+ * Optional miscellaneous charge context passed by the server action when the
+ * admin adds an extra, ad-hoc charge (additional products, one-off services)
+ * on top of the plan price and delivery charge.
+ *
+ * The `label` is admin-supplied and is what the customer's invoice prints — the
+ * word "Miscellaneous" is never surfaced to the customer.
+ */
+export interface MiscChargeContext {
+  /** The miscellaneous charge amount in INR (> 0 when present). */
+  miscCharge: number;
+  /** Admin-supplied name for the charge, e.g. "Additional product charges". */
+  miscChargeLabel: string;
+}
+
 // ---------------------------------------------------------------------------
 // onboard — the atomic quick-onboarding write
 // ---------------------------------------------------------------------------
@@ -245,15 +261,18 @@ export interface DeliveryChargeContext {
  *      by deleting the just-created auth identity and return an error, so no
  *      partial Customer_Record is ever observable.
  *
- * @param payload the Zod-validated Quick_Onboarding_Form input
- * @param admin   the resolved admin context (audit `created_by`)
- * @param pin     optional PIN context for setting a temp PIN at onboarding
+ * @param payload  the Zod-validated Quick_Onboarding_Form input
+ * @param admin    the resolved admin context (audit `created_by`)
+ * @param pin      optional PIN context for setting a temp PIN at onboarding
+ * @param delivery optional delivery charge recorded against the subscription
+ * @param misc     optional miscellaneous charge + its admin-supplied invoice label
  */
 export async function onboard(
   payload: QuickOnboardingInput,
   admin: AdminContext = {},
   pin?: PinContext,
   delivery?: DeliveryChargeContext,
+  misc?: MiscChargeContext,
 ): Promise<OnboardOutcome> {
   // (1) PAID precondition (Req 8.1/8.2). No customer record is persisted while
   //     Payment_Status is anything other than PAID.
@@ -471,6 +490,15 @@ export async function onboard(
   }
   const authUserId = authData.user.id;
 
+  // Extra charges recorded alongside the plan amount. Both are optional and
+  // default to "not charged" so callers that omit them are unaffected. The
+  // miscellaneous label is only persisted when an amount is actually charged,
+  // matching the chk_*_misc_charge_label DB constraint.
+  const deliveryChargeAmount = delivery?.deliveryCharge ?? 0;
+  const miscChargeAmount = misc && misc.miscCharge > 0 ? misc.miscCharge : 0;
+  const miscChargeLabel =
+    miscChargeAmount > 0 ? misc!.miscChargeLabel.trim() : null;
+
   // (8) Atomic, all-or-nothing DB write (Req 6.6).
   const rpcInput: OnboardCustomerRpcInput = {
     user: {
@@ -511,16 +539,25 @@ export async function onboard(
       status: "ACTIVE",
       total_days: category === "MEAL" && plan ? plan.totalDays : (payload.kitDurationDays ?? 0),
       pause_credits_total: category === "MEAL" && plan ? plan.pauseCredits : 0,
-      delivery_charge: delivery?.deliveryCharge ?? 0,
+      delivery_charge: deliveryChargeAmount,
+      misc_charge: miscChargeAmount,
+      misc_charge_label: miscChargeLabel,
       franchise_id: franchiseId,
       initial_meal_category_id: mealCategoryId,  // For daily preferences generation
     },
     payment: {
-      amount: (category === "MEAL" && plan ? plan.totalAmount : (kitProduct?.totalAmount ?? 0)) + (delivery?.deliveryCharge ?? 0),
+      // Total_Payable = plan/kit amount + delivery charge + miscellaneous charge.
+      amount: calculateTotalPayable(
+        category === "MEAL" && plan ? plan.totalAmount : (kitProduct?.totalAmount ?? 0),
+        deliveryChargeAmount,
+        miscChargeAmount,
+      ),
       base_amount: category === "MEAL" && plan ? plan.baseAmount : (kitProduct?.baseAmount ?? 0),
       tax_percent: category === "MEAL" && plan ? plan.taxPercent : (kitProduct?.taxPercent ?? 5),
       tax_amount: category === "MEAL" && plan ? plan.taxAmount : (kitProduct?.taxAmount ?? 0),
-      delivery_charge: delivery?.deliveryCharge ?? 0,
+      delivery_charge: deliveryChargeAmount,
+      misc_charge: miscChargeAmount,
+      misc_charge_label: miscChargeLabel,
       paid_at: nowIso,
       payment_method: "COUNTER",
       franchise_id: franchiseId,
