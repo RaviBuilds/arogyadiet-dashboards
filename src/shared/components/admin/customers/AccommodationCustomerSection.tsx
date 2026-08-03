@@ -138,8 +138,12 @@ export function AccommodationCustomerSection({
   const [currentPage, setCurrentPage] = useState(0);
   const PAGE_SIZE = 20;
 
-  // Apply internal filters to the customers list
-  const displayCustomers = useMemo(() => {
+  // Apply the filters that DON'T depend on stayInfoMap first. This list drives
+  // fetchStayInfo below, so it must never depend on stayInfoMap itself —
+  // otherwise every fetch response creates a new Map, which would recompute
+  // this list, which would re-trigger the fetch, looping forever and leaving
+  // the table stuck on "Loading accommodation customers...".
+  const baseFilteredCustomers = useMemo(() => {
     let result = customers;
 
     if (showArchived) {
@@ -162,6 +166,23 @@ export function AccommodationCustomerSection({
       result = result.filter((c) => !c.hasMedicalHistory);
     }
 
+    // Dietitian filter
+    if (filterDietitian !== "ALL") {
+      if (filterDietitian === "UNASSIGNED") {
+        result = result.filter((c) => !c.dietitianName);
+      } else {
+        result = result.filter((c) => c.dietitianName === filterDietitian);
+      }
+    }
+
+    return result;
+  }, [customers, showArchived, filterDiet, filterStatus, filterMedical, filterDietitian]);
+
+  // Layer the stay-info-dependent filters on top. This is allowed to depend
+  // on stayInfoMap since it does NOT feed back into fetchStayInfo.
+  const displayCustomers = useMemo(() => {
+    let result = baseFilteredCustomers;
+
     // Stay status filter (applied after stay info loads)
     if (filterStayStatus !== "ALL" && stayInfoMap.size > 0) {
       result = result.filter((c) => {
@@ -179,15 +200,6 @@ export function AccommodationCustomerSection({
       });
     }
 
-    // Dietitian filter
-    if (filterDietitian !== "ALL") {
-      if (filterDietitian === "UNASSIGNED") {
-        result = result.filter((c) => !c.dietitianName);
-      } else {
-        result = result.filter((c) => c.dietitianName === filterDietitian);
-      }
-    }
-
     // Checkout-in-days filter
     if (checkoutInDays !== null && stayInfoMap.size > 0) {
       const now = new Date();
@@ -202,7 +214,7 @@ export function AccommodationCustomerSection({
     }
 
     return result;
-  }, [customers, showArchived, filterDiet, filterStatus, filterMedical, filterStayStatus, filterStayType, filterDietitian, checkoutInDays, stayInfoMap]);
+  }, [baseFilteredCustomers, filterStayStatus, filterStayType, checkoutInDays, stayInfoMap]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -232,15 +244,17 @@ export function AccommodationCustomerSection({
     return displayCustomers.slice(start, start + PAGE_SIZE);
   }, [displayCustomers, currentPage, PAGE_SIZE]);
 
-  // Fetch stay info for all visible accommodation customers
+  // Fetch stay info for all visible accommodation customers. Depends on
+  // baseFilteredCustomers (not displayCustomers) to avoid the fetch → new Map
+  // → displayCustomers recompute → refetch loop described above.
   const fetchStayInfo = useCallback(async () => {
-    if (displayCustomers.length === 0) {
+    if (baseFilteredCustomers.length === 0) {
       setStayInfoMap(new Map());
       return;
     }
 
     setLoadingStayInfo(true);
-    const ids = displayCustomers.map((c) => c.id);
+    const ids = baseFilteredCustomers.map((c) => c.id);
     const result = await getBulkAccommodationStayInfoAction(ids);
 
     if ("success" in result && result.success) {
@@ -251,7 +265,7 @@ export function AccommodationCustomerSection({
       setStayInfoMap(map);
     }
     setLoadingStayInfo(false);
-  }, [displayCustomers]);
+  }, [baseFilteredCustomers]);
 
   useEffect(() => {
     fetchStayInfo();
