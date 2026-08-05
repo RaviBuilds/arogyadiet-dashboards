@@ -33,7 +33,10 @@ import {
   LOG_DATE_IN_FUTURE,
   LOG_DATE_IS_PAUSED,
   LOG_NO_LONGER_EDITABLE,
+  REOPEN_REPORT_TO_EDIT,
+  REPORT_IS_LOCKED,
 } from "@/lib/dietitian/messages";
+import { findReportCardForDate } from "@/services/ReportCardService";
 import { healthLogSchemaFor } from "@/validations/healthLogSchema";
 import {
   upsertHealthLog,
@@ -248,6 +251,43 @@ export async function submitHealthLog(
     return reject(LOG_DATE_IN_FUTURE, action);
   }
 
+  // 4b. Report_Card lock (report-card-lifecycle Phase 3). Resolved by DATE, not
+  // by the governing record, because an edit may target a date inside an older
+  // period whose report is already closed.
+  //
+  // A date covered by no report card is NOT rejected: a log outside every
+  // Logging_Window belongs to no report and keeps its pre-feature behaviour.
+  const coveringReport = await findReportCardForDate(
+    validated.customerProfileId,
+    validated.logDate,
+  );
+
+  if (coveringReport && !coveringReport.isEditable) {
+    // `isReopenable` distinguishes the one closed report that can still be
+    // amended from the older ones that are final, so the message names a remedy
+    // only when one exists.
+    return reject(
+      coveringReport.isReopenable ? REOPEN_REPORT_TO_EDIT : REPORT_IS_LOCKED,
+      action,
+    );
+  }
+
+  /**
+   * Amendment mode: the report was closed and has since been reopened, so the
+   * Dietitian is deliberately revising a finished period. The same-day edit
+   * window is relaxed for its logs — otherwise reopening would let them edit the
+   * REPORT but not the logs inside it, which is the only reason to reopen.
+   *
+   * Req 18.1/18.2 are unchanged for normal operation: a report that has never
+   * been closed still enforces the same-day window, so this is not a general
+   * loosening of retroactive-edit protection. Authorship (Req 18.3) still
+   * applies in every case.
+   */
+  const isAmendment =
+    coveringReport !== null &&
+    coveringReport.status === "ACTIVE" &&
+    coveringReport.reopenCount > 0;
+
   if (existing) {
     // 5a. Authorship — an update by a different Dietitian is refused
     // (Req 18.3) before the edit window is even considered.
@@ -255,8 +295,8 @@ export async function submitHealthLog(
       return reject(CAN_ONLY_EDIT_OWN_LOGS, action);
     }
     // 5b. Same-day edit window, anchored to the log's own submission date —
-    // NOT the log date it describes (Req 18.1, 18.2).
-    if (existing.submissionDateIst !== submissionDateIst) {
+    // NOT the log date it describes (Req 18.1, 18.2). Skipped in amendment mode.
+    if (!isAmendment && existing.submissionDateIst !== submissionDateIst) {
       return reject(LOG_NO_LONGER_EDITABLE, action);
     }
     // Req 15.10 — a Paused_Day never blocks an update to an existing log.
@@ -280,6 +320,11 @@ export async function submitHealthLog(
     log_date: validated.logDate,
     author_user_id: actor.userId,
     customer_category: input.category,
+    // Link the log to the Report_Card covering its date, so the lock check above
+    // and the per-report reads have a durable key rather than re-deriving from
+    // dates (report-card-lifecycle Phase 3). `null` when the date falls outside
+    // every Logging_Window — such a log belongs to no report.
+    report_card_id: coveringReport?.id ?? null,
     // Req 25.8 — only the values the Dietitian entered in this submission are
     // ever persisted; no Self_Log value is read or merged in above.
     parameters: validated.parameters,

@@ -35,6 +35,7 @@ import {
   AvatarImage,
 } from "@/shared/components/ui/avatar";
 import { createClient } from "@/lib/supabase/client";
+import { NotificationBell } from "@/components/shared/NotificationBell";
 
 interface MasterNavbarProps {
   userProfile: {
@@ -113,8 +114,12 @@ export default function MasterNavbar({ userProfile, email }: MasterNavbarProps) 
           })}
         </nav>
 
-        {/* Right: Mobile Menu & Avatar */}
+        {/* Right: Notifications, Mobile Menu & Avatar */}
         <div className="flex items-center space-x-3">
+          {userProfile.id ? (
+            <NotificationBell userId={userProfile.id} showPopupToggle />
+          ) : null}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

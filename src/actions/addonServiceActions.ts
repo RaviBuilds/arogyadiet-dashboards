@@ -18,6 +18,10 @@ import {
   addonServiceRequestSchema,
 } from "@/validations/accommodationSchema";
 import type { AddonServiceRequestRow } from "@/repositories/addonServiceRepository";
+import {
+  OPEN_ADDON_SERVICE_STATUSES,
+  type AddonServiceStatus,
+} from "@/types/accommodation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -154,20 +158,41 @@ export async function requestAddonServiceAction(
       return { error: "Validation failed", fieldErrors };
     }
 
-    // 3. Verify customer has an active stay
+    // 3. Verify customer has an active stay — once checked out (FINISHED) or
+    //    a no-show (EXPIRED), add-on services are no longer offered.
     const activeStay = await stayRepository.getActiveStay(auth.customerProfileId);
     if (!activeStay) {
       return { error: "Service requests are available during active stays only" };
     }
 
-    // 4. Create the service request
+    // 4. Block a duplicate request for THIS service while one is still open.
+    //    This is what stops the "clicked Ayurvedic Massage 3 times" bug. The
+    //    gate is per service type, not global: a pending Therapy Session must
+    //    not stop the customer from also requesting a Massage or Yoga session.
+    const existingRequests = await addonServiceRepository.getServiceRequests(
+      auth.customerProfileId
+    );
+    const hasOpenRequestForService = existingRequests.some(
+      (r) =>
+        r.service_type === parsed.data.serviceType &&
+        OPEN_ADDON_SERVICE_STATUSES.includes(r.status as AddonServiceStatus)
+    );
+    if (hasOpenRequestForService) {
+      const serviceLabel =
+        SERVICE_TYPE_LABELS[parsed.data.serviceType] ?? parsed.data.serviceType;
+      return {
+        error: `You already have a ${serviceLabel} request in progress. It must be completed before you can request it again.`,
+      };
+    }
+
+    // 5. Create the service request
     const request = await addonServiceRepository.createServiceRequest({
       customerProfileId: auth.customerProfileId,
       stayEntryId: activeStay.id,
       serviceType: parsed.data.serviceType,
     });
 
-    // 5. Alert the admins who act on these requests. Inventory-only and
+    // 6. Alert the admins who act on these requests. Inventory-only and
     //    Dietitian admins are skipped — the request is outside their remit.
     await notifyAddonServiceRequested(
       auth.customerProfileId,
@@ -187,7 +212,14 @@ export async function requestAddonServiceAction(
 // ---------------------------------------------------------------------------
 
 /**
- * Get all add-on service requests for a customer.
+ * Get all add-on service requests for the authenticated customer.
+ *
+ * SECURITY: this reads through the service-role client, so it must never
+ * serve an arbitrary caller-supplied profile id. The `customerProfileId`
+ * argument is accepted for call-site clarity but is verified against the
+ * session — a mismatch is rejected rather than honoured. Admin surfaces use
+ * the separately gated actions in `customerHistoryActions` /
+ * `accommodationCustomerActions` instead.
  *
  * Req 11.3
  */
@@ -195,7 +227,18 @@ export async function getAddonServiceRequestsAction(
   customerProfileId: string
 ): Promise<ActionResult<AddonServiceRequestRow[]>> {
   try {
-    const requests = await addonServiceRepository.getServiceRequests(customerProfileId);
+    const auth = await authenticateCustomer();
+    if (!auth.success) {
+      return { error: auth.error };
+    }
+
+    if (customerProfileId !== auth.customerProfileId) {
+      return { error: "Unauthorized" };
+    }
+
+    const requests = await addonServiceRepository.getServiceRequests(
+      auth.customerProfileId
+    );
     return { success: true, data: requests };
   } catch (err) {
     console.error("getAddonServiceRequestsAction error:", err);
@@ -219,7 +262,7 @@ export async function getAddonServiceRequestsAction(
  */
 export async function updateAddonServiceStatusAction(
   requestId: string,
-  status: "CONFIRMED" | "COMPLETED"
+  status: "CONFIRMED" | "COMPLETED" | "CANCELLED"
 ): Promise<ActionResult<undefined>> {
   try {
     const gate = await checkGroupManage("customers");
@@ -232,12 +275,21 @@ export async function updateAddonServiceStatusAction(
     // Verify request exists before updating
     const { data: existing, error: fetchError } = await admin
       .from("addon_service_requests")
-      .select("id")
+      .select("id, status")
       .eq("id", requestId)
       .single();
 
     if (fetchError || !existing) {
       return { error: "Service request not found." };
+    }
+
+    // A delivered service is terminal — it cannot be walked back to
+    // cancelled, which would erase the fact that it happened.
+    if (existing.status === "COMPLETED") {
+      return { error: "This request is already completed." };
+    }
+    if (existing.status === "CANCELLED") {
+      return { error: "This request is already cancelled." };
     }
 
     // Update the status via the repository
@@ -247,5 +299,58 @@ export async function updateAddonServiceStatusAction(
   } catch (err) {
     console.error("updateAddonServiceStatusAction error:", err);
     return { error: "Failed to update service request status." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// cancelAddonServiceRequestAction
+// ---------------------------------------------------------------------------
+
+/**
+ * Lets the authenticated customer withdraw their OWN add-on service
+ * request, as long as it is still open (PENDING or CONFIRMED).
+ *
+ * A COMPLETED request can no longer be cancelled — the service already
+ * happened. Ownership is enforced by comparing `customer_profile_id`
+ * against the authenticated session, so a customer can never cancel
+ * another customer's request.
+ */
+export async function cancelAddonServiceRequestAction(
+  requestId: string
+): Promise<ActionResult<undefined>> {
+  try {
+    const auth = await authenticateCustomer();
+    if (!auth.success) {
+      return { error: auth.error };
+    }
+
+    const admin = createAdminClient();
+
+    const { data: existing, error: fetchError } = await admin
+      .from("addon_service_requests")
+      .select("id, customer_profile_id, status")
+      .eq("id", requestId)
+      .single();
+
+    if (fetchError || !existing) {
+      return { error: "Service request not found." };
+    }
+
+    if (existing.customer_profile_id !== auth.customerProfileId) {
+      return { error: "Unauthorized" };
+    }
+
+    if (!OPEN_ADDON_SERVICE_STATUSES.includes(
+      existing.status as AddonServiceStatus
+    )) {
+      return { error: "Only a pending or confirmed request can be cancelled." };
+    }
+
+    await addonServiceRepository.updateServiceStatus(requestId, "CANCELLED");
+
+    return { success: true, data: undefined };
+  } catch (err) {
+    console.error("cancelAddonServiceRequestAction error:", err);
+    return { error: "Failed to cancel service request." };
   }
 }

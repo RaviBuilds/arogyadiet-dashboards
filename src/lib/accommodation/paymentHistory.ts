@@ -57,3 +57,40 @@ export function buildPaymentHistoryRows(
     receiptLinkTarget: `/admin/customers/${tx.customerProfileId}/billing/stay-receipt/${tx.id}`,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Extension history (below Payment History on the Accommodation tab)
+// ---------------------------------------------------------------------------
+
+import type { StayExtension, ExtensionHistoryRow } from "@/types/accommodation";
+
+/**
+ * Builds an ordered list of extension history rows from a stay's recorded
+ * Stay_Extensions. Purely informational — has no bearing on Total_Paid or
+ * Remaining_Balance, which are derived exclusively from
+ * `buildPaymentHistoryRows`'s source, `StayPaymentTransaction`.
+ *
+ * Sorting: by (extendedOn, createdAt) non-decreasing — earliest first,
+ * mirroring `buildPaymentHistoryRows`.
+ *
+ * This is a pure function — no side effects or DB interaction.
+ */
+export function buildExtensionHistoryRows(
+  extensions: readonly StayExtension[]
+): ExtensionHistoryRow[] {
+  const sorted = [...extensions].sort((a, b) => {
+    const dateCompare = a.extendedOn.localeCompare(b.extendedOn);
+    if (dateCompare !== 0) return dateCompare;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+
+  return sorted.map((ext) => ({
+    id: ext.id,
+    date: ext.extendedOn,
+    additionalNights: ext.additionalNights,
+    additionalAmount: ext.additionalAmount,
+    nightsBefore: ext.nightsBefore,
+    nightsAfter: ext.nightsAfter,
+    totalAmountAfter: ext.totalAmountAfter,
+  }));
+}

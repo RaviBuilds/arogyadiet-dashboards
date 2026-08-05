@@ -74,13 +74,15 @@ export async function createServiceRequest(
 /**
  * Update the status of an addon service request.
  *
- * Accepts only "CONFIRMED" or "COMPLETED" as valid target statuses.
+ * Accepts "CONFIRMED" / "COMPLETED" (admin-driven) or "CANCELLED"
+ * (customer withdrawing their own still-open request) as valid target
+ * statuses.
  *
  * Req 11.3
  */
 export async function updateServiceStatus(
   requestId: string,
-  status: "CONFIRMED" | "COMPLETED"
+  status: "CONFIRMED" | "COMPLETED" | "CANCELLED"
 ): Promise<AddonServiceRequestRow> {
   const admin = createAdminClient();
 
@@ -108,6 +110,43 @@ export async function updateServiceStatus(
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
+
+/**
+ * Count COMPLETED addon service requests per stay, for the given stay IDs.
+ *
+ * Returns a map keyed by `stay_entry_id`. Stays with no completed requests
+ * are omitted, so callers should default a missing key to 0.
+ *
+ * Only COMPLETED is counted — a pending, confirmed or cancelled request was
+ * never actually delivered during the stay.
+ */
+export async function getCompletedCountByStay(
+  stayEntryIds: string[]
+): Promise<Record<string, number>> {
+  if (stayEntryIds.length === 0) return {};
+
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("addon_service_requests")
+    .select("stay_entry_id")
+    .in("stay_entry_id", stayEntryIds)
+    .eq("status", "COMPLETED");
+
+  if (error) {
+    throw new Error(
+      `Failed to count completed addon requests by stay: ${error.message}`
+    );
+  }
+
+  const counts: Record<string, number> = {};
+  for (const row of data ?? []) {
+    const stayId = (row as { stay_entry_id: string }).stay_entry_id;
+    counts[stayId] = (counts[stayId] ?? 0) + 1;
+  }
+
+  return counts;
+}
 
 /**
  * Get all addon service requests for a customer, ordered by requested_at desc.

@@ -75,7 +75,8 @@ const COPY: Record<
   ACCOMMODATION: {
     primaryHeader: "Stay",
     durationHeader: "Nights",
-    extraHeader: null,
+    // Count of add-on wellness services actually delivered during the stay.
+    extraHeader: "Completed Add-ons",
     empty: "This customer has no stays yet.",
   },
 };
@@ -243,7 +244,7 @@ export function CustomerHistoryTab({
             endDate: stay.endDate,
             duration: stay.totalNights,
             status: stay.status,
-            extra: null,
+            extra: String(stay.completedAddonCount),
             reportDisabled: stay.status.toUpperCase() === "PENDING",
           })),
         );
@@ -372,7 +373,18 @@ export function CustomerHistoryTab({
                 </span>
               </TableCell>
               {copy.extraHeader && (
-                <TableCell className="text-center text-sm">{row.extra ?? "—"}</TableCell>
+                <TableCell className="text-center text-sm">
+                  {/* The accommodation extra is a single count, so it gets the
+                      same numeric pill as the Nights column beside it. KIT's
+                      "taken / skipped" pair stays plain text. */}
+                  {category === "ACCOMMODATION" ? (
+                    <span className="inline-flex h-7 min-w-[28px] items-center justify-center rounded-md bg-muted px-2 text-sm font-semibold">
+                      {row.extra ?? "0"}
+                    </span>
+                  ) : (
+                    (row.extra ?? "—")
+                  )}
+                </TableCell>
               )}
               <TableCell>
                 <StatusBadge status={row.status} />

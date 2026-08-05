@@ -23,7 +23,7 @@ export interface AccommodationAddonRequest {
   id: string;
   customerProfileId: string;
   serviceType: string;
-  status: "PENDING" | "CONFIRMED" | "COMPLETED";
+  status: "PENDING" | "CONFIRMED" | "COMPLETED" | "CANCELLED";
   requestedAt: string;
 }
 
@@ -95,6 +95,13 @@ export async function getBulkAccommodationStayInfoAction(
  * Fetches the add-on wellness service requests belonging to the given
  * accommodation customer profile IDs, newest first.
  *
+ * SCOPE: only requests tied to a currently ACTIVE stay are returned. This
+ * panel is a live work queue for guests who are in-house right now — once a
+ * guest checks out (stay FINISHED) or is marked a no-show (EXPIRED), their
+ * requests drop off it entirely, because staff can no longer act on them.
+ * The full per-customer audit trail lives on the Customer_360 Accommodation
+ * tab via `getAdminAddonRequestHistoryAction`.
+ *
  * The caller passes the customer IDs already visible on the Accommodation
  * Customers tab, so the result inherits that tab's franchise scoping — a
  * request can never surface for a customer the admin is not already looking at.
@@ -118,10 +125,30 @@ export async function getAccommodationAddonRequestsAction(
 
     const admin = createAdminClient();
 
+    // Resolve which of these customers currently have an ACTIVE stay, and
+    // which stay rows those are — requests are filtered to those stays.
+    const { data: activeStays, error: stayError } = await admin
+      .from("stay_entries")
+      .select("id")
+      .in("customer_profile_id", customerProfileIds)
+      .eq("status", "ACTIVE");
+
+    if (stayError) {
+      return { error: stayError.message };
+    }
+
+    const activeStayIds = (activeStays ?? []).map((s) => s.id as string);
+
+    // Nobody is currently in-house, so there is nothing actionable.
+    if (activeStayIds.length === 0) {
+      return { success: true, data: [] };
+    }
+
     const { data, error } = await admin
       .from("addon_service_requests")
       .select("id, customer_profile_id, service_type, status, requested_at")
       .in("customer_profile_id", customerProfileIds)
+      .in("stay_entry_id", activeStayIds)
       .order("requested_at", { ascending: false });
 
     if (error) {

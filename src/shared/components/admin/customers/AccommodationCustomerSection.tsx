@@ -1,5 +1,22 @@
 "use client";
 
+// src/shared/components/admin/customers/AccommodationCustomerSection.tsx
+//
+// Accommodation Customers directory. Renders the shared 9-column spine from
+// CustomerTableCells; column 6 (the one category-specific slot) holds the stay
+// state and the check-in → checkout window.
+//
+// Two accommodation-specific readings of the shared columns:
+//   - Column 4 "Location" holds the on-site stay unit (e.g. "Village Style Hut")
+//     rather than pincode + clinic. Accommodation captures no delivery address,
+//     so the unit is the only meaningful "where is this customer served".
+//   - Column 5 "Status & Plan" pairs the account status with the stay length,
+//     because a stay has no package to name.
+//
+// Stay data arrives from a secondary fetch, so it renders an inline spinner in
+// column 6 alone — the rest of each row comes from the customer list and must
+// not be held back.
+
 import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
@@ -26,14 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
-import {
-  Eye,
-  MoreHorizontal,
-  Edit,
-  Trash2,
-  Home,
-  Loader2,
-} from "lucide-react";
+import { Eye, MoreHorizontal, Edit, Trash2, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { DataTableCard } from "../core/DataTableCard";
@@ -47,6 +57,34 @@ import {
   type AccommodationCustomerStayInfo,
 } from "@/actions/admin-actions/accommodationCustomerActions";
 import type { CustomerData } from "./CustomerDashboard";
+import {
+  ContactCell,
+  CustomerInfoCell,
+  DateRangeLine,
+  DietAllergyCell,
+  DietitianCell,
+  LifecycleCell,
+  MedicalRecordCell,
+  StatusPlanCell,
+  StayUnitCell,
+  TableEmptyRow,
+  collectDietitianNames,
+  deriveCheckoutDate,
+  dietAllergyFilterSections,
+  dietitianFilterSections,
+  formatNights,
+  matchesDietAllergy,
+  matchesDietitian,
+  matchesMedical,
+  matchesStatus,
+  medicalFilterSections,
+  statusFilterSections,
+  CUSTOMER_TABLE_COLSPAN,
+  CUSTOMER_TABLE_MIN_WIDTH,
+  CUSTOMER_TABLE_SCROLL_CONTAINER,
+  CUSTOMER_TABLE_STICKY_HEADER,
+  FILTER_ALL,
+} from "./CustomerTableCells";
 
 interface AccommodationCustomerSectionProps {
   customers: CustomerData[];
@@ -66,36 +104,34 @@ interface AccommodationCustomerSectionProps {
   isDietitian?: boolean;
 }
 
-// --- Filter states managed internally ---
-function getStayStatusBadge(status: string | null) {
+const PAGE_SIZE = 20;
+
+/** Stay status chip for column 6. `null` means the customer has no stay entry. */
+function StayStatusBadge({ status }: { status: string | null }) {
   if (!status) {
     return (
       <Badge
         variant="outline"
-        className="rounded-full px-2.5 text-[11px] font-semibold text-slate-500 border-slate-200"
+        className="w-fit rounded-full border-slate-200 px-2.5 text-[11px] font-semibold text-slate-500"
       >
         No Stay
       </Badge>
     );
   }
 
-  const config: Record<string, { bg: string; text: string; border: string }> = {
-    PENDING: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
-    ACTIVE: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200" },
-    FINISHED: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200" },
-    EXPIRED: { bg: "bg-red-50", text: "text-red-700", border: "border-red-200" },
+  const config: Record<string, string> = {
+    PENDING: "border-amber-200 bg-amber-50 text-amber-700",
+    ACTIVE: "border-green-200 bg-green-50 text-green-700",
+    FINISHED: "border-slate-200 bg-slate-50 text-slate-700",
+    EXPIRED: "border-red-200 bg-red-50 text-red-700",
   };
-
-  const style = config[status] ?? config.FINISHED;
 
   return (
     <Badge
       variant="outline"
       className={cn(
-        "rounded-full px-2.5 text-[11px] font-semibold shadow-none w-fit",
-        style.bg,
-        style.text,
-        style.border
+        "w-fit rounded-full px-2.5 text-[11px] font-semibold shadow-none",
+        config[status] ?? config.FINISHED,
       )}
     >
       {status}
@@ -125,128 +161,46 @@ export function AccommodationCustomerSection({
   >(new Map());
   const [loadingStayInfo, setLoadingStayInfo] = useState(false);
 
-  // Internal filters for the accommodation tab
-  const [filterDiet, setFilterDiet] = useState<string>("ALL");
-  const [filterStatus, setFilterStatus] = useState<string>("ALL");
-  const [filterMedical, setFilterMedical] = useState<string>("ALL");
-  const [filterStayStatus, setFilterStayStatus] = useState<string>("ALL");
-  const [filterStayType, setFilterStayType] = useState<string>("ALL");
-  const [filterDietitian, setFilterDietitian] = useState<string>("ALL");
+  // ── Column filter state ─────────────────────────────────────────────────
+  const [filterDiet, setFilterDiet] = useState(FILTER_ALL);
+  const [filterStayType, setFilterStayType] = useState(FILTER_ALL);
+  const [filterStatus, setFilterStatus] = useState(FILTER_ALL);
+  const [filterStayStatus, setFilterStayStatus] = useState(FILTER_ALL);
+  const [filterMedicalRecord, setFilterMedicalRecord] = useState(FILTER_ALL);
+  const [filterDietitian, setFilterDietitian] = useState(FILTER_ALL);
   const [checkoutInDays, setCheckoutInDays] = useState<number | null>(null);
 
   // ── Pagination state ────────────────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(0);
-  const PAGE_SIZE = 20;
 
-  // Apply the filters that DON'T depend on stayInfoMap first. This list drives
-  // fetchStayInfo below, so it must never depend on stayInfoMap itself —
-  // otherwise every fetch response creates a new Map, which would recompute
-  // this list, which would re-trigger the fetch, looping forever and leaving
-  // the table stuck on "Loading accommodation customers...".
+  /**
+   * Every filter that does NOT depend on the stay-info fetch. This is what
+   * drives fetchStayInfo below, so it must never depend on `stayInfoMap` —
+   * otherwise each response would produce a new Map, recompute this list, and
+   * re-trigger the fetch in a loop, leaving the table spinning forever.
+   */
   const baseFilteredCustomers = useMemo(() => {
-    let result = customers;
+    const result = showArchived
+      ? customers.filter((c) => !c.isActive)
+      : customers.filter((c) => c.isActive);
 
-    if (showArchived) {
-      result = result.filter((c) => !c.isActive);
-    } else {
-      result = result.filter((c) => c.isActive);
-    }
+    return result.filter(
+      (c) =>
+        matchesDietAllergy(c, filterDiet) &&
+        matchesStatus(c, filterStatus) &&
+        matchesMedical(c, filterMedicalRecord) &&
+        matchesDietitian(c, filterDietitian),
+    );
+  }, [
+    customers,
+    showArchived,
+    filterDiet,
+    filterStatus,
+    filterMedicalRecord,
+    filterDietitian,
+  ]);
 
-    if (filterDiet !== "ALL") {
-      result = result.filter((c) => c.dietary_preference === filterDiet);
-    }
-
-    if (filterStatus !== "ALL") {
-      result = result.filter((c) => c.status === filterStatus);
-    }
-
-    if (filterMedical === "Yes") {
-      result = result.filter((c) => c.hasMedicalHistory);
-    } else if (filterMedical === "No") {
-      result = result.filter((c) => !c.hasMedicalHistory);
-    }
-
-    // Dietitian filter
-    if (filterDietitian !== "ALL") {
-      if (filterDietitian === "UNASSIGNED") {
-        result = result.filter((c) => !c.dietitianName);
-      } else {
-        result = result.filter((c) => c.dietitianName === filterDietitian);
-      }
-    }
-
-    return result;
-  }, [customers, showArchived, filterDiet, filterStatus, filterMedical, filterDietitian]);
-
-  // Layer the stay-info-dependent filters on top. This is allowed to depend
-  // on stayInfoMap since it does NOT feed back into fetchStayInfo.
-  const displayCustomers = useMemo(() => {
-    let result = baseFilteredCustomers;
-
-    // Stay status filter (applied after stay info loads)
-    if (filterStayStatus !== "ALL" && stayInfoMap.size > 0) {
-      result = result.filter((c) => {
-        const info = stayInfoMap.get(c.id);
-        if (filterStayStatus === "NO_STAY") return !info?.stayStatus;
-        return info?.stayStatus === filterStayStatus;
-      });
-    }
-
-    // Stay type filter
-    if (filterStayType !== "ALL" && stayInfoMap.size > 0) {
-      result = result.filter((c) => {
-        const info = stayInfoMap.get(c.id);
-        return info?.stayType === filterStayType;
-      });
-    }
-
-    // Checkout-in-days filter
-    if (checkoutInDays !== null && stayInfoMap.size > 0) {
-      const now = new Date();
-      const cutoff = new Date(now.getTime() + checkoutInDays * 24 * 60 * 60 * 1000);
-      result = result.filter((c) => {
-        const info = stayInfoMap.get(c.id);
-        if (!info?.startDate || !info?.totalNights) return false;
-        const checkout = new Date(info.startDate);
-        checkout.setDate(checkout.getDate() + info.totalNights);
-        return checkout >= now && checkout <= cutoff;
-      });
-    }
-
-    return result;
-  }, [baseFilteredCustomers, filterStayStatus, filterStayType, checkoutInDays, stayInfoMap]);
-
-  // Reset page when filters change
-  useEffect(() => {
-    setCurrentPage(0);
-  }, [filterDiet, filterStatus, filterMedical, filterStayStatus, filterStayType, filterDietitian, checkoutInDays, searchTerm, showArchived]);
-
-  // Unique stay types for filter
-  const uniqueStayTypes = useMemo(() => {
-    const types = new Set<string>();
-    stayInfoMap.forEach((info) => {
-      if (info.stayType) types.add(info.stayType);
-    });
-    return Array.from(types).sort();
-  }, [stayInfoMap]);
-
-  // Unique dietitian names for filter
-  const uniqueDietitians = useMemo(() => {
-    const names = new Set<string>();
-    customers.forEach((c) => {
-      if (c.dietitianName) names.add(c.dietitianName);
-    });
-    return Array.from(names).sort();
-  }, [customers]);
-
-  const paginatedCustomers = useMemo(() => {
-    const start = currentPage * PAGE_SIZE;
-    return displayCustomers.slice(start, start + PAGE_SIZE);
-  }, [displayCustomers, currentPage, PAGE_SIZE]);
-
-  // Fetch stay info for all visible accommodation customers. Depends on
-  // baseFilteredCustomers (not displayCustomers) to avoid the fetch → new Map
-  // → displayCustomers recompute → refetch loop described above.
+  // Fetch stay info for the customers that survived the non-stay filters.
   const fetchStayInfo = useCallback(async () => {
     if (baseFilteredCustomers.length === 0) {
       setStayInfoMap(new Map());
@@ -271,6 +225,84 @@ export function AccommodationCustomerSection({
     fetchStayInfo();
   }, [fetchStayInfo]);
 
+  // Stay-derived filters are layered on last, since they read the fetched data.
+  const displayCustomers = useMemo(() => {
+    let result = baseFilteredCustomers;
+
+    if (filterStayType !== FILTER_ALL) {
+      result = result.filter(
+        (c) => stayInfoMap.get(c.id)?.stayType === filterStayType,
+      );
+    }
+
+    if (filterStayStatus !== FILTER_ALL) {
+      result = result.filter((c) => {
+        const info = stayInfoMap.get(c.id);
+        if (filterStayStatus === "NO_STAY") return !info?.stayStatus;
+        return info?.stayStatus === filterStayStatus;
+      });
+    }
+
+    if (checkoutInDays !== null) {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + checkoutInDays * 24 * 60 * 60 * 1000);
+      result = result.filter((c) => {
+        const info = stayInfoMap.get(c.id);
+        const checkout = deriveCheckoutDate(info?.startDate, info?.totalNights);
+        if (!checkout) return false;
+        return checkout >= now && checkout <= cutoff;
+      });
+    }
+
+    return result;
+  }, [
+    baseFilteredCustomers,
+    filterStayType,
+    filterStayStatus,
+    checkoutInDays,
+    stayInfoMap,
+  ]);
+
+  // Send the reader back to page 1 whenever the filter set changes, otherwise a
+  // narrower result set can leave them stranded on a now-empty page. Adjusted
+  // during render rather than in an effect — the pattern React recommends for
+  // resetting state in response to changing inputs.
+  const filterKey = [
+    filterDiet,
+    filterStayType,
+    filterStatus,
+    filterStayStatus,
+    filterMedicalRecord,
+    filterDietitian,
+    String(checkoutInDays),
+    searchTerm,
+    String(showArchived),
+  ].join("|");
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (prevFilterKey !== filterKey) {
+    setPrevFilterKey(filterKey);
+    setCurrentPage(0);
+  }
+
+  const paginatedCustomers = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return displayCustomers.slice(start, start + PAGE_SIZE);
+  }, [displayCustomers, currentPage]);
+
+  // Stay unit options for the Location column filter, from the loaded stay data.
+  const uniqueStayTypes = useMemo(() => {
+    const types = new Set<string>();
+    stayInfoMap.forEach((info) => {
+      if (info.stayType) types.add(info.stayType);
+    });
+    return Array.from(types).sort((a, b) => a.localeCompare(b));
+  }, [stayInfoMap]);
+
+  const dietitianOptions = useMemo(
+    () => collectDietitianNames(customers),
+    [customers],
+  );
+
   return (
     <DataTableCard
       header={<SectionHeader title="Accommodation Customers" icon={Home} />}
@@ -293,18 +325,6 @@ export function AccommodationCustomerSection({
             onTermChange={setSearchTerm}
             options={searchOptions}
           />
-          {/* Account status filter — no matching column, so it stays in the toolbar.
-              Diet & Medical History filters now live in their column headers. */}
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-[140px] border-slate-200 bg-white transition-all duration-200">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Status</SelectItem>
-              <SelectItem value="Active">Active</SelectItem>
-              <SelectItem value="Inactive">Inactive</SelectItem>
-            </SelectContent>
-          </Select>
           <Button
             type="button"
             variant={showArchived ? "default" : "outline"}
@@ -340,13 +360,16 @@ export function AccommodationCustomerSection({
         </>
       }
     >
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-slate-50/50 border-b border-slate-200">
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+      <Table
+        containerClassName={CUSTOMER_TABLE_SCROLL_CONTAINER}
+        className={CUSTOMER_TABLE_MIN_WIDTH}
+      >
+        <TableHeader className={CUSTOMER_TABLE_STICKY_HEADER}>
+          <TableRow className="border-b border-slate-200">
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
               Customer Info
             </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
               Contact
             </TableHead>
             <TableHead>
@@ -355,14 +378,24 @@ export function AccommodationCustomerSection({
                 title="Diet & Allergy"
                 value={filterDiet}
                 onChange={setFilterDiet}
-                allValue="ALL"
+                allValue={FILTER_ALL}
+                sections={dietAllergyFilterSections()}
+              />
+            </TableHead>
+            <TableHead>
+              <TableColumnFilter
+                mode="single"
+                title="Location"
+                value={filterStayType}
+                onChange={setFilterStayType}
+                allValue={FILTER_ALL}
+                contentClassName="w-[220px]"
                 sections={[
                   {
-                    label: "Filter by Diet",
+                    label: "Filter by Stay Unit",
                     options: [
-                      { value: "ALL", label: "All Diets" },
-                      { value: "Veg", label: "Veg" },
-                      { value: "Non-Veg", label: "Non-Veg" },
+                      { value: FILTER_ALL, label: "All Stay Units" },
+                      ...uniqueStayTypes.map((t) => ({ value: t, label: t })),
                     ],
                   },
                 ]}
@@ -371,62 +404,44 @@ export function AccommodationCustomerSection({
             <TableHead>
               <TableColumnFilter
                 mode="single"
-                title="Stay Type / Status"
-                value={filterStayStatus !== "ALL" ? `status:${filterStayStatus}` : filterStayType !== "ALL" ? `type:${filterStayType}` : "ALL"}
-                onChange={(val) => {
-                  if (val === "ALL") {
-                    setFilterStayStatus("ALL");
-                    setFilterStayType("ALL");
-                  } else if (val.startsWith("status:")) {
-                    setFilterStayStatus(val.replace("status:", ""));
-                    setFilterStayType("ALL");
-                  } else if (val.startsWith("type:")) {
-                    setFilterStayType(val.replace("type:", ""));
-                    setFilterStayStatus("ALL");
-                  }
-                }}
-                allValue="ALL"
-                sections={[
-                  {
-                    label: "By Status",
-                    options: [
-                      { value: "ALL", label: "All" },
-                      { value: "status:ACTIVE", label: "Active" },
-                      { value: "status:PENDING", label: "Pending" },
-                      { value: "status:FINISHED", label: "Finished" },
-                      { value: "status:NO_STAY", label: "No Stay" },
-                    ],
-                  },
-                  {
-                    label: "By Type",
-                    options: uniqueStayTypes.map((t) => ({ value: `type:${t}`, label: t })),
-                  },
-                ]}
+                title="Status & Nights"
+                value={filterStatus}
+                onChange={setFilterStatus}
+                allValue={FILTER_ALL}
+                contentClassName="w-[200px]"
+                sections={statusFilterSections()}
               />
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Check-in
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Checkout
             </TableHead>
             <TableHead>
               <TableColumnFilter
                 mode="single"
-                title="Medical History"
-                value={filterMedical}
-                onChange={setFilterMedical}
-                allValue="ALL"
+                title="Stay"
+                value={filterStayStatus}
+                onChange={setFilterStayStatus}
+                allValue={FILTER_ALL}
                 sections={[
                   {
-                    label: "Filter by Medical History",
+                    label: "Filter by Stay Status",
                     options: [
-                      { value: "ALL", label: "All Medical" },
-                      { value: "Yes", label: "Has Medical History" },
-                      { value: "No", label: "No Medical History" },
+                      { value: FILTER_ALL, label: "All Stays" },
+                      { value: "ACTIVE", label: "Active" },
+                      { value: "PENDING", label: "Pending" },
+                      { value: "FINISHED", label: "Finished" },
+                      { value: "EXPIRED", label: "Expired" },
+                      { value: "NO_STAY", label: "No Stay" },
                     ],
                   },
                 ]}
+              />
+            </TableHead>
+            <TableHead>
+              <TableColumnFilter
+                mode="single"
+                title="Medical Record"
+                value={filterMedicalRecord}
+                onChange={setFilterMedicalRecord}
+                allValue={FILTER_ALL}
+                sections={medicalFilterSections()}
               />
             </TableHead>
             <TableHead>
@@ -435,180 +450,69 @@ export function AccommodationCustomerSection({
                 title="Dietitian"
                 value={filterDietitian}
                 onChange={setFilterDietitian}
-                allValue="ALL"
-                sections={[
-                  {
-                    label: "Filter by Dietitian",
-                    options: [
-                      { value: "ALL", label: "All Dietitians" },
-                      { value: "UNASSIGNED", label: "Unassigned" },
-                      ...uniqueDietitians.map((n) => ({ value: n, label: n })),
-                    ],
-                  },
-                ]}
+                allValue={FILTER_ALL}
+                contentClassName="w-[200px]"
+                sections={dietitianFilterSections(dietitianOptions)}
               />
             </TableHead>
-            <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <TableHead className="w-[50px] text-xs font-medium uppercase tracking-wider text-slate-500">
               <span className="sr-only">Actions</span>
             </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loadingStayInfo ? (
-            <TableRow>
-              <TableCell
-                colSpan={9}
-                className="text-center py-12 text-sm text-slate-500"
-              >
-                <div className="flex flex-col items-center gap-1.5">
-                  <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-                  <span className="text-sm text-slate-500">
-                    Loading accommodation customers...
-                  </span>
-                </div>
-              </TableCell>
-            </TableRow>
-          ) : displayCustomers.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={9}
-                className="text-center py-12 text-sm text-slate-500"
-              >
-                <div className="flex flex-col items-center gap-1.5">
-                  <Home className="h-8 w-8 text-slate-300" />
-                  <span className="text-sm font-medium text-slate-700">
-                    No accommodation customers found
-                  </span>
-                  <span className="max-w-md text-xs text-slate-500">
-                    No accommodation customers match the current criteria.
-                  </span>
-                </div>
-              </TableCell>
-            </TableRow>
+          {displayCustomers.length === 0 ? (
+            <TableEmptyRow
+              icon={Home}
+              title="No accommodation customers found"
+              hint="No accommodation customers match the current criteria."
+              colSpan={CUSTOMER_TABLE_COLSPAN}
+            />
           ) : (
             paginatedCustomers.map((customer) => {
               const stayInfo = stayInfoMap.get(customer.id);
-              const checkoutDate = stayInfo?.startDate && stayInfo?.totalNights
-                ? (() => { const d = new Date(stayInfo.startDate!); d.setDate(d.getDate() + stayInfo.totalNights!); return d; })()
-                : null;
+              const checkoutDate = deriveCheckoutDate(
+                stayInfo?.startDate,
+                stayInfo?.totalNights,
+              );
 
               return (
                 <TableRow
                   key={customer.id}
-                  className="hover:bg-slate-50 transition-colors duration-200"
+                  className="transition-colors duration-200 hover:bg-slate-50"
                 >
-                  {/* Customer Info */}
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900 tracking-tight">
-                        {customer.fullName}
-                      </span>
-                      <Badge className="rounded-full border-0 bg-teal-100 px-2 text-[10px] font-semibold text-teal-700 hover:bg-teal-100">
-                        STAY
-                      </Badge>
-                    </div>
-                    <div className="text-sm text-slate-500 mt-0.5">
-                      {customer.gender && customer.gender !== "N/A" ? (
-                        <span>
-                          ( {customer.gender.charAt(0).toUpperCase()} -{" "}
-                          {customer.age ? `${customer.age} yrs` : "N/A"} )
-                        </span>
-                      ) : (
-                        <span>( N/A )</span>
-                      )}
-                    </div>
-                  </TableCell>
+                  <CustomerInfoCell customer={customer} />
+                  <ContactCell customer={customer} />
+                  <DietAllergyCell customer={customer} />
 
-                  {/* Contact */}
-                  <TableCell>
-                    <div className="font-medium text-slate-900">
-                      {customer.mobile}
-                    </div>
-                    {customer.email && customer.email !== "N/A" && (
-                      <div className="text-xs text-slate-500 mt-0.5 truncate max-w-[180px]">
-                        {customer.email}
-                      </div>
-                    )}
-                  </TableCell>
+                  {/* Column 4 — on-site stay unit stands in for pincode + clinic. */}
+                  <StayUnitCell unit={stayInfo?.stayType} />
 
-                  {/* Diet & Allergy */}
-                  <TableCell>
-                    <Badge
-                      className={cn(
-                        "rounded-full border-0 px-2 text-[10px] font-semibold",
-                        customer.dietary_preference === "Veg"
-                          ? "bg-green-100 text-green-700 hover:bg-green-100"
-                          : "bg-red-100 text-red-700 hover:bg-red-100"
-                      )}
-                    >
-                      {customer.dietary_preference === "N/A"
-                        ? "Not Set"
-                        : customer.dietary_preference}
-                    </Badge>
-                    {customer.allergies && (
-                      <div className="text-xs text-slate-500 mt-1 truncate max-w-[120px]">
-                        {customer.allergies}
-                      </div>
-                    )}
-                  </TableCell>
+                  {/* Column 5 — a stay has no package, so the sub-line is its length. */}
+                  <StatusPlanCell
+                    status={customer.status}
+                    secondary={formatNights(stayInfo?.totalNights)}
+                  />
 
-                  {/* Stay Type / Status (combined) */}
-                  <TableCell>
-                    <div className="space-y-1">
-                      {getStayStatusBadge(stayInfo?.stayStatus ?? null)}
-                      <div className="text-xs text-slate-600">
-                        {stayInfo?.stayType ?? "—"}
-                      </div>
-                    </div>
-                  </TableCell>
+                  {/* Column 6 — stay state and the check-in → checkout window. */}
+                  <LifecycleCell
+                    loading={loadingStayInfo}
+                    badge={
+                      <StayStatusBadge status={stayInfo?.stayStatus ?? null} />
+                    }
+                    dates={
+                      <DateRangeLine
+                        start={stayInfo?.startDate}
+                        end={checkoutDate}
+                      />
+                    }
+                  />
 
-                  {/* Check-in */}
-                  <TableCell>
-                    <span className="text-sm text-slate-700">
-                      {stayInfo?.startDate
-                        ? new Date(stayInfo.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                        : "—"}
-                    </span>
-                  </TableCell>
+                  <MedicalRecordCell
+                    hasMedicalHistory={customer.hasMedicalHistory}
+                  />
+                  <DietitianCell dietitianName={customer.dietitianName} />
 
-                  {/* Checkout */}
-                  <TableCell>
-                    <span className="text-sm text-slate-700">
-                      {checkoutDate
-                        ? checkoutDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                        : "—"}
-                    </span>
-                  </TableCell>
-
-                  {/* Medical History */}
-                  <TableCell>
-                    {customer.hasMedicalHistory ? (
-                      <Badge
-                        variant="outline"
-                        className="rounded-full px-2.5 text-[11px] font-semibold text-blue-700 border-blue-200 bg-blue-50"
-                      >
-                        Has History
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-slate-500">None</span>
-                    )}
-                  </TableCell>
-
-                  {/* Dietitian */}
-                  <TableCell>
-                    <span
-                      className={cn(
-                        "text-sm",
-                        customer.dietitianName
-                          ? "text-slate-700"
-                          : "text-slate-400 italic",
-                      )}
-                    >
-                      {customer.dietitianName || "Unassigned"}
-                    </span>
-                  </TableCell>
-
-                  {/* Actions */}
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -623,7 +527,7 @@ export function AccommodationCustomerSection({
                         <DropdownMenuItem asChild>
                           <Link
                             href={`/customers/${customer.id}`}
-                            className="cursor-pointer font-medium flex items-center"
+                            className="flex cursor-pointer items-center font-medium"
                           >
                             <Eye className="mr-2 h-4 w-4 text-primary" />
                             View 360 Dashboard
@@ -641,7 +545,7 @@ export function AccommodationCustomerSection({
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                              className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
+                              className="cursor-pointer font-medium text-destructive focus:bg-destructive/10"
                               onClick={() => onDeactivate(customer)}
                               disabled={!customer.isActive}
                             >

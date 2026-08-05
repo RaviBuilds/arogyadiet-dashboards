@@ -20,7 +20,8 @@
 //   2. `PaymentReceiptDocument` (component render) — one representative
 //      render per Payment_Transaction_Type (ADVANCE / PARTIAL_BALANCE_PAYMENT
 //      / REFUND) asserting the rendered DOM carries the correct label,
-//      receipt number, formatted total, and conditional comment/remark lines.
+//      receipt number, and formatted total, and never leaking the internal
+//      comment/remark notes.
 
 import { describe, expect, it } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
@@ -163,21 +164,17 @@ describe("PaymentReceiptDocument — Property 16 (render half)", () => {
               const amountOccurrences = fullText.split(formattedAmount).length - 1;
               expect(amountOccurrences).toBeGreaterThanOrEqual(2);
 
-              // 8. Comment presence/absence — matched against full text
-              //    content since "Comment: " and the value are separate JSX
-              //    text nodes (this also holds for a whitespace-only comment).
-              if (transaction.comment !== null) {
-                expect(fullText).toContain(`Comment: ${transaction.comment}`);
-              } else {
-                expect(fullText).not.toContain("Comment: ");
-              }
-
-              // 9. Remark presence/absence.
-              if (transaction.remark !== null) {
-                expect(fullText).toContain(`Remark: ${transaction.remark}`);
-              } else {
-                expect(fullText).not.toContain("Remark: ");
-              }
+              // 8/9. Comment and remark are internal operations notes: they are
+              //    carried on PaymentReceiptData (the ledger and any internal
+              //    view can read them) but must never be printed on the
+              //    customer-facing document, whatever their value.
+              //    Asserted on the labels rather than the raw values: a short
+              //    generated note can legitimately occur inside unrelated
+              //    boilerplate (a remark of "+" appears in the "+91" mobile
+              //    prefix). The value-level check lives in the fixed-fixture
+              //    test below, which uses a distinctive note.
+              expect(fullText).not.toContain("Comment: ");
+              expect(fullText).not.toContain("Remark: ");
 
               // 10. REFUND-specific heading and total label; others use the
               //     Payment Receipt / Amount Received wording.
@@ -224,7 +221,10 @@ describe("PaymentReceiptDocument — Property 16 (render half)", () => {
     try {
       render(<PaymentReceiptDocument receiptData={receiptData} autoPrint={false} />);
       expect(screen.getByText(receiptData.receiptNumber)).toBeInTheDocument();
-      expect(screen.getByText("Comment: Cash at reception")).toBeInTheDocument();
+      // Comment and remark are internal operations notes: they must never reach
+      // the customer-facing receipt, even when the transaction carries them.
+      expect(screen.queryByText(/Cash at reception/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Comment: /)).not.toBeInTheDocument();
       expect(screen.queryByText(/^Remark: /)).not.toBeInTheDocument();
     } finally {
       cleanup();

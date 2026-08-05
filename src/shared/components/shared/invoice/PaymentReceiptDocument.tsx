@@ -4,8 +4,10 @@
 // shell, header, and print conventions so receipts and invoices look like
 // the same family of document, while staying simpler: no email/address,
 // no line-item table, no discount/GST breakdown — just the single
-// transaction's amount, date, comment, remark, and its ADVANCE / PARTIAL /
-// REFUND label.
+// transaction's amount, date, and its ADVANCE / PARTIAL / REFUND label.
+//
+// The transaction's `comment` and `remark` are internal operations notes and are
+// intentionally omitted from this document.
 //
 // This is a plain server-renderable component (no "use client").
 //
@@ -118,18 +120,12 @@ export function PaymentReceiptDocument({
           </thead>
           <tbody className="divide-y border-b-2 border-zinc-100">
             <tr>
+              {/* Comment and remark are internal operations notes (front-desk
+                  context, reconciliation hints) and are deliberately NOT printed
+                  here. The customer-facing receipt carries only the label,
+                  amount, and date; the notes stay in the admin payment ledger. */}
               <td className="py-5">
                 <p className="font-bold text-zinc-900">{typeLabel}</p>
-                {transaction.comment && (
-                  <p className="text-sm text-zinc-500 mt-1">
-                    Comment: {transaction.comment}
-                  </p>
-                )}
-                {transaction.remark && (
-                  <p className="text-sm text-zinc-500 mt-1">
-                    Remark: {transaction.remark}
-                  </p>
-                )}
               </td>
               <td className="py-5 text-right font-medium text-zinc-900">
                 ₹{transaction.amount.toFixed(2)}

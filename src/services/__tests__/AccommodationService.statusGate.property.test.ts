@@ -39,6 +39,7 @@ const H = vi.hoisted(() => {
     listTransactionsByStay: [] as string[],
     recordTransaction: [] as any[],
     insertAdvanceTransaction: [] as any[],
+    recordExtension: [] as any[],
   };
 
   function reset() {
@@ -49,6 +50,7 @@ const H = vi.hoisted(() => {
     calls.listTransactionsByStay = [];
     calls.recordTransaction = [];
     calls.insertAdvanceTransaction = [];
+    calls.recordExtension = [];
   }
 
   return { calls, reset };
@@ -160,6 +162,22 @@ vi.mock("@/repositories/stayPaymentRepository", async (importOriginal) => {
   };
 });
 
+// extendStay's rejection path never reaches the extension-history write —
+// mocked so a wiring mistake that DID reach it would fail loudly.
+vi.mock("@/repositories/stayExtensionHistoryRepository", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  const { calls } = H;
+  return {
+    ...actual,
+    recordExtension: vi.fn(async (input: any) => {
+      calls.recordExtension.push(input);
+      throw new Error(
+        "recordExtension should not be called when extendStay is rejected at the status gate"
+      );
+    }),
+  };
+});
+
 // ─── System under test (imported after the mocks are registered) ───────────
 import { extendStay, earlyCheckout } from "@/services/AccommodationService";
 import type { StayEntryRow } from "@/repositories/stayRepository";
@@ -249,6 +267,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 19: Extension and e
         expect(calls.insertAdvanceTransaction).toHaveLength(0);
         expect(calls.applyEarlyCheckout).toHaveLength(0);
         expect(calls.finalizeCheckout).toHaveLength(0);
+        expect(calls.recordExtension).toHaveLength(0);
 
         // The stay's nights, Total_Stay_Amount, and status remain unchanged.
         expect(row.total_nights).toBe(seed.stay.totalNights);

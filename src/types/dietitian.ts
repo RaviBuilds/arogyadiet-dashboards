@@ -169,3 +169,133 @@ export interface DietitianActivitySummary {
   customersMissingSelfLog: number;
   rows: DietitianCustomerRow[];
 }
+
+// ---------------------------------------------------------------------------
+// Report_Card lifecycle (report-card-lifecycle, Phase 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which record a Report_Card covers. MEAL and KIT report on a `subscriptions`
+ * row; ACCOMMODATION reports on a `stay_entries` row, so a Stay_Extension folds
+ * into the same report rather than starting a new one.
+ */
+export type ReportCardSubjectType = "SUBSCRIPTION" | "STAY";
+
+/**
+ * A Report_Card's lifecycle state.
+ * - `ACTIVE` — still being filled in; its logs are writable.
+ * - `CLOSED` — finalised with a report-level Closing_Comment.
+ *
+ * A customer may hold several `ACTIVE` report cards at once: an unfinished older
+ * subscription's report coexists with the current one, so the Dietitian can go
+ * back and complete it.
+ */
+export type ReportCardStatus = "ACTIVE" | "CLOSED";
+
+/**
+ * One closable Report_Card, covering exactly one subscription or one stay.
+ *
+ * `reportClosingComment` is the REPORT-level closing statement written at
+ * finalisation — distinct from {@link HealthLog.closingComment}, which is a
+ * mandatory per-day note on every individual log.
+ *
+ * `windowStart` / `windowEnd` snapshot the Logging_Window. They are refreshed
+ * while the report is ACTIVE (a Stay_Extension moves `windowEnd`) and frozen at
+ * finalisation, so a closed report always states the period it actually covered.
+ */
+export interface ReportCard {
+  id: string;
+  customerProfileId: string;
+  subjectType: ReportCardSubjectType;
+  /** Set iff `subjectType === "SUBSCRIPTION"`. */
+  subscriptionId: string | null;
+  /** Set iff `subjectType === "STAY"`. */
+  stayEntryId: string | null;
+  category: CustomerCategory;
+  windowStart: string;
+  windowEnd: string;
+  status: ReportCardStatus;
+  reportClosingComment: string | null;
+  finalisedAt: string | null;
+  finalisedBy: string | null;
+  reopenCount: number;
+  lastReopenedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /**
+   * True when this report's Logging_Window had already ended before the report
+   * itself existed, so its Log_Slots could never have been logged on their
+   * deadline dates.
+   *
+   * Derived by `isRetrospectiveReport` in `src/lib/dietitian/reportCardLifecycle.ts`
+   * from `windowEnd` and `createdAt` — never stored, and never compared against a
+   * hard-coded migration date. Such a report may be finalised on its
+   * Report_Closing_Comment alone; every other rule (write lock, reopen
+   * eligibility, scoping) applies to it unchanged.
+   */
+  isRetrospective: boolean;
+}
+
+/**
+ * A Report_Card plus the derived lock flags read from
+ * `v_report_card_editability` — the single source of truth for the lock rule.
+ *
+ * - `isEditable` — the report's logs may still be written. True for every
+ *   `ACTIVE` report and for the one most-recently-CLOSED report.
+ * - `isReopenable` — true only for that most-recently-CLOSED report.
+ *
+ * Every CLOSED report older than the most recent one is permanently locked for
+ * everyone. Closing the current report shifts the window forward: the newly
+ * closed report becomes reopenable and the previous one locks for good.
+ */
+export interface ReportCardWithEditability extends ReportCard {
+  isEditable: boolean;
+  isReopenable: boolean;
+}
+
+/**
+ * One entry in a customer's Report_Card history: the report card, its lock
+ * flags, and the slot progress that decides whether it can be finalised.
+ *
+ * Declared here rather than in `ReportCardService` because client components
+ * render it. A service module pulls `createAdminClient` (and therefore the
+ * service-role key) into its module graph, so a `"use client"` file must not
+ * depend on one even for types — the same reason `paymentHistory.ts` and
+ * `backdatedStay.ts` were extracted into `src/lib/`.
+ */
+export interface ReportCardHistoryEntry {
+  reportCard: ReportCardWithEditability;
+  /** Total Log_Slots in this report's Logging_Window. */
+  totalSlots: number;
+  /** Slots that already carry a Dietitian_Log. */
+  loggedSlots: number;
+  /**
+   * True when every slot in the window is logged — the precondition for
+   * finalising the report with its Closing_Comment. A window with no slots at
+   * all is NOT completable, since there would be nothing to report on.
+   */
+  isComplete: boolean;
+  /** True when this report covers the customer's currently-governing record. */
+  isCurrent: boolean;
+}
+
+/** A customer's full Report_Card history, newest period first. */
+export interface ReportCardHistory {
+  customerProfileId: string;
+  category: CustomerCategory;
+  entries: ReportCardHistoryEntry[];
+}
+/**
+ * Progress of one Report_Card's Log_Slots. Paired with `ReportCardWithEditability`
+ * and a `LogSlot[]` by the client-facing detail payload.
+ *
+ * Kept free of any `LogSlot` reference on purpose: `@/lib/dietitian/logSlots`
+ * already imports `CustomerCategory` from this module, so naming `LogSlot` here
+ * would close a type-only import cycle. The Server Action composes the two
+ * instead.
+ */
+export interface ReportCardProgress {
+  totalSlots: number;
+  loggedSlots: number;
+  isComplete: boolean;
+}

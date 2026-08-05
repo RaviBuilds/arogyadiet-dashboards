@@ -20,20 +20,40 @@ import {
 } from "@/validations/accommodationSchema";
 import * as stayPaymentRepository from "@/repositories/stayPaymentRepository";
 import * as stayRepository from "@/repositories/stayRepository";
+import * as stayExtensionHistoryRepository from "@/repositories/stayExtensionHistoryRepository";
 import * as AccommodationService from "@/services/AccommodationService";
 import { getISTDateString } from "@/lib/dates/ist";
 import type {
   StayBalanceSnapshot,
   StayLedgerView,
   StayPaymentTransaction,
+  StayExtension,
   PaymentReceiptData,
   StayEntry,
 } from "@/types/accommodation";
 import type { StayPaymentTransactionRow } from "@/repositories/stayPaymentRepository";
+import type { StayExtensionHistoryRow } from "@/repositories/stayExtensionHistoryRepository";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Maps a StayExtensionHistoryRow (snake_case) to a StayExtension (camelCase). */
+function mapExtensionRow(row: StayExtensionHistoryRow): StayExtension {
+  return {
+    id: row.id,
+    stayEntryId: row.stay_entry_id,
+    customerProfileId: row.customer_profile_id,
+    additionalNights: row.additional_nights,
+    additionalAmount: row.additional_amount,
+    nightsBefore: row.nights_before,
+    nightsAfter: row.nights_after,
+    totalAmountBefore: row.total_amount_before,
+    totalAmountAfter: row.total_amount_after,
+    extendedOn: row.extended_on,
+    createdAt: row.created_at,
+  };
+}
 
 /** Maps a StayPaymentTransactionRow (snake_case) to a StayPaymentTransaction (camelCase). */
 function mapTransactionRow(row: StayPaymentTransactionRow): StayPaymentTransaction {
@@ -257,6 +277,10 @@ export async function getStayPaymentLedgerAction(
   const transactionRows = await stayPaymentRepository.listTransactionsByStay(stayId);
   const transactions = transactionRows.map(mapTransactionRow);
 
+  // 3b. Fetch extension history (informational — does not affect balance below)
+  const extensionRows = await stayExtensionHistoryRepository.listExtensionsByStay(stayId);
+  const extensions = extensionRows.map(mapExtensionRow);
+
   // 4. Derive balance
   const balance = AccommodationService.deriveStayBalance(
     stay.paymentAmount,
@@ -277,6 +301,7 @@ export async function getStayPaymentLedgerAction(
   const ledgerView: StayLedgerView = {
     stay,
     transactions,
+    extensions,
     balance,
     hasFinalInvoice,
     visibility,
@@ -317,11 +342,18 @@ export async function getStayPaymentReceiptAction(
   const { createAdminClient } = await import("@/lib/supabase/admin");
   const admin = createAdminClient();
 
-  const { data: profileData } = await admin
+  // `customer_profiles` has two FKs into `users` (user_id and dietitian_id), so a
+  // bare `users(...)` embed is ambiguous and PostgREST rejects the whole query —
+  // which silently emptied the receipt's "Received From" block. Pin the FK.
+  const { data: profileData, error: profileError } = await admin
     .from("customer_profiles")
-    .select("id, users(full_name, mobile)")
+    .select("id, users!customer_profiles_user_id_fkey(full_name, mobile)")
     .eq("id", txRow.customer_profile_id)
     .single();
+
+  if (profileError) {
+    console.error("[getStayPaymentReceiptAction] customer lookup failed", profileError);
+  }
 
   const users = profileData?.users as
     | { full_name: string; mobile: string }

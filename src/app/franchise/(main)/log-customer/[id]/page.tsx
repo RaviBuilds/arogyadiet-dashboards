@@ -16,8 +16,10 @@ import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
 import { Button } from "@/shared/components/ui/button";
 import { HealthLogEntryWorkspace } from "@/shared/components/dietitian/HealthLogEntryWorkspace";
 import { KitSelfLogTrackerPanel } from "@/shared/components/dietitian/KitSelfLogTrackerPanel";
+import { ReportCardHistorySection } from "@/shared/components/dietitian/ReportCardHistorySection";
 import { getCustomerDetailRow } from "@/repositories/dietitian/assignmentRepository";
 import { loadLogWorkspaceData } from "@/services/DietitianLogWorkspaceService";
+import { getReportCardHistory } from "@/services/ReportCardService";
 
 export const revalidate = false;
 
@@ -39,11 +41,20 @@ export default async function FranchiseLogCustomerDetailPage({
   const detail = await getCustomerDetailRow(id);
   if (!detail) redirect(LOG_CUSTOMER_LIST_HREF);
 
-  const workspace = await loadLogWorkspaceData(
-    id,
-    detail.category,
-    scope.ctx.userId,
-  );
+  const [workspace, reportHistory] = await Promise.all([
+    loadLogWorkspaceData(id, detail.category, scope.ctx.userId),
+    // Same report history the admin portal shows (Req 23.4 — both portals must
+    // present the same schedule and periods).
+    getReportCardHistory(id, scope.ctx.userId),
+  ]);
+
+  // Same derivation as the admin portal, so both portals explain Amendment_Mode
+  // identically rather than one of them leaving it unexplained.
+  const currentReport = reportHistory.entries.find(
+    (entry) => entry.isCurrent,
+  )?.reportCard;
+  const amendmentMode =
+    currentReport?.status === "ACTIVE" && currentReport.reopenCount > 0;
 
   return (
     <div className="flex flex-col gap-6 pb-4">
@@ -72,6 +83,7 @@ export default async function FranchiseLogCustomerDetailPage({
         initialValues={workspace.initialValues}
         initialEditable={workspace.initialEditable}
         slotsUnavailableReason={workspace.slotsUnavailableReason}
+        amendmentMode={amendmentMode}
         selfLogTrackerPanel={
           workspace.kitSelfLog ? (
             <KitSelfLogTrackerPanel
@@ -84,6 +96,7 @@ export default async function FranchiseLogCustomerDetailPage({
           ) : null
         }
       />
+      <ReportCardHistorySection entries={reportHistory.entries} />
     </div>
   );
 }

@@ -33,6 +33,7 @@ const H = vi.hoisted(() => {
     listTransactionsByStay: [] as any[],
     recordTransaction: [] as any[],
     insertAdvanceTransaction: [] as any[],
+    recordExtension: [] as any[],
   };
 
   function reset() {
@@ -41,6 +42,7 @@ const H = vi.hoisted(() => {
     calls.listTransactionsByStay = [];
     calls.recordTransaction = [];
     calls.insertAdvanceTransaction = [];
+    calls.recordExtension = [];
   }
 
   return { calls, reset };
@@ -102,6 +104,21 @@ vi.mock("@/repositories/stayPaymentRepository", async (importOriginal) => {
       throw new Error(
         "insertAdvanceTransaction should not be called by extendStay"
       );
+    }),
+  };
+});
+
+// extendStay also records an informational history row (Req: extend-stay-history)
+// via this repository — mocked so the property doesn't hit a real database, and
+// so the call can be asserted on below.
+vi.mock("@/repositories/stayExtensionHistoryRepository", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  const { calls } = H;
+  return {
+    ...actual,
+    recordExtension: vi.fn(async (input: any) => {
+      calls.recordExtension.push(input);
+      return { id: "history-row", ...input };
     }),
   };
 });
@@ -283,6 +300,29 @@ describe("Feature: accommodation-payment-lifecycle, Property 18: Stay extension 
         // insert occurs for the extension.
         expect(calls.recordTransaction).toHaveLength(0);
         expect(calls.insertAdvanceTransaction).toHaveLength(0);
+
+        // 6. Exactly one informational extension-history row is recorded,
+        // capturing the nights/total immediately before and after (Req:
+        // extend-stay-history). This is a SEPARATE table from
+        // stay_payment_transactions — it does not affect Total_Paid.
+        expect(calls.recordExtension).toHaveLength(1);
+        expect(calls.recordExtension[0].additionalNights).toBe(
+          seed.additionalNights
+        );
+        expect(calls.recordExtension[0].nightsBefore).toBe(
+          seed.currentTotalNights
+        );
+        expect(calls.recordExtension[0].nightsAfter).toBe(
+          seed.currentTotalNights + seed.additionalNights
+        );
+        expect(calls.recordExtension[0].totalAmountBefore).toBeCloseTo(
+          seed.currentTotalStayAmount,
+          6
+        );
+        expect(calls.recordExtension[0].totalAmountAfter).toBeCloseTo(
+          seed.currentTotalStayAmount + seed.additionalCostAmount,
+          6
+        );
       }),
       { numRuns: 100 }
     );

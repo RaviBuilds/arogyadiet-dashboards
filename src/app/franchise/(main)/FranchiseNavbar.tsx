@@ -39,6 +39,7 @@ import {
 } from "@/shared/components/ui/avatar";
 import { Badge } from "@/shared/components/ui/badge";
 import { createClient } from "@/lib/supabase/client";
+import { NotificationBell } from "@/components/shared/NotificationBell";
 import {
   isDietitianLevel,
   landingRouteFor,
@@ -159,8 +160,12 @@ export default function FranchiseNavbar({
           })}
         </nav>
 
-        {/* Right: Avatar + Mobile Menu */}
+        {/* Right: Notifications + Avatar + Mobile Menu */}
         <div className="flex items-center space-x-3">
+          {userProfile.id ? (
+            <NotificationBell userId={userProfile.id} showPopupToggle />
+          ) : null}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

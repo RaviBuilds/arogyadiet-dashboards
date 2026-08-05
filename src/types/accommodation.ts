@@ -40,8 +40,20 @@ export type MealPreference = "VEG" | "EGG" | "CHICKEN";
  * - PENDING: Request submitted, awaiting confirmation
  * - CONFIRMED: Request confirmed by admin
  * - COMPLETED: Service has been delivered
+ * - CANCELLED: Customer withdrew the request before it was completed
  */
-export type AddonServiceStatus = "PENDING" | "CONFIRMED" | "COMPLETED";
+export type AddonServiceStatus =
+  | "PENDING"
+  | "CONFIRMED"
+  | "COMPLETED"
+  | "CANCELLED";
+
+/** Add-on request statuses that count as "open" — block a new request for
+ *  the same customer until they resolve to COMPLETED or CANCELLED. */
+export const OPEN_ADDON_SERVICE_STATUSES: readonly AddonServiceStatus[] = [
+  "PENDING",
+  "CONFIRMED",
+];
 
 /**
  * A single accommodation booking record representing one continuous stay period.
@@ -197,6 +209,25 @@ export interface StayBalanceSnapshot {
 }
 
 /**
+ * A single recorded Stay_Extension. Purely informational — has no bearing on
+ * Total_Paid or Remaining_Balance, which continue to be derived exclusively
+ * from `StayPaymentTransaction`. See `scripts/create-stay-extension-history.sql`.
+ */
+export interface StayExtension {
+  id: string;
+  stayEntryId: string;
+  customerProfileId: string;
+  additionalNights: number;
+  additionalAmount: number;
+  nightsBefore: number;
+  nightsAfter: number;
+  totalAmountBefore: number | null;
+  totalAmountAfter: number;
+  extendedOn: string; // ISO date (YYYY-MM-DD, IST)
+  createdAt: string;
+}
+
+/**
  * Which payment and checkout affordances the Accommodation tab may render for a stay.
  * `showMarkCheckedOut` and `showGenerateFinalInvoice` are disjoint by construction.
  *
@@ -207,6 +238,13 @@ export interface StayActionVisibility {
   showFullyPaidMessage: boolean;
   showMarkCheckedOut: boolean;
   markCheckedOutEnabled: boolean;
+  /**
+   * Why Mark as Checked Out is visible but disabled, so the UI can explain the
+   * block rather than leaving a dead button. `null` when it is enabled (or not
+   * shown at all). Balance is reported ahead of the date when both apply,
+   * because collecting money is the action the admin can take today.
+   */
+  markCheckedOutBlockedReason: "BALANCE_OUTSTANDING" | "BEFORE_END_DATE" | null;
   showGenerateFinalInvoice: boolean;
   showEarlyCheckout: boolean;
 }
@@ -220,6 +258,8 @@ export interface StayActionVisibility {
 export interface StayLedgerView {
   stay: StayEntry;
   transactions: StayPaymentTransaction[]; // chronological
+  /** Every Stay_Extension applied to this stay, chronological. Informational only. */
+  extensions: StayExtension[];
   balance: StayBalanceSnapshot;
   hasFinalInvoice: boolean;
   visibility: StayActionVisibility;
@@ -257,6 +297,28 @@ export type EarlyCheckoutOutcome = {
   refundDue: number;
   invoiceStatus?: "GENERATED" | "PENDING_RETRY";
 };
+
+/**
+ * A single row in the extension history list displayed on the Accommodation
+ * tab, below Payment History. Produced by `buildExtensionHistoryRows` —
+ * sorted by (extendedOn, createdAt) non-decreasing.
+ */
+export interface ExtensionHistoryRow {
+  /** The Stay_Extension record's id. */
+  id: string;
+  /** Formatted extension date for display (YYYY-MM-DD). */
+  date: string;
+  /** Nights added by this extension. */
+  additionalNights: number;
+  /** Amount folded into Total_Stay_Amount by this extension. */
+  additionalAmount: number;
+  /** Total nights immediately before this extension. */
+  nightsBefore: number;
+  /** Total nights immediately after this extension. */
+  nightsAfter: number;
+  /** Total_Stay_Amount immediately after this extension. */
+  totalAmountAfter: number;
+}
 
 /**
  * A single row in the payment history list displayed on the Accommodation tab.

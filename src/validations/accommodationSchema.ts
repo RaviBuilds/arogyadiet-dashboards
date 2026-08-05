@@ -210,25 +210,11 @@ export const createStaySchema = z.object({
 /** Inferred input type for creating a new stay entry. */
 export type CreateStayInput = z.infer<typeof createStaySchema>;
 
-/**
- * Schema for admin-submitted daily health monitoring data.
- *
- * All metric fields are optional — the admin may record only the metrics
- * measured during a particular checkup session.
- *
- * Validates: Requirements 5.6
- */
-export const adminHealthLogSchema = z.object({
-  logDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  weightKg: z.coerce.number().min(30.0).max(300.0).optional(),
-  bpSystolic: z.coerce.number().int().min(60).max(250).optional(),
-  bpDiastolic: z.coerce.number().int().min(40).max(150).optional(),
-  sugarLevelMgdl: z.coerce.number().int().min(30).max(600).optional(),
-  notes: z.string().max(500).optional(),
-});
-
-/** Inferred input type for admin health log submission. */
-export type AdminHealthLogInput = z.infer<typeof adminHealthLogSchema>;
+// The admin health log schema was removed along with the Accommodation tab's
+// "Record Health Metrics" form. Staff readings are now captured only through the
+// Dietitian's Health_Log form, which validates against `healthLogSchema` in
+// `src/validations/dietitian/`. The `admin_health_logs` table is retained and
+// still surfaced read-only via `v_health_log_timeline`.
 
 /**
  * Schema for requesting an add-on wellness service.

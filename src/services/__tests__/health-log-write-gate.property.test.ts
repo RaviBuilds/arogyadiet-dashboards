@@ -180,6 +180,15 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
+// The write gate also consults the Report_Card lock
+// (report-card-lifecycle Phase 3). This suite covers the DATE, AUTHORSHIP and
+// PAUSED_DAY gates, so the report lock is stubbed to "no covering report" —
+// the state in which those gates behave exactly as they always have. The lock's
+// own behaviour is exercised separately, against a report card fixture.
+vi.mock("@/services/ReportCardService", () => ({
+  findReportCardForDate: vi.fn(async () => null),
+}));
+
 // ─── System under test (imported after the mocks are registered) ───────────
 import {
   submitHealthLog,

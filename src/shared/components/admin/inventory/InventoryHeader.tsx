@@ -100,7 +100,9 @@ export default function InventoryHeader({
       </nav>
 
       <div className="flex items-center gap-2">
-        {userId ? <NotificationBell userId={userId} /> : null}
+        {userId ? (
+          <NotificationBell userId={userId} showPopupToggle />
+        ) : null}
         {endSlot ?? (
           <Button variant="outline" size="sm" asChild>
             <Link href="/admin/dashboard">Admin Dashboard</Link>

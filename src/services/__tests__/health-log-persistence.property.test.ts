@@ -164,6 +164,13 @@ vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => H.makeFakeAdmin(),
 }));
 
+// The write gate consults the Report_Card lock (report-card-lifecycle Phase 3);
+// this suite is about PERSISTENCE, so the lock is stubbed to "no covering
+// report" — the state that leaves the persistence path unchanged.
+vi.mock("@/services/ReportCardService", () => ({
+  findReportCardForDate: vi.fn(async () => null),
+}));
+
 // ─── System under test (imported after the mock is registered) ─────────────
 import { submitHealthLog, type HealthLogActor } from "@/services/HealthLogService";
 import { fieldSetFor } from "@/lib/dietitian/fieldSets";

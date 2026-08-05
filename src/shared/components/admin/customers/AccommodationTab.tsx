@@ -27,11 +27,15 @@ import {
   CalendarPlus,
   Wallet,
   LogOut,
-  Receipt,
+  Banknote,
+  CircleDollarSign,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
-import { AdminHealthLogForm } from "./AdminHealthLogForm";
+
 import { StayExtensionDialog } from "./StayExtensionDialog";
 import { NewStayDialog } from "./NewStayDialog";
+import { CustomerAddonRequestHistory } from "./CustomerAddonRequestHistory";
 import { StayPaymentPanel } from "./StayPaymentPanel";
 import { RecordStayPaymentForm } from "./RecordStayPaymentForm";
 import { RecordStayRefundDialog } from "./RecordStayRefundDialog";
@@ -60,6 +64,10 @@ function getStatusBadgeClasses(status: string): string {
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
   return isValid(date) ? format(date, "dd MMM yyyy") : "N/A";
+}
+
+function formatRupees(amount: number): string {
+  return `₹${amount.toLocaleString("en-IN")}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,13 +131,9 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
       .sort((a, b) => a.startDate.localeCompare(b.startDate))[0] ?? null;
   const currentStay = activeStay ?? earliestPendingStay;
 
-  const stayHistory = allStays.filter(
-    (s) => s.status === "FINISHED" || s.status === "EXPIRED"
-  );
-
   // Default the payment-panel selection: prefer the ACTIVE stay, otherwise
   // the most recent Backdated_Stay still awaiting a final invoice. Keep an
-  // existing selection (e.g. from a history row click) if it still exists.
+  // existing selection if it still exists.
   useEffect(() => {
     if (selectedStayId && allStays.some((s) => s.id === selectedStayId)) {
       return;
@@ -249,39 +253,82 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
   const visibility = currentLedger?.visibility ?? null;
   const balance = balanceOverride ?? currentLedger?.balance ?? null;
 
+  // The overview card owns the money figures whenever the payment panel is
+  // pointed at the very stay it describes. When the panel is aimed elsewhere
+  // (a backdated stay still awaiting its final invoice, with no current stay
+  // to describe), the panel keeps its own summary cards instead.
+  const showFinancialsInOverview =
+    !!currentStay && !!selectedStayId && selectedStayId === currentStay.id;
+
+  const paidPercent =
+    balance && balance.totalStayAmount > 0
+      ? Math.min(
+          100,
+          Math.max(0, Math.round((balance.totalPaid / balance.totalStayAmount) * 100))
+        )
+      : 0;
+
+  const canExtendStay = currentStay?.status === "ACTIVE";
+  // Early Checkout only ever applies to the ACTIVE stay, so it is safe to sit
+  // beside Extend Stay in the Current Stay header.
+  const canEarlyCheckout =
+    !!visibility?.showEarlyCheckout &&
+    !!selectedStay &&
+    selectedStay.id === currentStay?.id;
+
   return (
     <div className="space-y-8">
-      {/* ─── Active Stay Overview ─── */}
-      <div>
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold tracking-tight">Current Stay</h2>
-            <p className="text-sm text-muted-foreground">
-              Active or upcoming stay details for this customer.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {currentStay?.status === "ACTIVE" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowExtendDialog(true)}
-              >
-                <CalendarPlus className="h-4 w-4 mr-2" />
-                Extend Stay
-              </Button>
-            )}
-            {canAddNewStay && (
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => setShowNewStayDialog(true)}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Stay
-              </Button>
-            )}
-          </div>
+      {/* ─── Current stay header + primary stay actions ─── */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight">Current Stay</h2>
+          <p className="text-sm text-muted-foreground">
+            Active or upcoming stay details for this customer.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Extend Stay and Early Checkout are the two lifecycle actions on a
+              live stay, so they sit side by side in one segmented group. */}
+          {(canExtendStay || canEarlyCheckout) && (
+            <div className="inline-flex items-center rounded-md border bg-background shadow-sm overflow-hidden">
+              {canExtendStay && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-none h-9 px-3 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                  onClick={() => setShowExtendDialog(true)}
+                >
+                  <CalendarPlus className="h-4 w-4 mr-2" />
+                  Extend Stay
+                </Button>
+              )}
+              {canExtendStay && canEarlyCheckout && (
+                <span aria-hidden className="h-5 w-px bg-border" />
+              )}
+              {canEarlyCheckout && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-none h-9 px-3 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                  onClick={() => setShowEarlyCheckoutDialog(true)}
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Early Checkout
+                </Button>
+              )}
+            </div>
+          )}
+          {canAddNewStay && (
+            <Button
+              variant="default"
+              size="sm"
+              className="h-9"
+              onClick={() => setShowNewStayDialog(true)}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Stay
+            </Button>
+          )}
         </div>
       </div>
 
@@ -326,7 +373,7 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
                 </div>
               </div>
             </div>
-            <div className="mt-4 pt-4 border-t flex items-center gap-4">
+            <div className="mt-4 pt-4 border-t flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">
@@ -342,6 +389,126 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
                 </Badge>
               )}
             </div>
+
+            {/* ─── Payment summary for this stay (Total / Paid / Remaining) ─── */}
+            {showFinancialsInOverview && (
+              <div className="mt-4 pt-4 border-t">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Payment Summary
+                  </p>
+                  {balance &&
+                    (balance.isFullyPaid ? (
+                      <Badge
+                        variant="outline"
+                        className="border-emerald-500 bg-emerald-50 text-emerald-700"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                        Fully Paid
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="border-amber-500 bg-amber-50 text-amber-700"
+                      >
+                        <AlertCircle className="h-3.5 w-3.5 mr-1" />
+                        Balance Due
+                      </Badge>
+                    ))}
+                </div>
+
+                {balance ? (
+                  <div className="rounded-lg border bg-background/80 p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-0 sm:divide-x sm:divide-border">
+                      <div className="flex items-start gap-3 sm:pr-4">
+                        <Banknote className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Total Stay Amount
+                          </p>
+                          <p className="text-lg font-semibold tabular-nums">
+                            {formatRupees(balance.totalStayAmount)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3 sm:px-4">
+                        <Wallet className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Total Paid
+                          </p>
+                          <p className="text-lg font-semibold tabular-nums text-emerald-700">
+                            {formatRupees(balance.totalPaid)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3 sm:pl-4">
+                        <CircleDollarSign
+                          className={`h-5 w-5 mt-0.5 shrink-0 ${
+                            balance.isFullyPaid ? "text-emerald-600" : "text-amber-600"
+                          }`}
+                        />
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Remaining Balance
+                          </p>
+                          <p
+                            className={`text-lg font-semibold tabular-nums ${
+                              balance.isFullyPaid ? "text-emerald-700" : "text-amber-700"
+                            }`}
+                          >
+                            {formatRupees(Math.max(0, balance.remainingBalance))}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Paid-vs-total progress */}
+                    <div className="mt-4">
+                      <div
+                        role="progressbar"
+                        aria-label="Stay payment collected"
+                        aria-valuenow={paidPercent}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                      >
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            balance.isFullyPaid ? "bg-emerald-500" : "bg-amber-500"
+                          }`}
+                          style={{ width: `${paidPercent}%` }}
+                        />
+                      </div>
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        {paidPercent}% collected
+                        {balance.refundDue > 0 && (
+                          <span className="text-blue-700 font-medium">
+                            {" "}
+                            · Refund due {formatRupees(balance.refundDue)}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border bg-background/80 p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="flex items-start gap-3">
+                          <Skeleton className="h-5 w-5 rounded" />
+                          <div className="space-y-1.5 w-full">
+                            <Skeleton className="h-3 w-24" />
+                            <Skeleton className="h-5 w-20" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <Skeleton className="mt-4 h-1.5 w-full rounded-full" />
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -357,10 +524,12 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
         </Card>
       )}
 
-      {/* ─── Health Logs Section (Req 13.5, 13.6) ─── */}
-      {currentStay?.status === "ACTIVE" && (
-        <AdminHealthLogForm stayId={currentStay.id} />
-      )}
+      {/* Health logs are neither captured nor listed anywhere in the admin
+          portal any more. Recording and reviewing readings belongs entirely to
+          the Dietitian portal, which reads `v_health_log_timeline` through its
+          own scoped path. The `admin_health_logs` / `customer_health_logs`
+          tables and that view are all retained — only the admin-side surfaces
+          are gone. */}
 
       {/* ─── Payment & Checkout ─── */}
       {selectedStayId && (
@@ -371,40 +540,25 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
               <p className="text-sm text-muted-foreground">
                 {selectedStay && selectedStay.id !== currentStay?.id
                   ? `Viewing the stay from ${formatDate(selectedStay.startDate)} to ${formatDate(selectedStay.endDate)}.`
-                  : "Balance, payment history, and checkout actions for the current stay."}
+                  : "Payment history and checkout actions for the current stay. Balance is shown in the overview above."}
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              {visibility?.showEarlyCheckout && selectedStay && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowEarlyCheckoutDialog(true)}
-                >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Early Checkout
-                </Button>
-              )}
-              {balance && balance.refundDue > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowRefundDialog(true)}
-                >
-                  <Wallet className="h-4 w-4 mr-2" />
-                  Record Refund
-                </Button>
-              )}
-            </div>
+            {balance && balance.refundDue > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9"
+                onClick={() => setShowRefundDialog(true)}
+              >
+                <Wallet className="h-4 w-4 mr-2" />
+                Record Refund
+              </Button>
+            )}
           </div>
 
-          <StayPaymentPanel
-            stayId={selectedStayId}
-            balanceOverride={balanceOverride}
-            refreshToken={refreshToken}
-            onLedgerChange={handleLedgerChange}
-          />
-
+          {/* Record Payment sits directly above Payment History: staff record
+              the newest transaction right where they'll immediately see it
+              land at the top of the history feed below (Req 5.1-5.7). */}
           {visibility?.showRecordPayment && selectedStay && balance && (
             <Card>
               <CardHeader className="pb-3">
@@ -421,12 +575,21 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
             </Card>
           )}
 
+          <StayPaymentPanel
+            stayId={selectedStayId}
+            balanceOverride={balanceOverride}
+            refreshToken={refreshToken}
+            onLedgerChange={handleLedgerChange}
+            showSummary={!showFinancialsInOverview}
+          />
+
           {visibility && selectedStay && balance && (
             <StayCheckoutActionBar
               stayId={selectedStayId}
               visibility={visibility}
               remainingBalance={balance.remainingBalance}
               finalInvoiceError={selectedStay.finalInvoiceError}
+              endDate={selectedStay.endDate}
               onCheckedOut={handleCheckedOut}
               onInvoiceGenerated={handleInvoiceGenerated}
             />
@@ -434,69 +597,15 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
         </div>
       )}
 
-      {/* ─── Stay History ─── */}
-      <div>
-        <h2 className="text-xl font-bold tracking-tight">Stay History</h2>
-        <p className="text-sm text-muted-foreground">
-          All past stays for this customer.
-        </p>
-      </div>
+      {/* Past stays are NOT listed here. The Customer_360 "Accommodation
+          History" tab is the single place that enumerates finished/expired
+          stays, so duplicating the list at the bottom of this tab only added
+          scroll. This tab stays focused on the current stay and its money. */}
 
-      {stayHistory.length > 0 ? (
-        <div className="space-y-3">
-          {stayHistory.map((stay) => (
-            <Card key={stay.id} className={stay.id === selectedStayId ? "border-primary/40" : undefined}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-4 flex-wrap">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Dates</p>
-                      <p className="text-sm font-semibold">
-                        {formatDate(stay.startDate)} — {formatDate(stay.endDate)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Nights</p>
-                      <p className="text-sm font-semibold">{stay.totalNights}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Type</p>
-                      <p className="text-sm font-semibold">{stay.stayType}</p>
-                    </div>
-                    {stay.isBackdated && (
-                      <Badge variant="secondary" className="bg-purple-50 text-purple-700 border-purple-200">
-                        Backdated
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className={getStatusBadgeClasses(stay.status)}>
-                      {stay.status}
-                    </Badge>
-                    {stay.status === "FINISHED" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setSelectedStayId(stay.id)}
-                        disabled={stay.id === selectedStayId}
-                      >
-                        <Receipt className="h-4 w-4 mr-2" />
-                        {stay.id === selectedStayId ? "Selected" : "View Payment Details"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-muted-foreground">No past stay records available.</p>
-          </CardContent>
-        </Card>
-      )}
+      {/* ─── Add-on service request history (all stays, all statuses) ───
+          The Accommodation Customers queue only shows in-house guests, so this
+          is where staff can still see what a checked-out guest requested. */}
+      <CustomerAddonRequestHistory customerProfileId={customerProfileId} />
 
       {/* ─── Dialogs ─── */}
       {currentStay?.status === "ACTIVE" && (

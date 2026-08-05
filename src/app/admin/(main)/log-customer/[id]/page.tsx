@@ -24,8 +24,10 @@ import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader"
 import { Button } from "@/shared/components/ui/button";
 import { HealthLogEntryWorkspace } from "@/shared/components/dietitian/HealthLogEntryWorkspace";
 import { KitSelfLogTrackerPanel } from "@/shared/components/dietitian/KitSelfLogTrackerPanel";
+import { ReportCardHistorySection } from "@/shared/components/dietitian/ReportCardHistorySection";
 import { getCustomerDetailRow } from "@/repositories/dietitian/assignmentRepository";
 import { loadLogWorkspaceData } from "@/services/DietitianLogWorkspaceService";
+import { getReportCardHistory } from "@/services/ReportCardService";
 
 export const revalidate = false;
 
@@ -47,11 +49,23 @@ export default async function AdminLogCustomerDetailPage({
   const detail = await getCustomerDetailRow(id);
   if (!detail) redirect(LOG_CUSTOMER_LIST_HREF);
 
-  const workspace = await loadLogWorkspaceData(
-    id,
-    detail.category,
-    scope.ctx.userId,
-  );
+  const [workspace, reportHistory] = await Promise.all([
+    loadLogWorkspaceData(id, detail.category, scope.ctx.userId),
+    // Every subscription/stay this customer has had, so an unfinished older
+    // report stays reachable after a new period has started
+    // (report-card-lifecycle Phase 2).
+    getReportCardHistory(id, scope.ctx.userId),
+  ]);
+
+  // Derived from the history that was already fetched, so the notice costs no
+  // extra query. The condition mirrors `HealthLogService`'s Amendment_Mode gate
+  // exactly — ACTIVE and reopened at least once — so the workspace never claims
+  // an edit window the server would refuse.
+  const currentReport = reportHistory.entries.find(
+    (entry) => entry.isCurrent,
+  )?.reportCard;
+  const amendmentMode =
+    currentReport?.status === "ACTIVE" && currentReport.reopenCount > 0;
 
   return (
     <div className="flex flex-col gap-6 pb-4">
@@ -79,6 +93,7 @@ export default async function AdminLogCustomerDetailPage({
         initialValues={workspace.initialValues}
         initialEditable={workspace.initialEditable}
         slotsUnavailableReason={workspace.slotsUnavailableReason}
+        amendmentMode={amendmentMode}
         selfLogTrackerPanel={
           workspace.kitSelfLog ? (
             <KitSelfLogTrackerPanel
@@ -91,6 +106,7 @@ export default async function AdminLogCustomerDetailPage({
           ) : null
         }
       />
+      <ReportCardHistorySection entries={reportHistory.entries} />
     </div>
   );
 }
