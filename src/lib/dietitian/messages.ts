@@ -95,6 +95,64 @@ export const CAN_ONLY_EDIT_OWN_LOGS = "You can only edit your own logs" as const
 export const HEALTH_LOGS_CANNOT_BE_DELETED =
   "Health logs cannot be deleted" as const;
 
+// ─── Report_Card lifecycle (report-card-lifecycle) ───────────────────────────
+
+/**
+ * The log falls inside a Report_Card that is closed and permanently locked —
+ * i.e. any closed report other than the most recent one. Reopening is not
+ * offered for these, so the message names no remedy.
+ */
+export const REPORT_IS_LOCKED =
+  "This report is closed and can no longer be changed" as const;
+
+/**
+ * A write landed on a closed-but-reopenable Report_Card. The remedy exists, so
+ * the message names it.
+ */
+export const REOPEN_REPORT_TO_EDIT =
+  "Reopen this report before changing its logs" as const;
+
+/** Finalising was attempted while at least one Log_Slot was still unlogged. */
+export const REPORT_HAS_UNLOGGED_SLOTS =
+  "Every log slot must be filled before finalising this report" as const;
+
+/**
+ * Shown on a Retrospective_Report — one whose period ended before the report
+ * existed, so its Log_Slots were never loggable.
+ *
+ * The all-slots-filled precondition is waived for such a report, and this states
+ * why. The relaxation must never apply silently: a Dietitian closing a report
+ * with visible gaps needs to know the gaps are historical rather than their own
+ * omission.
+ */
+export const REPORT_PREDATES_LOG_COLLECTION =
+  "This period ended before log collection began, so its slots cannot be filled. Add a closing comment to finalise it" as const;
+
+/** Finalising was attempted on a Logging_Window that schedules no slots at all. */
+export const REPORT_HAS_NO_SLOTS =
+  "This period has no log slots, so there is nothing to finalise" as const;
+
+/** Finalising was attempted on a Report_Card that is already closed. */
+export const REPORT_ALREADY_CLOSED = "This report is already closed" as const;
+
+/** Reopening was attempted on a Report_Card that is not closed. */
+export const REPORT_NOT_CLOSED = "This report is not closed" as const;
+
+/**
+ * Reopening was attempted on an older closed Report_Card. Only the most
+ * recently closed report may be reopened; everything before it is final.
+ */
+export const ONLY_LATEST_REPORT_CAN_REOPEN =
+  "Only the most recently closed report can be reopened" as const;
+
+/** The report-level Closing_Comment is mandatory when finalising. */
+export const REPORT_CLOSING_COMMENT_REQUIRED =
+  "A closing comment is required to finalise this report" as const;
+
+/** No Report_Card could be resolved for the customer's current period. */
+export const NO_REPORT_FOR_PERIOD =
+  "This customer has no active subscription or stay to log against" as const;
+
 // ─── Reporting empty states ──────────────────────────────────────────────────
 
 /** Report_Card for a customer with no Health_Log; PDF export stays disabled (Req 19.8). */
@@ -162,6 +220,16 @@ export const DIETITIAN_MESSAGES = {
   LOG_NO_LONGER_EDITABLE,
   CAN_ONLY_EDIT_OWN_LOGS,
   HEALTH_LOGS_CANNOT_BE_DELETED,
+  REPORT_IS_LOCKED,
+  REOPEN_REPORT_TO_EDIT,
+  REPORT_HAS_UNLOGGED_SLOTS,
+  REPORT_HAS_NO_SLOTS,
+  REPORT_PREDATES_LOG_COLLECTION,
+  REPORT_ALREADY_CLOSED,
+  REPORT_NOT_CLOSED,
+  ONLY_LATEST_REPORT_CAN_REOPEN,
+  REPORT_CLOSING_COMMENT_REQUIRED,
+  NO_REPORT_FOR_PERIOD,
   NO_HEALTH_LOGS_RECORDED,
   NO_CUSTOMERS_FOR_DIETITIAN,
   NO_DIETITIAN_FOR_FRANCHISE,

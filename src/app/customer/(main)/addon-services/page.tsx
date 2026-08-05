@@ -3,6 +3,7 @@ import { Sparkles } from "lucide-react";
 
 import { getCustomerSession } from "@/lib/customer/get-session";
 import { getAddonServiceRequestsAction } from "@/actions/addonServiceActions";
+import { getActiveStayAction } from "@/actions/stayActions";
 import { AddonServicesClient } from "@/shared/components/customer/addon-services/AddonServicesClient";
 import { IconChip } from "@/shared/components/customer/profile-ui/IconChip";
 import type { AddonServiceRequest } from "@/types/accommodation";
@@ -23,11 +24,16 @@ export default async function AddonServicesPage() {
   if (error || !user) redirect("/login");
 
   let initialRequests: AddonServiceRequest[] = [];
+  let hasActiveStay = false;
 
   if (customerProfileId) {
-    const result = await getAddonServiceRequestsAction(customerProfileId);
-    if ("success" in result && result.success) {
-      initialRequests = result.data.map((row) => ({
+    const [requestsResult, stayResult] = await Promise.all([
+      getAddonServiceRequestsAction(customerProfileId),
+      getActiveStayAction(customerProfileId),
+    ]);
+
+    if ("success" in requestsResult && requestsResult.success) {
+      initialRequests = requestsResult.data.map((row) => ({
         id: row.id,
         customerProfileId: row.customer_profile_id,
         stayEntryId: row.stay_entry_id,
@@ -36,6 +42,15 @@ export default async function AddonServicesPage() {
         requestedAt: row.requested_at,
       }));
     }
+
+    // getActiveStayAction falls back to the earliest PENDING stay when
+    // there's no ACTIVE one — add-on services are only available once the
+    // stay has actually started, and stop being available once the
+    // customer checks out (FINISHED) or is marked a no-show (EXPIRED).
+    hasActiveStay =
+      "success" in stayResult &&
+      stayResult.success &&
+      stayResult.data?.status === "ACTIVE";
   }
 
   return (
@@ -61,6 +76,7 @@ export default async function AddonServicesPage() {
       <AddonServicesClient
         customerProfileId={customerProfileId}
         initialRequests={initialRequests}
+        hasActiveStay={hasActiveStay}
       />
     </div>
   );

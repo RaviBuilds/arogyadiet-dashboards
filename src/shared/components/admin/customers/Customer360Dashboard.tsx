@@ -60,7 +60,7 @@ import { AdminMedicalUploadModal } from "./AdminMedicalUploadModal";
 import { ResetPinDialog } from "@/shared/components/admin/ResetPinDialog";
 import { ClinicAssignmentSelector } from "./ClinicAssignmentSelector";
 import { DietitianAssignmentSelector } from "./DietitianAssignmentSelector";
-import { CustomerHealthLogTab } from "./CustomerHealthLogTab";
+
 import { CustomerHistoryTab } from "./CustomerHistoryTab";
 
 import {
@@ -334,7 +334,7 @@ export function Customer360Dashboard({
   const isMealCustomer = customerCategory === "MEAL";
   const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(
-    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription", "Accommodation", "Health Log", "Subscription History", "KIT History", "Accommodation History"].includes(requestedTab)
+    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription", "Accommodation", "Subscription History", "KIT History", "Accommodation History"].includes(requestedTab)
       ? requestedTab
       : "Profile & Medical",
   );
@@ -657,7 +657,6 @@ export function Customer360Dashboard({
                 "Shipping",
                 "Addresses",
                 "Billing",
-                "Health Log",
                 "KIT History",
                 "User Management",
               ]
@@ -666,7 +665,6 @@ export function Customer360Dashboard({
                   "Profile & Medical",
                   "Accommodation",
                   "Billing",
-                  "Health Log",
                   "Accommodation History",
                   "User Management",
                 ]
@@ -985,10 +983,6 @@ export function Customer360Dashboard({
               </Card>
             )}
           </div>
-        )}
-
-        {activeTab === "Health Log" && (
-          <CustomerHealthLogTab customerProfileId={customer.id} />
         )}
 
         {activeTab === "Add Subscription" && (

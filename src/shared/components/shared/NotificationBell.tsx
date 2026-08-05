@@ -1,9 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import {
@@ -12,10 +20,20 @@ import {
   PopoverTrigger,
 } from "@/shared/components/ui/popover";
 import { ScrollArea } from "@/shared/components/ui/scroll-area";
+import { Switch } from "@/shared/components/ui/switch";
+import { Label } from "@/shared/components/ui/label";
 import { cn } from "@/lib/utils";
 import { NOTIFICATIONS_REFRESH_EVENT } from "@/lib/notifications/refresh";
+import {
+  getPopupPreferenceServerSnapshot,
+  readPopupPreference,
+  subscribePopupPreference,
+  writePopupPreference,
+} from "@/lib/notifications/popupPreference";
 
 const POLL_INTERVAL_MS = 30_000;
+// New-notification popup stays on screen for 6s (user asked for 5-7s).
+const TOAST_DURATION_MS = 6_000;
 
 type NotificationRecord = {
   id: string;
@@ -30,6 +48,13 @@ type NotificationRecord = {
 
 export interface NotificationBellProps {
   userId?: string;
+  /**
+   * Renders a switch inside the popover that lets the user silence the
+   * on-screen popups (toasts) for incoming notifications. Enabled for the
+   * back-office portals (admin, master, franchise) where notification bursts
+   * can interrupt focused work. Customer/rider portals leave this off.
+   */
+  showPopupToggle?: boolean;
 }
 
 function formatFetchError(detail: unknown): string {
@@ -47,8 +72,12 @@ function formatFetchError(detail: unknown): string {
   }
 }
 
-export function NotificationBell({ userId }: NotificationBellProps) {
+export function NotificationBell({
+  userId,
+  showPopupToggle = false,
+}: NotificationBellProps) {
   const router = useRouter();
+  const popupToggleId = useId();
 
   const [notifications, setNotifications] = useState<NotificationRecord[]>(
     [],
@@ -57,6 +86,38 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   const [loading, setLoading] = useState(true);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const hasLoadedOnceRef = useRef(false);
+  // Tracks ids already seen so we only pop a toast for genuinely new
+  // notifications (not the ones fetched on initial mount).
+  const seenIdsRef = useRef<Set<string> | null>(null);
+
+  // Ids of toasts this component raised, so turning the toggle off can clear
+  // only its own popups and leave unrelated app toasts alone.
+  const activeToastIdsRef = useRef<Set<string | number>>(new Set());
+
+  // Popup (toast) preference, read from localStorage via an external store so
+  // the server render stays deterministic (always enabled) and hydration
+  // reconciles without a setState-in-effect. Portals that don't opt into the
+  // toggle always get popups.
+  const storedPopupsEnabled = useSyncExternalStore(
+    subscribePopupPreference,
+    () => readPopupPreference(userId),
+    getPopupPreferenceServerSnapshot,
+  );
+  const popupsEnabled = showPopupToggle ? storedPopupsEnabled : true;
+
+  const handlePopupsEnabledChange = useCallback(
+    (enabled: boolean) => {
+      writePopupPreference(enabled, userId);
+
+      if (!enabled) {
+        for (const id of activeToastIdsRef.current) {
+          toast.dismiss(id);
+        }
+        activeToastIdsRef.current.clear();
+      }
+    },
+    [userId],
+  );
   // [Req 12.5, 12.6] Prevents concurrent/rapid duplicate fetches — e.g. the
   // mount effect and a near-simultaneous popover-open or refresh-event
   // trigger — from firing two overlapping requests to /api/notifications.
@@ -106,6 +167,48 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         };
 
         const rows = payload.notifications ?? [];
+
+        // Read the preference at fire time rather than closing over it, so the
+        // memoized callback (and the poll/refresh effects that depend on it)
+        // don't need to be rebuilt when the toggle flips.
+        const popupsAllowed =
+          !showPopupToggle || readPopupPreference(userId);
+
+        if (seenIdsRef.current === null) {
+          // First successful fetch: just record what's already there,
+          // don't toast for pre-existing notifications.
+          seenIdsRef.current = new Set(rows.map((n) => n.id));
+        } else if (popupsAllowed) {
+          const newlySeen = rows.filter(
+            (n) => !seenIdsRef.current!.has(n.id) && !n.is_read,
+          );
+          for (const notification of newlySeen) {
+            const toastId = toast(notification.title, {
+              description: notification.message,
+              duration: TOAST_DURATION_MS,
+              onDismiss: (t) => activeToastIdsRef.current.delete(t.id),
+              onAutoClose: (t) => activeToastIdsRef.current.delete(t.id),
+              action: notification.action_url
+                ? {
+                    label: "View",
+                    onClick: () => {
+                      router.push(notification.action_url as string);
+                    },
+                  }
+                : undefined,
+            });
+            activeToastIdsRef.current.add(toastId);
+          }
+        }
+
+        // Always absorb the current ids — including while popups are muted — so
+        // re-enabling the toggle doesn't dump a backlog of old notifications.
+        if (seenIdsRef.current !== null) {
+          for (const n of rows) {
+            seenIdsRef.current.add(n.id);
+          }
+        }
+
         setNotifications(rows);
         setUnreadCount(
           payload.unreadCount ?? rows.filter((n) => !n.is_read).length,
@@ -127,7 +230,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         }
       }
     },
-    [],
+    [router, showPopupToggle, userId],
   );
 
   useEffect(() => {
@@ -229,6 +332,29 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         <div className="border-b px-4 py-3">
           <h2 className="font-semibold">Notifications</h2>
         </div>
+        {showPopupToggle && (
+          <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-4 py-2.5">
+            <div className="min-w-0">
+              <Label
+                htmlFor={popupToggleId}
+                className="cursor-pointer text-xs font-medium"
+              >
+                On-screen popups
+              </Label>
+              <p className="text-muted-foreground mt-0.5 text-[11px] leading-snug">
+                {popupsEnabled
+                  ? "New alerts appear briefly on screen."
+                  : "Muted — only the bell badge updates."}
+              </p>
+            </div>
+            <Switch
+              id={popupToggleId}
+              checked={popupsEnabled}
+              onCheckedChange={handlePopupsEnabledChange}
+              aria-label="Show on-screen notification popups"
+            />
+          </div>
+        )}
         <ScrollArea className="h-[300px]">
           {loading ? (
             <p className="text-muted-foreground px-4 py-8 text-center text-sm">

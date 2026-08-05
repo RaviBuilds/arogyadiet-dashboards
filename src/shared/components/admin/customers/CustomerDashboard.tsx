@@ -1,29 +1,10 @@
 "use client";
 
-import { useState, useMemo, useTransition, useEffect } from "react";
+import { useState, useMemo, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/shared/components/ui/table";
-import { Popover, PopoverContent, PopoverTrigger } from "@/shared/components/ui/popover";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
-import { Badge } from "@/shared/components/ui/badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/shared/components/ui/dropdown-menu";
-import { Eye, MoreHorizontal } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -39,28 +20,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
-import {
-  Users,
-  Edit,
-  Trash2,
-  AlertTriangle,
-  Loader2,
-  Filter,
-  Truck,
-  MapPin,
-  Navigation,
-  ShoppingBag,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { AlertTriangle, Loader2, ShoppingBag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
-import { DataTableCard } from "../core/DataTableCard";
-import { SectionHeader } from "../core/SectionHeader";
-import { DataSearchFilter } from "../core/DataSearchFilter";
-import { TablePagination } from "../core/TablePagination";
-import { StatusBadge } from "../core/StatusBadge";
-import { ExportButton, RefreshButton } from "../core/ActionButtons";
 import { AdminSubmenuBar } from "../core/AdminSubmenuBar";
 import {
   revalidateCustomersPage,
@@ -70,10 +33,18 @@ import {
 import { AdminCreateCustomerModal } from "./AdminCreateCustomerModal";
 import { CustomerOverview } from "./CustomerOverview";
 import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
+import { MealCustomerSection } from "./MealCustomerSection";
 import { KitCustomerSection } from "./KitCustomerSection";
 import { AccommodationCustomerSection } from "./AccommodationCustomerSection";
 import { AddonServiceRequestsPanel } from "./AddonServiceRequestsPanel";
-import { Plus, Upload, UserPlus, Stethoscope } from "lucide-react"; // Plus & Upload kept — used by AdminCreateCustomerModal trigger and possible future use
+import { UserPlus, Stethoscope } from "lucide-react";
+import {
+  matchesDietAllergy,
+  matchesDietitian,
+  matchesLocationFlags,
+  matchesMedical,
+  matchesStatus,
+} from "./CustomerTableCells";
 import {
   clinicDisplayName,
   filterRowsByClinic,
@@ -103,6 +74,16 @@ export interface CustomerData {
   dietitianId?: string | null;
   dietitianName?: string | null;
   hasCoords?: boolean;
+}
+
+/**
+ * The active subscription window for a customer, used by the shared "Plan
+ * Period" column (column 6 of the Meal table) and by the expiring-soon filters.
+ * Derived from the subscription rows the page already loads — no extra fetch.
+ */
+export interface SubscriptionPeriod {
+  startsOn: string | null;
+  endsOn: string | null;
 }
 
 export interface ActiveSubscriptionData {
@@ -194,13 +175,10 @@ export default function CustomerDashboard({
   const [showExpired, setShowExpired] = useState(false);
   const [clinicFilter, setClinicFilter] =
     useState<ClinicFilterSelection>(ALL_CLINICS);
-  const [filterUnassignedClinic, setFilterUnassignedClinic] = useState(false);
-  const [filterNoCoords, setFilterNoCoords] = useState(false);
+  // Data-quality toggles that live in the shared Location column header.
+  // Multi-select so "this clinic" and "missing GPS" can still be combined.
+  const [locationFlags, setLocationFlags] = useState<string[]>([]);
   const [expiringInDays, setExpiringInDays] = useState<number | null>(null);
-
-  // ── Pagination state for Meal Customers table ─────────────────────────────
-  const [mealPage, setMealPage] = useState(0);
-  const MEAL_PAGE_SIZE = 20;
 
   // Distinct clinics present in the loaded customer rows, for the filter control.
   const clinicOptions = useMemo(() => {
@@ -227,14 +205,21 @@ export default function CustomerDashboard({
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [customers]);
 
-  // Build a lookup: customer email → earliest subscription end date (for expiring-soon filter).
-  const customerEndDateMap = useMemo(() => {
-    const map = new Map<string, string>();
+  /**
+   * customer email → the earliest-ending active subscription window. Powers both
+   * the expiring-soon filters and the Meal table's Plan Period column, so the
+   * dates a row is filtered on are always the dates it displays.
+   */
+  const customerPeriodMap = useMemo(() => {
+    const map = new Map<string, SubscriptionPeriod>();
     for (const sub of activeSubscriptions) {
       if (!sub.ends_on) continue;
       const existing = map.get(sub.email);
-      if (!existing || new Date(sub.ends_on) < new Date(existing)) {
-        map.set(sub.email, sub.ends_on);
+      if (!existing?.endsOn || new Date(sub.ends_on) < new Date(existing.endsOn)) {
+        map.set(sub.email, {
+          startsOn: sub.starts_on ?? null,
+          endsOn: sub.ends_on,
+        });
       }
     }
     return map;
@@ -274,15 +259,10 @@ export default function CustomerDashboard({
       clinicFilter
     );
 
-    // Filter for unassigned clinic
-    if (filterUnassignedClinic) {
-      result = result.filter((customer) => !customer.clinic_id);
-    }
-
-    // Filter for no coordinates
-    if (filterNoCoords) {
-      result = result.filter((customer) => !customer.hasCoords);
-    }
+    // Location column data-quality toggles (unassigned clinic / missing GPS).
+    result = result.filter((customer) =>
+      matchesLocationFlags(customer, locationFlags),
+    );
 
     if (showArchived) {
       // Strictly show only archived (inactive) customers
@@ -306,38 +286,22 @@ export default function CustomerDashboard({
       });
     }
 
-    if (filterDiet !== "ALL") {
-      result = result.filter(
-        (customer) => customer.dietary_preference === filterDiet,
-      );
-    }
-
-    if (filterStatus !== "ALL") {
-      result = result.filter((customer) => customer.status === filterStatus);
-    }
-
-    if (filterDietitian !== "ALL") {
-      if (filterDietitian === "UNASSIGNED") {
-        result = result.filter((customer) => !customer.dietitianName);
-      } else {
-        result = result.filter((customer) => customer.dietitianName === filterDietitian);
-      }
-    }
-
-    if (filterMedicalRecord !== "ALL") {
-      if (filterMedicalRecord === "YES") {
-        result = result.filter((customer) => customer.hasMedicalHistory);
-      } else {
-        result = result.filter((customer) => !customer.hasMedicalHistory);
-      }
-    }
+    // Column filters, sharing their predicates with the dropdown options so the
+    // two can never disagree (see CustomerTableCells).
+    result = result.filter(
+      (customer) =>
+        matchesDietAllergy(customer, filterDiet) &&
+        matchesStatus(customer, filterStatus) &&
+        matchesDietitian(customer, filterDietitian) &&
+        matchesMedical(customer, filterMedicalRecord),
+    );
 
     // Expiring-in-days filter: only show customers whose active subscription ends within N days
     if (expiringInDays !== null) {
       const now = new Date();
       const cutoff = new Date(now.getTime() + expiringInDays * 24 * 60 * 60 * 1000);
       result = result.filter((customer) => {
-        const endDate = customerEndDateMap.get(customer.email);
+        const endDate = customerPeriodMap.get(customer.email)?.endsOn;
         if (!endDate) return false;
         const end = new Date(endDate);
         return end >= now && end <= cutoff;
@@ -345,17 +309,7 @@ export default function CustomerDashboard({
     }
 
     return result;
-  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterDietitian, filterMedicalRecord, showArchived, clinicFilter, filterUnassignedClinic, filterNoCoords, expiringInDays, customerEndDateMap]);
-
-  // Reset meal page when filters change
-  useEffect(() => {
-    setMealPage(0);
-  }, [searchTerm, filterDiet, filterStatus, filterDietitian, filterMedicalRecord, showArchived, clinicFilter, filterUnassignedClinic, filterNoCoords, expiringInDays]);
-
-  const paginatedMealCustomers = useMemo(() => {
-    const start = mealPage * MEAL_PAGE_SIZE;
-    return filteredCustomers.slice(start, start + MEAL_PAGE_SIZE);
-  }, [filteredCustomers, mealPage, MEAL_PAGE_SIZE]);
+  }, [customers, searchTerm, searchColumn, filterDiet, filterStatus, filterDietitian, filterMedicalRecord, showArchived, clinicFilter, locationFlags, expiringInDays, customerPeriodMap]);
 
   // KIT Customer tab: same directory filtering pipeline, scoped to KIT category.
   const kitCustomers = useMemo(
@@ -392,12 +346,11 @@ export default function CustomerDashboard({
       });
     }
 
-    if (filterStatus !== "ALL") {
-      result = result.filter((customer) => customer.status === filterStatus);
-    }
-
+    // Status, diet, medical and dietitian filters live in the KIT table's own
+    // column headers, so they are applied inside KitCustomerSection rather than
+    // here — `filterStatus` above belongs to the Meal table.
     return result;
-  }, [kitCustomers, searchTerm, searchColumn, filterStatus, showArchived, showExpired, clinicFilter]);
+  }, [kitCustomers, searchTerm, searchColumn, showArchived, showExpired, clinicFilter]);
 
   // Accommodation Customers tab: scoped to ACCOMMODATION category.
   const accommodationCustomers = useMemo(
@@ -728,570 +681,40 @@ export default function CustomerDashboard({
           onNavigate={handleTabChange}
         />
       ) : activeTab === "Meal Customers" ? (
-        <DataTableCard
-          header={<SectionHeader title="Meal Customers" icon={Users} />}
-          footer={
-            filteredCustomers.length > 0 ? (
-              <TablePagination
-                totalRecords={filteredCustomers.length}
-                pageSize={MEAL_PAGE_SIZE}
-                currentPage={mealPage}
-                onPageChange={setMealPage}
-              />
-            ) : undefined
-          }
-          controls={
-            <div className="flex flex-wrap items-center gap-4">
-              <DataSearchFilter
-                searchColumn={searchColumn}
-                onColumnChange={setSearchColumn}
-                searchTerm={searchTerm}
-                onTermChange={setSearchTerm}
-                options={searchOptions}
-              />
-              <Select
-                value={clinicFilter ?? ALL_CLINICS}
-                onValueChange={(val) => {
-                  setClinicFilter(val);
-                  if (val !== ALL_CLINICS) setFilterUnassignedClinic(false);
-                }}
-              >
-                <SelectTrigger className="w-[200px] border-slate-200 bg-white transition-all duration-200">
-                  <SelectValue placeholder="Filter by clinic..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_CLINICS}>All Clinics</SelectItem>
-                  {clinicOptions.map((clinic) => (
-                    <SelectItem key={clinic.id} value={clinic.id}>
-                      {clinic.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                variant={filterUnassignedClinic ? "default" : "outline"}
-                size="sm"
-                className={cn(
-                  "transition-all duration-200",
-                  filterUnassignedClinic && "bg-amber-600 hover:bg-amber-700 text-white border-amber-600"
-                )}
-                onClick={() => {
-                  setFilterUnassignedClinic((prev) => !prev);
-                  if (!filterUnassignedClinic) setClinicFilter(ALL_CLINICS);
-                }}
-              >
-                <MapPin className="h-3.5 w-3.5 mr-1.5" />
-                {filterUnassignedClinic ? "Clinic: Unassigned" : "Unassigned"}
-              </Button>
-              <Button
-                type="button"
-                variant={filterNoCoords ? "default" : "outline"}
-                size="sm"
-                className={cn(
-                  "transition-all duration-200",
-                  filterNoCoords && "bg-rose-600 hover:bg-rose-700 text-white border-rose-600"
-                )}
-                onClick={() => setFilterNoCoords((prev) => !prev)}
-              >
-                <Navigation className="h-3.5 w-3.5 mr-1.5" />
-                {filterNoCoords ? "No GPS: Active" : "No GPS"}
-              </Button>
-              <Button
-                type="button"
-                variant={showArchived ? "default" : "outline"}
-                size="sm"
-                className="transition-all duration-200"
-                onClick={() => setShowArchived((prev) => !prev)}
-              >
-                {showArchived ? "Showing Archived" : "Show Archived"}
-              </Button>
-              <Select
-                value={expiringInDays === null ? "ALL" : String(expiringInDays)}
-                onValueChange={(val) => setExpiringInDays(val === "ALL" ? null : Number(val))}
-              >
-                <SelectTrigger className="w-[160px] border-slate-200 bg-white transition-all duration-200">
-                  <SelectValue placeholder="Expiring in..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Expiry</SelectItem>
-                  <SelectItem value="2">Expiring in 2 days</SelectItem>
-                  <SelectItem value="5">Expiring in 5 days</SelectItem>
-                  <SelectItem value="10">Expiring in 10 days</SelectItem>
-                  <SelectItem value="15">Expiring in 15 days</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          }
-          actions={
-            <>
-              {/* Req 16.1: the mutating Excel export is removed for a Dietitian; RefreshButton is a read, so it stays. */}
-              {!isDietitian && (
-                <ExportButton
-                  onClick={handleExportExcel}
-                  disabled={filteredCustomers.length === 0}
-                />
-              )}
-              <RefreshButton
-                onClick={handleRefreshISR}
-                isLoading={isLoading || isPending}
-              />
-            </>
-          }
-        >
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50/50 border-b border-slate-200">
-                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Customer Info</TableHead>
-                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">Contact</TableHead>
-
-                {/* Filterable: Diet & Location */}
-                <TableHead>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
-                      >
-                        <span>Diet & Allergy</span>
-                        <Filter
-                          className={cn(
-                            "ml-2 h-3.5 w-3.5",
-                            filterDiet !== "ALL"
-                              ? "text-primary fill-primary/20"
-                              : "text-muted-foreground/70",
-                          )}
-                        />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[180px]">
-                      <DropdownMenuLabel>Filter by Diet</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        onClick={() => setFilterDiet("ALL")}
-                        className={
-                          filterDiet === "ALL" ? "bg-accent font-semibold" : ""
-                        }
-                      >
-                        All Diets & Allergies
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterDiet("VEG")}
-                        className={
-                          filterDiet === "VEG" ? "bg-accent font-semibold" : ""
-                        }
-                      >
-                        Vegetarian
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterDiet("NON_VEG")}
-                        className={
-                          filterDiet === "NON_VEG"
-                            ? "bg-accent font-semibold"
-                            : ""
-                        }
-                      >
-                        Non-Vegetarian
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuLabel>Filter by Allergy</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        onClick={() => setFilterDiet("ALLERGY")}
-                        className={
-                          filterDiet === "ALLERGY"
-                            ? "bg-accent font-semibold"
-                            : ""
-                        }
-                      >
-                        Has Allergies
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableHead>
-
-                {/* Filterable: Status */}
-                <TableHead>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
-                      >
-                        <span>Status</span>
-                        <Filter
-                          className={cn(
-                            "ml-2 h-3.5 w-3.5",
-                            filterStatus !== "ALL"
-                              ? "text-primary fill-primary/20"
-                              : "text-muted-foreground/70",
-                          )}
-                        />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[180px]">
-                      <DropdownMenuLabel>Filter by Status</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        onClick={() => setFilterStatus("ALL")}
-                        className={
-                          filterStatus === "ALL"
-                            ? "bg-accent font-semibold"
-                            : ""
-                        }
-                      >
-                        All Statuses
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterStatus("Active")}
-                        className={filterStatus === "Active" ? "bg-accent font-semibold" : ""}
-                      >
-                        Active
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterStatus("Pending")}
-                        className={filterStatus === "Pending" ? "bg-accent font-semibold" : ""}
-                      >
-                        Pending
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterStatus("Stopped")}
-                        className={filterStatus === "Stopped" ? "bg-accent font-semibold" : ""}
-                      >
-                        Stopped
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterStatus("Expired")}
-                        className={filterStatus === "Expired" ? "bg-accent font-semibold" : ""}
-                      >
-                        Expired
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterStatus("No Plan")}
-                        className={filterStatus === "No Plan" ? "bg-accent font-semibold" : ""}
-                      >
-                        No Plan
-                      </DropdownMenuItem>
-                      {uniquePlans && uniquePlans.length > 0 && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel>Filter by Plan</DropdownMenuLabel>
-                          {uniquePlans.map((plan: string) => (
-                            <DropdownMenuItem
-                              key={plan}
-                              onClick={() => setFilterStatus(plan)}
-                              className={
-                                filterStatus === plan
-                                  ? "bg-accent font-semibold"
-                                  : ""
-                              }
-                            >
-                              {plan}
-                            </DropdownMenuItem>
-                          ))}
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableHead>
-
-                <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
-                      >
-                        <span>Medical Record</span>
-                        <Filter
-                          className={cn(
-                            "ml-2 h-3.5 w-3.5",
-                            filterMedicalRecord !== "ALL"
-                              ? "text-primary fill-primary/20"
-                              : "text-muted-foreground/70",
-                          )}
-                        />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[180px]">
-                      <DropdownMenuLabel>Filter by Medical Record</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        onClick={() => setFilterMedicalRecord("ALL")}
-                        className={filterMedicalRecord === "ALL" ? "bg-accent font-semibold" : ""}
-                      >
-                        All
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterMedicalRecord("YES")}
-                        className={filterMedicalRecord === "YES" ? "bg-accent font-semibold" : ""}
-                      >
-                        Has Medical Record
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterMedicalRecord("NO")}
-                        className={filterMedicalRecord === "NO" ? "bg-accent font-semibold" : ""}
-                      >
-                        No Medical Record
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableHead>
-
-                <TableHead>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-slate-100 font-medium text-xs uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-all duration-200"
-                      >
-                        <span>Dietitian</span>
-                        <Filter
-                          className={cn(
-                            "ml-2 h-3.5 w-3.5",
-                            filterDietitian !== "ALL"
-                              ? "text-primary fill-primary/20"
-                              : "text-muted-foreground/70",
-                          )}
-                        />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[180px]">
-                      <DropdownMenuLabel>Filter by Dietitian</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        onClick={() => setFilterDietitian("ALL")}
-                        className={filterDietitian === "ALL" ? "bg-accent font-semibold" : ""}
-                      >
-                        All Dietitians
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setFilterDietitian("UNASSIGNED")}
-                        className={filterDietitian === "UNASSIGNED" ? "bg-accent font-semibold" : ""}
-                      >
-                        Unassigned
-                      </DropdownMenuItem>
-                      {uniqueDietitians.length > 0 && (
-                        <>
-                          <DropdownMenuSeparator />
-                          {uniqueDietitians.map((name) => (
-                            <DropdownMenuItem
-                              key={name}
-                              onClick={() => setFilterDietitian(name)}
-                              className={filterDietitian === name ? "bg-accent font-semibold" : ""}
-                            >
-                              {name}
-                            </DropdownMenuItem>
-                          ))}
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableHead>
-
-                <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
-                  <span className="sr-only">Actions</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredCustomers.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="text-center py-12 text-sm text-slate-500"
-                  >
-                    No customers match your criteria.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginatedMealCustomers.map((customer) => (
-                  <TableRow key={customer.id} className="hover:bg-slate-50 transition-colors duration-200">
-                    {/* Column 1: Customer Info */}
-                    <TableCell>
-                      <div className="font-semibold text-slate-900 tracking-tight">{customer.fullName}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-sm text-slate-500">
-                          {customer.gender && customer.gender !== "N/A" ? (
-                            <span>
-                              ( {customer.gender.charAt(0).toUpperCase()} -{" "}
-                              {customer.age ? `${customer.age} yrs` : "N/A"} )
-                            </span>
-                          ) : (
-                            <span>( N/A )</span>
-                          )}
-                        </span>
-                        {customer.hasCoords ? (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600" title="GPS coordinates available">
-                            <Navigation className="h-2.5 w-2.5" />
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-rose-500" title="No GPS coordinates">
-                            <Navigation className="h-2.5 w-2.5" />
-                            <span className="sr-only">No GPS</span>
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-xs font-mono text-slate-500">
-                          {customer.primary_pincode !== "N/A" ? customer.primary_pincode : "—"}
-                        </span>
-                        <span className="text-slate-300">·</span>
-                        <span
-                          className={cn(
-                            "text-xs",
-                            customer.clinicName
-                              ? "text-slate-500"
-                              : "text-amber-600 font-medium",
-                          )}
-                        >
-                          {customer.clinicName ? clinicDisplayName(customer.clinicName) : "Unassigned"}
-                        </span>
-                      </div>
-                    </TableCell>
-
-                    {/* Column 2: Contact */}
-                    <TableCell>
-                      <div className="font-medium text-slate-900">{customer.mobile}</div>
-                      <div className="text-sm text-slate-500 mt-0.5">
-                        {customer.email}
-                      </div>
-                    </TableCell>
-
-                    {/* Column 3: Diet & Location */}
-                    <TableCell>
-                      <div className="flex flex-col items-start gap-2">
-                        <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 px-2.5 text-slate-700">
-                          {customer.dietary_preference}
-                        </Badge>
-                        {customer.allergies &&
-                          customer.allergies.toLowerCase() !== "none" &&
-                          customer.allergies.trim() !== "" && (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-6 text-[10px] px-2 bg-red-50 text-red-600 border-red-200 hover:bg-red-100"
-                                >
-                                  View Allergy
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-64 p-3 text-sm">
-                                <p className="font-semibold mb-1 text-red-600">
-                                  Allergies/Instructions:
-                                </p>
-                                <p className="text-muted-foreground">
-                                  {customer.allergies}
-                                </p>
-                              </PopoverContent>
-                            </Popover>
-                          )}
-                      </div>
-                    </TableCell>
-
-                    {/* Column 4: Status */}
-                    <TableCell>
-                      <StatusBadge
-                        status={customer.status}
-                        variant={
-                          customer.status === "Active" ? "solid" : "outline"
-                        }
-                      />
-                      <div className="text-sm text-slate-500 mt-1.5">
-                        {customer.activePlanName || "No Active Plan"}
-                      </div>
-                    </TableCell>
-
-                    {/* Column 5: Medical Record */}
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "rounded-full px-2.5 text-xs",
-                          customer.hasMedicalHistory
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-slate-50 text-slate-500",
-                        )}
-                      >
-                        {customer.hasMedicalHistory ? "Available" : "None"}
-                      </Badge>
-                    </TableCell>
-
-                    {/* Column 6: Dietitian */}
-                    <TableCell>
-                      <span
-                        className={cn(
-                          "text-sm",
-                          customer.dietitianName
-                            ? "text-slate-700"
-                            : "text-slate-400 italic",
-                        )}
-                      >
-                        {customer.dietitianName || "Unassigned"}
-                      </span>
-                    </TableCell>
-
-                    {/* Column 7: Actions (Keep existing DropdownMenu code exactly as it is) */}
-                    <TableCell>
-                      {/* ... Existing DropdownMenu code ... */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0 transition-all duration-200 hover:bg-slate-100">
-                            <MoreHorizontal className="h-4 w-4 text-slate-500" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-[180px]">
-                          <DropdownMenuItem asChild>
-                            <Link
-                              href={`/customers/${customer.id}`}
-                              className="cursor-pointer font-medium flex items-center"
-                            >
-                              <Eye className="mr-2 h-4 w-4 text-primary" />
-                              View 360 Dashboard
-                            </Link>
-                          </DropdownMenuItem>
-                          {customer.customerCategory === "KIT" && (
-                            <DropdownMenuItem asChild>
-                              <Link
-                                href={`/customers/${customer.id}?tab=Shipping`}
-                                className="cursor-pointer font-medium flex items-center"
-                              >
-                                <Truck className="mr-2 h-4 w-4 text-primary" />
-                                Shipping
-                              </Link>
-                            </DropdownMenuItem>
-                          )}
-                          {/* Req 16.1: Quick Edit and Deactivate are mutating controls, removed for a Dietitian. */}
-                          {!isDietitian && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="cursor-pointer font-medium"
-                                onClick={() => openEditModal(customer)}
-                              >
-                                <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
-                                Quick Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
-                                onClick={() => openDeleteModal(customer)}
-                                disabled={!customer.isActive}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Deactivate Customer
-                              </DropdownMenuItem>
-                            </>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </DataTableCard>
+        <MealCustomerSection
+          customers={filteredCustomers}
+          clinicFilter={clinicFilter}
+          setClinicFilter={setClinicFilter}
+          clinicOptions={clinicOptions}
+          locationFlags={locationFlags}
+          setLocationFlags={setLocationFlags}
+          filterDiet={filterDiet}
+          setFilterDiet={setFilterDiet}
+          filterStatus={filterStatus}
+          setFilterStatus={setFilterStatus}
+          filterMedicalRecord={filterMedicalRecord}
+          setFilterMedicalRecord={setFilterMedicalRecord}
+          filterDietitian={filterDietitian}
+          setFilterDietitian={setFilterDietitian}
+          uniquePlans={uniquePlans}
+          uniqueDietitians={uniqueDietitians}
+          showArchived={showArchived}
+          setShowArchived={setShowArchived}
+          expiringInDays={expiringInDays}
+          setExpiringInDays={setExpiringInDays}
+          searchColumn={searchColumn}
+          setSearchColumn={setSearchColumn}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          searchOptions={searchOptions}
+          periodMap={customerPeriodMap}
+          isLoading={isLoading || isPending}
+          onRefresh={handleRefreshISR}
+          onExport={handleExportExcel}
+          onEdit={openEditModal}
+          onDeactivate={openDeleteModal}
+          isDietitian={isDietitian}
+        />
       ) : activeTab === "Onboarded" ? (
         <OnboardingCustomersSection status="IN_PROGRESS" />
       ) : activeTab === "KIT Customer" ? (
@@ -1315,7 +738,7 @@ export default function CustomerDashboard({
           onEdit={openEditModal}
           onDeactivate={openDeleteModal}
           isDietitian={isDietitian}
-          customerEndDateMap={customerEndDateMap}
+          periodMap={customerPeriodMap}
         />
       ) : activeTab === "Accommodation Customers" ? (
         <div className="space-y-6">

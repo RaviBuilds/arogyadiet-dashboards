@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { format } from "date-fns";
-import { Sparkles, Loader2, CheckCircle2, Check } from "lucide-react";
+import { Sparkles, Loader2, CheckCircle2, Check, X, FilterX } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -25,6 +25,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/components/ui/select";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { DataTableCard } from "../core/DataTableCard";
 import { SectionHeader } from "../core/SectionHeader";
 import { RefreshButton } from "../core/ActionButtons";
+import { ConfirmActionModal } from "../core/ConfirmActionModal";
 import {
   getAccommodationAddonRequestsAction,
   type AccommodationAddonRequest,
@@ -45,10 +53,30 @@ const SERVICE_TYPE_LABELS: Record<string, string> = {
   YOGA: "Private Yoga Session",
 };
 
+/** Sentinel meaning "no filter applied" — Radix Select forbids empty values. */
+const ALL = "ALL";
+
+/**
+ * Status filter options. "Open" (the default) is the live work queue: the
+ * requests still awaiting staff action. There is deliberately no separate
+ * "Action" filter — the action a row needs is a pure function of its status
+ * (PENDING → Confirm, CONFIRMED → Mark Completed), so filtering by status
+ * already filters by action.
+ */
+const STATUS_FILTERS: { value: string; label: string }[] = [
+  { value: "OPEN", label: "Open (needs action)" },
+  { value: ALL, label: "All statuses" },
+  { value: "PENDING", label: "Pending" },
+  { value: "CONFIRMED", label: "Confirmed" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
+
 const STATUS_STYLES: Record<AccommodationAddonRequest["status"], string> = {
   PENDING: "bg-amber-50 text-amber-700 border-amber-200",
   CONFIRMED: "bg-blue-50 text-blue-700 border-blue-200",
   COMPLETED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  CANCELLED: "bg-slate-50 text-slate-500 border-slate-200",
 };
 
 interface AddonServiceRequestsPanelProps {
@@ -64,8 +92,16 @@ export function AddonServiceRequestsPanel({
 }: AddonServiceRequestsPanelProps) {
   const [requests, setRequests] = useState<AccommodationAddonRequest[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showCompleted, setShowCompleted] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  // ── Filters ──
+  const [customerFilter, setCustomerFilter] = useState(ALL);
+  const [serviceFilter, setServiceFilter] = useState(ALL);
+  const [statusFilter, setStatusFilter] = useState("OPEN");
+
+  // The request pending admin cancellation, held for the confirm modal.
+  const [cancelTarget, setCancelTarget] =
+    useState<AccommodationAddonRequest | null>(null);
 
   const customerIds = useMemo(
     () => customers.map((customer) => customer.id),
@@ -106,15 +142,62 @@ export function AddonServiceRequestsPanel({
   }, [fetchRequests]);
 
   const openRequests = useMemo(
-    () => requests.filter((request) => request.status !== "COMPLETED"),
+    () =>
+      requests.filter(
+        (request) => request.status !== "COMPLETED" && request.status !== "CANCELLED",
+      ),
     [requests],
   );
 
-  const visibleRequests = showCompleted ? requests : openRequests;
+  /** Only customers who actually have a request appear in the filter. */
+  const customerFilterOptions = useMemo(() => {
+    const ids = new Set(requests.map((r) => r.customerProfileId));
+    return [...ids]
+      .map((id) => ({ id, name: nameById.get(id) ?? "Customer" }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [requests, nameById]);
+
+  /** Only service types actually present appear in the filter. */
+  const serviceFilterOptions = useMemo(() => {
+    const types = new Set(requests.map((r) => r.serviceType));
+    return [...types]
+      .map((type) => ({ type, label: SERVICE_TYPE_LABELS[type] ?? type }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [requests]);
+
+  const visibleRequests = useMemo(
+    () =>
+      requests.filter((request) => {
+        if (customerFilter !== ALL && request.customerProfileId !== customerFilter) {
+          return false;
+        }
+        if (serviceFilter !== ALL && request.serviceType !== serviceFilter) {
+          return false;
+        }
+        if (statusFilter === "OPEN") {
+          return request.status !== "COMPLETED" && request.status !== "CANCELLED";
+        }
+        if (statusFilter !== ALL && request.status !== statusFilter) {
+          return false;
+        }
+        return true;
+      }),
+    [requests, customerFilter, serviceFilter, statusFilter],
+  );
+
+  // "Open" is the default view, so it does not count as a user-applied filter.
+  const hasActiveFilters =
+    customerFilter !== ALL || serviceFilter !== ALL || statusFilter !== "OPEN";
+
+  const clearFilters = () => {
+    setCustomerFilter(ALL);
+    setServiceFilter(ALL);
+    setStatusFilter("OPEN");
+  };
 
   const handleStatusChange = (
     request: AccommodationAddonRequest,
-    status: "CONFIRMED" | "COMPLETED",
+    status: "CONFIRMED" | "COMPLETED" | "CANCELLED",
   ) => {
     startTransition(async () => {
       const result = await updateAddonServiceStatusAction(request.id, status);
@@ -127,11 +210,14 @@ export function AddonServiceRequestsPanel({
       toast.success(
         status === "CONFIRMED"
           ? "Request confirmed. The customer now sees it as CONFIRMED."
-          : "Request marked completed.",
+          : status === "COMPLETED"
+            ? "Request marked completed."
+            : "Request cancelled. The customer can request this service again.",
       );
       setRequests((prev) =>
         prev.map((row) => (row.id === request.id ? { ...row, status } : row)),
       );
+      setCancelTarget(null);
     });
   };
 
@@ -140,6 +226,7 @@ export function AddonServiceRequestsPanel({
       header={
         <SectionHeader
           title="Add-on Service Requests"
+          description="Live queue for guests currently in-house. Requests drop off once the guest checks out — their full history stays on the customer's Accommodation tab."
           icon={Sparkles}
           action={
             openRequests.length > 0 ? (
@@ -151,15 +238,61 @@ export function AddonServiceRequestsPanel({
         />
       }
       controls={
-        <Button
-          type="button"
-          variant={showCompleted ? "default" : "outline"}
-          size="sm"
-          className="transition-all duration-200"
-          onClick={() => setShowCompleted(!showCompleted)}
-        >
-          {showCompleted ? "Showing Completed" : "Show Completed"}
-        </Button>
+        <>
+          <Select value={customerFilter} onValueChange={setCustomerFilter}>
+            <SelectTrigger className="w-[200px] border-slate-200 bg-white transition-all duration-200">
+              <SelectValue placeholder="Customer" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All customers</SelectItem>
+              {customerFilterOptions.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={serviceFilter} onValueChange={setServiceFilter}>
+            <SelectTrigger className="w-[190px] border-slate-200 bg-white transition-all duration-200">
+              <SelectValue placeholder="Service" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All services</SelectItem>
+              {serviceFilterOptions.map((option) => (
+                <SelectItem key={option.type} value={option.type}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[190px] border-slate-200 bg-white transition-all duration-200">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTERS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {hasActiveFilters && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-slate-600"
+              onClick={clearFilters}
+            >
+              <FilterX className="h-3.5 w-3.5" />
+              Clear
+            </Button>
+          )}
+        </>
       }
       actions={<RefreshButton onClick={fetchRequests} isLoading={loading} />}
     >
@@ -199,12 +332,14 @@ export function AddonServiceRequestsPanel({
                 <div className="flex flex-col items-center gap-1.5">
                   <CheckCircle2 className="h-7 w-7 text-slate-300" />
                   <span className="text-sm font-medium text-slate-700">
-                    No add-on service requests
+                    {hasActiveFilters
+                      ? "No requests match these filters"
+                      : "No add-on service requests"}
                   </span>
                   <span className="max-w-md text-xs text-slate-500">
-                    {showCompleted
-                      ? "Accommodation customers have not requested any wellness services yet."
-                      : "Nothing pending. Enable Show Completed to see past requests."}
+                    {hasActiveFilters
+                      ? "Try widening or clearing the filters above."
+                      : "Nothing needs action from in-house guests right now. This queue only lists requests from customers whose stay is currently active."}
                   </span>
                 </div>
               </TableCell>
@@ -236,24 +371,38 @@ export function AddonServiceRequestsPanel({
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
-                  {isDietitian || request.status === "COMPLETED" ? (
+                  {isDietitian ||
+                  request.status === "COMPLETED" ||
+                  request.status === "CANCELLED" ? (
                     <span className="text-xs text-slate-400">—</span>
                   ) : (
-                    <Button
-                      size="sm"
-                      variant={request.status === "PENDING" ? "default" : "outline"}
-                      className="gap-1.5 transition-all duration-200"
-                      disabled={isPending}
-                      onClick={() =>
-                        handleStatusChange(
-                          request,
-                          request.status === "PENDING" ? "CONFIRMED" : "COMPLETED",
-                        )
-                      }
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                      {request.status === "PENDING" ? "Confirm" : "Mark Completed"}
-                    </Button>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant={request.status === "PENDING" ? "default" : "outline"}
+                        className="gap-1.5 transition-all duration-200"
+                        disabled={isPending}
+                        onClick={() =>
+                          handleStatusChange(
+                            request,
+                            request.status === "PENDING" ? "CONFIRMED" : "COMPLETED",
+                          )
+                        }
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        {request.status === "PENDING" ? "Confirm" : "Mark Completed"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="gap-1.5 transition-all duration-200"
+                        disabled={isPending}
+                        onClick={() => setCancelTarget(request)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Cancel
+                      </Button>
+                    </div>
                   )}
                 </TableCell>
               </TableRow>
@@ -261,6 +410,27 @@ export function AddonServiceRequestsPanel({
           )}
         </TableBody>
       </Table>
+
+      <ConfirmActionModal
+        isOpen={!!cancelTarget}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={() => cancelTarget && handleStatusChange(cancelTarget, "CANCELLED")}
+        title="Cancel this request?"
+        description={
+          cancelTarget
+            ? `${
+                SERVICE_TYPE_LABELS[cancelTarget.serviceType] ??
+                cancelTarget.serviceType
+              } for ${
+                nameById.get(cancelTarget.customerProfileId) ?? "this customer"
+              } will be cancelled. The customer will see it as CANCELLED and can request the service again.`
+            : ""
+        }
+        confirmLabel="Yes, cancel request"
+        cancelLabel="Keep Request"
+        isPending={isPending}
+        variant="destructive"
+      />
     </DataTableCard>
   );
 }

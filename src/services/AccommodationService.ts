@@ -19,6 +19,7 @@ import * as stayRepository from "@/repositories/stayRepository";
 import type { StayEntryRow, CreateStayEntryInput } from "@/repositories/stayRepository";
 import * as stayPaymentRepository from "@/repositories/stayPaymentRepository";
 import type { StayPaymentTransactionRow } from "@/repositories/stayPaymentRepository";
+import * as stayExtensionHistoryRepository from "@/repositories/stayExtensionHistoryRepository";
 import {
   computeEndDate,
   determineInitialStatus,
@@ -481,7 +482,8 @@ function mapTransactionRowToDomain(
 export async function extendStay(
   stayId: string,
   additionalNights: number,
-  additionalCostAmount: number
+  additionalCostAmount: number,
+  createdBy: string | null = null
 ): Promise<{
   updatedStay: StayEntryRow;
   newEndDate: string;
@@ -491,6 +493,9 @@ export async function extendStay(
   if (!current) {
     throw new Error(`Stay ${stayId} not found`);
   }
+
+  const nightsBefore = current.total_nights;
+  const totalAmountBefore = current.payment_amount;
 
   const newTotalStayAmount =
     (current.payment_amount ?? 0) + additionalCostAmount;
@@ -503,6 +508,25 @@ export async function extendStay(
     gst.baseAmount,
     gst.taxAmount
   );
+
+  // Record this extension in the informational history list (see
+  // scripts/create-stay-extension-history.sql) immediately after the stay
+  // itself is updated. This does NOT touch stay_payment_transactions and has
+  // no bearing on Total_Paid / Remaining_Balance (Req 11.2 is unaffected) —
+  // it exists solely so the Accommodation tab can list every extension
+  // applied, the way it already lists every Payment_Transaction.
+  await stayExtensionHistoryRepository.recordExtension({
+    stayEntryId: stayId,
+    customerProfileId: updatedStay.customer_profile_id,
+    additionalNights,
+    nightsBefore,
+    nightsAfter: updatedStay.total_nights,
+    additionalAmount: additionalCostAmount,
+    totalAmountBefore,
+    totalAmountAfter: updatedStay.payment_amount ?? newTotalStayAmount,
+    extendedOn: getISTDateString(0),
+    createdBy,
+  });
 
   const newEndDate = computeEndDate(
     updatedStay.start_date,
@@ -641,7 +665,12 @@ export function shouldSkipBilling(
  * - showFullyPaidMessage: same status eligibility, positive total, non-shared,
  *   and balance IS fully paid.
  * - showMarkCheckedOut: ACTIVE, non-backdated, non-shared, positive total.
- *   Disabled until the balance is exactly zero (markCheckedOutEnabled).
+ *   Disabled (markCheckedOutEnabled false) until BOTH the balance is exactly
+ *   zero AND `todayIST` has reached the stay's inclusive end date. The date
+ *   condition means a normal checkout can only be actioned from 00:00 IST on
+ *   the end date onward — leaving early is the Early_Checkout flow's job, which
+ *   recalculates the amount for the nights actually stayed. Without this gate a
+ *   single click silently billed the guest for nights they never stayed.
  * - showGenerateFinalInvoice: FINISHED + isBackdated, fully paid, no final
  *   invoice yet, positive total, non-shared.
  * - showEarlyCheckout: ACTIVE, non-shared, positive total, not already
@@ -671,6 +700,7 @@ export function deriveStayActionVisibility(
       showFullyPaidMessage: false,
       showMarkCheckedOut: false,
       markCheckedOutEnabled: false,
+      markCheckedOutBlockedReason: null,
       showGenerateFinalInvoice: false,
       showEarlyCheckout: false,
     };
@@ -690,7 +720,26 @@ export function deriveStayActionVisibility(
   // Mark as Checked Out: ACTIVE, non-backdated (Req 7.1)
   // Disjoint from Generate Final Invoice by construction (ACTIVE vs FINISHED)
   const showMarkCheckedOut = isActive && !isBackdated;
-  const markCheckedOutEnabled = showMarkCheckedOut && balance.isFullyPaid;
+
+  // The stay must have actually reached its inclusive end date. YYYY-MM-DD
+  // strings compare correctly lexicographically, so this is true from 00:00 IST
+  // on the end date onward. Deliberately `>=` rather than `===`: an admin who
+  // misses the exact day must still be able to close the stay, otherwise the
+  // stay would be permanently stuck ACTIVE.
+  const hasReachedEndDate = todayIST >= stay.endDate;
+
+  const markCheckedOutEnabled =
+    showMarkCheckedOut && balance.isFullyPaid && hasReachedEndDate;
+
+  let markCheckedOutBlockedReason:
+    | "BALANCE_OUTSTANDING"
+    | "BEFORE_END_DATE"
+    | null = null;
+  if (showMarkCheckedOut && !markCheckedOutEnabled) {
+    markCheckedOutBlockedReason = !balance.isFullyPaid
+      ? "BALANCE_OUTSTANDING"
+      : "BEFORE_END_DATE";
+  }
 
   // Generate Final Invoice: FINISHED + isBackdated + fully paid + no invoice (Req 9.2)
   const showGenerateFinalInvoice =
@@ -704,6 +753,7 @@ export function deriveStayActionVisibility(
     showFullyPaidMessage,
     showMarkCheckedOut,
     markCheckedOutEnabled,
+    markCheckedOutBlockedReason,
     showGenerateFinalInvoice,
     showEarlyCheckout,
   };

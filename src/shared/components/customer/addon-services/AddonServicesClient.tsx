@@ -8,7 +8,7 @@
 //
 // Requirements: 11.1, 11.2, 11.3, 11.4, 15.5
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
@@ -19,16 +19,32 @@ import {
   Activity,
   ListChecks,
   ArrowRight,
+  X,
+  BedDouble,
   type LucideIcon,
 } from "lucide-react";
 
 import { Badge } from "@/shared/components/ui/badge";
+import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
-import { requestAddonServiceAction } from "@/actions/addonServiceActions";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/shared/components/ui/alert-dialog";
+import {
+  requestAddonServiceAction,
+  cancelAddonServiceRequestAction,
+} from "@/actions/addonServiceActions";
 import { cn } from "@/lib/utils";
-import type {
-  AddonServiceRequest,
-  AddonServiceStatus,
+import {
+  OPEN_ADDON_SERVICE_STATUSES,
+  type AddonServiceRequest,
+  type AddonServiceStatus,
 } from "@/types/accommodation";
 
 interface AvailableService {
@@ -106,22 +122,35 @@ const STATUS_BADGE_STYLES: Record<AddonServiceStatus, string> = {
   PENDING: "border-amber-200 bg-amber-50 text-amber-700",
   CONFIRMED: "border-blue-200 bg-blue-50 text-blue-700",
   COMPLETED: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  CANCELLED: "border-slate-200 bg-slate-50 text-slate-600",
 };
+
+function isOpenStatus(status: AddonServiceStatus): boolean {
+  return OPEN_ADDON_SERVICE_STATUSES.includes(status);
+}
 
 interface AddonServicesClientProps {
   customerProfileId: string | null;
   initialRequests: AddonServiceRequest[];
+  /** False once the stay has ended (checked out / no-show) — add-on
+   *  services are only offered during an active stay. */
+  hasActiveStay: boolean;
 }
 
 export function AddonServicesClient({
   customerProfileId,
   initialRequests,
+  hasActiveStay,
 }: AddonServicesClientProps) {
   const [requests, setRequests] =
     useState<AddonServiceRequest[]>(initialRequests);
   const [selectedService, setSelectedService] =
     useState<AvailableService | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<AddonServiceRequest | null>(
+    null
+  );
+  const [isCancelling, startCancel] = useTransition();
 
   // Requests are already sorted desc by the repository, but re-sort
   // defensively so any locally-appended entry lands in the right spot.
@@ -132,6 +161,27 @@ export function AddonServicesClient({
           new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()
       ),
     [requests]
+  );
+
+  // The open (PENDING/CONFIRMED) request per service type, if any. Gating is
+  // per service, NOT global: a pending Therapy Session locks only the Therapy
+  // card, leaving Massage and Yoga freely requestable. This is what stops the
+  // duplicate-request bug (clicking one card repeatedly used to create several
+  // PENDING rows for the same service) without blocking the other services.
+  const openRequestByService = useMemo(() => {
+    const map = new Map<string, AddonServiceRequest>();
+    for (const request of sortedRequests) {
+      if (isOpenStatus(request.status) && !map.has(request.serviceType)) {
+        map.set(request.serviceType, request);
+      }
+    }
+    return map;
+  }, [sortedRequests]);
+
+  /** Every service the customer currently has an open request for. */
+  const openRequests = useMemo(
+    () => [...openRequestByService.values()],
+    [openRequestByService]
   );
 
   async function handleRequest(service: AvailableService) {
@@ -167,8 +217,83 @@ export function AddonServicesClient({
     setSubmitting(false);
   }
 
+  function handleCancelConfirmed() {
+    if (!cancelTarget) return;
+    const target = cancelTarget;
+
+    startCancel(async () => {
+      const result = await cancelAddonServiceRequestAction(target.id);
+
+      if ("success" in result && result.success) {
+        toast.success("Request cancelled.");
+        setRequests((prev) =>
+          prev.map((r) =>
+            r.id === target.id ? { ...r, status: "CANCELLED" } : r
+          )
+        );
+        setCancelTarget(null);
+      } else {
+        const message =
+          "error" in result ? result.error : "Failed to cancel request.";
+        toast.error(message);
+      }
+    });
+  }
+
   return (
     <div className="space-y-6 sm:space-y-8">
+      {!hasActiveStay && (
+        <div
+          className="reveal-rise flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4"
+          style={{ ["--reveal-delay" as string]: "200ms" }}
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-500">
+            <BedDouble className="h-[18px] w-[18px]" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-700">
+              Add-on services aren&apos;t available right now
+            </p>
+            <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+              These wellness services can only be requested during an active
+              stay. Once your stay has ended, new requests can&apos;t be
+              placed.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {hasActiveStay && openRequests.length > 0 && (
+        <div
+          className="reveal-rise flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4"
+          style={{ ["--reveal-delay" as string]: "200ms" }}
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+            <ListChecks className="h-[18px] w-[18px]" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-amber-800">
+              {openRequests.length === 1
+                ? "You have a request in progress"
+                : `You have ${openRequests.length} requests in progress`}
+            </p>
+            <p className="mt-0.5 text-xs leading-relaxed text-amber-700">
+              {openRequests
+                .map(
+                  (r) =>
+                    `${
+                      AVAILABLE_SERVICES.find((s) => s.type === r.serviceType)
+                        ?.name ?? r.serviceType
+                    } (${r.status.toLowerCase()})`
+                )
+                .join(", ")}
+              . Each of these can be requested again once it is completed or
+              cancelled — the other services stay available.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div
         className="reveal-rise grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-3"
         style={{ ["--reveal-delay" as string]: "300ms" }}
@@ -178,6 +303,8 @@ export function AddonServicesClient({
           const tone = TONE_STYLES[service.tone];
           const isSelectedSubmitting =
             submitting && selectedService?.type === service.type;
+          // Only THIS service's own open request locks THIS card.
+          const openForThisService = openRequestByService.get(service.type);
 
           return (
             <Card
@@ -212,9 +339,25 @@ export function AddonServicesClient({
                   <Icon className="h-6 w-6" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-base font-semibold text-slate-900">
-                    {service.name}
-                  </h3>
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-base font-semibold text-slate-900">
+                      {service.name}
+                    </h3>
+                    {/* Surfaces the live status right on the card that has
+                        the open request, so the customer doesn't need to
+                        scroll down to "Your Requests" to know where it stands. */}
+                    {openForThisService && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                          STATUS_BADGE_STYLES[openForThisService.status],
+                        )}
+                      >
+                        {openForThisService.status}
+                      </Badge>
+                    )}
+                  </div>
                   <p className="mt-1.5 text-sm leading-relaxed text-slate-500">
                     {service.description}
                   </p>
@@ -222,11 +365,25 @@ export function AddonServicesClient({
                 <button
                   type="button"
                   onClick={() => handleRequest(service)}
-                  disabled={submitting || !customerProfileId}
+                  disabled={
+                    submitting ||
+                    !customerProfileId ||
+                    !hasActiveStay ||
+                    !!openForThisService
+                  }
+                  title={
+                    !hasActiveStay
+                      ? "Available only during an active stay"
+                      : openForThisService
+                        ? `Your ${service.name} request is ${openForThisService.status.toLowerCase()} — you can request it again once it's completed or cancelled`
+                        : undefined
+                  }
                   className="group mt-1 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:brightness-105 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
                 >
                   {isSelectedSubmitting ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : openForThisService ? (
+                    "Request Submitted"
                   ) : (
                     <>
                       Request
@@ -278,6 +435,7 @@ export function AddonServicesClient({
                   ? TONE_STYLES[serviceMeta.tone]
                   : TONE_STYLES.green;
                 const Icon = serviceMeta?.icon ?? ListChecks;
+                const canCancel = isOpenStatus(request.status);
 
                 return (
                   <li
@@ -304,14 +462,28 @@ export function AddonServicesClient({
                         )}
                       </p>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${
-                        STATUS_BADGE_STYLES[request.status]
-                      }`}
-                    >
-                      {request.status}
-                    </Badge>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider",
+                          STATUS_BADGE_STYLES[request.status],
+                        )}
+                      >
+                        {request.status}
+                      </Badge>
+                      {canCancel && (
+                        <button
+                          type="button"
+                          onClick={() => setCancelTarget(request)}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                          aria-label={`Cancel ${serviceMeta?.name ?? request.serviceType} request`}
+                          title="Cancel request"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   </li>
                 );
               })}
@@ -319,6 +491,42 @@ export function AddonServicesClient({
           </Card>
         )}
       </div>
+
+      <AlertDialog
+        open={!!cancelTarget}
+        onOpenChange={(open) => !open && setCancelTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this request?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {cancelTarget &&
+                `Your ${
+                  AVAILABLE_SERVICES.find(
+                    (s) => s.type === cancelTarget.serviceType
+                  )?.name ?? cancelTarget.serviceType
+                } request will be withdrawn. You can submit a new request right after.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCancelling}>
+              Keep Request
+            </AlertDialogCancel>
+            {/* A plain Button, not AlertDialogAction — same pattern as the
+                address-delete dialog. AlertDialogAction closes the dialog on
+                click, which would tear it down before a failed cancel could
+                surface; this keeps it open until the action actually
+                succeeds. */}
+            <Button
+              variant="destructive"
+              onClick={handleCancelConfirmed}
+              disabled={isCancelling}
+            >
+              {isCancelling ? "Cancelling..." : "Yes, cancel request"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

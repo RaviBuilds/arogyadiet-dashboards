@@ -109,6 +109,7 @@ function makeLedger(overrides: Partial<StayLedgerView> = {}): StayLedgerView {
         createdAt: "2025-06-05T09:00:00.000Z",
       },
     ],
+    extensions: [],
     balance: {
       totalStayAmount: 10000,
       totalPaid: 5000,
@@ -122,6 +123,7 @@ function makeLedger(overrides: Partial<StayLedgerView> = {}): StayLedgerView {
       showFullyPaidMessage: false,
       showMarkCheckedOut: true,
       markCheckedOutEnabled: false,
+      markCheckedOutBlockedReason: "BALANCE_OUTSTANDING",
       showGenerateFinalInvoice: false,
       showEarlyCheckout: true,
     },

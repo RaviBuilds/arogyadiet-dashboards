@@ -36,6 +36,7 @@ import {
   arbTotalStayAmount,
   referenceTotalPaid,
   roundToPaise,
+  shiftISODate,
 } from "@/test/accommodation/paymentArbitraries";
 import type { StayStatus } from "@/types/accommodation";
 
@@ -271,7 +272,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
     );
   });
 
-  it("markCheckedOutEnabled is true only when showMarkCheckedOut is true AND balance is exactly zero", () => {
+  it("markCheckedOutEnabled is true only when showMarkCheckedOut is true AND balance is exactly zero AND the stay has reached its end date", () => {
     fc.assert(
       fc.property(
         arbStayEntryWith({
@@ -291,9 +292,76 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
           const expected =
             stay.status === "ACTIVE" &&
             !stay.isBackdated &&
-            balance.isFullyPaid;
+            balance.isFullyPaid &&
+            REFERENCE_TODAY_IST >= stay.endDate;
 
           expect(result.markCheckedOutEnabled).toBe(expected);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  it("markCheckedOutBlockedReason names the blocker exactly when the button is shown but disabled, with balance taking precedence over the date", () => {
+    fc.assert(
+      fc.property(
+        arbStayEntryWith({
+          sharedPayment: fc.constant(false),
+          totalStayAmount: arbTotalStayAmount,
+        }),
+        arbBalance,
+        fc.boolean(),
+        (stay, balance, hasFinalInvoice) => {
+          const result = deriveStayActionVisibility(
+            stay,
+            balance,
+            hasFinalInvoice,
+            REFERENCE_TODAY_IST,
+          );
+
+          if (!result.showMarkCheckedOut || result.markCheckedOutEnabled) {
+            // Enabled, or not shown at all — nothing to explain.
+            expect(result.markCheckedOutBlockedReason).toBeNull();
+            return;
+          }
+
+          expect(result.markCheckedOutBlockedReason).toBe(
+            balance.isFullyPaid ? "BEFORE_END_DATE" : "BALANCE_OUTSTANDING",
+          );
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  it("a fully-paid ACTIVE stay is blocked before its end date and enabled on or after it", () => {
+    fc.assert(
+      fc.property(
+        arbStayEntryWith({
+          sharedPayment: fc.constant(false),
+          totalStayAmount: arbTotalStayAmount,
+          status: fc.constant<StayStatus>("ACTIVE"),
+          isBackdated: fc.constant(false),
+        }),
+        arbFullyPaidBalance,
+        (stay, balance) => {
+          // One day before the end date: always blocked on the date.
+          const dayBefore = shiftISODate(stay.endDate, -1);
+          const before = deriveStayActionVisibility(
+            stay,
+            balance,
+            false,
+            dayBefore,
+          );
+          expect(before.markCheckedOutEnabled).toBe(false);
+          expect(before.markCheckedOutBlockedReason).toBe("BEFORE_END_DATE");
+
+          // On the end date itself, and a day after: enabled both times.
+          for (const day of [stay.endDate, shiftISODate(stay.endDate, 1)]) {
+            const on = deriveStayActionVisibility(stay, balance, false, day);
+            expect(on.markCheckedOutEnabled).toBe(true);
+            expect(on.markCheckedOutBlockedReason).toBeNull();
+          }
         },
       ),
       { numRuns: 100 },

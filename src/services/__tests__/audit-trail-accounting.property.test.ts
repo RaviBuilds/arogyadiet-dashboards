@@ -236,6 +236,14 @@ vi.mock("@/repositories/dietitian/cadenceRepository", () => ({
     H.getPausedDatesSince(ids, sinceDate),
 }));
 
+// The write gate consults the Report_Card lock (report-card-lifecycle Phase 3);
+// this suite is about AUDIT ACCOUNTING, so the lock is stubbed to "no covering
+// report" — every write attempt then reaches the same accounting path it always
+// did, keeping the one-audit-entry-per-attempt invariant under test.
+vi.mock("@/services/ReportCardService", () => ({
+  findReportCardForDate: vi.fn(async () => null),
+}));
+
 // ─── System under test (imported after the mocks are registered) ───────────────
 import { submitHealthLog } from "@/services/HealthLogService";
 

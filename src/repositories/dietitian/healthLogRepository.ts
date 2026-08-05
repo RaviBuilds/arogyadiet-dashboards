@@ -49,6 +49,8 @@ export interface HealthLogRow {
   submission_date_ist: string;
   clinic_id: string | null;
   franchise_id: string | null;
+  /** The owning Report_Card, or `null` for a log outside every Logging_Window. */
+  report_card_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -68,6 +70,13 @@ export interface UpsertHealthLogInput {
   submission_date_ist: string;
   clinic_id?: string | null;
   franchise_id?: string | null;
+  /**
+   * The Report_Card whose Logging_Window contains `log_date`
+   * (report-card-lifecycle). `null` when the date falls outside every window —
+   * such a log belongs to no report. Optional so pre-feature callers still
+   * compile; omitting it leaves the column untouched on an UPDATE.
+   */
+  report_card_id?: string | null;
 }
 
 /**
@@ -143,7 +152,7 @@ const KIT_SELF_LOG_COLUMNS =
   "log_date, status, weight_kg, step_count, physical_activity_minutes, physical_activity_name, water_intake_liters, buttermilk_intake, fat_consumption, main_dish, protein_curry, veg_curry, soup_name_qty, eggs_count, salads_qty";
 
 const HEALTH_LOG_COLUMNS =
-  "id, customer_profile_id, log_date, author_type, author_user_id, customer_category, parameters, custom_parameters, closing_comment, submitted_at, submission_date_ist, clinic_id, franchise_id, created_at, updated_at";
+  "id, customer_profile_id, log_date, author_type, author_user_id, customer_category, parameters, custom_parameters, closing_comment, submitted_at, submission_date_ist, clinic_id, franchise_id, report_card_id, created_at, updated_at";
 
 const TIMELINE_COLUMNS =
   "id, customer_profile_id, log_date, author_type, author_user_id, source, parameters, custom_parameters, closing_comment, submitted_at";
@@ -208,6 +217,7 @@ export async function upsertHealthLog(
       submission_date_ist: input.submission_date_ist,
       clinic_id: input.clinic_id ?? null,
       franchise_id: input.franchise_id ?? null,
+      report_card_id: input.report_card_id ?? null,
     })
     .select(HEALTH_LOG_COLUMNS)
     .single();
@@ -262,6 +272,9 @@ async function updateHealthLogById(
       submission_date_ist: input.submission_date_ist,
       clinic_id: input.clinic_id ?? null,
       franchise_id: input.franchise_id ?? null,
+      // Backfills the link on a pre-feature log the first time it is edited,
+      // while `?? null` keeps an already-linked row correct.
+      report_card_id: input.report_card_id ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -304,6 +317,51 @@ export async function getHealthLogTimeline(
   if (error) {
     throw new Error(
       `Failed to get health log timeline for customer ${customerProfileId}: ${error.message}`
+    );
+  }
+
+  return (data ?? []) as TimelineRow[];
+}
+
+/**
+ * Read the Health_Log timeline for ONE Report_Card's Logging_Window
+ * (report-card-lifecycle Phase 2) — the per-subscription / per-stay slice of
+ * the customer-wide {@link getHealthLogTimeline}.
+ *
+ * WHY THIS FILTERS BY WINDOW AND NOT BY `report_card_id`:
+ * `health_logs.report_card_id` exists, but the other three sources unioned into
+ * `v_health_log_timeline` — `admin_health_logs`, `customer_health_logs` and
+ * `kit_daily_logs` — have no such column and never will; they predate the
+ * feature and are read-only legacy tables. Filtering on `report_card_id` would
+ * therefore silently drop every legacy reading from a report, which is exactly
+ * the historical data a report for an older subscription/stay is made of.
+ * The Report_Card's window is the durable, source-agnostic boundary.
+ *
+ * `report_card_id` remains the right key for the WRITE gate, which only ever
+ * concerns `health_logs` rows.
+ *
+ * Bounds are inclusive on both ends, matching the Logging_Window definition.
+ * Ordered oldest-first, like {@link getHealthLogTimeline}.
+ */
+export async function getHealthLogTimelineForWindow(
+  customerProfileId: string,
+  windowStart: string,
+  windowEnd: string
+): Promise<TimelineRow[]> {
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from("v_health_log_timeline")
+    .select(TIMELINE_COLUMNS)
+    .eq("customer_profile_id", customerProfileId)
+    .gte("log_date", windowStart)
+    .lte("log_date", windowEnd)
+    .order("log_date", { ascending: true })
+    .order("submitted_at", { ascending: true });
+
+  if (error) {
+    throw new Error(
+      `Failed to get health log timeline for customer ${customerProfileId} in ${windowStart}..${windowEnd}: ${error.message}`
     );
   }
 

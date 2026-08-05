@@ -1,10 +1,20 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/shared/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/shared/components/ui/alert-dialog";
 
 import { markStayCheckedOutAction } from "@/actions/stayActions";
 import { generateFinalStayInvoiceAction } from "@/actions/stayInvoiceActions";
@@ -19,6 +29,8 @@ interface StayCheckoutActionBarProps {
   visibility: StayActionVisibility;
   remainingBalance: number;
   finalInvoiceError: string | null;
+  /** The stay's inclusive end date (YYYY-MM-DD), named in the disabled hint. */
+  endDate?: string;
   onCheckedOut: (result: {
     status: "FINISHED";
     invoiceStatus: string;
@@ -61,13 +73,16 @@ export function StayCheckoutActionBar({
   visibility,
   remainingBalance,
   finalInvoiceError,
+  endDate,
   onCheckedOut,
   onInvoiceGenerated,
 }: StayCheckoutActionBarProps) {
   const [isCheckingOut, startCheckoutTransition] = useTransition();
   const [isGeneratingInvoice, startInvoiceTransition] = useTransition();
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const handleCheckout = () => {
+    setConfirmOpen(false);
     startCheckoutTransition(async () => {
       const result = await markStayCheckedOutAction(stayId);
 
@@ -93,14 +108,21 @@ export function StayCheckoutActionBar({
     });
   };
 
-  const showOutstandingHint =
-    visibility.showMarkCheckedOut && !visibility.markCheckedOutEnabled;
-
-  const outstandingLabel =
-    remainingBalance > 0
-      ? `Outstanding: ₹${remainingBalance.toLocaleString("en-IN")}`
-      : remainingBalance < 0
-        ? `Refund due before checkout: ₹${Math.abs(remainingBalance).toLocaleString("en-IN")}`
+  // Why the button is visible but disabled. The balance wording keeps its
+  // existing shape; the date wording names the end date so the admin knows
+  // exactly when checkout opens, and points at Early Checkout as the
+  // alternative for a guest leaving sooner.
+  const blockedLabel =
+    visibility.markCheckedOutBlockedReason === "BALANCE_OUTSTANDING"
+      ? remainingBalance > 0
+        ? `Outstanding: ₹${remainingBalance.toLocaleString("en-IN")}`
+        : remainingBalance < 0
+          ? `Refund due before checkout: ₹${Math.abs(remainingBalance).toLocaleString("en-IN")}`
+          : null
+      : visibility.markCheckedOutBlockedReason === "BEFORE_END_DATE"
+        ? endDate
+          ? `Opens on ${endDate} — use Early Checkout to close sooner`
+          : "Opens on the stay's end date — use Early Checkout to close sooner"
         : null;
 
   const nothingToShow =
@@ -117,17 +139,45 @@ export function StayCheckoutActionBar({
       {visibility.showMarkCheckedOut && (
         <div className="flex items-center gap-2">
           <Button
-            onClick={handleCheckout}
+            onClick={() => setConfirmOpen(true)}
             disabled={!visibility.markCheckedOutEnabled || isCheckingOut}
           >
             {isCheckingOut && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Mark as Checked Out
           </Button>
-          {showOutstandingHint && outstandingLabel && (
+          {blockedLabel && (
             <span className="text-sm text-muted-foreground">
-              {outstandingLabel}
+              {blockedLabel}
             </span>
           )}
+
+          {/* Checkout is irreversible and generates the final invoice, so it
+              takes an explicit confirmation rather than firing on first click. */}
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  You are going to mark the customer as Checked Out. Are you
+                  sure?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This closes the stay{endDate ? ` ending ${endDate}` : ""} and
+                  generates the final invoice. It cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={isCheckingOut}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleCheckout}
+                  disabled={isCheckingOut}
+                >
+                  I confirm and process checkout
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
 

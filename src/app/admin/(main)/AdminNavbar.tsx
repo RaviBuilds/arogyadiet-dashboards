@@ -167,7 +167,7 @@ export default function AdminNavbar({
         {/* Right: Notification Bell, Avatar & Mobile Menu */}
         <div className="flex items-center space-x-3">
           {userProfile.id ? (
-            <NotificationBell userId={userProfile.id} />
+            <NotificationBell userId={userProfile.id} showPopupToggle />
           ) : null}
 
           <DropdownMenu>

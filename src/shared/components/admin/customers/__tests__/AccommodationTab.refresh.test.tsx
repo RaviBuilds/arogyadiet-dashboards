@@ -57,15 +57,9 @@ vi.mock("@/actions/stayInvoiceActions", () => ({
     generateFinalStayInvoiceAction(...a),
 }));
 
-vi.mock("@/actions/healthLogActions", () => ({
-  submitAdminHealthLogAction: vi.fn(),
-  getCustomerHealthLogsAction: vi
-    .fn()
-    .mockResolvedValue({ success: true, data: [] }),
-  getAdminHealthLogsAction: vi
-    .fn()
-    .mockResolvedValue({ success: true, data: [] }),
-}));
+// `@/actions/healthLogActions` no longer needs stubbing: the Accommodation tab
+// dropped its "Record Health Metrics" section, so the tab makes no health-log
+// calls at all. Health logs live entirely in the Dietitian portal now.
 
 const routerPush = vi.fn();
 const routerRefresh = vi.fn();
@@ -147,6 +141,7 @@ function makeLedger(stay: StayEntry): StayLedgerView {
         createdAt: "2025-06-01T09:00:00.000Z",
       },
     ],
+    extensions: [],
     balance: {
       totalStayAmount: 10000,
       totalPaid: 6000,
@@ -160,6 +155,7 @@ function makeLedger(stay: StayEntry): StayLedgerView {
       showFullyPaidMessage: false,
       showMarkCheckedOut: true,
       markCheckedOutEnabled: false,
+      markCheckedOutBlockedReason: "BALANCE_OUTSTANDING",
       showGenerateFinalInvoice: false,
       showEarlyCheckout: true,
     },

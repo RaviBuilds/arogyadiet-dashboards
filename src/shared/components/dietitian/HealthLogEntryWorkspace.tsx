@@ -23,7 +23,14 @@
 import { useCallback, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { Phone, Hash, User2, ClipboardList, FileText } from "lucide-react";
+import {
+  Phone,
+  Hash,
+  User2,
+  ClipboardList,
+  FileText,
+  RotateCcw,
+} from "lucide-react";
 
 import { parseISODateString } from "@/lib/dates/ist";
 
@@ -88,6 +95,16 @@ export interface HealthLogEntryWorkspaceProps {
    * reached) instead of the generic fallback copy.
    */
   slotsUnavailableReason?: string | null;
+  /**
+   * True when this period's Report_Card has been reopened and is ACTIVE, which
+   * is the one state where `HealthLogService` relaxes the same-day edit window
+   * (report-card-lifecycle Req 9.1, 9.4).
+   *
+   * Without this, an older slot silently becomes editable and the Dietitian has
+   * no way to know why — or that the licence to edit it ends as soon as the
+   * report is closed again.
+   */
+  amendmentMode?: boolean;
 }
 
 function categoryLabel(category: CustomerCategory): string {
@@ -115,6 +132,7 @@ export function HealthLogEntryWorkspace({
   initialEditable,
   selfLogTrackerPanel = null,
   slotsUnavailableReason = null,
+  amendmentMode = false,
 }: HealthLogEntryWorkspaceProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -207,6 +225,21 @@ export function HealthLogEntryWorkspace({
           </div>
         </CardContent>
       </Card>
+
+      {/* Amendment_Mode notice. Sits directly above the slot strip because that
+          is where the effect is visible: slots that would normally be locked are
+          selectable and editable. Naming the cause here is the difference between
+          "this behaves oddly" and "this is open because I reopened it". */}
+      {amendmentMode && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <RotateCcw className="mt-0.5 size-4 shrink-0" />
+          <p>
+            This report was reopened, so earlier logs can be edited beyond their
+            usual same-day window. That ends when the report is finalised again.
+            You can still only edit logs you wrote yourself.
+          </p>
+        </div>
+      )}
 
       {/* Cadence-driven slot schedule. */}
       <Card className="border-slate-200/70">

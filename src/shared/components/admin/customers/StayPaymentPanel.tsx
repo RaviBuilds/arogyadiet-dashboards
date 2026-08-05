@@ -25,11 +25,15 @@ import Link from "next/link";
 import { Receipt, Wallet, CheckCircle2, Banknote, CircleDollarSign } from "lucide-react";
 
 import { getStayPaymentLedgerAction } from "@/actions/stayPaymentActions";
-import { buildPaymentHistoryRows } from "@/lib/accommodation/paymentHistory";
+import {
+  buildPaymentHistoryRows,
+  buildExtensionHistoryRows,
+} from "@/lib/accommodation/paymentHistory";
 import type {
   StayBalanceSnapshot,
   StayLedgerView,
   PaymentHistoryRow,
+  ExtensionHistoryRow,
 } from "@/types/accommodation";
 
 import {
@@ -40,6 +44,7 @@ import {
 } from "@/shared/components/ui/card";
 import { Badge } from "@/shared/components/ui/badge";
 import { Skeleton } from "@/shared/components/ui/skeleton";
+import { CalendarPlus } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -70,6 +75,13 @@ export interface StayPaymentPanelProps {
   refreshToken?: number;
   /** Notifies the parent whenever a fresh ledger view has been loaded. */
   onLedgerChange?: (ledger: StayLedgerView) => void;
+  /**
+   * When false, the Total / Paid / Remaining summary cards and the fully-paid
+   * banner are omitted so the parent can surface those figures elsewhere
+   * (the Active Stay Overview card renders them for the current stay).
+   * Payment history is always rendered. Defaults to true.
+   */
+  showSummary?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +93,7 @@ export function StayPaymentPanel({
   balanceOverride,
   refreshToken,
   onLedgerChange,
+  showSummary = true,
 }: StayPaymentPanelProps) {
   const [ledger, setLedger] = useState<StayLedgerView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -117,11 +130,13 @@ export function StayPaymentPanel({
   if (loading && !ledger) {
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full rounded-lg" />
-          ))}
-        </div>
+        {showSummary && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-lg" />
+            ))}
+          </div>
+        )}
         <Skeleton className="h-48 w-full rounded-lg" />
       </div>
     );
@@ -145,58 +160,63 @@ export function StayPaymentPanel({
   const historyRows: PaymentHistoryRow[] = buildPaymentHistoryRows(
     ledger.transactions
   );
+  const extensionRows: ExtensionHistoryRow[] = buildExtensionHistoryRows(
+    ledger.extensions
+  );
 
   return (
     <div className="space-y-4">
       {/* ─── Summary cards ─── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="flex items-start gap-3 py-2">
-            <Banknote className="h-5 w-5 text-muted-foreground mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">
-                Total Stay Amount
-              </p>
-              <p className="text-lg font-semibold">
-                {formatRupees(balance.totalStayAmount)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-start gap-3 py-2">
-            <Wallet className="h-5 w-5 text-muted-foreground mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">
-                Total Paid
-              </p>
-              <p className="text-lg font-semibold">
-                {formatRupees(balance.totalPaid)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card
-          className={
-            balance.isFullyPaid ? "border-emerald-500/40 bg-emerald-50/40" : undefined
-          }
-        >
-          <CardContent className="flex items-start gap-3 py-2">
-            <CircleDollarSign className="h-5 w-5 text-muted-foreground mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">
-                Remaining Balance
-              </p>
-              <p className="text-lg font-semibold">
-                {formatRupees(Math.max(0, balance.remainingBalance))}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {showSummary && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Card>
+            <CardContent className="flex items-start gap-3 py-2">
+              <Banknote className="h-5 w-5 text-muted-foreground mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Total Stay Amount
+                </p>
+                <p className="text-lg font-semibold">
+                  {formatRupees(balance.totalStayAmount)}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-start gap-3 py-2">
+              <Wallet className="h-5 w-5 text-muted-foreground mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Total Paid
+                </p>
+                <p className="text-lg font-semibold">
+                  {formatRupees(balance.totalPaid)}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card
+            className={
+              balance.isFullyPaid ? "border-emerald-500/40 bg-emerald-50/40" : undefined
+            }
+          >
+            <CardContent className="flex items-start gap-3 py-2">
+              <CircleDollarSign className="h-5 w-5 text-muted-foreground mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Remaining Balance
+                </p>
+                <p className="text-lg font-semibold">
+                  {formatRupees(Math.max(0, balance.remainingBalance))}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* ─── Fully paid message ─── */}
-      {balance.isFullyPaid && (
+      {showSummary && balance.isFullyPaid && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">
           <CheckCircle2 className="h-4 w-4" />
           <p className="text-sm font-medium">This stay is fully paid.</p>
@@ -248,6 +268,53 @@ export function StayPaymentPanel({
                       <Receipt className="h-3.5 w-3.5" />
                       Receipt
                     </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── Extension history ─── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Extension History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {extensionRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No stay extensions recorded yet.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {extensionRows.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex items-start justify-between gap-4 rounded-lg border px-4 py-3"
+                >
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant="outline" className="gap-1">
+                        <CalendarPlus className="h-3.5 w-3.5" />
+                        +{row.additionalNights}{" "}
+                        {row.additionalNights === 1 ? "night" : "nights"}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">
+                        {row.date}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {row.nightsBefore} → {row.nightsAfter} nights total
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="font-semibold">
+                      +{formatRupees(row.additionalAmount)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      New total: {formatRupees(row.totalAmountAfter)}
+                    </span>
                   </div>
                 </div>
               ))}

@@ -4,11 +4,26 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  containerClassName,
+  ...props
+}: React.ComponentProps<"table"> & {
+  /**
+   * Extra classes for the scroll container that wraps the table.
+   *
+   * By default the container only scrolls horizontally and grows to fit every
+   * row, which puts its horizontal scrollbar below the last row — out of reach
+   * until the page itself is scrolled to the bottom. Pass a max-height plus
+   * `overflow-y-auto` here to bound the container instead, so both scrollbars
+   * stay on screen and a sticky header can keep the column names visible.
+   */
+  containerClassName?: string
+}) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className={cn("relative w-full overflow-x-auto", containerClassName)}
     >
       <table
         data-slot="table"

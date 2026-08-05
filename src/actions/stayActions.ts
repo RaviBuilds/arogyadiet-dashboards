@@ -11,6 +11,7 @@
 //   14.1, 14.2, 14.3, 14.4, 14.5
 
 import { getCurrentAdminContext } from "@/lib/auth/adminAccess";
+import { getISTDateString } from "@/lib/dates/ist";
 import * as stayRepository from "@/repositories/stayRepository";
 import * as AccommodationService from "@/services/AccommodationService";
 import {
@@ -127,7 +128,8 @@ export async function extendStayAction(
   const { newEndDate, balance } = await AccommodationService.extendStay(
     stayId,
     additionalNights,
-    paymentAmount
+    paymentAmount,
+    ctx.userId
   );
 
   return { success: true, data: { newEndDate, balance } };
@@ -158,7 +160,32 @@ export async function markStayCheckedOutAction(
     return { error: "Unauthorized" };
   }
 
-  // 2. Delegate to service orchestration
+  // 2. End-date gate. A normal checkout may only be actioned once the stay has
+  //    reached its inclusive end date; leaving early goes through
+  //    earlyCheckoutStayAction, which recalculates the amount for the nights
+  //    actually stayed. Enforced here in the action rather than inside
+  //    AccommodationService.checkoutStay, because `earlyCheckout` calls
+  //    checkoutStay internally once the balance settles — and that call is by
+  //    definition before the end date, so gating the service would break it.
+  const stayForDateGate = await stayRepository.getStayById(stayId);
+  if (!stayForDateGate) {
+    return { error: "Stay entry not found." };
+  }
+
+  const endDate = AccommodationService.computeEndDate(
+    stayForDateGate.start_date,
+    stayForDateGate.total_nights
+  );
+  const todayIST = getISTDateString(0);
+
+  // YYYY-MM-DD strings compare correctly lexicographically.
+  if (todayIST < endDate) {
+    return {
+      error: `This stay runs until ${endDate}. Checkout opens on that date — use Early Checkout to close it sooner and recalculate the amount.`,
+    };
+  }
+
+  // 3. Delegate to service orchestration
   const result = await AccommodationService.checkoutStay(stayId);
 
   if (!result.ok) {

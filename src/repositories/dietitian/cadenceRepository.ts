@@ -50,6 +50,15 @@ export interface GoverningRecord {
   windowEnd: string;
   /** Subscription status, or stay status; anything other than `ACTIVE` zeroes the cadence counts (Req 14.7). */
   status: string;
+  /**
+   * The `subscriptions.id` (MEAL/KIT) or `stay_entries.id` (ACCOMMODATION) this
+   * window came from (report-card-lifecycle Phase 2). The Report_Card is keyed
+   * on this, so the write path can resolve which report a new log belongs to
+   * without any date matching.
+   */
+  recordId: string;
+  /** Which table `recordId` refers to — the Report_Card's `subject_type`. */
+  subjectType: "SUBSCRIPTION" | "STAY";
 }
 
 interface SubscriptionRow {
@@ -173,6 +182,8 @@ export async function getGoverningRecords(
         windowStart: stay.start_date,
         windowEnd: computeStayEndDate(stay.start_date, stay.total_nights),
         status: stay.status,
+        recordId: stay.id,
+        subjectType: "STAY",
       });
       continue;
     }
@@ -206,10 +217,120 @@ export async function getGoverningRecords(
       windowStart,
       windowEnd,
       status: sub.status,
+      recordId: sub.id,
+      subjectType: "SUBSCRIPTION",
     });
   }
 
   return result;
+}
+
+/**
+ * EVERY Logging_Window a customer has ever had — one entry per MEAL/KIT
+ * subscription and per accommodation stay, newest window first
+ * (report-card-lifecycle Phase 2).
+ *
+ * {@link getGoverningRecords} deliberately collapses to the single most
+ * recently created record, because the Cadence_Engine only ever cares about the
+ * one currently in force. The Report_Card history needs the opposite: all of
+ * them, including records whose report was never finished, so a Dietitian can
+ * go back and complete an older subscription's report while a newer one runs.
+ *
+ * Window formulas are identical to `getGoverningRecords` — deliberately so, as
+ * the two must never disagree about what period a record covers. Records with
+ * no resolvable window start are omitted, mirroring that function.
+ *
+ * NOTE the KIT branch: an ACTIVE KIT subscription carries `starts_on = NULL`
+ * until the customer confirms receipt, so its window exists only via
+ * `kit_received_date`. Filtering on `starts_on` alone would silently drop live
+ * KIT plans.
+ */
+export async function listLoggingWindowsForCustomer(
+  customerProfileId: string,
+): Promise<GoverningRecord[]> {
+  const admin = createAdminClient();
+
+  const { data: subsData, error: subsError } = await admin
+    .from("subscriptions")
+    .select(
+      "id, customer_profile_id, customer_category, status, starts_on, ends_on, effective_end_on, kit_received_date, kit_tracker_end_date, created_at",
+    )
+    .eq("customer_profile_id", customerProfileId);
+
+  if (subsError) {
+    throw new Error(
+      `Failed to load logging windows for customer ${customerProfileId}: ${subsError.message}`,
+    );
+  }
+
+  const subs = (subsData ?? []) as SubscriptionRow[];
+  const records: GoverningRecord[] = [];
+
+  // The Customer_Category still comes from the subscription row even for
+  // ACCOMMODATION, matching getGoverningRecords.
+  const isAccommodationCustomer = subs.some(
+    (sub) => sub.customer_category === "ACCOMMODATION",
+  );
+
+  for (const sub of subs) {
+    const category = sub.customer_category as CustomerCategory;
+    if (category === "ACCOMMODATION") continue; // handled via stay_entries below
+
+    const windowStart =
+      category === "KIT"
+        ? (sub.kit_received_date ?? sub.starts_on)
+        : sub.starts_on;
+    if (!windowStart) continue;
+
+    const windowEnd =
+      category === "KIT"
+        ? (sub.kit_tracker_end_date ??
+          sub.effective_end_on ??
+          sub.ends_on ??
+          windowStart)
+        : (sub.effective_end_on ?? sub.ends_on ?? windowStart);
+
+    records.push({
+      customerProfileId: sub.customer_profile_id,
+      category,
+      windowStart,
+      windowEnd,
+      status: sub.status,
+      recordId: sub.id,
+      subjectType: "SUBSCRIPTION",
+    });
+  }
+
+  if (isAccommodationCustomer) {
+    const { data: staysData, error: staysError } = await admin
+      .from("stay_entries")
+      .select(
+        "id, customer_profile_id, start_date, total_nights, status, created_at",
+      )
+      .eq("customer_profile_id", customerProfileId);
+
+    if (staysError) {
+      throw new Error(
+        `Failed to load stay logging windows for customer ${customerProfileId}: ${staysError.message}`,
+      );
+    }
+
+    for (const stay of (staysData ?? []) as StayRow[]) {
+      if (!stay.start_date || stay.total_nights == null) continue;
+      records.push({
+        customerProfileId: stay.customer_profile_id,
+        category: "ACCOMMODATION",
+        windowStart: stay.start_date,
+        windowEnd: computeStayEndDate(stay.start_date, stay.total_nights),
+        status: stay.status,
+        recordId: stay.id,
+        subjectType: "STAY",
+      });
+    }
+  }
+
+  // Newest window first — the current period leads, older periods follow.
+  return records.sort((a, b) => b.windowStart.localeCompare(a.windowStart));
 }
 
 // ---------------------------------------------------------------------------

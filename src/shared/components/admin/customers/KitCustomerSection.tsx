@@ -1,5 +1,15 @@
 "use client";
 
+// src/shared/components/admin/customers/KitCustomerSection.tsx
+//
+// KIT Customers directory. Renders the shared 9-column spine from
+// CustomerTableCells; column 6 (the one category-specific slot) holds the KIT
+// shipment state and the timestamp it last changed.
+//
+// Shipment status arrives from a secondary fetch, so it renders an inline
+// spinner in that cell alone — the rest of each row is available immediately
+// from the customer list and must not be held back.
+
 import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
@@ -26,15 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
-import {
-  Eye,
-  MoreHorizontal,
-  Edit,
-  Trash2,
-  Truck,
-  Package,
-  Loader2,
-} from "lucide-react";
+import { Eye, MoreHorizontal, Edit, Trash2, Truck, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { DataTableCard } from "../core/DataTableCard";
@@ -42,19 +44,43 @@ import { SectionHeader } from "../core/SectionHeader";
 import { DataSearchFilter } from "../core/DataSearchFilter";
 import { TableColumnFilter } from "../core/TableColumnFilter";
 import { TablePagination } from "../core/TablePagination";
-import { StatusBadge } from "../core/StatusBadge";
 import { ExportButton, RefreshButton } from "../core/ActionButtons";
 import {
   getBulkKitShippingStatusAction,
   type KitCustomerShippingStatus,
 } from "@/actions/admin-actions/kitCustomerShippingActions";
 import { getExpiredKitCustomersAction } from "@/actions/admin-actions/kitLifecycleActions";
+import { ALL_CLINICS, type ClinicFilterSelection } from "@/lib/clinic/visibility";
+import type { CustomerData, SubscriptionPeriod } from "./CustomerDashboard";
 import {
-  clinicDisplayName,
-  ALL_CLINICS,
-  type ClinicFilterSelection,
-} from "@/lib/clinic/visibility";
-import type { CustomerData } from "./CustomerDashboard";
+  ContactCell,
+  CustomerInfoCell,
+  DietAllergyCell,
+  DietitianCell,
+  LifecycleCell,
+  LocationCell,
+  MedicalRecordCell,
+  StatusPlanCell,
+  TableEmptyRow,
+  TableLoadingRow,
+  collectDietitianNames,
+  dietAllergyFilterSections,
+  dietitianFilterSections,
+  formatDateTime,
+  matchesDietAllergy,
+  matchesDietitian,
+  matchesLocationFlags,
+  matchesMedical,
+  matchesStatus,
+  medicalFilterSections,
+  statusFilterSections,
+  CUSTOMER_TABLE_COLSPAN,
+  CUSTOMER_TABLE_MIN_WIDTH,
+  CUSTOMER_TABLE_SCROLL_CONTAINER,
+  CUSTOMER_TABLE_STICKY_HEADER,
+  FILTER_ALL,
+  LOCATION_FILTER_UNASSIGNED_CLINIC,
+} from "./CustomerTableCells";
 
 interface KitCustomerSectionProps {
   customers: CustomerData[];
@@ -77,24 +103,11 @@ interface KitCustomerSectionProps {
   onDeactivate: (customer: CustomerData) => void;
   /** Removes the mutating export/edit/deactivate controls for a Dietitian (dietitian-management, Req 16.1). */
   isDietitian?: boolean;
-  /** Map of customer email → earliest active subscription end date (for expiry filter). */
-  customerEndDateMap?: Map<string, string>;
+  /** customer email → active subscription window, for the expiry filter. */
+  periodMap?: Map<string, SubscriptionPeriod>;
 }
 
-function formatShippingDate(iso: string | null): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }) + ", " + date.toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
+const PAGE_SIZE = 20;
 
 export function KitCustomerSection({
   customers,
@@ -116,7 +129,7 @@ export function KitCustomerSection({
   onEdit,
   onDeactivate,
   isDietitian = false,
-  customerEndDateMap = new Map(),
+  periodMap = new Map(),
 }: KitCustomerSectionProps) {
   const [shippingStatuses, setShippingStatuses] = useState<
     Map<string, KitCustomerShippingStatus>
@@ -125,13 +138,15 @@ export function KitCustomerSection({
   const [loadingShipping, setLoadingShipping] = useState(false);
 
   // ── Column filter state ─────────────────────────────────────────────────
-  const [filterStatus, setFilterStatus] = useState("ALL");
-  const [filterDietitian, setFilterDietitian] = useState("ALL");
-  const [filterShipment, setFilterShipment] = useState("ALL");
+  const [filterDiet, setFilterDiet] = useState(FILTER_ALL);
+  const [locationFlags, setLocationFlags] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState(FILTER_ALL);
+  const [filterShipment, setFilterShipment] = useState(FILTER_ALL);
+  const [filterMedicalRecord, setFilterMedicalRecord] = useState(FILTER_ALL);
+  const [filterDietitian, setFilterDietitian] = useState(FILTER_ALL);
 
   // ── Pagination state ────────────────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(0);
-  const PAGE_SIZE = 20;
 
   // Expired KIT customers state
   const [expiredCustomerIds, setExpiredCustomerIds] = useState<Set<string>>(new Set());
@@ -187,28 +202,54 @@ export function KitCustomerSection({
     );
   }, [customers, showExpired, showArchived, expiredCustomerIds]);
 
-  // Apply expiring-in-days filter on top of display list
-  const expiryFilteredCustomers = useMemo(() => {
-    if (expiringInDays === null) return displayCustomers;
-    const now = new Date();
-    const cutoff = new Date(now.getTime() + expiringInDays * 24 * 60 * 60 * 1000);
-    return displayCustomers.filter((c) => {
-      const endDate = customerEndDateMap.get(c.email);
-      if (!endDate) return false;
-      const end = new Date(endDate);
-      return end >= now && end <= cutoff;
-    });
-  }, [displayCustomers, expiringInDays, customerEndDateMap]);
+  /**
+   * Every filter that does NOT depend on the shipment fetch. This is what drives
+   * fetchShippingStatuses below, so it must never depend on `shippingStatuses` —
+   * otherwise each response would produce a new Map, recompute this list, and
+   * re-trigger the fetch in a loop.
+   */
+  const baseFilteredCustomers = useMemo(() => {
+    let result = displayCustomers;
+
+    if (expiringInDays !== null) {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + expiringInDays * 24 * 60 * 60 * 1000);
+      result = result.filter((c) => {
+        const endDate = periodMap.get(c.email)?.endsOn;
+        if (!endDate) return false;
+        const end = new Date(endDate);
+        return end >= now && end <= cutoff;
+      });
+    }
+
+    return result.filter(
+      (c) =>
+        matchesDietAllergy(c, filterDiet) &&
+        matchesLocationFlags(c, locationFlags) &&
+        matchesStatus(c, filterStatus) &&
+        matchesMedical(c, filterMedicalRecord) &&
+        matchesDietitian(c, filterDietitian),
+    );
+  }, [
+    displayCustomers,
+    expiringInDays,
+    periodMap,
+    filterDiet,
+    locationFlags,
+    filterStatus,
+    filterMedicalRecord,
+    filterDietitian,
+  ]);
 
   // Fetch shipping statuses for all visible KIT customers
   const fetchShippingStatuses = useCallback(async () => {
-    if (expiryFilteredCustomers.length === 0) {
+    if (baseFilteredCustomers.length === 0) {
       setShippingStatuses(new Map());
       return;
     }
 
     setLoadingShipping(true);
-    const ids = expiryFilteredCustomers.map((c) => c.id);
+    const ids = baseFilteredCustomers.map((c) => c.id);
     const result = await getBulkKitShippingStatusAction(ids);
 
     if (result.success) {
@@ -219,57 +260,60 @@ export function KitCustomerSection({
       setShippingStatuses(map);
     }
     setLoadingShipping(false);
-  }, [expiryFilteredCustomers]);
+  }, [baseFilteredCustomers]);
 
   useEffect(() => {
     fetchShippingStatuses();
   }, [fetchShippingStatuses]);
 
-  // ── Derived list with column filters + pagination ─────────────────────────
+  // The shipment filter is layered on last, since it reads the fetched data.
   const filteredDisplayCustomers = useMemo(() => {
-    let result = expiryFilteredCustomers;
+    if (filterShipment === FILTER_ALL) return baseFilteredCustomers;
+    return baseFilteredCustomers.filter((c) => {
+      const shipmentStatus = shippingStatuses.get(c.id)?.status ?? "Not Shipped";
+      return shipmentStatus === filterShipment;
+    });
+  }, [baseFilteredCustomers, filterShipment, shippingStatuses]);
 
-    if (filterStatus !== "ALL") {
-      result = result.filter((c) => c.status === filterStatus);
-    }
-
-    if (filterDietitian !== "ALL") {
-      if (filterDietitian === "UNASSIGNED") {
-        result = result.filter((c) => !c.dietitianName);
-      } else {
-        result = result.filter((c) => c.dietitianName === filterDietitian);
-      }
-    }
-
-    if (filterShipment !== "ALL") {
-      result = result.filter((c) => {
-        const shipping = shippingStatuses.get(c.id);
-        const shipmentStatus = shipping?.status ?? "Not Shipped";
-        return shipmentStatus === filterShipment;
-      });
-    }
-
-    return result;
-  }, [expiryFilteredCustomers, filterStatus, filterDietitian, filterShipment, shippingStatuses]);
-
-  // Reset page when filters change
-  useEffect(() => {
+  // Send the reader back to page 1 whenever the filter set changes, otherwise a
+  // narrower result set can leave them stranded on a now-empty page. Adjusted
+  // during render rather than in an effect — the pattern React recommends for
+  // resetting state in response to changing inputs.
+  const filterKey = [
+    filterDiet,
+    [...locationFlags].sort().join(","),
+    filterStatus,
+    filterShipment,
+    filterMedicalRecord,
+    filterDietitian,
+    String(expiringInDays),
+    searchTerm,
+    String(showArchived),
+    String(showExpired),
+  ].join("|");
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (prevFilterKey !== filterKey) {
+    setPrevFilterKey(filterKey);
     setCurrentPage(0);
-  }, [filterStatus, filterDietitian, filterShipment, searchTerm, showArchived, showExpired]);
+  }
 
   const paginatedCustomers = useMemo(() => {
     const start = currentPage * PAGE_SIZE;
     return filteredDisplayCustomers.slice(start, start + PAGE_SIZE);
-  }, [filteredDisplayCustomers, currentPage, PAGE_SIZE]);
+  }, [filteredDisplayCustomers, currentPage]);
 
-  // Unique dietitian names for filter options
-  const dietitianOptions = useMemo(() => {
-    const names = new Set<string>();
-    expiryFilteredCustomers.forEach((c) => {
-      if (c.dietitianName) names.add(c.dietitianName);
-    });
-    return Array.from(names).sort();
-  }, [expiryFilteredCustomers]);
+  const dietitianOptions = useMemo(
+    () => collectDietitianNames(displayCustomers),
+    [displayCustomers],
+  );
+
+  const uniquePlans = useMemo(() => {
+    const plans = new Set<string>();
+    for (const c of displayCustomers) {
+      if (c.activePlanName) plans.add(c.activePlanName);
+    }
+    return Array.from(plans).sort((a, b) => a.localeCompare(b));
+  }, [displayCustomers]);
 
   return (
     <DataTableCard
@@ -353,72 +397,67 @@ export function KitCustomerSection({
         </>
       }
     >
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-slate-50/50 border-b border-slate-200">
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+      <Table
+        containerClassName={CUSTOMER_TABLE_SCROLL_CONTAINER}
+        className={CUSTOMER_TABLE_MIN_WIDTH}
+      >
+        <TableHeader className={CUSTOMER_TABLE_STICKY_HEADER}>
+          <TableRow className="border-b border-slate-200">
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
               Customer Info
             </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
               Contact
             </TableHead>
             <TableHead>
               <TableColumnFilter
                 mode="single"
-                title="Status"
+                title="Diet & Allergy"
+                value={filterDiet}
+                onChange={setFilterDiet}
+                allValue={FILTER_ALL}
+                sections={dietAllergyFilterSections()}
+              />
+            </TableHead>
+            <TableHead>
+              <TableColumnFilter
+                mode="multiple"
+                title="Location"
+                values={locationFlags}
+                onChange={setLocationFlags}
+                groupLabel="Flag data gaps"
+                contentClassName="w-[200px]"
+                options={[
+                  {
+                    value: LOCATION_FILTER_UNASSIGNED_CLINIC,
+                    label: "Clinic: Unassigned",
+                  },
+                ]}
+              />
+            </TableHead>
+            <TableHead>
+              <TableColumnFilter
+                mode="single"
+                title="Status & Plan"
                 value={filterStatus}
                 onChange={setFilterStatus}
-                allValue="ALL"
-                sections={[
-                  {
-                    label: "Filter by Status",
-                    options: [
-                      { value: "ALL", label: "All Statuses" },
-                      { value: "Active", label: "Active" },
-                      { value: "Pending", label: "Pending" },
-                      { value: "Expired", label: "Expired" },
-                      { value: "Stopped", label: "Stopped" },
-                      { value: "No Plan", label: "No Plan" },
-                    ],
-                  },
-                ]}
-              />
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Clinic
-            </TableHead>
-            <TableHead>
-              <TableColumnFilter
-                mode="single"
-                title="Dietitian"
-                value={filterDietitian}
-                onChange={setFilterDietitian}
-                allValue="ALL"
+                allValue={FILTER_ALL}
                 contentClassName="w-[200px]"
-                sections={[
-                  {
-                    label: "Filter by Dietitian",
-                    options: [
-                      { value: "ALL", label: "All Dietitians" },
-                      { value: "UNASSIGNED", label: "Unassigned" },
-                      ...dietitianOptions.map((name) => ({ value: name, label: name })),
-                    ],
-                  },
-                ]}
+                sections={statusFilterSections(uniquePlans)}
               />
             </TableHead>
             <TableHead>
               <TableColumnFilter
                 mode="single"
-                title="Shipment Status"
+                title="Shipment"
                 value={filterShipment}
                 onChange={setFilterShipment}
-                allValue="ALL"
+                allValue={FILTER_ALL}
                 sections={[
                   {
                     label: "Filter by Shipment",
                     options: [
-                      { value: "ALL", label: "All Shipments" },
+                      { value: FILTER_ALL, label: "All Shipments" },
                       { value: "Not Shipped", label: "Not Shipped" },
                       { value: "Shipped", label: "Shipped" },
                       { value: "Delivered", label: "Delivered" },
@@ -427,143 +466,68 @@ export function KitCustomerSection({
                 ]}
               />
             </TableHead>
-            <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <TableHead>
+              <TableColumnFilter
+                mode="single"
+                title="Medical Record"
+                value={filterMedicalRecord}
+                onChange={setFilterMedicalRecord}
+                allValue={FILTER_ALL}
+                sections={medicalFilterSections()}
+              />
+            </TableHead>
+            <TableHead>
+              <TableColumnFilter
+                mode="single"
+                title="Dietitian"
+                value={filterDietitian}
+                onChange={setFilterDietitian}
+                allValue={FILTER_ALL}
+                contentClassName="w-[200px]"
+                sections={dietitianFilterSections(dietitianOptions)}
+              />
+            </TableHead>
+            <TableHead className="w-[50px] text-xs font-medium uppercase tracking-wider text-slate-500">
               <span className="sr-only">Actions</span>
             </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(loadingExpired && showExpired) ? (
-            <TableRow>
-              <TableCell
-                colSpan={7}
-                className="text-center py-12 text-sm text-slate-500"
-              >
-                <div className="flex flex-col items-center gap-1.5">
-                  <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-                  <span className="text-sm text-slate-500">
-                    Loading expired customers...
-                  </span>
-                </div>
-              </TableCell>
-            </TableRow>
+          {loadingExpired && showExpired ? (
+            <TableLoadingRow
+              label="Loading expired customers..."
+              colSpan={CUSTOMER_TABLE_COLSPAN}
+            />
           ) : filteredDisplayCustomers.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={7}
-                className="text-center py-12 text-sm text-slate-500"
-              >
-                <div className="flex flex-col items-center gap-1.5">
-                  <Package className="h-8 w-8 text-slate-300" />
-                  <span className="text-sm font-medium text-slate-700">
-                    No KIT customers found
-                  </span>
-                  <span className="max-w-md text-xs text-slate-500">
-                    KIT customers will appear here once they complete onboarding.
-                  </span>
-                </div>
-              </TableCell>
-            </TableRow>
+            <TableEmptyRow
+              icon={Package}
+              title="No KIT customers found"
+              hint="KIT customers will appear here once they complete onboarding."
+              colSpan={CUSTOMER_TABLE_COLSPAN}
+            />
           ) : (
             paginatedCustomers.map((customer) => {
               const shipping = shippingStatuses.get(customer.id);
               const shipmentStatus = shipping?.status ?? "Not Shipped";
-              const shipmentDate = shipping?.statusUpdatedAt ?? null;
+              const shipmentDate = formatDateTime(shipping?.statusUpdatedAt);
 
               return (
                 <TableRow
                   key={customer.id}
-                  className="hover:bg-slate-50 transition-colors duration-200"
+                  className="transition-colors duration-200 hover:bg-slate-50"
                 >
-                  {/* Customer Info */}
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900 tracking-tight">
-                        {customer.fullName}
-                      </span>
-                      <Badge className="rounded-full border-0 bg-orange-100 px-2 text-[10px] font-semibold text-orange-700 hover:bg-orange-100">
-                        KIT
-                      </Badge>
-                    </div>
-                    <div className="text-sm text-slate-500 mt-0.5">
-                      {customer.gender && customer.gender !== "N/A" ? (
-                        <span>
-                          ( {customer.gender.charAt(0).toUpperCase()} -{" "}
-                          {customer.age ? `${customer.age} yrs` : "N/A"} )
-                        </span>
-                      ) : (
-                        <span>( N/A )</span>
-                      )}
-                    </div>
-                  </TableCell>
+                  <CustomerInfoCell customer={customer} />
+                  <ContactCell customer={customer} />
+                  <DietAllergyCell customer={customer} />
+                  <LocationCell customer={customer} />
+                  <StatusPlanCell
+                    status={customer.status}
+                    secondary={customer.activePlanName || "No Active Plan"}
+                  />
 
-                  {/* Contact */}
-                  <TableCell>
-                    <div className="font-medium text-slate-900">
-                      {customer.mobile}
-                    </div>
-                    <div className="mt-1">
-                      <Badge
-                        className={cn(
-                          "rounded-full border-0 px-2 text-[10px] font-semibold",
-                          customer.dietary_preference === "Veg"
-                            ? "bg-green-100 text-green-700 hover:bg-green-100"
-                            : "bg-red-100 text-red-700 hover:bg-red-100"
-                        )}
-                      >
-                        {customer.dietary_preference === "N/A"
-                          ? "Not Set"
-                          : customer.dietary_preference}
-                      </Badge>
-                    </div>
-                  </TableCell>
-
-                  {/* Status */}
-                  <TableCell>
-                    <StatusBadge
-                      status={customer.status}
-                      variant={
-                        customer.status === "Active" ? "solid" : "outline"
-                      }
-                    />
-                    <div className="text-sm text-slate-500 mt-1.5">
-                      {customer.activePlanName || "No Active Plan"}
-                    </div>
-                  </TableCell>
-
-                  {/* Clinic */}
-                  <TableCell>
-                    <span
-                      className={cn(
-                        "text-sm",
-                        customer.clinicName
-                          ? "text-slate-700"
-                          : "text-slate-400 italic"
-                      )}
-                    >
-                      {clinicDisplayName(customer.clinicName)}
-                    </span>
-                  </TableCell>
-
-                  {/* Dietitian */}
-                  <TableCell>
-                    <span
-                      className={cn(
-                        "text-sm",
-                        customer.dietitianName
-                          ? "text-slate-700"
-                          : "text-slate-400 italic"
-                      )}
-                    >
-                      {customer.dietitianName || "Unassigned"}
-                    </span>
-                  </TableCell>
-
-                  {/* Shipment Status */}
-                  <TableCell>
-                    {loadingShipping ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                    ) : shipmentStatus === "Not Shipped" ? (
+                  {/* Column 6 — KIT lifecycle: shipment state and when it changed. */}
+                  {shipmentStatus === "Not Shipped" && !loadingShipping ? (
+                    <TableCell>
                       <Link
                         href={`/customers/${customer.id}?tab=Shipping`}
                         className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
@@ -571,29 +535,38 @@ export function KitCustomerSection({
                         <Truck className="h-3.5 w-3.5" />
                         Add Shipment
                       </Link>
-                    ) : (
-                      <div className="flex flex-col gap-0.5">
+                    </TableCell>
+                  ) : (
+                    <LifecycleCell
+                      loading={loadingShipping}
+                      badge={
                         <Badge
-                          className={cn(
-                            "rounded-full px-2.5 text-[11px] font-semibold shadow-none w-fit",
-                            shipmentStatus === "Shipped"
-                              ? "bg-blue-50 text-blue-700 border-blue-200"
-                              : "bg-green-50 text-green-700 border-green-200"
-                          )}
                           variant="outline"
+                          className={cn(
+                            "w-fit rounded-full px-2.5 text-[11px] font-semibold shadow-none",
+                            shipmentStatus === "Shipped"
+                              ? "border-blue-200 bg-blue-50 text-blue-700"
+                              : "border-green-200 bg-green-50 text-green-700",
+                          )}
                         >
                           {shipmentStatus}
                         </Badge>
-                        {shipmentDate && (
-                          <span className="text-[10px] text-slate-500 mt-0.5">
-                            {formatShippingDate(shipmentDate)}
+                      }
+                      dates={
+                        shipmentDate ? (
+                          <span className="text-xs text-slate-500">
+                            {shipmentDate}
                           </span>
-                        )}
-                      </div>
-                    )}
-                  </TableCell>
+                        ) : undefined
+                      }
+                    />
+                  )}
 
-                  {/* Actions */}
+                  <MedicalRecordCell
+                    hasMedicalHistory={customer.hasMedicalHistory}
+                  />
+                  <DietitianCell dietitianName={customer.dietitianName} />
+
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -608,7 +581,7 @@ export function KitCustomerSection({
                         <DropdownMenuItem asChild>
                           <Link
                             href={`/customers/${customer.id}`}
-                            className="cursor-pointer font-medium flex items-center"
+                            className="flex cursor-pointer items-center font-medium"
                           >
                             <Eye className="mr-2 h-4 w-4 text-primary" />
                             View 360 Dashboard
@@ -617,7 +590,7 @@ export function KitCustomerSection({
                         <DropdownMenuItem asChild>
                           <Link
                             href={`/customers/${customer.id}?tab=Shipping`}
-                            className="cursor-pointer font-medium flex items-center"
+                            className="flex cursor-pointer items-center font-medium"
                           >
                             <Truck className="mr-2 h-4 w-4 text-primary" />
                             Shipping
@@ -635,7 +608,7 @@ export function KitCustomerSection({
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                              className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
+                              className="cursor-pointer font-medium text-destructive focus:bg-destructive/10"
                               onClick={() => onDeactivate(customer)}
                               disabled={!customer.isActive}
                             >
