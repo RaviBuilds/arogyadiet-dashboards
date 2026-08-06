@@ -3,14 +3,15 @@
 //
 // LAYERING: Data-access ONLY. This module performs all Supabase reads/writes
 // for stay_entries operations (creation, status transitions, extensions,
-// history, cron transitions, early checkout, checkout finalisation, and final
-// invoice linkage). It applies NO business validation or GST math (that lives
+// history, cron transitions, Save_Stay_Details recalculation, checkout
+// finalisation, and final invoice linkage). It applies NO business validation
+// or GST math (that lives
 // in `src/services/AccommodationService.ts`) and contains NO `'use server'`
 // wrappers (those live in `src/actions/*`). Uses the service-role admin client,
 // mirroring the kitLifecycleRepository pattern.
 //
-// Requirements: 3.4, 4.1, 4.2, 4.3, 7.3, 8.1, 8.2, 8.3, 8.7, 9.2, 11.1, 11.3,
-// 11.5, 12.6, 12.15, 14.1, 14.3, 14.5
+// Requirements: 3.4, 4.1, 4.2, 4.3, 7.3, 8.1, 8.2, 8.3, 8.4, 8.7, 9.2, 11.1,
+// 11.3, 11.5, 12.8, 12.14, 12.15, 12.16, 13.1, 13.2
 
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -37,14 +38,32 @@ export interface StayEntryRow {
   updated_at: string;
   /** True when the stay was onboarded with a past start date (Backdated_Stay). */
   is_backdated: boolean;
-  /** True once an Early_Checkout recalculation has been applied to this stay. */
+  /**
+   * Retained with a narrowed meaning: true when the stay ended EARLIER than
+   * originally booked — i.e. a Save_Stay_Details submission shortened it. It is
+   * no longer the "figures were recalculated" signal (that is
+   * {@link StayEntryRow.recalculation_applied}).
+   */
   early_checkout_applied: boolean;
-  /** Nights actually stayed; set only by Early_Checkout. */
+  /**
+   * Nights actually stayed. Kept in sync with `total_nights` by
+   * `save_stay_details()` whenever `early_checkout_applied` is set.
+   *
+   * @deprecated Never read — Save_Stay_Details is repeatable, so this can go
+   * stale between invocations. Use `total_nights`.
+   */
   actual_nights_stayed: number | null;
-  /** Booked nights before the first Early_Checkout; preserved on first application only. */
+  /** Booked nights before the FIRST Save_Stay_Details; pinned on first application only. */
   original_total_nights: number | null;
-  /** Total_Stay_Amount before the first Early_Checkout; preserved on first application only. */
+  /** Total_Stay_Amount before the FIRST Save_Stay_Details; pinned on first application only. */
   original_total_amount: number | null;
+  /**
+   * True once Save_Stay_Details has been applied at least once. This — not
+   * `early_checkout_applied` — is what "the figures were recalculated" means
+   * (Req 8.4). Backfilled from `early_checkout_applied` by
+   * `scripts/create-stay-recalculation.sql`.
+   */
+  recalculation_applied: boolean;
   /** Timestamp the stay was finalised through checkout. */
   checked_out_at: string | null;
   /** `payments.id` of the single Final_Consolidated_Invoice for this stay. */
@@ -57,10 +76,10 @@ export interface StayEntryRow {
 
 /**
  * Column list shared by every `stay_entries` read/write so the row shape
- * stays consistent everywhere (Req 8.1, 9.2, 12.6, 12.15).
+ * stays consistent everywhere (Req 8.1, 8.4, 9.2, 12.15).
  */
 const STAY_ENTRY_COLUMNS =
-  "id, customer_profile_id, start_date, total_nights, stay_type, occupancy_type, status, payment_amount, base_amount, tax_amount, tax_percentage, payment_host_profile_id, meal_preference, created_at, updated_at, is_backdated, early_checkout_applied, actual_nights_stayed, original_total_nights, original_total_amount, checked_out_at, final_invoice_payment_id, final_invoice_generated_at, final_invoice_error";
+  "id, customer_profile_id, start_date, total_nights, stay_type, occupancy_type, status, payment_amount, base_amount, tax_amount, tax_percentage, payment_host_profile_id, meal_preference, created_at, updated_at, is_backdated, early_checkout_applied, actual_nights_stayed, original_total_nights, original_total_amount, recalculation_applied, checked_out_at, final_invoice_payment_id, final_invoice_generated_at, final_invoice_error";
 
 /** Input for creating a new stay entry. */
 export interface CreateStayEntryInput {
@@ -396,75 +415,137 @@ export async function extendStay(
 }
 
 // ---------------------------------------------------------------------------
-// Early Checkout, Checkout Finalisation, and Final Invoice Linkage
+// Save Stay Details, Checkout Finalisation, and Final Invoice Linkage
 // ---------------------------------------------------------------------------
 
+/** Input for {@link saveStayDetails}. */
+export interface SaveStayDetailsInput {
+  stayId: string;
+  /** Recalculated_End_Date (YYYY-MM-DD). Nights are DERIVED from it, never typed. */
+  recalculatedEndDate: string;
+  /**
+   * Recalculated_Total_Nights as the service layer derived it
+   * (`endDate − startDate + 1`).
+   *
+   * NOT sent to the RPC: `save_stay_details()` derives nights itself from
+   * `p_recalculated_end_date` and the stay's locked `start_date`, and inventing
+   * a parameter it does not accept would create a second truth the database
+   * could disagree with. It stays on this input so the service layer keeps one
+   * shape for the value it already computed (and can compare it against the
+   * returned row's `total_nights` if it chooses to).
+   */
+  recalculatedTotalNights: number;
+  /** Recalculated_Stay_Amount — becomes the stay's Total_Stay_Amount. */
+  recalculatedStayAmount: number;
+  /** Recomputed 18% breakup of the recalculated amount, from the single `gstFromTotal` path. */
+  gst: { baseAmount: number; taxAmount: number };
+  /** IST date the recalculation was applied, stamped onto the history row. */
+  recalculatedOn: string;
+  createdBy: string | null;
+}
+
+/** Outcome of {@link saveStayDetails}. Mirrors the `save_stay_details` RPC's jsonb shape. */
+export type SaveStayDetailsResult =
+  | { ok: true; stay: StayEntryRow; historyRecorded: boolean }
+  | {
+      ok: false;
+      reason:
+        | "NOT_FOUND"
+        | "NOT_ACTIVE"
+        | "INVALID_END_DATE"
+        | "AMOUNT_OUT_OF_RANGE";
+      status?: string;
+      minEndDate?: string;
+      maxEndDate?: string;
+    };
+
 /**
- * Applies an Early_Checkout recalculation to an ACTIVE stay: sets
- * `total_nights` / `payment_amount` / GST breakup to the recalculated
- * values, records `actual_nights_stayed`, and marks
- * `early_checkout_applied = true`.
+ * Persists a Save_Stay_Details submission through the row-locking
+ * `save_stay_details()` RPC: derives Recalculated_Total_Nights from the
+ * submitted end date, sets `payment_amount` / GST breakup, stamps
+ * `recalculation_applied`, pins `original_total_*` on first application, and
+ * inserts the Recalculation_History row — all in ONE transaction under ONE row
+ * lock, so a mid-operation failure leaves nights, amount, status, and end date
+ * fully unchanged (Req 12.16).
  *
- * On the FIRST application (early_checkout_applied currently false),
- * `original_total_nights` / `original_total_amount` are set to the stay's
- * pre-recalculation totals as an audit trail. On a subsequent application
- * those original values are preserved unchanged.
+ * REPLACES `applyEarlyCheckout`, which did a plain unlocked UPDATE and wrote
+ * `actual_nights_stayed` / `early_checkout_applied` directly. Those legacy
+ * columns are still maintained — by the RPC, only for the shortening case.
  *
- * Req 12.6, 12.15
+ * The RPC never touches `status` and never writes a `payments` row:
+ * Save_Stay_Details is not a checkout (Req 12.9), and `finalizeCheckout`
+ * remains the sole path to FINISHED.
+ *
+ * Business-outcome failures (NOT_FOUND / NOT_ACTIVE / INVALID_END_DATE /
+ * AMOUNT_OUT_OF_RANGE) are RETURNED as a typed result, not thrown — only
+ * infrastructure errors throw. Same convention as {@link finalizeCheckout}.
+ *
+ * Req 12.8, 12.14, 12.15, 12.16, 13.1, 13.2
  */
-export async function applyEarlyCheckout(
-  stayId: string,
-  actualNightsStayed: number,
-  recalculatedStayAmount: number,
-  gst: { baseAmount: number; taxAmount: number }
-): Promise<StayEntryRow> {
+export async function saveStayDetails(
+  input: SaveStayDetailsInput
+): Promise<SaveStayDetailsResult> {
   const admin = createAdminClient();
 
-  const { data: current, error: fetchError } = await admin
-    .from("stay_entries")
-    .select(STAY_ENTRY_COLUMNS)
-    .eq("id", stayId)
-    .single();
-
-  if (fetchError) {
-    throw new Error(
-      `Failed to fetch stay ${stayId} for early checkout: ${fetchError.message}`
-    );
-  }
-
-  const currentRow = current as StayEntryRow;
-
-  const isFirstApplication = !currentRow.early_checkout_applied;
-
-  const update: Record<string, unknown> = {
-    total_nights: actualNightsStayed,
-    payment_amount: recalculatedStayAmount,
-    base_amount: gst.baseAmount,
-    tax_amount: gst.taxAmount,
-    actual_nights_stayed: actualNightsStayed,
-    early_checkout_applied: true,
-  };
-
-  if (isFirstApplication) {
-    update.original_total_nights = currentRow.total_nights;
-    update.original_total_amount = currentRow.payment_amount;
-  }
-  // else: preserve the existing original_total_nights / original_total_amount.
-
-  const { data, error } = await admin
-    .from("stay_entries")
-    .update(update)
-    .eq("id", stayId)
-    .select(STAY_ENTRY_COLUMNS)
-    .single();
+  const { data, error } = await admin.rpc("save_stay_details", {
+    p_stay_entry_id: input.stayId,
+    p_recalculated_end_date: input.recalculatedEndDate,
+    p_recalculated_amount: input.recalculatedStayAmount,
+    p_base_amount: input.gst.baseAmount,
+    p_tax_amount: input.gst.taxAmount,
+    p_recalculated_on: input.recalculatedOn,
+    p_created_by: input.createdBy,
+  });
 
   if (error) {
     throw new Error(
-      `Failed to apply early checkout to stay ${stayId}: ${error.message}`
+      `Failed to save stay details for stay ${input.stayId}: ${error.message}`
     );
   }
 
-  return data as StayEntryRow;
+  const result = data as {
+    ok: boolean;
+    reason?:
+      | "NOT_FOUND"
+      | "NOT_ACTIVE"
+      | "INVALID_END_DATE"
+      | "AMOUNT_OUT_OF_RANGE";
+    status?: string;
+    min_end_date?: string;
+    max_end_date?: string;
+    stay?: StayEntryRow;
+    history_recorded?: boolean;
+  } | null;
+
+  if (!result) {
+    throw new Error(
+      `save_stay_details returned no result for stay ${input.stayId}`
+    );
+  }
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      reason: result.reason ?? "NOT_FOUND",
+      status: result.status,
+      minEndDate: result.min_end_date,
+      maxEndDate: result.max_end_date,
+    };
+  }
+
+  // The RPC returns the updated row inline (`to_jsonb(v_updated)`), so no
+  // re-fetch is needed — unlike finalizeCheckout, which only returns balances.
+  if (!result.stay) {
+    throw new Error(
+      `save_stay_details succeeded but returned no stay row for stay ${input.stayId}`
+    );
+  }
+
+  return {
+    ok: true,
+    stay: result.stay,
+    historyRecorded: result.history_recorded === true,
+  };
 }
 
 /** Outcome of {@link finalizeCheckout}. Mirrors the `finalize_stay_checkout` RPC's jsonb shape. */

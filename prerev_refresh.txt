@@ -1,0 +1,9 @@
+﻿
+ RUN  v4.1.9 E:/Local Clients/Next.js/arogyadiet
+
+
+ Test Files  2 passed (2)
+      Tests  8 passed (8)
+   Start at  23:53:55
+   Duration  8.28s (transform 736ms, setup 1.54s, import 4.71s, tests 2.66s, environment 2.35s)
+

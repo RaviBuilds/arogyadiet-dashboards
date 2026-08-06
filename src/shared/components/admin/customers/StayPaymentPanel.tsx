@@ -35,6 +35,7 @@ import type {
   PaymentHistoryRow,
   ExtensionHistoryRow,
 } from "@/types/accommodation";
+import { StayRecalculationHistoryCard } from "@/shared/components/admin/customers/StayRecalculationHistoryCard";
 
 import {
   Card,
@@ -322,6 +323,9 @@ export function StayPaymentPanel({
           )}
         </CardContent>
       </Card>
+
+      {/* ─── Recalculation history ─── */}
+      <StayRecalculationHistoryCard recalculations={ledger.recalculations} />
     </div>
   );
 }

@@ -7,7 +7,7 @@ import type {
   StayEntry,
   StayLedgerView,
   StayBalanceSnapshot,
-  EarlyCheckoutOutcome,
+  SaveStayDetailsOutcome,
 } from "@/types/accommodation";
 import {
   Card,
@@ -26,7 +26,7 @@ import {
   Clock,
   CalendarPlus,
   Wallet,
-  LogOut,
+  Calculator,
   Banknote,
   CircleDollarSign,
   CheckCircle2,
@@ -39,7 +39,7 @@ import { CustomerAddonRequestHistory } from "./CustomerAddonRequestHistory";
 import { StayPaymentPanel } from "./StayPaymentPanel";
 import { RecordStayPaymentForm } from "./RecordStayPaymentForm";
 import { RecordStayRefundDialog } from "./RecordStayRefundDialog";
-import { EarlyCheckoutDialog } from "./EarlyCheckoutDialog";
+import { RecalculateStayDialog } from "./RecalculateStayDialog";
 import { StayCheckoutActionBar } from "./StayCheckoutActionBar";
 
 // ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
   // Dialog state
   const [showExtendDialog, setShowExtendDialog] = useState(false);
   const [showNewStayDialog, setShowNewStayDialog] = useState(false);
-  const [showEarlyCheckoutDialog, setShowEarlyCheckoutDialog] = useState(false);
+  const [showRecalculateDialog, setShowRecalculateDialog] = useState(false);
   const [showRefundDialog, setShowRefundDialog] = useState(false);
 
   const fetchAllStays = async () => {
@@ -176,10 +176,12 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
     bumpRefresh();
   };
 
-  const handleRefundSuccess = (balance: StayBalanceSnapshot) => {
-    setBalanceOverride(balance);
+  const handleRefundSuccess = (result: {
+    balance: StayBalanceSnapshot;
+    refundInvoicePaymentId: string;
+  }) => {
+    setBalanceOverride(result.balance);
     bumpRefresh();
-    setShowRefundDialog(false);
   };
 
   const handleCheckedOut = () => {
@@ -192,10 +194,15 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
     fetchAllStays();
   };
 
-  const handleEarlyCheckoutOutcome = (outcome: EarlyCheckoutOutcome) => {
+  // Save Stay Details never transitions Stay_Status and never generates a
+  // Final_Consolidated_Invoice (Req 12.9) — this refetches the ledger and the
+  // stay list so nights, end date, total, and both history lists update
+  // without a page reload, and it never calls `handleCheckedOut` or anything
+  // that implies a checkout refresh.
+  const handleStayDetailsSaved = (outcome: SaveStayDetailsOutcome) => {
     bumpRefresh();
     fetchAllStays();
-    if (outcome.nextStep === "RECORD_REFUND") {
+    if (outcome.nextAction === "RECORD_REFUND") {
       setShowRefundDialog(true);
     }
   };
@@ -269,10 +276,11 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
       : 0;
 
   const canExtendStay = currentStay?.status === "ACTIVE";
-  // Early Checkout only ever applies to the ACTIVE stay, so it is safe to sit
-  // beside Extend Stay in the Current Stay header.
-  const canEarlyCheckout =
-    !!visibility?.showEarlyCheckout &&
+  // Recalculate Stay only ever applies to the ACTIVE stay, so it is safe to
+  // sit beside Extend Stay in the Current Stay header. It stays available
+  // after a first recalculation (Req 12.1, 12.10).
+  const canRecalculateStay =
+    !!visibility?.showRecalculateStay &&
     !!selectedStay &&
     selectedStay.id === currentStay?.id;
 
@@ -287,9 +295,9 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Extend Stay and Early Checkout are the two lifecycle actions on a
-              live stay, so they sit side by side in one segmented group. */}
-          {(canExtendStay || canEarlyCheckout) && (
+          {/* Extend Stay and Recalculate Stay are the two lifecycle actions on
+              a live stay, so they sit side by side in one segmented group. */}
+          {(canExtendStay || canRecalculateStay) && (
             <div className="inline-flex items-center rounded-md border bg-background shadow-sm overflow-hidden">
               {canExtendStay && (
                 <Button
@@ -302,18 +310,18 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
                   Extend Stay
                 </Button>
               )}
-              {canExtendStay && canEarlyCheckout && (
+              {canExtendStay && canRecalculateStay && (
                 <span aria-hidden className="h-5 w-px bg-border" />
               )}
-              {canEarlyCheckout && (
+              {canRecalculateStay && (
                 <Button
                   variant="ghost"
                   size="sm"
                   className="rounded-none h-9 px-3 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-                  onClick={() => setShowEarlyCheckoutDialog(true)}
+                  onClick={() => setShowRecalculateDialog(true)}
                 >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Early Checkout
+                  <Calculator className="h-4 w-4 mr-2" />
+                  Recalculate Stay
                 </Button>
               )}
             </div>
@@ -543,7 +551,7 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
                   : "Payment history and checkout actions for the current stay. Balance is shown in the overview above."}
               </p>
             </div>
-            {balance && balance.refundDue > 0 && (
+            {visibility?.showMarkAsRefunded && (
               <Button
                 variant="outline"
                 size="sm"
@@ -551,7 +559,7 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
                 onClick={() => setShowRefundDialog(true)}
               >
                 <Wallet className="h-4 w-4 mr-2" />
-                Record Refund
+                Mark as refunded
               </Button>
             )}
           </div>
@@ -618,18 +626,21 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
       )}
 
       {selectedStay && (
-        <EarlyCheckoutDialog
+        <RecalculateStayDialog
           stayId={selectedStay.id}
-          bookedTotalNights={selectedStay.totalNights}
-          open={showEarlyCheckoutDialog}
-          onOpenChange={setShowEarlyCheckoutDialog}
-          onOutcome={handleEarlyCheckoutOutcome}
+          startDate={selectedStay.startDate}
+          bookedEndDate={selectedStay.endDate}
+          currentTotalStayAmount={selectedStay.paymentAmount ?? 0}
+          open={showRecalculateDialog}
+          onOpenChange={setShowRecalculateDialog}
+          onSaved={handleStayDetailsSaved}
         />
       )}
 
       {selectedStayId && balance && (
         <RecordStayRefundDialog
           stayId={selectedStayId}
+          customerProfileId={customerProfileId}
           refundDue={balance.refundDue}
           open={showRefundDialog}
           onOpenChange={setShowRefundDialog}

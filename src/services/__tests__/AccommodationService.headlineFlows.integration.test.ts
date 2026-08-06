@@ -2,20 +2,29 @@
 // Feature: accommodation-payment-lifecycle — end-to-end integration tests for
 // the two headline flows (Task 11.9).
 //
-// **Validates: Requirements 3.1, 4.5, 9.1, 9.2, 12.11, 12.13**
+// **Validates: Requirements 3.1, 4.5, 9.1, 9.2, 12.11, 12.13, 12.9, 14.7, 14.10**
+//
+// Revision 2: the "early checkout with a refund" scenario is rewritten to go
+// through `saveStayDetails` (which REPLACES the retired `earlyCheckout`) and
+// `recordRefundWithInvoice` (the standalone Mark_As_Refunded action), so it
+// exercises the shipped Recalculate Stay / Save Stay Details flow instead of
+// the retired one. It now asserts the decoupling Req 12.9 requires: the stay
+// stays ACTIVE through the recalculation and the refund, with no invoice of
+// either kind until the separate, explicit `checkoutStay` call.
 //
 // These are SERVICE-LEVEL integration tests, not browser E2E: they exercise
 // the real `AccommodationService` functions (`createStay`, `checkoutStay`,
-// `generateFinalInvoice`, `earlyCheckout`, `deriveStayBalance`,
-// `deriveStayActionVisibility`) end-to-end against an IN-MEMORY FAKE of
-// `stayRepository` / `stayPaymentRepository` (and a fake `createAdminClient`
-// for the `payments` insert `generateFinalInvoice` performs directly). No
-// live database connection is made. The fake mirrors the real row-locking
-// RPCs' accept/reject rules (`record_stay_payment_transaction`,
-// `finalize_stay_checkout`) closely enough that these flows behave the same
-// way the real Postgres functions would, following the
-// `vi.mock` + `vi.hoisted` call-log/fake-state convention already used by
-// `AccommodationService.createStay.property.test.ts` and
+// `generateFinalInvoice`, `saveStayDetails`, `recordRefundWithInvoice`,
+// `deriveStayBalance`, `deriveStayActionVisibility`) end-to-end against an
+// IN-MEMORY FAKE of `stayRepository` / `stayPaymentRepository` (and a fake
+// `createAdminClient` for the `payments` inserts `generateFinalInvoice` and
+// `recordRefundWithInvoice` perform). No live database connection is made.
+// The fake mirrors the real row-locking RPCs' accept/reject rules
+// (`record_stay_payment_transaction`, `finalize_stay_checkout`,
+// `save_stay_details`, `record_stay_refund_with_invoice`) closely enough that
+// these flows behave the same way the real Postgres functions would,
+// following the `vi.mock` + `vi.hoisted` call-log/fake-state convention
+// already used by `AccommodationService.createStay.property.test.ts` and
 // `AccommodationService.statusGate.property.test.ts`.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,13 +40,14 @@ const H = vi.hoisted(() => {
     createStayEntry: [] as any[],
     deleteStayEntry: [] as string[],
     getStayById: [] as string[],
-    applyEarlyCheckout: [] as any[],
+    saveStayDetails: [] as any[],
     finalizeCheckout: [] as string[],
     attachFinalInvoice: [] as any[],
     recordFinalInvoiceFailure: [] as any[],
     insertAdvanceTransaction: [] as any[],
     listTransactionsByStay: [] as string[],
     recordTransaction: [] as any[],
+    recordRefundWithInvoice: [] as any[],
     paymentsInsert: [] as any[],
   };
 
@@ -53,13 +63,14 @@ const H = vi.hoisted(() => {
     calls.createStayEntry = [];
     calls.deleteStayEntry = [];
     calls.getStayById = [];
-    calls.applyEarlyCheckout = [];
+    calls.saveStayDetails = [];
     calls.finalizeCheckout = [];
     calls.attachFinalInvoice = [];
     calls.recordFinalInvoiceFailure = [];
     calls.insertAdvanceTransaction = [];
     calls.listTransactionsByStay = [];
     calls.recordTransaction = [];
+    calls.recordRefundWithInvoice = [];
     calls.paymentsInsert = [];
     seq = 0;
   }
@@ -144,6 +155,7 @@ vi.mock("@/repositories/stayRepository", async (importOriginal) => {
         actual_nights_stayed: null,
         original_total_nights: null,
         original_total_amount: null,
+        recalculation_applied: false,
         checked_out_at: null,
         final_invoice_payment_id: null,
         final_invoice_generated_at: null,
@@ -161,38 +173,51 @@ vi.mock("@/repositories/stayRepository", async (importOriginal) => {
       const row = stayStore.get(stayId);
       return row ? { ...row } : null;
     }),
-    applyEarlyCheckout: vi.fn(
-      async (
-        stayId: string,
-        actualNightsStayed: number,
-        recalculatedStayAmount: number,
-        gst: { baseAmount: number; taxAmount: number },
-      ) => {
-        calls.applyEarlyCheckout.push({
-          stayId,
-          actualNightsStayed,
-          recalculatedStayAmount,
-          gst,
-        });
-        const current = stayStore.get(stayId);
-        const isFirstApplication = !current.early_checkout_applied;
-        const updated = {
-          ...current,
-          total_nights: actualNightsStayed,
-          payment_amount: recalculatedStayAmount,
-          base_amount: gst.baseAmount,
-          tax_amount: gst.taxAmount,
-          actual_nights_stayed: actualNightsStayed,
-          early_checkout_applied: true,
+    // Mirrors the row-locked `save_stay_details()` RPC: derives nights from
+    // the submitted end date, replaces the total, pins `original_total_*` on
+    // first application only, flags `early_checkout_applied` when the
+    // submission shortens the stay, and NEVER touches `status` (Req 12.9).
+    saveStayDetails: vi.fn(async (input: any) => {
+      calls.saveStayDetails.push(input);
+      const current = stayStore.get(input.stayId);
+      if (!current) {
+        return { ok: false as const, reason: "NOT_FOUND" as const };
+      }
+      if (current.status !== "ACTIVE") {
+        return {
+          ok: false as const,
+          reason: "NOT_ACTIVE" as const,
+          status: current.status,
         };
-        if (isFirstApplication) {
-          updated.original_total_nights = current.total_nights;
-          updated.original_total_amount = current.payment_amount;
-        }
-        stayStore.set(stayId, updated);
-        return { ...updated };
-      },
-    ),
+      }
+      const isFirstApplication = !current.recalculation_applied;
+      const shortens = input.recalculatedTotalNights < current.total_nights;
+      const changed =
+        input.recalculatedTotalNights !== current.total_nights ||
+        input.recalculatedStayAmount !== current.payment_amount;
+      const updated = {
+        ...current,
+        total_nights: input.recalculatedTotalNights,
+        payment_amount: input.recalculatedStayAmount,
+        base_amount: input.gst.baseAmount,
+        tax_amount: input.gst.taxAmount,
+        recalculation_applied: true,
+        early_checkout_applied: current.early_checkout_applied || shortens,
+        actual_nights_stayed: shortens
+          ? input.recalculatedTotalNights
+          : current.actual_nights_stayed,
+      };
+      if (isFirstApplication) {
+        updated.original_total_nights = current.total_nights;
+        updated.original_total_amount = current.payment_amount;
+      }
+      stayStore.set(input.stayId, updated);
+      return {
+        ok: true as const,
+        stay: { ...updated },
+        historyRecorded: changed,
+      };
+    }),
     // Mirrors the row-locked `finalize_stay_checkout` RPC: re-checks ACTIVE
     // and an exactly-zero ledger-derived balance before transitioning.
     finalizeCheckout: vi.fn(async (stayId: string) => {
@@ -351,6 +376,80 @@ vi.mock("@/repositories/stayPaymentRepository", async (importOriginal) => {
         remainingBalance: remainingAfter,
       };
     }),
+    // Mirrors the row-locked `record_stay_refund_with_invoice()` RPC: writes
+    // the REFUND ledger row AND its Refund_Invoice `payments` row in one
+    // step, so a failure downstream leaves neither behind (Req 14.8).
+    recordRefundWithInvoice: vi.fn(async (input: any) => {
+      calls.recordRefundWithInvoice.push(input);
+      const stay = stayStore.get(input.stayEntryId);
+      if (!stay) {
+        return { ok: false as const, reason: "NOT_FOUND" as const };
+      }
+      if (stay.payment_host_profile_id !== null) {
+        return { ok: false as const, reason: "SHARED_PAYMENT" as const };
+      }
+      if (stay.status !== "ACTIVE") {
+        return { ok: false as const, reason: "NOT_ACTIVE" as const };
+      }
+      if (input.amount <= 0) {
+        return { ok: false as const, reason: "AMOUNT_NOT_POSITIVE" as const };
+      }
+      if (!input.remark || input.remark.trim().length === 0) {
+        return { ok: false as const, reason: "REMARK_INVALID" as const };
+      }
+
+      const totalPaidBefore = totalPaidOf(input.stayEntryId);
+      const excess = Math.max(
+        totalPaidBefore - (stay.payment_amount ?? 0),
+        0,
+      );
+      if (excess <= 0) {
+        return { ok: false as const, reason: "NO_EXCESS_TO_REFUND" as const };
+      }
+      if (input.amount > excess) {
+        return {
+          ok: false as const,
+          reason: "REFUND_EXCEEDS_EXCESS" as const,
+          excess,
+        };
+      }
+
+      const id = nextId("tx");
+      const row = {
+        id,
+        stay_entry_id: input.stayEntryId,
+        customer_profile_id: stay.customer_profile_id,
+        transaction_type: "REFUND",
+        amount: input.amount,
+        transaction_date: input.transactionDate,
+        comment: input.comment ?? null,
+        remark: input.remark,
+        created_by: input.createdBy ?? null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const ledger = ledgerOf(input.stayEntryId);
+      ledger.push(row);
+      ledgerStore.set(input.stayEntryId, ledger);
+
+      const refundInvoicePaymentId = nextId("payment");
+      calls.paymentsInsert = calls.paymentsInsert ?? [];
+      calls.paymentsInsert.push({
+        invoice_type: "ACCOMMODATION_REFUND_INVOICE",
+        amount: input.amount,
+      });
+
+      const totalPaidAfter = totalPaidBefore - input.amount;
+      const remainingAfter = (stay.payment_amount ?? 0) - totalPaidAfter;
+
+      return {
+        ok: true as const,
+        transaction: { ...row },
+        refundInvoicePaymentId,
+        totalPaid: totalPaidAfter,
+        remainingBalance: remainingAfter,
+      };
+    }),
   };
 });
 
@@ -363,7 +462,8 @@ import {
   createStay,
   checkoutStay,
   generateFinalInvoice,
-  earlyCheckout,
+  saveStayDetails,
+  recordRefundWithInvoice,
   deriveStayBalance,
   deriveStayActionVisibility,
 } from "@/services/AccommodationService";
@@ -403,6 +503,7 @@ function mapStayRowToDomain(row: any): StayEntry {
     actualNightsStayed: row.actual_nights_stayed,
     originalTotalNights: row.original_total_nights,
     originalTotalAmount: row.original_total_amount,
+    recalculationApplied: row.recalculation_applied,
     checkedOutAt: row.checked_out_at,
     finalInvoicePaymentId: row.final_invoice_payment_id,
     finalInvoiceGeneratedAt: row.final_invoice_generated_at,
@@ -530,8 +631,8 @@ describe("Feature: accommodation-payment-lifecycle — headline flow: backdated 
   });
 });
 
-describe("Feature: accommodation-payment-lifecycle — headline flow: early checkout with a refund", () => {
-  it("records the refund, finishes the stay, and produces exactly one invoice with the recalculated amount and actual nights", async () => {
+describe("Feature: accommodation-payment-lifecycle — headline flow: recalculate stay with a refund", () => {
+  it("saves the recalculated details without touching status, marks the refund, and only then finishes the stay with exactly one final invoice", async () => {
     // 1. An ACTIVE, non-shared, non-backdated stay: total 70,000, paid in
     // full via an ADVANCE (50,000) plus a PARTIAL_BALANCE_PAYMENT (20,000).
     const stay = await createStay({
@@ -565,42 +666,68 @@ describe("Feature: accommodation-payment-lifecycle — headline flow: early chec
     expect(firstBalancePayment.ok).toBe(true);
     expect(H.totalPaidOf(stay.id)).toBe(70000);
 
-    // 2. Early checkout: actual nights 4, recalculated amount 55,000 — Total_Paid
-    // (70,000) now exceeds the new total, producing a refund-due situation.
-    const outcome = await earlyCheckout(stay.id, 4, 55000);
+    // 2. Recalculate Stay / Save Stay Details: end date shortened to 4
+    // nights, recalculated amount 55,000 — Total_Paid (70,000) now exceeds
+    // the new total, producing a refund-due situation (Req 12.8, 12.12).
+    const recalculatedEndDate = addDaysToISODate(stay.start_date, 3); // 4 nights inclusive
+    const outcome = await saveStayDetails(stay.id, recalculatedEndDate, 55000);
     if ("error" in outcome) {
       throw new Error(`expected a successful outcome, got ${outcome.error}`);
     }
 
-    // 3. Refund branch, excess of 15,000 (Req 12.13).
-    expect(outcome.nextStep).toBe("RECORD_REFUND");
+    // 3. Refund branch, excess of 15,000 (Req 12.12) — and Save_Stay_Details
+    // never reports a checkout: `status` is always the literal "ACTIVE"
+    // (Req 12.9).
+    expect(outcome.nextAction).toBe("RECORD_REFUND");
     expect(outcome.refundDue).toBe(15000);
+    expect(outcome.status).toBe("ACTIVE");
 
     // 4. The stay row reflects the recalculated nights/amount and is flagged
-    // as early-checked-out; status remains ACTIVE until the refund clears
-    // the balance.
-    expect(calls.applyEarlyCheckout).toHaveLength(1);
-    const stayAfterEarlyCheckout = H.stayStore.get(stay.id);
-    expect(stayAfterEarlyCheckout.total_nights).toBe(4);
-    expect(stayAfterEarlyCheckout.payment_amount).toBe(55000);
-    expect(stayAfterEarlyCheckout.early_checkout_applied).toBe(true);
-    expect(stayAfterEarlyCheckout.status).toBe("ACTIVE");
+    // as recalculated (and, because it shortened the stay, early-checked-out
+    // for audit purposes too); status remains ACTIVE — Save_Stay_Details
+    // never transitions it and never touches `checked_out_at` (Req 12.9,
+    // 12.13).
+    expect(calls.saveStayDetails).toHaveLength(1);
+    const stayAfterRecalculation = H.stayStore.get(stay.id);
+    expect(stayAfterRecalculation.total_nights).toBe(4);
+    expect(stayAfterRecalculation.payment_amount).toBe(55000);
+    expect(stayAfterRecalculation.recalculation_applied).toBe(true);
+    expect(stayAfterRecalculation.early_checkout_applied).toBe(true);
+    expect(stayAfterRecalculation.status).toBe("ACTIVE");
+    expect(stayAfterRecalculation.checked_out_at).toBeNull();
+    // No invoice of any kind is generated by Save_Stay_Details itself.
+    expect(calls.paymentsInsert).toHaveLength(0);
 
-    // 5. Record the refund (15,000 — exactly the excess).
-    const refundResult = await recordTransaction({
-      stayEntryId: stay.id,
-      transactionType: "REFUND",
+    // 5. Mark as refunded — the standalone action, not a branch of the
+    // recalculation (Req 14.1) — records the excess (15,000) and its
+    // Refund_Invoice atomically.
+    const refundOutcome = await recordRefundWithInvoice({
+      stayId: stay.id,
       amount: 15000,
-      transactionDate: TODAY_IST,
-      comment: null,
       remark: "Refunded via UPI to source account",
       createdBy: null,
     });
-    expect(refundResult.ok).toBe(true);
+    if (!refundOutcome.ok) {
+      throw new Error(
+        `expected a successful refund, got ${refundOutcome.reason}`,
+      );
+    }
+    expect(typeof refundOutcome.refundInvoicePaymentId).toBe("string");
 
-    // No extraneous ledger rows: exactly three rows total (Req 12.11).
+    // No extraneous ledger rows: exactly three rows total (Req 12.11 / 14.6).
     const ledgerAfterRefund = H.ledgerOf(stay.id);
     expect(ledgerAfterRefund).toHaveLength(3);
+
+    // Exactly one Refund_Invoice row was written by the refund itself, and
+    // the stay is STILL ACTIVE — a refund never transitions status or
+    // checks out on its own (Req 14.10).
+    expect(calls.paymentsInsert).toHaveLength(1);
+    expect(calls.paymentsInsert[0]).toMatchObject({
+      invoice_type: "ACCOMMODATION_REFUND_INVOICE",
+      amount: 15000,
+    });
+    expect(H.stayStore.get(stay.id).status).toBe("ACTIVE");
+    expect(H.stayStore.get(stay.id).checked_out_at).toBeNull();
 
     // 6. Balance is now exactly zero.
     const balanceAfterRefund = deriveStayBalance(
@@ -610,7 +737,8 @@ describe("Feature: accommodation-payment-lifecycle — headline flow: early chec
     expect(balanceAfterRefund.remainingBalance).toBe(0);
     expect(balanceAfterRefund.isFullyPaid).toBe(true);
 
-    // 7. Checkout now succeeds and finishes the stay with an invoice
+    // 7. Mark as Checked Out is the sole, separate, explicit step that
+    // finishes the stay and generates the Final_Consolidated_Invoice
     // (Req 12.13).
     const checkoutResult = await checkoutStay(stay.id);
     expect(checkoutResult).toMatchObject({
@@ -619,19 +747,21 @@ describe("Feature: accommodation-payment-lifecycle — headline flow: early chec
       invoiceStatus: "GENERATED",
     });
 
-    // 8. Exactly one invoice row, reflecting the recalculated total; the
-    // stay's invoice linkage was set exactly once (Req 9.2, 8.6).
-    expect(calls.paymentsInsert).toHaveLength(1);
-    expect(calls.paymentsInsert[0]).toMatchObject({
+    // 8. Exactly one ADDITIONAL invoice row (the Final_Consolidated_Invoice,
+    // alongside the earlier Refund_Invoice), reflecting the recalculated
+    // total; the stay's invoice linkage was set exactly once (Req 9.2, 8.6).
+    expect(calls.paymentsInsert).toHaveLength(2);
+    expect(calls.paymentsInsert[1]).toMatchObject({
       invoice_type: "ACCOMMODATION_FINAL_INVOICE",
       amount: 55000,
     });
     expect(calls.attachFinalInvoice).toHaveLength(1);
 
-    // 9. The stay row itself carries the recalculated actual nights, which
-    // the invoice branch (task 8.1) reads from the stay row.
+    // 9. The stay row itself carries the recalculated nights and FINISHED
+    // status, which the invoice branch (task 8.1, corrected by task 21.1)
+    // reads unconditionally from `total_nights` / `payment_amount`.
     const finalStayRow = H.stayStore.get(stay.id);
-    expect(finalStayRow.actual_nights_stayed).toBe(4);
+    expect(finalStayRow.total_nights).toBe(4);
     expect(finalStayRow.status).toBe("FINISHED");
   });
 });

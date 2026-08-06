@@ -10,7 +10,8 @@
 //   - baseAmount + taxAmount = total within ±0.01
 //
 // The breakup uses the Stay_Entry's current Total_Stay_Amount as the input —
-// including after a Stay_Extension or an Early_Checkout replaces that total.
+// including after a Stay_Extension, an Early_Checkout, or any number of
+// Save_Stay_Details submissions replace that total (Req 12.10).
 
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
@@ -79,6 +80,37 @@ describe("Feature: accommodation-payment-lifecycle, Property 7: GST breakup from
         expect(result.baseAmount).toBe(reference.baseAmount);
         expect(result.taxAmount).toBe(reference.taxAmount);
       }),
+      { numRuns: 100 },
+    );
+  });
+
+  it("GST breakup is correctly derived from the CURRENT total after repeated Save Stay Details submissions", () => {
+    // Generates 1–5 Total_Stay_Amount values simulating repeated Save Stay Details
+    // submissions (Req 12.10), each replacing the total. The GST breakup must ALWAYS
+    // be derived from the CURRENT total — not accumulated across operations.
+    fc.assert(
+      fc.property(
+        fc.array(arbTotalStayAmount, { minLength: 1, maxLength: 5 }),
+        (totals) => {
+          for (const total of totals) {
+            const result = gstFromTotal(total);
+
+            // base + tax === total in paise (exact integer arithmetic)
+            const basePaise = Math.round(result.baseAmount * 100);
+            const taxPaise = Math.round(result.taxAmount * 100);
+            const totalPaise = Math.round(total * 100);
+
+            expect(basePaise + taxPaise).toBe(totalPaise);
+
+            // Each call independently produces the correct breakup
+            expect(result.baseAmount).toBe(roundToPaise(total / 1.18));
+            expect(result.taxAmount).toBe(
+              roundToPaise(total - result.baseAmount),
+            );
+            expect(result.taxPercentage).toBe(18);
+          }
+        },
+      ),
       { numRuns: 100 },
     );
   });

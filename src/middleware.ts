@@ -102,6 +102,36 @@ function isCustomerCategoryRouteDenied(
   return match ? !match.allow.includes(category) : false;
 }
 
+/**
+ * [Req 2.1, 2.5, 2.8] Prefix for public app download routes.
+ * Matches `/app` exactly and `/app/` prefixed paths only — never `/apps` or `/applications`.
+ */
+const PUBLIC_APP_PATH_PREFIX = "/app";
+
+/**
+ * [Req 2.1, 2.5, 2.8] Checks if a pathname targets the public app download route.
+ *
+ * `portalPath` is stripped first so a direct hit on the rewritten form
+ * (e.g. `/customer/app/customer`) behaves identically to `/app/customer`.
+ * This mirrors the `isCustomerCategoryRouteDenied` helper's portal-path stripping.
+ *
+ * Returns true only for:
+ *   - `/app` exactly
+ *   - Paths starting with `/app/`
+ *
+ * Returns false for `/apps`, `/applications`, `/app-store`, etc.
+ */
+function isPublicAppPath(pathname: string, portalPath: string): boolean {
+  const path =
+    portalPath && pathname.startsWith(`${portalPath}/`)
+      ? pathname.slice(portalPath.length)
+      : pathname;
+  return (
+    path === PUBLIC_APP_PATH_PREFIX ||
+    path.startsWith(`${PUBLIC_APP_PATH_PREFIX}/`)
+  );
+}
+
 export async function middleware(request: NextRequest) {
   const timer = createServerTimer(`middleware ${request.nextUrl.pathname}`);
 
@@ -326,13 +356,15 @@ export async function middleware(request: NextRequest) {
     !url.pathname.includes(".")
   ) {
     // If not logged in, redirect to login (unless already on an auth page)
+    // [Req 2.1, 2.2] Public app paths are exempt from authentication requirement
     if (
       !user &&
       !url.pathname.startsWith("/login") &&
       !url.pathname.startsWith("/signup") &&
       !url.pathname.startsWith("/auth") &&
       !url.pathname.startsWith("/forgot-password") &&
-      !url.pathname.startsWith("/update-password")
+      !url.pathname.startsWith("/update-password") &&
+      !isPublicAppPath(url.pathname, portalPath)
     ) {
       // [Req 16.9] Building the target from `request.url` preserves the
       // requested subdomain/host: e.g. an unauthenticated hit on
@@ -360,6 +392,14 @@ export async function middleware(request: NextRequest) {
       //   - more than one allowed Customer_Record    → ambiguous (Req 12.4)
       // Only the exactly-one-allowed case is granted (Req 12.2).
       if (currentSubdomain === "customer") {
+        // [Req 2.3, 2.4] Public app paths bypass role/onboarding checks.
+        // This is the edit that matters most: without it, a signed-in admin
+        // or rider scanning the QR is bounced to /unauthorized.
+        if (isPublicAppPath(url.pathname, portalPath)) {
+          timer.done();
+          return response;
+        }
+
         const ALLOWED_ONBOARDING_STATUSES = ["IN_PROGRESS", "COMPLETED"];
         const allowedRecords = customerOnboardingStatuses.filter(
           (status): status is string =>

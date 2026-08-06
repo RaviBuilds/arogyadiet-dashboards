@@ -268,10 +268,16 @@ describe("Feature: accommodation-payment-lifecycle, Property 14: Final invoice e
 
           // The single line item's description/subtitle derive only from
           // stay fields (stay_type, occupancy_type, nights, dates).
+          //
+          // Revision 2 (task 21.1) corrected the figures resolution to the
+          // unconditional live column `total_nights` — `actual_nights_stayed`
+          // is no longer read at all, since repeatable recalculation makes it
+          // stale. This mirrors that corrected resolution rather than the
+          // retired `earlyCheckoutApplied` ternary (which is Property 13's
+          // concern, not this one's — Property 14 only asserts "one line
+          // item, no ledger leak").
           const stay = row.stay_entries;
-          const nightsForInvoice = seed.earlyCheckoutApplied
-            ? (seed.actualNightsStayed as number)
-            : seed.totalNights;
+          const nightsForInvoice = seed.totalNights;
           const expectedEndDate = shiftISODate(
             seed.startDate,
             nightsForInvoice - 1,

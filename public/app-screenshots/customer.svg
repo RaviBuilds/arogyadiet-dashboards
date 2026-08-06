@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="375" height="812" viewBox="0 0 375 812">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10B981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="375" height="812" fill="url(#bg)"/>
+  
+  <!-- App Header -->
+  <rect x="0" y="0" width="375" height="100" fill="#ffffff" opacity="0.95"/>
+  <circle cx="50" cy="50" r="25" fill="#10B981"/>
+  <text x="90" y="45" font-family="system-ui, sans-serif" font-size="18" font-weight="600" fill="#1f2937">ArogyaDiet</text>
+  <text x="90" y="65" font-family="system-ui, sans-serif" font-size="12" fill="#6b7280">Customer App</text>
+  
+  <!-- Content Cards -->
+  <rect x="16" y="120" width="343" height="120" rx="12" fill="#ffffff" opacity="0.95"/>
+  <text x="32" y="150" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#1f2937">Today's Meal</text>
+  <text x="32" y="175" font-family="system-ui, sans-serif" font-size="12" fill="#6b7280">Breakfast: Poha with Mint Chutney</text>
+  <text x="32" y="195" font-family="system-ui, sans-serif" font-size="12" fill="#6b7280">Lunch: Dal Rice with Vegetable Curry</text>
+  <text x="32" y="215" font-family="system-ui, sans-serif" font-size="12" fill="#6b7280">Dinner: Roti with Paneer Butter Masala</text>
+  
+  <rect x="16" y="260" width="343" height="100" rx="12" fill="#ffffff" opacity="0.95"/>
+  <text x="32" y="290" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#1f2937">Delivery Status</text>
+  <circle cx="50" cy="320" r="8" fill="#10B981"/>
+  <text x="70" y="325" font-family="system-ui, sans-serif" font-size="12" fill="#6b7280">On the way - Arriving in 15 mins</text>
+  
+  <rect x="16" y="380" width="343" height="80" rx="12" fill="#ffffff" opacity="0.95"/>
+  <text x="32" y="410" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#1f2937">Subscription</text>
+  <text x="32" y="435" font-family="system-ui, sans-serif" font-size="12" fill="#6b7280">Premium Plan • 28 days remaining</text>
+  
+  <!-- Bottom Navigation -->
+  <rect x="0" y="762" width="375" height="50" fill="#ffffff"/>
+  <text x="60" y="792" font-family="system-ui, sans-serif" font-size="10" fill="#6b7280">Home</text>
+  <text x="145" y="792" font-family="system-ui, sans-serif" font-size="10" fill="#6b7280">Meals</text>
+  <text x="230" y="792" font-family="system-ui, sans-serif" font-size="10" fill="#6b7280">Track</text>
+  <text x="315" y="792" font-family="system-ui, sans-serif" font-size="10" fill="#6b7280">Profile</text>
+  
+  <!-- Placeholder notice -->
+  <rect x="16" y="500" width="343" height="200" rx="12" fill="#FEF3C7" opacity="0.95"/>
+  <text x="187" y="580" font-family="system-ui, sans-serif" font-size="14" fill="#92400E" text-anchor="middle">📷 Placeholder Screenshot</text>
+  <text x="187" y="610" font-family="system-ui, sans-serif" font-size="11" fill="#92400E" text-anchor="middle">Replace with actual app screenshot</text>
+  <text x="187" y="640" font-family="system-ui, sans-serif" font-size="11" fill="#92400E" text-anchor="middle">Recommended: 375x812px PNG</text>
+</svg>

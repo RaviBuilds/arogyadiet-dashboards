@@ -97,7 +97,13 @@ export function StayCheckoutActionBar({
 
   const handleGenerateInvoice = () => {
     startInvoiceTransition(async () => {
-      const result = await generateFinalStayInvoiceAction(stayId);
+      // Both call sites of this handler (the Backdated_Stay "Generate Final
+      // Invoice" action and the "Invoice generation failed — retry" button)
+      // are explicit admin-initiated triggers, so both mark the request as
+      // a manual retrigger (Req 8.9, 8.10).
+      const result = await generateFinalStayInvoiceAction(stayId, {
+        manualRetrigger: true,
+      });
 
       if ("success" in result && result.success) {
         toast.success("Final invoice generated.");
@@ -110,7 +116,7 @@ export function StayCheckoutActionBar({
 
   // Why the button is visible but disabled. The balance wording keeps its
   // existing shape; the date wording names the end date so the admin knows
-  // exactly when checkout opens, and points at Early Checkout as the
+  // exactly when checkout opens, and points at Recalculate Stay as the
   // alternative for a guest leaving sooner.
   const blockedLabel =
     visibility.markCheckedOutBlockedReason === "BALANCE_OUTSTANDING"
@@ -121,8 +127,8 @@ export function StayCheckoutActionBar({
           : null
       : visibility.markCheckedOutBlockedReason === "BEFORE_END_DATE"
         ? endDate
-          ? `Opens on ${endDate} — use Early Checkout to close sooner`
-          : "Opens on the stay's end date — use Early Checkout to close sooner"
+          ? `Opens on ${endDate} — use Recalculate Stay to shorten the stay, then check out on the new end date`
+          : "Opens on the stay's end date — use Recalculate Stay to shorten the stay, then check out on the new end date"
         : null;
 
   const nothingToShow =
