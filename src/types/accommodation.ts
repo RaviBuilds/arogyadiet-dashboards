@@ -63,7 +63,7 @@ export const OPEN_ADDON_SERVICE_STATUSES: readonly AddonServiceStatus[] = [
  * Remaining_Balance are never stored — they are always derived from the
  * Payment_Transaction ledger (see {@link StayPaymentTransaction}).
  *
- * Requirements: 6.3, 12.6, 12.15
+ * Requirements: 6.3, 8.4, 12.15
  */
 export interface StayEntry {
   id: string;
@@ -85,14 +85,34 @@ export interface StayEntry {
 
   /** True when the stay was onboarded with a past start date (Backdated_Stay). */
   isBackdated: boolean;
-  /** True once an Early_Checkout recalculation has been applied to this stay. */
+  /**
+   * Retained with a narrowed meaning: true when the stay **ended earlier than
+   * originally booked** — i.e. a Save_Stay_Details submission shortened it.
+   * It is no longer the "figures were recalculated" signal (that is
+   * {@link StayEntry.recalculationApplied}) and no gate reads it, because an
+   * amount-only correction leaves the stay length untouched.
+   */
   earlyCheckoutApplied: boolean;
-  /** Nights actually stayed; set only by Early_Checkout. */
+  /**
+   * Nights actually stayed. Still kept in sync with `totalNights` whenever
+   * `earlyCheckoutApplied` is set, so historical rows and
+   * `chk_stay_actual_nights` stay coherent.
+   *
+   * @deprecated Never read — Save_Stay_Details is repeatable, so this can go
+   * stale between invocations. Use {@link StayEntry.totalNights}.
+   */
   actualNightsStayed: number | null;
-  /** Booked nights before the first Early_Checkout; preserved on first application only. */
+  /** Booked nights before the FIRST Save_Stay_Details; pinned on first application only. */
   originalTotalNights: number | null;
-  /** Total_Stay_Amount before the first Early_Checkout; preserved on first application only. */
+  /** Total_Stay_Amount before the FIRST Save_Stay_Details; pinned on first application only. */
   originalTotalAmount: number | null;
+  /**
+   * True once Save_Stay_Details has been applied at least once. This — not
+   * `earlyCheckoutApplied` — is what "the figures were recalculated" means.
+   *
+   * Requirements: 8.4
+   */
+  recalculationApplied: boolean;
   /** Timestamp the stay was finalised through checkout. */
   checkedOutAt: string | null;
   /** `payments.id` of the single Final_Consolidated_Invoice for this stay. */
@@ -189,6 +209,15 @@ export interface StayPaymentTransaction {
   remark: string | null;
   createdBy: string | null;
   createdAt: string;
+  /**
+   * `payments.id` of this REFUND row's Refund_Invoice, mirroring
+   * `stay_payment_transactions.refund_invoice_payment_id`. Null for every
+   * non-REFUND row; written by `record_stay_refund_with_invoice()` in the same
+   * transaction as the ledger row, so a Refund_Invoice can never be orphaned.
+   *
+   * Requirements: 14.7
+   */
+  refundInvoicePaymentId?: string | null;
 }
 
 /**
@@ -228,10 +257,34 @@ export interface StayExtension {
 }
 
 /**
+ * One recorded Save_Stay_Details submission that actually changed something.
+ * Purely informational, exactly like {@link StayExtension} — nothing derives a
+ * balance, a night count, or an end date from it. Never mixed with extension
+ * history in either direction. See `scripts/create-stay-recalculation.sql`.
+ *
+ * Requirements: 13.1, 13.2, 13.3, 13.5
+ */
+export interface StayRecalculation {
+  id: string;
+  stayEntryId: string;
+  customerProfileId: string;
+  nightsBefore: number;
+  nightsAfter: number;
+  totalAmountBefore: number | null;
+  totalAmountAfter: number;
+  /** Computed_End_Date immediately before this submission. */
+  endDateBefore: string; // ISO date (YYYY-MM-DD)
+  /** Recalculated_End_Date this submission applied. */
+  endDateAfter: string; // ISO date (YYYY-MM-DD)
+  recalculatedOn: string; // ISO date (YYYY-MM-DD, IST)
+  createdAt: string;
+}
+
+/**
  * Which payment and checkout affordances the Accommodation tab may render for a stay.
  * `showMarkCheckedOut` and `showGenerateFinalInvoice` are disjoint by construction.
  *
- * Requirements: 5.1, 5.10, 7.1, 7.2, 9.1, 9.2, 9.4, 12.1
+ * Requirements: 5.1, 5.10, 7.1, 7.2, 9.1, 9.2, 9.4, 12.1, 12.10, 14.1
  */
 export interface StayActionVisibility {
   showRecordPayment: boolean;
@@ -246,20 +299,36 @@ export interface StayActionVisibility {
    */
   markCheckedOutBlockedReason: "BALANCE_OUTSTANDING" | "BEFORE_END_DATE" | null;
   showGenerateFinalInvoice: boolean;
-  showEarlyCheckout: boolean;
+  /**
+   * Recalculate_Stay. ACTIVE and billable — never suppressed after a first use,
+   * because recalculation is repeatable (Req 12.1, 12.10).
+   */
+  showRecalculateStay: boolean;
+  /**
+   * Mark_As_Refunded. Standalone rather than a recalculation branch: derived
+   * from the balance (ACTIVE, billable, `refundDue > 0`), so it survives a
+   * reload and stays true until the refund is recorded (Req 14.1).
+   */
+  showMarkAsRefunded: boolean;
 }
 
 /**
  * Everything the Accommodation tab needs for one stay in a single read:
  * the stay, its chronological ledger, the derived balance, and the action gating.
  *
- * Requirements: 6.5, 6.6, 8.1
+ * Requirements: 6.5, 6.6, 8.1, 13.3, 13.5
  */
 export interface StayLedgerView {
   stay: StayEntry;
   transactions: StayPaymentTransaction[]; // chronological
   /** Every Stay_Extension applied to this stay, chronological. Informational only. */
   extensions: StayExtension[];
+  /**
+   * Every recorded Save_Stay_Details submission, ascending by recorded date —
+   * oldest first. Informational only, and never sourced from `extensions`
+   * (Req 13.3, 13.5, 13.6, 13.7).
+   */
+  recalculations: StayRecalculation[];
   balance: StayBalanceSnapshot;
   hasFinalInvoice: boolean;
   visibility: StayActionVisibility;
@@ -281,21 +350,35 @@ export interface PaymentReceiptData {
 }
 
 /**
- * Result of applying an Early_Checkout to an ACTIVE stay: the recalculated
- * nights and amount, the new balance, and exactly one follow-up step.
+ * Result of a Save_Stay_Details submission against an ACTIVE stay: the
+ * recalculated nights and amount, the new balance, and exactly one money
+ * follow-up. REPLACES the retired `EarlyCheckoutOutcome`.
  *
- * Requirements: 12.6, 12.7, 12.12, 12.13, 12.15
+ * Two structural differences carry Req 12.9:
+ *  - there is no `CHECKED_OUT` member and no `invoiceStatus` field, so no value
+ *    of this type can express "and the stay was also checked out";
+ *  - `status` is the literal `"ACTIVE"`, making the invariant checkable at the
+ *    type level as well as at runtime.
+ *
+ * Requirements: 12.8, 12.9, 12.11, 12.12, 12.15, 13.2
  */
-export type EarlyCheckoutOutcome = {
+export type SaveStayDetailsOutcome = {
   stayId: string;
-  totalNights: number; // = actualNightsStayed
-  totalStayAmount: number; // = recalculatedStayAmount
+  /** Recalculated_Total_Nights, DERIVED from the submitted end date. */
+  totalNights: number;
+  /** Recalculated_End_Date, echoed back so the tab can re-render without a refetch. */
+  recalculatedEndDate: string; // ISO date (YYYY-MM-DD)
+  /** Recalculated_Stay_Amount, now the stay's Total_Stay_Amount. */
+  totalStayAmount: number;
   balance: StayBalanceSnapshot;
-  /** Which follow-up the Accommodation tab must present. */
-  nextStep: "COLLECT_BALANCE" | "RECORD_REFUND" | "CHECKED_OUT";
-  /** 0 unless nextStep === "RECORD_REFUND" */
+  /** Which money follow-up (if any) the tab must present. Never a checkout. */
+  nextAction: "COLLECT_BALANCE" | "RECORD_REFUND" | "SETTLED";
+  /** 0 unless nextAction === "RECORD_REFUND" */
   refundDue: number;
-  invoiceStatus?: "GENERATED" | "PENDING_RETRY";
+  /** false for a no-op submission — no Recalculation_History entry was written (Req 13.2). */
+  historyRecorded: boolean;
+  /** Always "ACTIVE": Save_Stay_Details never transitions status (Req 12.9). */
+  status: "ACTIVE";
 };
 
 /**
@@ -318,6 +401,33 @@ export interface ExtensionHistoryRow {
   nightsAfter: number;
   /** Total_Stay_Amount immediately after this extension. */
   totalAmountAfter: number;
+}
+
+/**
+ * A single row in the dedicated Recalculation History card displayed on the
+ * Accommodation tab, beside the Extension History card. Produced by
+ * `buildRecalculationHistoryRows` — sorted ascending by (recalculatedOn,
+ * createdAt), oldest first. An empty list is the Req 13.4 empty state.
+ *
+ * Requirements: 13.4, 13.5
+ */
+export interface RecalculationHistoryRow {
+  /** The Recalculation_History record's id. */
+  id: string;
+  /** Formatted recalculation date for display (YYYY-MM-DD). */
+  date: string;
+  /** Total nights immediately before this submission. */
+  nightsBefore: number;
+  /** Total nights immediately after this submission. */
+  nightsAfter: number;
+  /** Total_Stay_Amount immediately before this submission. */
+  totalAmountBefore: number | null;
+  /** Total_Stay_Amount immediately after this submission. */
+  totalAmountAfter: number;
+  /** Computed_End_Date immediately before this submission. */
+  endDateBefore: string;
+  /** Computed_End_Date immediately after this submission. */
+  endDateAfter: string;
 }
 
 /**

@@ -134,6 +134,7 @@ function buildFinishedRow(): StayEntryRow {
     actual_nights_stayed: null,
     original_total_nights: null,
     original_total_amount: null,
+    recalculation_applied: false,
     checked_out_at: new Date().toISOString(),
     final_invoice_payment_id: null,
     final_invoice_generated_at: null,

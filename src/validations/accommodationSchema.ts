@@ -5,7 +5,7 @@
 //
 // The accommodation-payment-lifecycle feature extends this file with the
 // backdated-stay toggle, the total/advance onboarding payment split, and the
-// Record Payment / Record Refund / Early Checkout schemas. Every range here is
+// Record Payment / Record Refund / Recalculate Stay schemas. Every range here is
 // enforced server-side regardless of whether the field was visible (or even
 // rendered) on the client.
 //
@@ -289,47 +289,72 @@ export const recordStayRefundSchema = z.object({
 export type RecordStayRefundInput = z.infer<typeof recordStayRefundSchema>;
 
 /**
- * Base schema for the Early_Checkout form.
+ * Base schema for the Recalculate_Stay form's "Save Stay Details" submission.
  *
- * `actualNightsStayed` carries only its lower bound here; the upper bound
- * depends on the stay's currently booked total nights and is applied by
- * `createEarlyCheckoutSchema`.
+ * REPLACES the retired `earlyCheckoutSchema` / `createEarlyCheckoutSchema`. The
+ * night count is gone from the payload entirely — Recalculated_Total_Nights is
+ * DERIVED from `recalculatedEndDate` server-side, so there is no second number
+ * that could disagree with the calendar.
+ *
+ * `recalculatedEndDate` carries only its shape here; the inclusive
+ * `[startDate, bookedEndDate]` bounds depend on the stay and are applied by
+ * `createRecalculateStaySchema`.
  *
  * Validates: Requirements 12.3, 12.4
  */
-export const earlyCheckoutSchema = z.object({
-  actualNightsStayed: z.coerce.number().int().min(1),
-  recalculatedStayAmount: z.coerce.number().min(1).max(MAX_STAY_AMOUNT),
+export const recalculateStaySchema = z.object({
+  recalculatedEndDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Select a valid end date."),
+  recalculatedStayAmount: z.coerce
+    .number()
+    .int("Recalculated total stay amount must be a whole number.")
+    .min(1, "Recalculated total stay amount must be at least ₹1.")
+    .max(
+      MAX_STAY_AMOUNT,
+      "Recalculated total stay amount cannot exceed ₹9,999,999.",
+    ),
 });
 
-/** Inferred input type for the early checkout form. */
-export type EarlyCheckoutInput = z.infer<typeof earlyCheckoutSchema>;
+/** Inferred input type for a Save_Stay_Details submission. */
+export type RecalculateStayInput = z.infer<typeof recalculateStaySchema>;
 
 /**
- * Builds an Early_Checkout schema bounded by the stay's currently booked total
- * nights: `actualNightsStayed` must be an integer in
- * `[1, bookedTotalNights − 1]`. Used on both the client and the server so the
- * bound holds regardless of client-side state.
+ * Builds a Recalculate_Stay schema bounded by the stay itself: `startDate` is
+ * the lower bound and `bookedEndDate` the stay's *currently booked*
+ * Computed_End_Date. Used on both the client and the server so acceptance is
+ * identical either side (Req 12.5).
  *
- * The upper bound is `bookedTotalNights − 1` with no floor applied: for a
- * one-night stay the range collapses to `[1, 0]`, which is deliberately empty —
- * a guest cannot have stayed fewer than one night, so *every* Early_Checkout
- * submission against a one-night stay must be rejected (Req 12.3). Flooring the
- * cap at 1 would make `actualNightsStayed = 1` satisfy both bounds and wrongly
- * accept a checkout that is not early at all. The message interpolates
- * `bookedTotalNights` itself (not the cap), so the admin is told which booked
- * night count the value has to fall below.
+ * Both bounds are inclusive and selectable (Req 12.3), which is why the
+ * comparisons are `<` and `>` rather than `<=` / `>=`. Selecting the start date
+ * itself is valid and yields exactly 1 night — the minimum stay length — so the
+ * range is never empty: for a 1-night stay it collapses to the single date
+ * `startDate === bookedEndDate`. No unchanged-date carve-out is needed either:
+ * the current end date lies inside `[startDate, bookedEndDate]` by
+ * construction, so a no-op submission passes the plain bounds check (Req 12.6).
  *
- * Validates: Requirements 12.3, 12.5
+ * Lexicographic comparison is correct for YYYY-MM-DD strings, matching the
+ * convention already used by `markStayCheckedOutAction`'s date gate.
+ *
+ * Validates: Requirements 12.3, 12.5, 12.6
  */
-export const createEarlyCheckoutSchema = (bookedTotalNights: number) =>
-  earlyCheckoutSchema.extend({
-    actualNightsStayed: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(
-        bookedTotalNights - 1,
-        `Actual nights stayed must be less than the currently booked ${bookedTotalNights} nights.`,
-      ),
+export const createRecalculateStaySchema = (
+  startDate: string,
+  bookedEndDate: string,
+) =>
+  recalculateStaySchema.superRefine((data, ctx) => {
+    if (data.recalculatedEndDate < startDate) {
+      addIssue(
+        ctx,
+        "recalculatedEndDate",
+        `End date must be on or after the stay's start date ${startDate}; selecting the start date itself gives a 1-night stay.`,
+      );
+    }
+    if (data.recalculatedEndDate > bookedEndDate) {
+      addIssue(
+        ctx,
+        "recalculatedEndDate",
+        `End date cannot be later than the currently booked ${bookedEndDate}. Use Extend Stay to lengthen the stay.`,
+      );
+    }
   });

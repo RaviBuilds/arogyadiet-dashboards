@@ -176,6 +176,7 @@ function buildCurrentStayRow(seed: {
     actual_nights_stayed: null,
     original_total_nights: null,
     original_total_amount: null,
+    recalculation_applied: false,
     checked_out_at: null,
     final_invoice_payment_id: null,
     final_invoice_generated_at: null,
@@ -201,6 +202,7 @@ function rowFromDomainTransaction(
     created_by: tx.createdBy,
     created_at: tx.createdAt,
     updated_at: tx.createdAt,
+    refund_invoice_payment_id: null,
   };
 }
 

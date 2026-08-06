@@ -11,6 +11,7 @@
 
 import Image from "next/image";
 import { Sprout, ChefHat, Package, Leaf } from "lucide-react";
+import { AppDownloadQrBlock } from "@/shared/components/app-download/AppDownloadQrBlock";
 
 // Feature points shown on the brand panel. ArogyaDiet serves three customer
 // categories through this one portal — MEAL (recurring chef-prepared deliveries),
@@ -36,7 +37,7 @@ const FEATURES = [
   },
 ] as const;
 
-export function LoginBrandPanel() {
+export async function LoginBrandPanel() {
   return (
     <div
       className="reveal-rise relative hidden w-1/2 shrink-0 overflow-hidden bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-800 lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16"
@@ -106,6 +107,9 @@ export function LoginBrandPanel() {
             </li>
           ))}
         </ul>
+
+        {/* QR code for app download — large viewport only (inherited from parent panel) */}
+        <AppDownloadQrBlock slug="customer" />
       </div>
 
       {/* ── Quiet footer note, anchored to the bottom ──────────────────── */}

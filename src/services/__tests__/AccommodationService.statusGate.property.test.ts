@@ -1,13 +1,14 @@
 // src/services/__tests__/AccommodationService.statusGate.property.test.ts
-// Feature: accommodation-payment-lifecycle, Property 19: Extension and early checkout require an ACTIVE stay
+// Feature: accommodation-payment-lifecycle, Property 19: Extension and Save Stay Details require an ACTIVE stay
 //
 // **Validates: Requirements 11.5, 12.14**
 //
 // For any Stay_Entry whose Stay_Status is not ACTIVE — including one already
-// finished via Early_Checkout — both Stay_Extension (`extendStay`) and
-// Early_Checkout (`earlyCheckout`) SHALL be rejected with a status-based
+// finished via a prior recalculation — both Stay_Extension (`extendStay`) and
+// Save Stay Details (`saveStayDetails`) SHALL be rejected with a status-based
 // error, and the stay's nights, Total_Stay_Amount, status, and ledger SHALL
-// remain unchanged.
+// remain unchanged. Additionally, BOTH `stay_recalculation_history` AND
+// `stay_extension_history` must gain no rows after a rejected call.
 //
 // `AccommodationService.extendStay` delegates the ACTIVE gate to
 // `stayRepository.extendStay`, which fetches the current row and THROWS when
@@ -16,10 +17,10 @@
 // non-ACTIVE behaviour, so the property exercises the SERVICE's behaviour of
 // propagating (not swallowing) that rejection.
 //
-// `AccommodationService.earlyCheckout` fetches the stay via
+// `AccommodationService.saveStayDetails` fetches the stay via
 // `stayRepository.getStayById` and itself returns `{ ok: false, error: "Only
-// active stays can be checked out early." }` — a returned rejection, not a
-// throw — when `stayRow.status !== "ACTIVE"` (task 5.5's implementation).
+// active stays can be recalculated." }` — a returned rejection, not a
+// throw — when `stayRow.status !== "ACTIVE"` (Req 12.14).
 //
 // Both repositories are mocked here (no live database connection), mirroring
 // the mocking convention used in `AccommodationService.createStay.property.test.ts`
@@ -34,23 +35,27 @@ const H = vi.hoisted(() => {
   const calls: any = {
     getStayById: [] as string[],
     extendStay: [] as any[],
+    saveStayDetails: [] as any[],
     applyEarlyCheckout: [] as any[],
     finalizeCheckout: [] as string[],
     listTransactionsByStay: [] as string[],
     recordTransaction: [] as any[],
     insertAdvanceTransaction: [] as any[],
     recordExtension: [] as any[],
+    listRecalculationsByStay: [] as string[],
   };
 
   function reset() {
     calls.getStayById = [];
     calls.extendStay = [];
+    calls.saveStayDetails = [];
     calls.applyEarlyCheckout = [];
     calls.finalizeCheckout = [];
     calls.listTransactionsByStay = [];
     calls.recordTransaction = [];
     calls.insertAdvanceTransaction = [];
     calls.recordExtension = [];
+    calls.listRecalculationsByStay = [];
   }
 
   return { calls, reset };
@@ -100,6 +105,25 @@ vi.mock("@/repositories/stayRepository", async (importOriginal) => {
         };
       }
     ),
+    // Tracks calls to saveStayDetails. In rejection-path tests it should
+    // never be reached (the service rejects before calling the repository).
+    // In the positive control, it returns a successful result.
+    saveStayDetails: vi.fn(async (input: any) => {
+      calls.saveStayDetails.push(input);
+      const current = (H as any).currentStayRow;
+      return {
+        ok: true,
+        stay: {
+          ...current,
+          total_nights: input.recalculatedTotalNights,
+          payment_amount: input.recalculatedStayAmount,
+          base_amount: input.gst.baseAmount,
+          tax_amount: input.gst.taxAmount,
+          recalculation_applied: true,
+        },
+        historyRecorded: false,
+      };
+    }),
     applyEarlyCheckout: vi.fn(
       async (
         stayId: string,
@@ -150,13 +174,13 @@ vi.mock("@/repositories/stayPaymentRepository", async (importOriginal) => {
     recordTransaction: vi.fn(async (input: any) => {
       calls.recordTransaction.push(input);
       throw new Error(
-        "recordTransaction should not be called by extendStay/earlyCheckout"
+        "recordTransaction should not be called by extendStay/saveStayDetails"
       );
     }),
     insertAdvanceTransaction: vi.fn(async (input: any) => {
       calls.insertAdvanceTransaction.push(input);
       throw new Error(
-        "insertAdvanceTransaction should not be called by extendStay/earlyCheckout"
+        "insertAdvanceTransaction should not be called by extendStay/saveStayDetails"
       );
     }),
   };
@@ -178,8 +202,23 @@ vi.mock("@/repositories/stayExtensionHistoryRepository", async (importOriginal) 
   };
 });
 
+// Recalculation history is written INSIDE the save_stay_details RPC — there is
+// no Node-side write function. This mock ensures no unexpected read is reached
+// during rejection paths.
+vi.mock("@/repositories/stayRecalculationHistoryRepository", async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  const { calls } = H;
+  return {
+    ...actual,
+    listRecalculationsByStay: vi.fn(async (stayId: string) => {
+      calls.listRecalculationsByStay.push(stayId);
+      return [];
+    }),
+  };
+});
+
 // ─── System under test (imported after the mocks are registered) ───────────
-import { extendStay, earlyCheckout } from "@/services/AccommodationService";
+import { extendStay, saveStayDetails } from "@/services/AccommodationService";
 import type { StayEntryRow } from "@/repositories/stayRepository";
 import type { StayEntry } from "@/types/accommodation";
 import {
@@ -228,6 +267,13 @@ function rowFromDomainStay(stay: StayEntry): StayEntryRow {
   };
 }
 
+/** Computes a plausible end date from a stay's start date and total nights. */
+function computeEndDateFromStay(stay: StayEntry): string {
+  const start = new Date(stay.startDate);
+  const end = new Date(start.getTime() + (stay.totalNights - 1) * 86400000);
+  return end.toISOString().slice(0, 10);
+}
+
 // ─── Generators ──────────────────────────────────────────────────────────────
 
 const arbExtendRejectionSeed = fc.record({
@@ -236,15 +282,14 @@ const arbExtendRejectionSeed = fc.record({
   additionalCostAmount: arbMoney,
 });
 
-const arbEarlyCheckoutRejectionSeed = fc.record({
+const arbSaveStayDetailsRejectionSeed = fc.record({
   stay: arbNonActiveStayEntry,
-  actualNightsStayed: fc.integer({ min: 1, max: 365 }),
   recalculatedStayAmount: arbMoney,
 });
 
 // ─── Property 19 ─────────────────────────────────────────────────────────────
-describe("Feature: accommodation-payment-lifecycle, Property 19: Extension and early checkout require an ACTIVE stay", () => {
-  it("extendStay rejects any non-ACTIVE stay — including one already finished via Early_Checkout — with a status-based error and no mutation", async () => {
+describe("Feature: accommodation-payment-lifecycle, Property 19: Extension and Save Stay Details require an ACTIVE stay", () => {
+  it("extendStay rejects any non-ACTIVE stay — including one already finished — with a status-based error and no mutation, and neither history table gains a row", async () => {
     await fc.assert(
       fc.asyncProperty(arbExtendRejectionSeed, async (seed) => {
         H.reset();
@@ -267,7 +312,12 @@ describe("Feature: accommodation-payment-lifecycle, Property 19: Extension and e
         expect(calls.insertAdvanceTransaction).toHaveLength(0);
         expect(calls.applyEarlyCheckout).toHaveLength(0);
         expect(calls.finalizeCheckout).toHaveLength(0);
+
+        // BOTH history tables remain unchanged: no extension history row
+        // written, and no recalculation history row written.
         expect(calls.recordExtension).toHaveLength(0);
+        expect(calls.saveStayDetails).toHaveLength(0);
+        expect(calls.listRecalculationsByStay).toHaveLength(0);
 
         // The stay's nights, Total_Stay_Amount, and status remain unchanged.
         expect(row.total_nights).toBe(seed.stay.totalNights);
@@ -278,38 +328,50 @@ describe("Feature: accommodation-payment-lifecycle, Property 19: Extension and e
     );
   });
 
-  it('earlyCheckout rejects any non-ACTIVE stay — including one already finished via Early_Checkout — returning { ok: false, error: "Only active stays can be checked out early." } with no mutation', async () => {
+  it('saveStayDetails rejects any non-ACTIVE stay with { ok: false, error: "Only active stays can be recalculated." } and no mutation, and neither history table gains a row', async () => {
     await fc.assert(
-      fc.asyncProperty(arbEarlyCheckoutRejectionSeed, async (seed) => {
+      fc.asyncProperty(arbSaveStayDetailsRejectionSeed, async (seed) => {
         H.reset();
 
         const row = rowFromDomainStay(seed.stay);
         (H as any).currentStayRow = row;
         (H as any).currentLedgerRows = [];
 
-        const result = await earlyCheckout(
+        // Compute a plausible recalculated end date (the start date itself —
+        // the minimum allowed, giving 1-night stay).
+        const recalculatedEndDate = seed.stay.startDate;
+
+        const result = await saveStayDetails(
           seed.stay.id,
-          seed.actualNightsStayed,
+          recalculatedEndDate,
           seed.recalculatedStayAmount
         );
 
-        // A returned rejection, not a throw.
-        expect("error" in result).toBe(true);
-        if ("error" in result) {
+        // A returned rejection, not a throw (Req 12.14).
+        expect(result).toHaveProperty("ok", false);
+        if ("ok" in result && !result.ok) {
           expect(result.error).toBe(
-            "Only active stays can be checked out early."
+            "Only active stays can be recalculated."
           );
         }
 
         // No mutation and no further processing — the math, the ledger read,
-        // the persistence call, and any checkout/invoice follow-up are all
-        // skipped once the status gate rejects.
-        expect(calls.applyEarlyCheckout).toHaveLength(0);
+        // the repository's saveStayDetails call (which writes to
+        // stay_recalculation_history inside its RPC), and any follow-up are
+        // all skipped once the status gate rejects.
+        expect(calls.saveStayDetails).toHaveLength(0);
         expect(calls.listTransactionsByStay).toHaveLength(0);
         expect(calls.finalizeCheckout).toHaveLength(0);
         expect(calls.recordTransaction).toHaveLength(0);
         expect(calls.insertAdvanceTransaction).toHaveLength(0);
 
+        // BOTH history tables remain unchanged: no recalculation history row
+        // (written inside saveStayDetails RPC, which was never called), and
+        // no extension history row.
+        expect(calls.recordExtension).toHaveLength(0);
+        expect(calls.listRecalculationsByStay).toHaveLength(0);
+
+        // The stay's nights, Total_Stay_Amount, and status remain unchanged.
         expect(row.total_nights).toBe(seed.stay.totalNights);
         expect(row.payment_amount).toBe(seed.stay.paymentAmount);
         expect(row.status).toBe(seed.stay.status);
@@ -319,10 +381,10 @@ describe("Feature: accommodation-payment-lifecycle, Property 19: Extension and e
   });
 
   // Light positive control (not the main property): confirms the gate isn't
-  // over-broad by checking an ACTIVE, not-yet-early-checked-out stay does
-  // NOT hit the rejection path in `earlyCheckout`. Downstream math and
-  // persistence are covered by Property 21's own test.
-  it("does not reject an ACTIVE, not-yet-early-checked-out stay at the status gate (positive control)", async () => {
+  // over-broad by checking an ACTIVE, billable stay does NOT hit the
+  // rejection path in `saveStayDetails`. Downstream math and persistence are
+  // covered by the recalculation history property test's own scope.
+  it("does not reject an ACTIVE stay at the status gate (positive control for saveStayDetails)", async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.record({ stay: arbActiveBillableStayEntry }),
@@ -332,26 +394,27 @@ describe("Feature: accommodation-payment-lifecycle, Property 19: Extension and e
           const row = rowFromDomainStay(seed.stay);
           (H as any).currentStayRow = row;
           // Empty ledger ⇒ totalPaid = 0 ⇒ remainingBalance =
-          // recalculatedStayAmount > 0 ⇒ nextStep is always COLLECT_BALANCE,
-          // never CHECKED_OUT — keeping this control focused on the gate
-          // alone without needing to stand in for the invoice pipeline.
+          // recalculatedStayAmount > 0 ⇒ nextAction is always
+          // COLLECT_BALANCE, keeping this control focused on the gate alone.
           (H as any).currentLedgerRows = [];
 
-          const actualNightsStayed = Math.max(1, seed.stay.totalNights - 1);
+          // Use the stay's own end date as recalculatedEndDate (a no-op
+          // submission) and the stay's current amount.
+          const recalculatedEndDate = computeEndDateFromStay(seed.stay);
           const recalculatedStayAmount = seed.stay.paymentAmount ?? 1;
 
-          const result = await earlyCheckout(
+          const result = await saveStayDetails(
             seed.stay.id,
-            actualNightsStayed,
+            recalculatedEndDate,
             recalculatedStayAmount
           );
 
           // Does NOT hit the "Only active stays..." rejection path.
-          expect("error" in result).toBe(false);
-          // Proceeds to the math/persistence — proven by the mocked
-          // repository call, without asserting deeply on its result (that's
-          // Property 21's scope).
-          expect(calls.applyEarlyCheckout).toHaveLength(1);
+          expect(result).not.toHaveProperty("ok", false);
+          // Proceeds past the gate — the ledger was read and the repository's
+          // saveStayDetails was called (proving the gate passed).
+          expect(calls.listTransactionsByStay).toHaveLength(1);
+          expect(calls.saveStayDetails).toHaveLength(1);
         }
       ),
       { numRuns: 50 }

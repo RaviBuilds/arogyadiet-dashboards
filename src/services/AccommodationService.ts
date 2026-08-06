@@ -34,7 +34,7 @@ import {
   type StayBalanceSnapshot,
   type StayEntry,
   type StayActionVisibility,
-  type EarlyCheckoutOutcome,
+  type SaveStayDetailsOutcome,
   type PaymentHistoryRow,
   type PaymentReceiptData,
 } from "@/types/accommodation";
@@ -194,6 +194,65 @@ export {
   describeBackdatedStayOutcome,
   type BackdatedStayOutcome,
 } from "@/lib/accommodation/backdatedStay";
+
+// ---------------------------------------------------------------------------
+// Nights ↔ End Date Conversion (Recalculate_Stay)
+// ---------------------------------------------------------------------------
+
+/**
+ * Total nights a stay spans between an inclusive start and end date:
+ * `end − start + 1`.
+ *
+ * The exact inverse of {@link computeEndDate} and the exact JS counterpart of
+ * the `save_stay_details()` RPC's
+ * `v_nights_after := (p_recalculated_end_date - v_stay.start_date) + 1`
+ * (`scripts/create-stay-recalculation.sql`), so a Recalculated_Total_Nights
+ * derived in the service can never disagree with the one the database writes.
+ *
+ * A stay whose end date equals its start date is exactly 1 night — the minimum
+ * stay length, never 0.
+ *
+ * Req 12.3, 12.8
+ */
+export function nightsFromEndDate(startDate: string, endDate: string): number {
+  return differenceInDays(parseISO(endDate), parseISO(startDate)) + 1;
+}
+
+/**
+ * Named alias of {@link computeEndDate} (`start + nights − 1`), for the
+ * Recalculate_Stay call sites where "end date from nights" reads as the
+ * intent. Deliberately an alias rather than a second implementation: one date
+ * convention, one implementation.
+ *
+ * Req 12.3, 12.8
+ */
+export const endDateFromNights = computeEndDate;
+
+/**
+ * Calendar-picker bounds for Recalculate_Stay. Both bounds are inclusive and
+ * selectable:
+ *   min = the stay's start date       (selectable — yields exactly 1 night)
+ *   max = endDateFromNights(startDate, currently booked total nights)
+ *
+ * `max` mirrors the RPC's
+ * `v_booked_end := v_stay.start_date + (v_stay.total_nights - 1)`.
+ *
+ * The range is never empty, so there is no availability flag to return: for a
+ * 1-night stay `min === max === startDate`, a single selectable date that is
+ * also that stay's current end date, which keeps "submit the current end date
+ * unchanged" a genuine no-op (design decision 13, Req 12.6).
+ *
+ * Req 12.3, 12.8
+ */
+export function recalculationDateBounds(stay: StayEntry): {
+  min: string;
+  max: string;
+} {
+  return {
+    min: stay.startDate,
+    max: endDateFromNights(stay.startDate, stay.totalNights),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Status Transition Enforcement
@@ -405,9 +464,9 @@ export async function createStay(
 /**
  * Maps a StayEntryRow (snake_case DB row) to a StayEntry (camelCase domain
  * type), including the computed endDate and all payment-lifecycle columns.
- * Used internally by orchestration functions (`earlyCheckout`) that need the
- * domain shape expected by the pure decision-logic functions
- * (`applyEarlyCheckoutMath`, `isEarlyCheckoutEligible`).
+ * Used internally by orchestration functions that need the domain shape
+ * expected by the pure decision-logic functions
+ * (`applyStayRecalculationMath`, `isRecalculationEligible`).
  */
 function mapStayRowToDomain(row: StayEntryRow): StayEntry {
   return {
@@ -432,6 +491,7 @@ function mapStayRowToDomain(row: StayEntryRow): StayEntry {
     actualNightsStayed: row.actual_nights_stayed,
     originalTotalNights: row.original_total_nights,
     originalTotalAmount: row.original_total_amount,
+    recalculationApplied: row.recalculation_applied,
     checkedOutAt: row.checked_out_at,
     finalInvoicePaymentId: row.final_invoice_payment_id,
     finalInvoiceGeneratedAt: row.final_invoice_generated_at,
@@ -668,18 +728,34 @@ export function shouldSkipBilling(
  *   Disabled (markCheckedOutEnabled false) until BOTH the balance is exactly
  *   zero AND `todayIST` has reached the stay's inclusive end date. The date
  *   condition means a normal checkout can only be actioned from 00:00 IST on
- *   the end date onward — leaving early is the Early_Checkout flow's job, which
- *   recalculates the amount for the nights actually stayed. Without this gate a
- *   single click silently billed the guest for nights they never stayed.
+ *   the end date onward — leaving early is Save_Stay_Details' job, which
+ *   recalculates the nights and the amount for the stay actually taken. Without
+ *   this gate a single click silently billed the guest for nights they never
+ *   stayed.
+ *   `markCheckedOutEnabled` (and its `markCheckedOutBlockedReason`) keep their
+ *   existing formula verbatim — `balance.isFullyPaid && todayIST >=
+ *   stay.endDate` — and recalculation adds **no branch** here. `stay.endDate` is
+ *   computed from `total_nights`, which Save_Stay_Details has already replaced,
+ *   so the Recalculated_End_Date flows into this *existing* gate on its own.
+ *   That is exactly why recalculation introduces no new path to FINISHED
+ *   (Req 12.13): Mark_As_Checked_Out simply auto-enables earlier once the
+ *   shortened end date is reached and the balance is exactly zero.
  * - showGenerateFinalInvoice: FINISHED + isBackdated, fully paid, no final
  *   invoice yet, positive total, non-shared.
- * - showEarlyCheckout: ACTIVE, non-shared, positive total, not already
- *   early-checkout-applied.
+ * - showRecalculateStay: ACTIVE + billable, and nothing else — the single truth
+ *   for it is {@link isRecalculationEligible}. Repeatable: there is no
+ *   `earlyCheckoutApplied` clause and no elapsed-nights clause, so a first
+ *   application never suppresses the action and a late amount-only correction
+ *   is never blocked (Req 12.1, 12.10).
+ * - showMarkAsRefunded: ACTIVE + billable + `balance.refundDue > 0`. Derived
+ *   from the *balance* rather than from "a recalculation just happened", which
+ *   is what makes it standalone: it survives a page reload and stays true until
+ *   the refund is actually recorded (Req 12.12, 14.1).
  *
  * By construction, showMarkCheckedOut (ACTIVE non-backdated) and
  * showGenerateFinalInvoice (FINISHED + isBackdated) are mutually exclusive.
  *
- * Req 5.1, 5.10, 7.1, 7.2, 9.1, 9.2, 9.4, 12.1
+ * Req 5.1, 5.10, 7.1, 7.2, 9.1, 9.2, 9.4, 12.1, 12.10, 12.11, 12.12, 12.13, 14.1
  */
 export function deriveStayActionVisibility(
   stay: StayEntry,
@@ -702,7 +778,8 @@ export function deriveStayActionVisibility(
       markCheckedOutEnabled: false,
       markCheckedOutBlockedReason: null,
       showGenerateFinalInvoice: false,
-      showEarlyCheckout: false,
+      showRecalculateStay: false,
+      showMarkAsRefunded: false,
     };
   }
 
@@ -745,8 +822,16 @@ export function deriveStayActionVisibility(
   const showGenerateFinalInvoice =
     isFinished && isBackdated && balance.isFullyPaid && !hasFinalInvoice;
 
-  // Early Checkout: ACTIVE, not already early-checkout-applied (Req 12.1)
-  const showEarlyCheckout = isActive && !stay.earlyCheckoutApplied;
+  // Recalculate Stay: ACTIVE + billable, nothing else. Delegated to
+  // `isRecalculationEligible` rather than re-spelled as `isActive && isBillable`
+  // so the button's availability and the write path's eligibility check can
+  // never drift apart (Req 12.1, 12.10).
+  const showRecalculateStay = isRecalculationEligible(stay);
+
+  // Mark as refunded: ACTIVE + billable + money owed back. Read off the derived
+  // balance, so it reappears on every reload until the REFUND transaction is
+  // recorded (Req 12.12, 14.1).
+  const showMarkAsRefunded = isActive && balance.refundDue > 0;
 
   return {
     showRecordPayment,
@@ -755,12 +840,13 @@ export function deriveStayActionVisibility(
     markCheckedOutEnabled,
     markCheckedOutBlockedReason,
     showGenerateFinalInvoice,
-    showEarlyCheckout,
+    showRecalculateStay,
+    showMarkAsRefunded,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Early Checkout Math
+// Stay Recalculation Math (Save_Stay_Details)
 // ---------------------------------------------------------------------------
 
 /**
@@ -770,8 +856,9 @@ export function deriveStayActionVisibility(
  * - If todayIST === startDate, 0 nights have elapsed (guest arrived today).
  * - If todayIST is before startDate, returns 0 (not yet started).
  *
- * Used informatively (e.g., to pre-fill the Actual_Nights_Stayed field);
- * does NOT gate the early checkout action.
+ * Used informatively — to prefill and to describe elapsed nights in the
+ * Recalculate_Stay dialog. It does NOT gate the Recalculate_Stay action and
+ * is deliberately absent from {@link isRecalculationEligible}.
  *
  * Req 12.1
  */
@@ -786,78 +873,113 @@ export function computeElapsedNights(
 }
 
 /**
- * Determines whether a stay is eligible for the Early_Checkout action.
+ * Determines whether a stay is eligible for the Recalculate_Stay action.
+ * REPLACES the retired `isEarlyCheckoutEligible`.
  *
- * Eligibility criteria (all must hold):
+ * Eligibility is ACTIVE + billable, and nothing else:
  * 1. Stay status is ACTIVE
  * 2. Stay is not a shared-payment stay (paymentHostProfileId is null)
  * 3. Stay has a positive Total_Stay_Amount
- * 4. Stay has not already had an early checkout applied
  *
- * Note: The design states eligibility does NOT require that elapsed nights < total
- * nights — that constraint is on the form input (actualNightsStayed < totalNights),
- * not on button visibility. The button is visible for any ACTIVE, non-shared,
- * positive-total stay that hasn't already been early-checked-out (Req 12.1).
+ * Two clauses the old predicate carried are deliberately **gone**:
+ * - `!stay.earlyCheckoutApplied` — recalculation is **repeatable** while the
+ *   stay is ACTIVE (Req 12.10), so a first application must not suppress the
+ *   action. `earlyCheckoutApplied` is now only a historical "ended earlier
+ *   than booked" marker and no gate reads it.
+ * - any elapsed-nights clause — the picker bounds
+ *   ({@link recalculationDateBounds}) constrain the submitted date, not the
+ *   button's availability, and those bounds are never empty (design decision
+ *   13). {@link computeElapsedNights} stays purely informational.
  *
- * Req 12.1
+ * Req 12.1, 12.10
  */
-export function isEarlyCheckoutEligible(stay: StayEntry): boolean {
+export function isRecalculationEligible(stay: StayEntry): boolean {
   if (stay.status !== "ACTIVE") return false;
   if (stay.paymentHostProfileId !== null) return false;
   if (stay.paymentAmount === null || stay.paymentAmount <= 0) return false;
-  if (stay.earlyCheckoutApplied) return false;
   return true;
 }
 
 /**
- * Applies the early-checkout recalculation math to determine the new balance
- * and the next step the UI must present.
+ * Applies the Save_Stay_Details recalculation math: the derived nights, the new
+ * balance, the single money follow-up the tab must present, and the two flags
+ * the write path needs. REPLACES the retired `applyEarlyCheckoutMath`.
+ *
+ * Note what is **absent**: there is no branch that checks the stay out, no
+ * `CHECKED_OUT` value, and no invoice decision anywhere in here. The exact
+ * balance is instead reported as `SETTLED`, and reaching FINISHED remains the
+ * separate Mark_As_Checked_Out action's sole job (Req 12.9, 12.13).
  *
  * Logic:
- * 1. Derive the new balance using `deriveStayBalance(recalculatedStayAmount, transactions)`.
- *    - The total changes to the recalculated amount; Total_Paid stays unchanged
- *      (existing transactions are not modified).
- * 2. Determine `nextStep` from remainingBalance:
- *    - > 0: COLLECT_BALANCE (admin must record a payment before checkout)
- *    - < 0: RECORD_REFUND (guest overpaid; admin must record a refund)
- *    - === 0: CHECKED_OUT (balance is exact; can finalise immediately)
- * 3. Return the stay id, actualNightsStayed as the new totalNights,
- *    recalculatedStayAmount as the new totalStayAmount, the balance,
- *    nextStep, and refundDue from the balance.
+ * 1. `totalNights` is **derived** from `recalculatedEndDate` via
+ *    {@link nightsFromEndDate} — never typed, and identical to the
+ *    `save_stay_details()` RPC's `v_nights_after`.
+ * 2. The balance comes from `deriveStayBalance(recalculatedStayAmount,
+ *    transactions)`: the total becomes the recalculated amount while Total_Paid
+ *    stays untouched (no transaction is modified).
+ * 3. `nextAction` is selected on the **paise-converted** remaining balance so a
+ *    float representation can never mis-route it: `> 0` COLLECT_BALANCE
+ *    (Req 12.11), `< 0` RECORD_REFUND (Req 12.12), `=== 0` SETTLED.
+ * 4. `changesSomething` drives whether a Recalculation_History row is written
+ *    (Req 13.1, 13.2) and must agree with the RPC's `v_changed`
+ *    (`v_nights_after <> total_nights OR payment_amount IS DISTINCT FROM
+ *    p_recalculated_amount`). Nights compare directly; the amount compares in
+ *    integer paise, so a float-representation difference that is the same money
+ *    is not a change. A **null** `paymentAmount` is treated as distinct from any
+ *    amount rather than coerced to 0, mirroring SQL's `IS DISTINCT FROM`.
+ * 5. `shortensStay` is the Early_Checkout case — a lexicographic YYYY-MM-DD
+ *    comparison against the currently booked Computed_End_Date, matching the
+ *    RPC's `v_shortens`.
  *
- * This is a pure function — no DB interaction.
+ * Pure function — no DB interaction, and the input `stay` is never mutated.
  *
- * Req 12.6, 12.7, 12.8, 12.12, 12.15
+ * Req 12.8, 12.9, 12.10, 12.11, 12.12, 13.1, 13.2
  */
-export function applyEarlyCheckoutMath(
+export function applyStayRecalculationMath(
   stay: StayEntry,
-  actualNightsStayed: number,
+  recalculatedEndDate: string,
   recalculatedStayAmount: number,
   transactions: readonly StayPaymentTransaction[]
 ): {
+  /** Recalculated_Total_Nights, derived from `recalculatedEndDate`. */
+  totalNights: number;
   balance: StayBalanceSnapshot;
-  nextStep: EarlyCheckoutOutcome["nextStep"];
+  nextAction: SaveStayDetailsOutcome["nextAction"];
   refundDue: number;
+  /** true iff nights or amount differ from the stay's current values (Req 13.1, 13.2). */
+  changesSomething: boolean;
+  /** true iff the submission shortens the stay — the Early_Checkout case. */
+  shortensStay: boolean;
 } {
-  // Derive the new balance with the recalculated total against existing payments
+  // Req 12.8 — nights are DERIVED from the calendar-picked end date.
+  const totalNights = nightsFromEndDate(stay.startDate, recalculatedEndDate);
+
+  // New total against the unchanged ledger; Total_Paid is untouched.
   const balance = deriveStayBalance(recalculatedStayAmount, transactions);
 
-  // Determine the branch based on the remaining balance (exact in paise)
+  // Exactly one follow-up, chosen on the exact paise balance.
   const remainingPaise = toPaise(balance.remainingBalance);
-  let nextStep: EarlyCheckoutOutcome["nextStep"];
+  const nextAction: SaveStayDetailsOutcome["nextAction"] =
+    remainingPaise > 0
+      ? "COLLECT_BALANCE"
+      : remainingPaise < 0
+        ? "RECORD_REFUND"
+        : "SETTLED";
 
-  if (remainingPaise > 0) {
-    nextStep = "COLLECT_BALANCE";
-  } else if (remainingPaise < 0) {
-    nextStep = "RECORD_REFUND";
-  } else {
-    nextStep = "CHECKED_OUT";
-  }
+  // SQL parity: NULL IS DISTINCT FROM <any amount> is true, so a stay with no
+  // stored total always counts as changed — never coerced to 0 first.
+  const amountChanged =
+    stay.paymentAmount === null ||
+    toPaise(recalculatedStayAmount) !== toPaise(stay.paymentAmount);
 
   return {
+    totalNights,
     balance,
-    nextStep,
+    nextAction,
     refundDue: balance.refundDue,
+    changesSomething: totalNights !== stay.totalNights || amountChanged,
+    shortensStay:
+      recalculatedEndDate < endDateFromNights(stay.startDate, stay.totalNights),
   };
 }
 
@@ -904,7 +1026,7 @@ export function buildPaymentReceiptData(
 }
 
 // ---------------------------------------------------------------------------
-// Checkout, Final Invoice, and Early Checkout Orchestration
+// Checkout, Final Invoice, and Save Stay Details Orchestration
 // ---------------------------------------------------------------------------
 
 /** Outcome of {@link generateFinalInvoice}. */
@@ -1054,32 +1176,74 @@ export async function checkoutStay(stayId: string): Promise<CheckoutResult> {
   return { ok: true, status: "FINISHED", invoiceStatus };
 }
 
+/** Failure shape of {@link saveStayDetails}. Mirrors the action layer's own
+ *  `{ error, fieldErrors? }` contract (design.md — Service Layer). */
+export type SaveStayDetailsFailure = {
+  ok: false;
+  error: string;
+  fieldErrors?: Record<string, string>;
+};
+
 /**
- * Orchestrates an Early_Checkout: rejects any non-ACTIVE stay (including one
- * already early-checked-out — Req 12.14), applies the pure recalculation
- * math (`applyEarlyCheckoutMath`), persists it via
- * `stayRepository.applyEarlyCheckout`, and — when the recalculated amount
- * already equals Total_Paid — immediately finalises the stay through
- * `checkoutStay` (Req 12.12, 12.13).
+ * Orchestrates a Save_Stay_Details submission. **REPLACES the retired
+ * `earlyCheckout`.**
  *
- * Req 7.3, 7.4, 7.5, 8.1, 8.2, 8.6, 8.7, 9.3, 11.5, 12.12, 12.13, 12.14
+ * Flow: fetch the stay → reject a non-ACTIVE one (Req 12.14) → run the pure
+ * {@link applyStayRecalculationMath} → recompute the GST breakup from the new
+ * total through the single {@link gstFromTotal} path (Req 11.3's single-path
+ * invariant) → delegate the ENTIRE write to
+ * `stayRepository.saveStayDetails`, which is one `save_stay_details()` RPC call
+ * under one row lock in one transaction, so a mid-operation failure leaves
+ * nights, amount, status, and end date fully unchanged (Req 12.16).
+ *
+ * What this function deliberately does **NOT** do, and why that is the whole
+ * point of the revision (Req 12.9, 12.13):
+ * - it never calls {@link checkoutStay};
+ * - it never calls {@link generateFinalInvoice};
+ * - it writes no `status` and no `checked_out_at` — neither here nor inside the
+ *   RPC. `Mark as Checked Out` (`finalizeCheckout`) remains the sole path to
+ *   FINISHED, and it auto-enables on its own once the recalculated end date is
+ *   reached and the balance is exactly zero, because
+ *   `deriveStayActionVisibility` reads `stay.endDate`, which is computed from
+ *   the `total_nights` this write has already replaced.
+ *
+ * The returned `nextAction` is therefore always a *money* follow-up —
+ * COLLECT_BALANCE (Req 12.11), RECORD_REFUND (Req 12.12), or SETTLED — never a
+ * checkout, and `status` is the literal `"ACTIVE"`.
+ *
+ * Repeatable while the stay is ACTIVE (Req 12.10): nothing here reads
+ * `recalculationApplied` or `earlyCheckoutApplied`, so a second, third, or
+ * amount-only submission is accepted exactly like the first. A submission that
+ * changes nothing is accepted as a no-op and reports
+ * `historyRecorded: false` (Req 12.6, 13.2).
+ *
+ * The service-level ACTIVE check is belt-and-braces: the RPC re-checks it
+ * inside the row lock, and *that* check is the authoritative one under
+ * concurrency. Both are kept.
+ *
+ * Business-outcome failures are RETURNED, never thrown — same convention as
+ * {@link checkoutStay}. The repository's typed reasons map to pinned messages
+ * with the field errors the Recalculate_Stay form binds to.
+ *
+ * Req 12.8, 12.9, 12.10, 12.14, 12.16, 13.1, 13.2
  */
-export async function earlyCheckout(
+export async function saveStayDetails(
   stayId: string,
-  actualNightsStayed: number,
-  recalculatedStayAmount: number
-): Promise<EarlyCheckoutOutcome | { ok: false; error: string }> {
+  recalculatedEndDate: string,
+  recalculatedStayAmount: number,
+  createdBy: string | null = null
+): Promise<SaveStayDetailsOutcome | SaveStayDetailsFailure> {
   const stayRow = await stayRepository.getStayById(stayId);
   if (!stayRow) {
     return { ok: false, error: `Stay ${stayId} not found` };
   }
 
-  // Reject any non-ACTIVE stay, including one already early-checked-out
-  // (Req 12.14) — no mutation.
+  // Req 12.14 — only ACTIVE stays may be recalculated. Belt-and-braces on top
+  // of the RPC's own re-check inside the row lock; no mutation either way.
   if (stayRow.status !== "ACTIVE") {
     return {
       ok: false,
-      error: "Only active stays can be checked out early.",
+      error: "Only active stays can be recalculated.",
     };
   }
 
@@ -1090,36 +1254,260 @@ export async function earlyCheckout(
   );
   const transactions = transactionRows.map(mapTransactionRowToDomain);
 
-  const math = applyEarlyCheckoutMath(
+  // Pure math: nights DERIVED from the submitted end date (Req 12.8), the new
+  // balance against the unchanged ledger, and the single money follow-up.
+  const math = applyStayRecalculationMath(
     stay,
-    actualNightsStayed,
+    recalculatedEndDate,
     recalculatedStayAmount,
     transactions
   );
 
+  // Single-path GST: always recomputed from the NEW total, never accumulated.
   const gst = gstFromTotal(recalculatedStayAmount);
-  await stayRepository.applyEarlyCheckout(
+
+  const result = await stayRepository.saveStayDetails({
     stayId,
-    actualNightsStayed,
+    recalculatedEndDate,
+    // The RPC derives nights itself from the locked `start_date`; this is the
+    // same value by construction (`nightsFromEndDate` is the exact JS
+    // counterpart of its `v_nights_after`) and is passed because it is part of
+    // the repository's input shape.
+    recalculatedTotalNights: math.totalNights,
     recalculatedStayAmount,
-    { baseAmount: gst.baseAmount, taxAmount: gst.taxAmount }
-  );
+    gst: { baseAmount: gst.baseAmount, taxAmount: gst.taxAmount },
+    recalculatedOn: getISTDateString(0),
+    createdBy,
+  });
 
-  const outcome: EarlyCheckoutOutcome = {
-    stayId,
-    totalNights: actualNightsStayed,
-    totalStayAmount: recalculatedStayAmount,
-    balance: math.balance,
-    nextStep: math.nextStep,
-    refundDue: math.refundDue,
-  };
-
-  if (math.nextStep === "CHECKED_OUT") {
-    const checkoutResult = await checkoutStay(stayId);
-    if (checkoutResult.ok && checkoutResult.invoiceStatus !== "NOT_APPLICABLE") {
-      outcome.invoiceStatus = checkoutResult.invoiceStatus;
-    }
+  if (!result.ok) {
+    return mapSaveStayDetailsFailure(stayId, recalculatedEndDate, result);
   }
 
-  return outcome;
+  return {
+    stayId,
+    totalNights: math.totalNights,
+    recalculatedEndDate,
+    totalStayAmount: recalculatedStayAmount,
+    balance: math.balance,
+    nextAction: math.nextAction,
+    refundDue: math.refundDue,
+    // Exactly the RPC's `v_changed` — no history row for a no-op (Req 13.2).
+    historyRecorded: result.historyRecorded,
+    // Save_Stay_Details never transitions status (Req 12.9).
+    status: "ACTIVE",
+  };
+}
+
+/**
+ * Maps `stayRepository.saveStayDetails`'s typed failure reasons to the pinned
+ * messages and field errors the Recalculate_Stay form binds to, following the
+ * same reason-mapping convention {@link checkoutStay} uses for
+ * `finalizeCheckout` (Req 12.3, 12.4, 12.5, 12.14). Raw SQL errors are never
+ * surfaced — the repository throws for those.
+ */
+function mapSaveStayDetailsFailure(
+  stayId: string,
+  submittedEndDate: string,
+  result: Extract<stayRepository.SaveStayDetailsResult, { ok: false }>
+): SaveStayDetailsFailure {
+  switch (result.reason) {
+    case "NOT_FOUND":
+      return { ok: false, error: `Stay ${stayId} not found` };
+
+    case "NOT_ACTIVE":
+      return { ok: false, error: "Only active stays can be recalculated." };
+
+    case "INVALID_END_DATE": {
+      // The RPC returns the authoritative inclusive bounds; the message names
+      // whichever bound the submitted date breached (Req 12.3, 12.5).
+      // YYYY-MM-DD compares correctly lexicographically.
+      const { minEndDate, maxEndDate } = result;
+      const message =
+        maxEndDate !== undefined && submittedEndDate > maxEndDate
+          ? `End date cannot be later than the currently booked ${maxEndDate}. Use Extend Stay to lengthen the stay.`
+          : `End date must be on or after the stay's start date${minEndDate ? ` ${minEndDate}` : ""}; selecting the start date itself gives a 1-night stay.`;
+      return {
+        ok: false,
+        error: message,
+        fieldErrors: { recalculatedEndDate: message },
+      };
+    }
+
+    case "AMOUNT_OUT_OF_RANGE": {
+      const message =
+        "Recalculated total stay amount must be a whole number between 1 and 9,999,999.";
+      return {
+        ok: false,
+        error: message,
+        fieldErrors: { recalculatedStayAmount: message },
+      };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Refund + Refund_Invoice Orchestration (Mark_As_Refunded)
+// ---------------------------------------------------------------------------
+
+/** Input for {@link recordRefundWithInvoice}. */
+export interface RecordRefundInput {
+  stayId: string;
+  amount: number;
+  /** Required — describes how the refund was initiated (Req 14.3). */
+  remark: string;
+  comment?: string | null;
+  createdBy: string | null;
+}
+
+/**
+ * Outcome of {@link recordRefundWithInvoice}.
+ *
+ * The reason union is the design's seven **plus `REMARK_INVALID`**, and the two
+ * additions come from opposite directions:
+ *
+ * - `REMARK_INVALID` is a real `record_stay_refund_with_invoice()` outcome — the
+ *   RPC validates the remark and the comment server-side inside the row lock
+ *   (Req 14.3), independently of the Zod layer above it. It is passed through
+ *   verbatim rather than folded into another reason, because collapsing it would
+ *   either lose the field the form must highlight or mislabel a validation
+ *   failure as a system failure.
+ * - `INVOICE_FAILED` is **not** an RPC-returned reason and never can be: when
+ *   the Refund_Invoice insert aborts the transaction, the whole function raises
+ *   and the repository throws, so there is no jsonb reason to read. It is this
+ *   service's translation of that throw — "nothing was written, the ledger is
+ *   untouched, retry is safe" (Req 14.8).
+ *
+ * So the two are complementary, not alternatives: one is a returned business
+ * outcome, the other is a thrown-and-caught system outcome.
+ */
+export type RecordRefundOutcome =
+  | {
+      ok: true;
+      /** Authoritative post-refund balance, derived inside the RPC's row lock. */
+      balance: StayBalanceSnapshot;
+      /** `payments.id` of the Refund_Invoice written in the same transaction (Req 14.7). */
+      refundInvoicePaymentId: string;
+      /** `stay_payment_transactions.id` of the REFUND row. */
+      transactionId: string;
+    }
+  | {
+      ok: false;
+      reason:
+        | "NOT_FOUND"
+        | "SHARED_PAYMENT"
+        | "NOT_ACTIVE"
+        | "AMOUNT_NOT_POSITIVE"
+        | "NO_EXCESS_TO_REFUND"
+        | "REFUND_EXCEEDS_EXCESS"
+        | "REMARK_INVALID"
+        | "INVOICE_FAILED";
+      /** Present with `REFUND_EXCEEDS_EXCESS` — the live excess the form must show. */
+      excess?: number;
+    };
+
+/**
+ * Builds a {@link StayBalanceSnapshot} from the authoritative Total_Paid and
+ * Remaining_Balance the RPC derived **inside the stay row lock**, so the
+ * snapshot cannot disagree with the figures the refund was validated against
+ * even when two admins act at once.
+ *
+ * All arithmetic runs through {@link toPaise} / {@link fromPaise}, exactly as
+ * {@link deriveStayBalance} does, so `isFullyPaid` stays an exact-zero predicate
+ * (Req 7.2) and Total_Stay_Amount is reconstructed without float drift.
+ * Deliberately NOT a second balance formula: the derived quantities
+ * (`totalStayAmount`, `isFullyPaid`, `refundDue`) follow the same definitions as
+ * `deriveStayBalance`, only sourced from the locked figures instead of a
+ * re-read ledger.
+ */
+function balanceFromAuthoritativeTotals(
+  totalPaid: number,
+  remainingBalance: number
+): StayBalanceSnapshot {
+  const totalPaidPaise = toPaise(totalPaid);
+  const remainingPaise = toPaise(remainingBalance);
+
+  return {
+    // Total_Stay_Amount = Total_Paid + Remaining_Balance, by definition of
+    // Remaining_Balance (Req 6.4).
+    totalStayAmount: fromPaise(totalPaidPaise + remainingPaise),
+    totalPaid: fromPaise(totalPaidPaise),
+    remainingBalance: fromPaise(remainingPaise),
+    isFullyPaid: remainingPaise === 0,
+    refundDue: fromPaise(Math.max(0, -remainingPaise)),
+  };
+}
+
+/**
+ * Records a REFUND Payment_Transaction together with its Refund_Invoice
+ * (Mark_As_Refunded). A **thin wrapper** over
+ * `stayPaymentRepository.recordRefundWithInvoice`: the atomicity Req 14.8
+ * demands lives entirely in the `record_stay_refund_with_invoice()` RPC, which
+ * writes the ledger row, the `payments` row, and the back-reference in ONE
+ * transaction.
+ *
+ * There is deliberately **no Node-side compensating delete, cleanup, or retry**
+ * here (design decision 16). A compensating delete is itself a write that can
+ * fail, which is precisely the failure mode Req 14.8 addresses — adding one back
+ * would reintroduce the bug the RPC exists to prevent. When the RPC throws
+ * because the invoice insert aborted the transaction, nothing was committed:
+ * this function reports `INVOICE_FAILED` and stops, and Total_Paid is exactly
+ * what it was before the call.
+ *
+ * It also writes **no `status` and no `checked_out_at`**, and never calls
+ * {@link checkoutStay} or {@link generateFinalInvoice}. A refund that settles
+ * the balance only makes the stay *eligible* for Mark as Checked Out — the
+ * admin still has to press it (Req 14.10). This mirrors the same decoupling
+ * {@link saveStayDetails} enforces: `deriveStayActionVisibility` picks the
+ * newly-zero balance up on its own through the existing gate.
+ *
+ * Business-outcome failures are RETURNED as `ok: false` reasons, never thrown —
+ * same convention as {@link checkoutStay} and {@link saveStayDetails}. The
+ * action layer maps each reason to its pinned message; no raw SQL error is ever
+ * surfaced.
+ *
+ * Req 14.1, 14.6, 14.7, 14.8, 14.10
+ */
+export async function recordRefundWithInvoice(
+  input: RecordRefundInput
+): Promise<RecordRefundOutcome> {
+  let result: Awaited<
+    ReturnType<typeof stayPaymentRepository.recordRefundWithInvoice>
+  >;
+
+  try {
+    result = await stayPaymentRepository.recordRefundWithInvoice({
+      stayEntryId: input.stayId,
+      amount: input.amount,
+      transactionDate: getISTDateString(0),
+      remark: input.remark,
+      comment: input.comment ?? null,
+      createdBy: input.createdBy,
+    });
+  } catch {
+    // The RPC raised, so its transaction aborted: neither the REFUND ledger row
+    // nor the Refund_Invoice was committed and Total_Paid is untouched
+    // (Req 14.8). Nothing to undo — and nothing IS undone here, on purpose.
+    return { ok: false, reason: "INVOICE_FAILED" };
+  }
+
+  if (!result.ok) {
+    // Every RPC reason, `REMARK_INVALID` included, is passed through unchanged.
+    return { ok: false, reason: result.reason, excess: result.excess };
+  }
+
+  return {
+    ok: true,
+    // Authoritative figures from inside the row lock — not re-derived from a
+    // second ledger read, which could observe a later concurrent write.
+    balance: balanceFromAuthoritativeTotals(
+      result.totalPaid,
+      result.remainingBalance
+    ),
+    // The separate field, NOT `result.transaction.refund_invoice_payment_id`:
+    // the RPC snapshots the ledger row before writing the back-reference, so the
+    // row's own column is still null in this response (Req 14.7).
+    refundInvoicePaymentId: result.refundInvoicePaymentId,
+    transactionId: result.transaction.id,
+  };
 }

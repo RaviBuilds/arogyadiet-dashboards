@@ -4,11 +4,12 @@
 //
 // Server Actions for stay lifecycle management.
 // Handles stay extension, new stay creation, expiration marking,
-// checkout, early checkout, and active/history stay retrieval.
+// checkout, Save_Stay_Details (Recalculate_Stay), and active/history stay
+// retrieval.
 //
 // Requirements: 4.4, 7.1, 7.2, 7.3, 7.4, 7.5, 8.1, 8.2, 8.3, 11.1, 11.2,
-//   11.4, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.12, 12.13, 12.14,
-//   14.1, 14.2, 14.3, 14.4, 14.5
+//   11.4, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.8, 12.9, 12.10, 12.14,
+//   12.16, 14.1, 14.2, 14.3, 14.4, 14.5
 
 import { getCurrentAdminContext } from "@/lib/auth/adminAccess";
 import { getISTDateString } from "@/lib/dates/ist";
@@ -17,14 +18,14 @@ import * as AccommodationService from "@/services/AccommodationService";
 import {
   extendStaySchema,
   createStaySchema,
-  createEarlyCheckoutSchema,
+  createRecalculateStaySchema,
   type ExtendStayInput,
   type CreateStayInput,
 } from "@/validations/accommodationSchema";
 import type {
   StayEntry,
   StayBalanceSnapshot,
-  EarlyCheckoutOutcome,
+  SaveStayDetailsOutcome,
 } from "@/types/accommodation";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,7 @@ function mapRowToStayEntry(
     actualNightsStayed: row.actual_nights_stayed,
     originalTotalNights: row.original_total_nights,
     originalTotalAmount: row.original_total_amount,
+    recalculationApplied: row.recalculation_applied,
     checkedOutAt: row.checked_out_at,
     finalInvoicePaymentId: row.final_invoice_payment_id,
     finalInvoiceGeneratedAt: row.final_invoice_generated_at,
@@ -160,13 +162,17 @@ export async function markStayCheckedOutAction(
     return { error: "Unauthorized" };
   }
 
-  // 2. End-date gate. A normal checkout may only be actioned once the stay has
-  //    reached its inclusive end date; leaving early goes through
-  //    earlyCheckoutStayAction, which recalculates the amount for the nights
-  //    actually stayed. Enforced here in the action rather than inside
-  //    AccommodationService.checkoutStay, because `earlyCheckout` calls
-  //    checkoutStay internally once the balance settles — and that call is by
-  //    definition before the end date, so gating the service would break it.
+  // 2. End-date gate (Req 12.13). A checkout may only be actioned once the stay
+  //    has reached its inclusive end date. Leaving early is no longer a checkout
+  //    variant: the admin first runs Recalculate Stay
+  //    (`saveStayDetailsAction`), which moves the stay's end date in and
+  //    recalculates Total_Stay_Amount for the nights actually stayed, then
+  //    settles the balance, and only then presses Mark as Checked Out. Because
+  //    the gate below reads the end date computed from `total_nights` — the very
+  //    column Save_Stay_Details replaces — the recalculated date flows into it
+  //    with no extra branch. Kept in the action rather than inside
+  //    AccommodationService.checkoutStay so the service stays a single
+  //    balance-and-status gate.
   const stayForDateGate = await stayRepository.getStayById(stayId);
   if (!stayForDateGate) {
     return { error: "Stay entry not found." };
@@ -211,39 +217,71 @@ export async function markStayCheckedOutAction(
 }
 
 /**
- * Applies an early checkout to an ACTIVE stay: recalculates nights and amount,
- * determines the follow-up step the Accommodation tab must render.
+ * Saves recalculated stay details against an ACTIVE stay: replaces the stay's
+ * Computed_End_Date (and with it Recalculated_Total_Nights, derived from the
+ * date) and Total_Stay_Amount, and reports the single money follow-up the
+ * Accommodation tab must render.
  *
- * Flow: admin auth → fetch stay to get total_nights → validate input through
- * createEarlyCheckoutSchema(bookedTotalNights) → call
- * AccommodationService.earlyCheckout → return the EarlyCheckoutOutcome.
+ * **REPLACES the retired `earlyCheckoutStayAction`.** The old contract is gone
+ * from this module entirely — no caller can reach it, and neither
+ * `createEarlyCheckoutSchema` nor `EarlyCheckoutOutcome` is imported any more.
+ * The behavioural difference that matters: this action performs **no status
+ * transition and no invoice generation** (Req 12.9). The returned
+ * `SaveStayDetailsOutcome` cannot express a checkout — `status` is the literal
+ * `"ACTIVE"` and `nextAction` is always a money follow-up. Mark as Checked Out
+ * stays the sole path to FINISHED, and it becomes available on its own once the
+ * recalculated end date is reached and the balance is exactly zero.
  *
- * Req 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.12, 12.13, 12.14
+ * Repeatable any number of times while the stay is ACTIVE (Req 12.10);
+ * rejected on any other status (Req 12.14).
+ *
+ * Flow: admin auth → fetch the stay for its `start_date` and *currently booked*
+ * end date → validate through `createRecalculateStaySchema(startDate,
+ * bookedEndDate)`, the same schema the dialog uses so acceptance is identical
+ * on both sides (Req 12.5) → delegate the whole write to
+ * `AccommodationService.saveStayDetails`, which is one `save_stay_details()`
+ * RPC in one transaction (Req 12.16) → return the `SaveStayDetailsOutcome`.
+ *
+ * Failure reasons arrive from the service already mapped to their pinned
+ * messages and field errors — `INVALID_END_DATE` naming the breached bound,
+ * `AMOUNT_OUT_OF_RANGE` naming the valid 1–9,999,999 whole-number range, and
+ * `NOT_ACTIVE` — and are passed through unchanged so the form can bind them
+ * per field. No raw SQL error is ever surfaced.
+ *
+ * Req 12.5, 12.8, 12.9, 12.10, 12.14, 12.16
  */
-export async function earlyCheckoutStayAction(
+export async function saveStayDetailsAction(
   stayId: string,
   input: unknown
-): Promise<ActionResult<EarlyCheckoutOutcome>> {
-  // 1. Admin-group authorisation
+): Promise<ActionResult<SaveStayDetailsOutcome>> {
+  // 1. Admin-group authorisation, before any DB access
   const ctx = await getCurrentAdminContext();
   if (ctx.roleCode !== "ADMIN" && ctx.roleCode !== "MASTER_ADMIN") {
     return { error: "Unauthorized" };
   }
 
-  // 2. Fetch the stay to get total_nights for schema construction
+  // 2. Fetch the stay for the schema's inclusive bounds: its start date and the
+  //    end date currently implied by `total_nights`. Both bounds are selectable
+  //    — the start date itself yields exactly 1 night — so for a 1-night stay
+  //    the range collapses to that single date rather than being empty.
   const stay = await stayRepository.getStayById(stayId);
   if (!stay) {
     return { error: "Stay entry not found." };
   }
 
-  // 3. Validate input through the dynamic schema bounded by the stay's booked nights
-  const schema = createEarlyCheckoutSchema(stay.total_nights);
+  const bookedEndDate = AccommodationService.endDateFromNights(
+    stay.start_date,
+    stay.total_nights
+  );
+
+  // 3. Validate through the stay-bounded schema (Req 12.3, 12.4, 12.5)
+  const schema = createRecalculateStaySchema(stay.start_date, bookedEndDate);
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
     for (const issue of parsed.error.issues) {
       const field = issue.path[0]?.toString();
-      if (field) {
+      if (field && !(field in fieldErrors)) {
         fieldErrors[field] = issue.message;
       }
     }
@@ -253,22 +291,27 @@ export async function earlyCheckoutStayAction(
     };
   }
 
-  const { actualNightsStayed, recalculatedStayAmount } = parsed.data;
+  const { recalculatedEndDate, recalculatedStayAmount } = parsed.data;
 
-  // 4. Delegate to service orchestration
-  const result = await AccommodationService.earlyCheckout(
+  // 4. Delegate to service orchestration — one RPC, one transaction
+  const result = await AccommodationService.saveStayDetails(
     stayId,
-    actualNightsStayed,
-    recalculatedStayAmount
+    recalculatedEndDate,
+    recalculatedStayAmount,
+    ctx.userId
   );
 
-  // Service returns { ok: false; error } on failure
-  if ("ok" in result && !result.ok) {
-    return { error: result.error };
+  // The outcome type has no `ok` member, so its presence discriminates the
+  // failure shape. The service has already mapped every reason
+  // (NOT_FOUND / NOT_ACTIVE / INVALID_END_DATE / AMOUNT_OUT_OF_RANGE) to its
+  // pinned message and field error; pass both through untouched.
+  if ("ok" in result) {
+    return result.fieldErrors
+      ? { error: result.error, fieldErrors: result.fieldErrors }
+      : { error: result.error };
   }
 
-  // Success path — result is an EarlyCheckoutOutcome
-  return { success: true, data: result as EarlyCheckoutOutcome };
+  return { success: true, data: result };
 }
 
 /**

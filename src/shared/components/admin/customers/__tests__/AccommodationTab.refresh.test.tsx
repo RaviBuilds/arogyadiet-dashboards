@@ -116,6 +116,7 @@ function makeActiveStay(overrides: Partial<StayEntry> = {}): StayEntry {
     actualNightsStayed: null,
     originalTotalNights: null,
     originalTotalAmount: null,
+    recalculationApplied: false,
     checkedOutAt: null,
     finalInvoicePaymentId: null,
     finalInvoiceGeneratedAt: null,
@@ -142,6 +143,7 @@ function makeLedger(stay: StayEntry): StayLedgerView {
       },
     ],
     extensions: [],
+    recalculations: [],
     balance: {
       totalStayAmount: 10000,
       totalPaid: 6000,
@@ -157,7 +159,8 @@ function makeLedger(stay: StayEntry): StayLedgerView {
       markCheckedOutEnabled: false,
       markCheckedOutBlockedReason: "BALANCE_OUTSTANDING",
       showGenerateFinalInvoice: false,
-      showEarlyCheckout: true,
+      showRecalculateStay: true,
+      showMarkAsRefunded: false,
     },
   };
 }

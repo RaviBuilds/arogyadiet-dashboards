@@ -1,0 +1,60 @@
+﻿ M .gitignore
+ M .kiro/specs/accommodation-payment-lifecycle/design.md
+ M .kiro/specs/accommodation-payment-lifecycle/requirements.md
+ M .kiro/specs/accommodation-payment-lifecycle/tasks.md
+ M .kiro/specs/app-apk-distribution/tasks.md
+ M package-lock.json
+ M package.json
+ M src/actions/stayActions.ts
+ M src/actions/stayInvoiceActions.ts
+ M src/actions/stayPaymentActions.ts
+ M src/app/customer/(auth)/login/LoginBrandPanel.tsx
+ M src/app/rider/(auth)/login/page.tsx
+ M src/lib/appDistribution/config.ts
+ M src/lib/appDistribution/slug.ts
+ M src/lib/invoices/index.ts
+ M src/middleware.ts
+ M src/repositories/stayPaymentRepository.ts
+ M src/repositories/stayRepository.ts
+ M src/services/AccommodationService.ts
+ M src/shared/components/admin/customers/AccommodationTab.tsx
+ D src/shared/components/admin/customers/EarlyCheckoutDialog.tsx
+ M src/shared/components/admin/customers/RecordStayRefundDialog.tsx
+ M src/shared/components/admin/customers/StayCheckoutActionBar.tsx
+ M src/shared/components/admin/customers/StayPaymentPanel.tsx
+ M src/types/accommodation.ts
+ M src/validations/accommodationSchema.ts
+?? context1.txt
+?? docs/capacitor-build-security-audit.md
+?? fail_lines.txt
+?? failed_files.txt
+?? git_status.txt
+?? prerev_consolidation.txt
+?? prerev_headline.txt
+?? prerev_refresh.txt
+?? public/app-screenshots/
+?? scripts/create-app-download-throttle.sql
+?? scripts/create-stay-recalculation.sql
+?? scripts/verify-apk-secrets.mjs
+?? scripts/verify-apk-secrets.sh
+?? src/actions/__tests__/stayInvoiceActions.manualRetrigger.test.ts
+?? src/app/api/app-download/
+?? src/app/customer/(public)/
+?? src/lib/accommodation/recalculationHistory.ts
+?? src/lib/appDistribution/content.ts
+?? src/lib/appDistribution/manifest.ts
+?? src/lib/appDistribution/qr.ts
+?? src/lib/appDistribution/rateLimit.ts
+?? src/lib/appDistribution/storage.ts
+?? src/lib/appDistribution/turnstile.ts
+?? src/repositories/appDownloadThrottleRepository.ts
+?? src/repositories/stayRecalculationHistoryRepository.ts
+?? src/shared/components/admin/customers/RecalculateStayDialog.tsx
+?? src/shared/components/admin/customers/StayRecalculationHistoryCard.tsx
+?? src/shared/components/app-download/
+?? src/validations/appDistribution.ts
+?? tsc_output.txt
+?? vitest_output.txt
+?? vitest_prerev_output.txt
+?? vitest_results.json
+?? vitest_stderr.txt

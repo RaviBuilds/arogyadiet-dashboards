@@ -12,37 +12,37 @@ Two tasks are operator activities performed outside the codebase and are marked 
 
 ## Tasks
 
-- [ ] 1. Dependencies, configuration, and pure primitives
-  - [ ] 1.1 Add the `qrcode` dependency
+- [x] 1. Dependencies, configuration, and pure primitives
+  - [x] 1.1 Add the `qrcode` dependency
     - `qrcode` and `@types/qrcode` added to `package.json` at exact pinned versions (no caret range)
     - No Turnstile package is added — Turnstile is a script tag plus a form POST
     - Confirm `npm run build` still completes after install
     - _Requirements: 12.1_
 
-  - [ ] 1.2 Create `src/lib/appDistribution/config.ts`
+  - [x] 1.2 Create `src/lib/appDistribution/config.ts`
     - `resolveTurnstileSiteKey()`, `resolveTurnstileSecretKey()`, `resolveDownloadBaseUrl()` — each returns the trimmed value or `null` for absent/empty, never throws
     - Each variable is read in exactly one place so rotation needs no code change
     - _Requirements: 14.1, 14.2, 14.7_
 
-  - [ ] 1.3 Create `src/lib/appDistribution/slug.ts`
+  - [x] 1.3 Create `src/lib/appDistribution/slug.ts`
     - `AppSlug` type union of `"customer" | "rider"`, `APP_SLUGS` readonly tuple, `parseAppSlug(value: unknown): AppSlug | null`
     - Total function, no throw — callers decide between `notFound()` and HTTP 400
     - _Requirements: 1.6, 6.9_
 
-  - [ ] 1.4 Create `src/lib/appDistribution/content.ts`
+  - [x] 1.4 Create `src/lib/appDistribution/content.ts`
     - `AppContent` interface (title, tagline, description, features, screenshot) and `APP_CONTENT: Record<AppSlug, AppContent>`
     - Customer features: manage subscription, pause and resume days, change delivery address per day, track today's delivery, view billing and invoices
     - Rider features: today's assigned route, live GPS duty tracking, delivery confirmation, payout summary
     - Screenshot paths point at `public/app-screenshots/`, each with non-empty alt text
     - _Requirements: 9.2, 9.10_
 
-- [ ] 2. Release manifest module
-  - [ ] 2.1 Create `src/validations/appDistribution.ts`
+- [x] 2. Release manifest module
+  - [x] 2.1 Create `src/validations/appDistribution.ts`
     - `releaseManifestSchema` — `version` matching `/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/`, `filename` non-empty, `size` non-negative integer, `sha256` matching `/^[0-9a-f]{64}$/`, `releasedAt` ISO 8601 with explicit offset, `whatsNew` string
     - `grantRequestSchema` — `slug` and `token`, both required non-empty strings
     - _Requirements: 4.2, 4.3, 4.4, 4.5, 6.8, 6.9_
 
-  - [ ] 2.2 Create `src/lib/appDistribution/manifest.ts`
+  - [x] 2.2 Create `src/lib/appDistribution/manifest.ts`
     - `ReleaseManifest` interface, `ManifestParseError` union (`MALFORMED_JSON` | `INVALID_FIELD` with `field`)
     - `parseReleaseManifest(text)` returning a discriminated result — `JSON.parse` failure maps to `MALFORMED_JSON`, first Zod issue path maps to `INVALID_FIELD.field`
     - `serializeReleaseManifest(manifest)` writing the six keys in fixed order with two-space indentation
@@ -61,28 +61,28 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - Non-JSON text yields `MALFORMED_JSON`; each of the six fields absent yields `INVALID_FIELD` naming that field; leading-zero semver, uppercase sha256, wrong-length sha256, negative size, and offset-less timestamp are each rejected
     - _Requirements: 4.7, 4.8_
 
-- [ ] 3. Rate-limit persistence
-  - [ ] 3.1 Create `scripts/create-app-download-throttle.sql`
+- [x] 3. Rate-limit persistence
+  - [x] 3.1 Create `scripts/create-app-download-throttle.sql`
     - `app_download_throttle` table — primary key (`ip_hash`, `app_slug`), `app_slug` CHECK constrained to `customer`/`rider`, `grant_count` integer default 0, `window_started_at` and `updated_at` timestamptz
     - `ENABLE ROW LEVEL SECURITY` with no policies — service-role access only, consistent with RLS-on-every-table
     - Fully idempotent (`IF NOT EXISTS`, `CREATE OR REPLACE`) with an ORDERING section and a Rollback block
     - _Requirements: 7.1_
 
-  - [ ] 3.2 Add `claim_app_download_grant` RPC to the same script
+  - [x] 3.2 Add `claim_app_download_grant` RPC to the same script
     - `claim_app_download_grant(p_ip_hash, p_app_slug, p_limit, p_window_seconds)` returning `(granted boolean, retry_after_seconds integer)`
     - Single upsert performing check-and-increment atomically under the primary key's row lock: reset the window when stale, increment and grant when under the limit, deny without incrementing when at the limit
     - `security definer` with `set search_path = public`, following existing RPC conventions
     - This atomicity is the whole point of the task — a read-decide-write split lets concurrent requests exceed the limit
     - _Requirements: 7.1, 7.2, 7.4_
 
-  - [ ] 3.3 Create `src/lib/appDistribution/rateLimit.ts`
+  - [x] 3.3 Create `src/lib/appDistribution/rateLimit.ts`
     - `DOWNLOAD_GRANT_LIMIT = 5`, `DOWNLOAD_WINDOW_SECONDS = 600`
     - `retryAfterSeconds(windowStartedAtMs, nowMs)` — whole seconds until the fixed window closes, never negative
     - `hashClientIp(ip)` — `sha256` lowercase hex, with a constant sentinel hash when `ip` is null so unidentifiable clients share one bucket rather than escaping the limit
     - `resolveClientIp(headers)` — first entry of `x-forwarded-for`, trimmed, or null
     - _Requirements: 7.3, 7.6, 7.7_
 
-  - [ ] 3.4 Create `src/repositories/appDownloadThrottleRepository.ts`
+  - [x] 3.4 Create `src/repositories/appDownloadThrottleRepository.ts`
     - `claimDownloadGrant(ipHash, slug): Promise<GrantClaim>` wrapping the RPC via `createAdminClient()`
     - On RPC failure return `{ granted: true, retryAfterSeconds: 0 }` and log an error — fail-open, because Turnstile has already established a human is present and a throttle-table outage must not stop legitimate installs
     - _Requirements: 7.1, 7.2_
@@ -123,15 +123,15 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - Set to the customer subdomain origin per environment, so QR codes encode a host that resolves for the scanning device
     - _Requirements: 12.6_
 
-- [ ] 6. Storage and verification IO modules
-  - [ ] 6.1 Create `src/lib/appDistribution/storage.ts`
+- [x] 6. Storage and verification IO modules
+  - [x] 6.1 Create `src/lib/appDistribution/storage.ts`
     - `import "server-only"` at the top so an accidental client import fails at build rather than leaking the service-role key
     - `RELEASE_BUCKET`, `SIGNED_URL_TTL_SECONDS = 120`
     - `readReleaseManifest(slug)` — downloads `{slug}/latest.json` via `createAdminClient()`, converts to text, delegates to `parseReleaseManifest`; storage error yields `UNAVAILABLE`, parse error yields `INVALID`
     - `createSignedDownloadUrl(slug, filename)` — `createSignedUrl(`${slug}/${filename}`, 120, { download: filename })` so the browser saves the versioned filename via `Content-Disposition: attachment`
     - _Requirements: 3.6, 6.4, 6.5, 8.3, 14.5_
 
-  - [ ] 6.2 Create `src/lib/appDistribution/turnstile.ts`
+  - [x] 6.2 Create `src/lib/appDistribution/turnstile.ts`
     - `import "server-only"`
     - `verifyTurnstileToken(token, remoteIp)` returning `VALID` | `REJECTED` | `UNAVAILABLE` | `MISCONFIGURED`
     - Form-encoded POST of `secret`, `response`, `remoteip` to the siteverify endpoint, bounded by a 5-second `AbortSignal.timeout` so a Cloudflare stall cannot hold a serverless invocation open
@@ -148,8 +148,8 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - Storage error yields `UNAVAILABLE`; malformed manifest text yields `INVALID`; valid manifest yields the parsed value
     - _Requirements: 6.11, 6.12_
 
-- [ ] 7. Download grant endpoint
-  - [ ] 7.1 Create `src/app/api/app-download/grant/route.ts`
+- [x] 7. Download grant endpoint
+  - [x] 7.1 Create `src/app/api/app-download/grant/route.ts`
     - `POST` only, so Next.js answers other methods with 405; `export const dynamic = "force-dynamic"`
     - Fixed ordering: validate body → resolve client IP → verify Turnstile → claim rate-limit grant → read manifest → create signed URL → respond
     - Responses: 200 `{ url, version, filename }`, 400 `INVALID_REQUEST`, 403 `VERIFICATION_FAILED`, 429 `RATE_LIMITED` with `Retry-After`, 503 `UNAVAILABLE`
@@ -171,17 +171,17 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - Across every response branch, assert the serialized body contains neither environment secret, no Cloudflare `error-codes` payload, and no unsigned storage object path
     - **Validates: Requirements 6.14, 9.9, 14.4**
 
-- [ ] 8. Middleware access exemptions
-  - [ ] 8.1 Add `isPublicAppPath` to `src/middleware.ts`
+- [x] 8. Middleware access exemptions
+  - [x] 8.1 Add `isPublicAppPath` to `src/middleware.ts`
     - `PUBLIC_APP_PATH_PREFIX = "/app"` and `isPublicAppPath(pathname, portalPath)` which strips `portalPath` first, mirroring the existing `isCustomerCategoryRouteDenied` helper, so a direct hit on the rewritten `/customer/app/customer` behaves identically to `/app/customer`
     - Matches `/app` exactly and `/app/` prefixed paths only — never `/apps` or `/applications`
     - _Requirements: 2.1, 2.5, 2.8_
 
-  - [ ] 8.2 Exempt public app paths from the unauthenticated redirect
+  - [x] 8.2 Exempt public app paths from the unauthenticated redirect
     - Add `!isPublicAppPath(url.pathname, portalPath)` to the condition guarding the `/login` redirect
     - _Requirements: 2.1, 2.2_
 
-  - [ ] 8.3 Bypass the customer portal gate for public app paths
+  - [x] 8.3 Bypass the customer portal gate for public app paths
     - Early `isPublicAppPath` check at the top of the `currentSubdomain === "customer"` branch that calls `timer.done()` and returns `response` before the role and onboarding evaluation
     - This is the edit that matters most: without it a signed-in admin or rider scanning the QR is bounced to `/unauthorized`
     - _Requirements: 2.3, 2.4_
@@ -196,11 +196,11 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - _Requirements: 2.2, 2.3, 2.4, 2.6, 2.8_
 
 - [ ] 9. Public route group and download pages
-  - [ ] 9.1 Create `src/app/customer/(public)/layout.tsx`
+  - [x] 9.1 Create `src/app/customer/(public)/layout.tsx`
     - Minimal public shell — no session read, no sidebar, no portal chrome, so page output cannot vary with authentication state
     - _Requirements: 1.3, 1.4, 1.5_
 
-  - [ ] 9.2 Add app screenshots to `public/app-screenshots/`
+  - [x] 9.2 Add app screenshots to `public/app-screenshots/`
     - One screenshot per app, sized for the phone frame
     - Local static files rather than remote images, because `images.remotePatterns` in `next.config.ts` whitelists only `/storage/v1/object/public/**` on the Supabase host, which the now-private bucket no longer serves
     - _Requirements: 9.1_
@@ -213,13 +213,13 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - Omits the download control entirely and renders an unavailable notice when the Turnstile site key is absent, logging a server-side warning
     - _Requirements: 1.1, 1.2, 1.3, 1.6, 1.7, 5.11, 5.12, 9.8_
 
-  - [ ] 9.4 Create `AppDownloadHero` and `ReleaseDetails` server components
+  - [x] 9.4 Create `AppDownloadHero` and `ReleaseDetails` server components
     - Hero renders the CSS phone frame (rounded bordered container with a notch pseudo-element) wrapping a `next/image`, plus tagline, description, and the feature list from `content.ts`
     - `ReleaseDetails` renders version, human-readable size, formatted release date, and non-empty `whatsNew`; renders the temporarily-unavailable notice when the manifest is null
     - Neither component receives or renders a storage object path or signed URL
     - _Requirements: 9.1, 9.2, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 9.10_
 
-  - [ ] 9.5 Create the `InstallGuide` server component
+  - [x] 9.5 Create the `InstallGuide` server component
     - Four ordered steps: download the file, open the downloaded file, grant install-from-this-source permission, confirm the install
     - Describes the Android unknown-sources prompt and names the option that continues
     - Describes the Play Protect warning screen and states where the continue option appears on it
@@ -231,7 +231,7 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - **Validates: Requirements 1.4, 1.5**
 
 - [ ] 10. Download control client component
-  - [ ] 10.1 Create `src/app/customer/(public)/app/[slug]/DownloadControl.tsx`
+  - [x] 10.1 Create `src/app/customer/(public)/app/[slug]/DownloadControl.tsx`
     - `"use client"`, with the explicit `DownloadState` union (`LOADING_WIDGET`, `AWAITING_CHALLENGE`, `READY`, `REQUESTING`, `DOWNLOADING`, `RATE_LIMITED`, `CHALLENGE_FAILED`, `WIDGET_UNAVAILABLE`, `ERROR`) rather than a cluster of booleans, so "disabled but for which reason" is representable
     - Turnstile script loaded with `next/script` at `strategy="afterInteractive"`, widget rendered explicitly in an effect
     - Callback wiring: `callback` → `READY`, `error-callback` → `CHALLENGE_FAILED`, `expired-callback` → discard token, reset widget, return to `AWAITING_CHALLENGE`, `Script onError` → `WIDGET_UNAVAILABLE`
@@ -258,25 +258,25 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - Button disabled in every non-`READY` state; expiry resets to `AWAITING_CHALLENGE`; script error renders the unavailable message; 429 renders the limit message with retry time; each state change reaches the `aria-live` region; iOS user agent suppresses control and widget while leaving release details rendered
     - _Requirements: 5.4, 5.5, 5.8, 5.9, 5.10, 5.14, 7.8, 11.1, 11.2, 11.3_
 
-- [ ] 11. QR code generation and placement
-  - [ ] 11.1 Create `src/lib/appDistribution/qr.ts`
+- [x] 11. QR code generation and placement
+  - [x] 11.1 Create `src/lib/appDistribution/qr.ts`
     - `renderQrSvg(url)` wrapping `qrcode`'s `toString(url, { type: "svg", errorCorrectionLevel: "M", margin: 1 })`
     - Pure computation, no network call at render time
     - _Requirements: 12.1, 12.2, 12.3_
 
-  - [ ] 11.2 Create `src/shared/components/app-download/AppDownloadQrBlock.tsx`
+  - [x] 11.2 Create `src/shared/components/app-download/AppDownloadQrBlock.tsx`
     - Async Server Component taking `{ slug, className }`, returning `null` with a warning log when the base URL is absent
     - Builds the absolute Download_Page URL from the base URL and slug, renders the SVG inline via `dangerouslySetInnerHTML`, prints the URL as selectable text beneath, includes a title instructing the user to scan, and provides a text alternative describing the destination
     - Takes only a slug and has no storage access, so it structurally cannot encode a signed URL
     - Ships no client JavaScript
     - _Requirements: 12.4, 12.5, 12.6, 12.7, 12.8, 13.7, 13.8, 13.9_
 
-  - [ ] 11.3 Place the QR block on the customer login page
+  - [x] 11.3 Place the QR block on the customer login page
     - `LoginBrandPanel.tsx` becomes `async` and renders exactly one `AppDownloadQrBlock` with slug `customer`, after the existing `FEATURES` list inside the middle group
     - No breakpoint class needed on the block itself — the panel is already `hidden … lg:flex`, so large-viewport-only visibility is inherited as pure CSS with no JavaScript media query
     - _Requirements: 13.1, 13.3, 13.4, 13.5, 13.6, 13.10_
 
-  - [ ] 11.4 Place the QR block on the rider login page
+  - [x] 11.4 Place the QR block on the rider login page
     - `src/app/rider/(auth)/login/page.tsx` renders exactly one `AppDownloadQrBlock` with slug `rider`, in a sibling panel carrying its own `hidden lg:flex` since the rider login has no equivalent desktop panel to nest inside
     - _Requirements: 13.2, 13.3, 13.4, 13.5, 13.6, 13.10_
 
@@ -289,17 +289,19 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - Returns null when the base URL env var is absent or empty; encodes the Download_Page path for the given slug; renders exactly one block per login page; renders the URL as text and a text alternative
     - _Requirements: 12.7, 13.7, 13.8, 13.9, 13.10_
 
-- [ ] 12. Repository hygiene
-  - [ ] 12.1 Exclude APK binaries from version control
+- [x] 12. Repository hygiene
+  - [x] 12.1 Exclude APK binaries from version control
     - `*.apk` pattern added to `.gitignore`
     - Tracked `Arogya-rider.apk` removed from the index with `git rm --cached`, leaving the local file in place
     - Confirm no APK binaries remain under `public/`
     - _Requirements: 16.1, 16.2, 16.3_
 
-- [ ] 13. Build security verification (operator task)
-  - [ ] 13.1 Audit both Capacitor build configurations
+- [x] 13. Build security verification (operator task)
+  - [x] 13.1 Audit both Capacitor build configurations
     - Confirm neither the Customer nor the Rider build embeds a service-role key, database credential, or API secret, and that both reference only endpoints intended for public client access
     - Record the check as a release gate so it repeats on every build, since the distributed binary is readable by anyone who obtains it
+    - Created `docs/capacitor-build-security-audit.md` with comprehensive findings
+    - Created `scripts/verify-apk-secrets.sh` and `scripts/verify-apk-secrets.mjs` for release gate verification
     - _Requirements: 15.1, 15.2, 15.3, 15.4_
 
 - [ ] 14. End-to-end verification

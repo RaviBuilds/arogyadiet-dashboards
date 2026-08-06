@@ -1,0 +1,156 @@
+﻿ FAIL  src/actions/__tests__/categoryGuards.test.ts [ 
+src/actions/__tests__/categoryGuards.test.ts ]
+ FAIL  src/actions/__tests__/addressActions.regression.test.ts > saveAddressAction ΓÇö 
+preserved behavior (Req 6.7) > returns the pincode error shape when the pincode is not 
+ FAIL  src/actions/__tests__/addressActions.regression.test.ts > saveAddressAction ΓÇö 
+preserved behavior (Req 6.7) > returns the over-limit error when creating a 3rd address 
+ FAIL  src/actions/__tests__/addressActions.regression.test.ts > saveAddressAction ΓÇö 
+preserved behavior (Req 6.7) > creates a valid address: returns success, inserts the row, 
+ FAIL  src/actions/__tests__/addressActions.regression.test.ts > saveAddressAction ΓÇö 
+preserved behavior (Req 6.7) > edits a valid address: returns success and updates the 
+ FAIL  src/actions/__tests__/addressActions.regression.test.ts > saveAddressAction ΓÇö 
+clinic stamping is the only addition (Req 6.7) > invokes stampCustomerClinic on a valid 
+ FAIL  src/actions/__tests__/addressActions.regression.test.ts > saveAddressAction ΓÇö 
+clinic stamping is the only addition (Req 6.7) > invokes stampCustomerClinic on a valid 
+ FAIL  src/actions/__tests__/addressActions.regression.test.ts > saveAddressAction ΓÇö 
+clinic stamping is the only addition (Req 6.7) > does not change the return shape 
+ FAIL  src/actions/__tests__/kitTracker.property.test.ts > KIT Tracker Property Tests > 
+Property 7: Tracker_End_Date Computation > end date extends monotonically with each 
+ FAIL  src/actions/__tests__/kitTracker.property.test.ts > KIT Tracker Property Tests > 
+Property 12: Optional Field Validation and Persistence > valid FOOD_TAKEN payloads with 
+ FAIL  src/actions/__tests__/kitTracker.property.test.ts > KIT Tracker Property Tests > 
+Property 13: Food_Skipped Field Clearing > transitioning from FOOD_TAKEN to FOOD_SKIPPED 
+ FAIL  src/actions/__tests__/stayRefundActions.property.test.ts > Feature: 
+accommodation-payment-lifecycle, Property 22: Refund validation and ledger effect > 
+ FAIL  src/actions/__tests__/stayRefundActions.property.test.ts > Feature: 
+accommodation-payment-lifecycle, Property 22: Refund validation and ledger effect > 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.earlyCheckoutMath.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 21: Early checkout recalculation and 
+ FAIL  src/services/__tests__/AccommodationService.headlineFlows.integration.test.ts > 
+Feature: accommodation-payment-lifecycle ΓÇö headline flow: early checkout with a refund 
+ FAIL  src/services/__tests__/AccommodationService.statusGate.property.test.ts > Feature: 
+accommodation-payment-lifecycle, Property 19: Extension and early checkout require an 
+ FAIL  src/services/__tests__/AccommodationService.statusGate.property.test.ts > Feature: 
+accommodation-payment-lifecycle, Property 19: Extension and early checkout require an 
+ FAIL  src/services/__tests__/AccommodationService.visibility.property.test.ts > Feature: 
+accommodation-payment-lifecycle, Property 10: Stay action visibility and mutual 
+ FAIL  src/services/__tests__/AccommodationService.visibility.property.test.ts > Feature: 
+accommodation-payment-lifecycle, Property 10: Stay action visibility and mutual 
+ FAIL  src/services/__tests__/AccommodationService.visibility.property.test.ts > Feature: 
+accommodation-payment-lifecycle, Property 10: Stay action visibility and mutual 
+ FAIL  src/services/__tests__/onboardingService.property.test.ts > Property 5: Onboarding 
+precondition gate and created-record shape > persists a correctly-shaped record when the 
+ FAIL  src/services/__tests__/onboardingService.property.test.ts > Property 5: Onboarding 
+precondition gate and created-record shape > rejects a duplicate mobile with no new 
+ FAIL  src/services/__tests__/onboardingService.property.test.ts > Property 5: Onboarding 
+precondition gate and created-record shape > the Quick_Onboarding_Form schema accepts a 
+ FAIL  src/services/__tests__/onboardingService.property.test.ts > Property 6: Onboarding 
+atomicity (no partial record) > leaves post-state == pre-state and compensates auth when 
+ FAIL  src/services/__tests__/onboardingService.property.test.ts > Property 6: Onboarding 
+atomicity (no partial record) > creates no record and no auth identity when the 
+ FAIL  src/services/__tests__/onboardingService.property.test.ts > Property 6: Onboarding 
+atomicity (no partial record) > creates no record when the auth-identity creation fails
+ FAIL  src/services/__tests__/onboardingService.property.test.ts > Property 11: Exactly 
+one valid Primary_Category > proceeds and records the selected category for any single 
+ FAIL  src/services/__tests__/onboardingService.property.test.ts > Property 16: 
+Test-email placeholder is unique, hidden, and replaceable > generates a hidden, 
+ FAIL  src/services/__tests__/stayPaymentLedger.stateful.property.test.ts > Feature: 
+accommodation-payment-lifecycle, Property 23: Ledger consistency across operation 
+ FAIL  src/test/dietitian/read-only-workspace.property.test.tsx > Property 28: The 
+read-only workspace renders the customer's data and adherence numbers, with all mutating 
+ FAIL  src/test/dietitian/read-only-workspace.property.test.tsx > Property 28: The 
+read-only workspace renders the customer's data and adherence numbers, with all mutating 
+ FAIL  src/validations/__tests__/earlyCheckoutSchema.property.test.ts > Property 20: 
+Early checkout input validation > accepts an Early_Checkout submission exactly when the 
+ FAIL  src/validations/__tests__/earlyCheckoutSchema.property.test.ts > Property 20: 
+Early checkout input validation > bounds the nights only through the booked-nights 
+ FAIL  src/validations/__tests__/earlyCheckoutSchema.property.test.ts > Property 20: 
+Early checkout input validation > rejects every submission for a one-night stay, whose 
+ FAIL  src/validations/__tests__/earlyCheckoutSchema.property.test.ts > Property 20: 
+Early checkout input validation > accepts every in-range submission for a multi-night stay
+ FAIL  src/actions/admin-actions/__tests__/kitProductActions.test.ts > kitProductActions 
+> calculateKitProductPrice > should calculate 5% tax correctly for integer prices
+ FAIL  src/actions/admin-actions/__tests__/kitProductActions.test.ts > kitProductActions 
+> calculateKitProductPrice > should calculate 5% tax correctly for decimal prices
+ FAIL  src/actions/admin-actions/__tests__/kitProductActions.test.ts > kitProductActions 
+> calculateKitProductPrice > should calculate correct total price (base + tax)
+ FAIL  src/actions/admin-actions/__tests__/kitProductActions.test.ts > kitProductActions 
+> calculateKitProductPrice > should round tax to 2 decimal places
+ FAIL  src/actions/admin-actions/__tests__/kitProductActions.test.ts > kitProductActions 
+> calculateKitProductPrice > should handle very small prices
+ FAIL  src/actions/admin-actions/__tests__/kitProductActions.test.ts > kitProductActions 
+> calculateKitProductPrice > should handle large prices
+ FAIL  src/actions/admin-actions/__tests__/kitProductActions.test.ts > kitProductActions 
+> calculateKitProductPrice > should always return positive tax for positive prices
+ FAIL  src/actions/admin-actions/__tests__/one-pincode-one-clinic.property.test.ts > 
+Property 7: One pincode belongs to exactly one clinic > each pincode maps to at most one 
+ FAIL  src/actions/master-actions/__tests__/crud-happy-paths.unit.test.ts > createKitchen 
+ΓÇö happy path with valid city (Req 2.5) > saves a kitchen referencing an existing city 
+ FAIL  src/actions/master-actions/__tests__/kitchen-clinic-city.property.test.ts > 
+Property 3: Kitchen requires a valid city, and clinicΓÇôkitchen must share a city > 
+ FAIL  src/actions/system-actions/__tests__/routing-batch-count.property.test.ts > 
+Routing engine - one-batch-per-rider / total batch count property > Property 22: exactly 
+ FAIL  src/actions/system-actions/__tests__/routing-clinic-origin.property.test.ts > 
+Routing engine - clinic-origin property > Property 21: each clinic scope routes from its 
+ FAIL  src/actions/system-actions/__tests__/routing-skip-scopes.property.test.ts > 
+executeAutomatedDispatch - Property 25: skips degenerate and invalid scopes without 
+ FAIL  
+src/actions/system-actions/__tests__/shop-linking-bug-checkout-ist-date.property.test.ts 
+ FAIL  
+src/actions/system-actions/__tests__/shop-linking-preservation-checkout.property.test.ts 
+ FAIL  
+src/actions/system-actions/__tests__/shop-linking-preservation-checkout.property.test.ts 
+ FAIL  
+src/actions/system-actions/__tests__/shop-linking-preservation-checkout.property.test.ts 
+ FAIL  
+src/lib/invoices/__tests__/accommodationFinalInvoice.consolidation.property.test.ts > 
+ FAIL  src/lib/invoices/__tests__/accommodationFinalInvoice.figures.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 13: Final invoice figures reflect 
+ FAIL  src/lib/invoices/__tests__/accommodationFinalInvoice.figures.property.test.ts > 
+Feature: accommodation-payment-lifecycle, Property 13: Final invoice figures reflect 
+ FAIL  src/shared/components/customer/__tests__/ProfileCompletionDialog.test.tsx > 
+ProfileCompletionDialog ΓÇö optional fields (Req 9.2) > accepts a zero-field Save and 
+ FAIL  src/app/customer/(main)/subscription/__tests__/subscription-page.test.tsx > 
+Account view ΓÇö subscription display (Req 11.1) > shows the onboarding subscription plan 
+ FAIL  src/app/customer/(main)/subscription/__tests__/subscription-page.test.tsx > 
+Account view ΓÇö no-subscription empty state (Req 11.2) > shows the no-subscription 
+ FAIL  src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx 
+> AccommodationTab ΓÇö ledger refetch after Record Payment (Req 5.9, 6.6) > refetches the 
+ FAIL  src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx 
+> AccommodationTab ΓÇö ledger refetch after Record Payment (Req 5.9, 6.6) > refetches the 
+ FAIL  src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx 
+> AccommodationTab ΓÇö ledger refetch after a Stay_Extension (Req 11.4) > refetches the 
+ FAIL  src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx 
+> AccommodationTab ΓÇö receipt link present per payment history row (Req 10.3) > renders 
+ FAIL  src/shared/components/admin/customers/__tests__/QuickOnboardingForm.accommodation.t
+est.tsx > QuickOnboardingForm ΓÇö backdated completion alert (Req 2.2, 2.3, 2.4) > shows 
+ FAIL  src/shared/components/admin/customers/__tests__/QuickOnboardingForm.test.tsx > 
+QuickOnboardingForm ΓÇö 5 PM cutoff acknowledgment gate (Req 7.1ΓÇô7.4) > warns past the 
+ FAIL  src/shared/components/admin/customers/__tests__/QuickOnboardingForm.test.tsx > 
+QuickOnboardingForm ΓÇö KIT product payment review (Req 4.1) > displays KIT product name, 
+ FAIL  src/shared/components/admin/customers/__tests__/StayPaymentPanel.refresh.test.tsx 
+> StayPaymentPanel ΓÇö ledger refetch on refreshToken bump (Req 6.6) > fetches the ledger 
+ FAIL  src/shared/components/admin/customers/__tests__/StayPaymentPanel.refresh.test.tsx 
+> StayPaymentPanel ΓÇö ledger refetch on refreshToken bump (Req 6.6) > refetches again on 
+ FAIL  src/shared/components/admin/customers/__tests__/StayPaymentPanel.refresh.test.tsx 
+> StayPaymentPanel ΓÇö receipt link per history row (Req 10.3) > renders a receipt link 
+ FAIL  src/shared/components/admin/customers/__tests__/StayPaymentPanel.refresh.test.tsx 
+> StayPaymentPanel ΓÇö receipt link per history row (Req 10.3) > renders no history rows 
+ FAIL  
+src/shared/components/customer/subscription/manage/__tests__/billing-client.test.tsx > 

@@ -31,7 +31,9 @@ import type {
   OccupancyType,
   PaymentTransactionType,
   StayEntry,
+  StayExtension,
   StayPaymentTransaction,
+  StayRecalculation,
   StayStatus,
   StayType,
 } from "@/types/accommodation";
@@ -736,6 +738,8 @@ export interface StayEntryOptions {
   sharedPayment?: fc.Arbitrary<boolean>;
   isBackdated?: fc.Arbitrary<boolean>;
   earlyCheckoutApplied?: fc.Arbitrary<boolean>;
+  /** Independent axis: whether Save_Stay_Details has been applied at least once. */
+  recalculationApplied?: fc.Arbitrary<boolean>;
   /** Total_Stay_Amount when the stay is not shared-payment. */
   totalStayAmount?: fc.Arbitrary<number>;
   totalNights?: fc.Arbitrary<number>;
@@ -778,6 +782,10 @@ export function arbStayEntryWith(
       { arbitrary: fc.constant(false), weight: 3 },
       { arbitrary: fc.constant(true), weight: 1 },
     ),
+    recalculationApplied = fc.oneof(
+      { arbitrary: fc.constant(false), weight: 3 },
+      { arbitrary: fc.constant(true), weight: 1 },
+    ),
     totalStayAmount = arbTotalStayAmountOrZero,
     totalNights = arbTotalNights,
     hasFinalInvoice = fc.boolean(),
@@ -798,6 +806,7 @@ export function arbStayEntryWith(
       isBackdated,
       sharedPayment,
       earlyCheckoutApplied,
+      recalculationApplied,
       totalStayAmount,
       originalTotalAmount: arbTotalStayAmount,
       extraOriginalNights: fc.integer({ min: 1, max: 60 }),
@@ -813,6 +822,8 @@ export function arbStayEntryWith(
         },
       ),
       ageSeconds: fc.integer({ min: 0, max: 100_000 }),
+      /** Stale night count that differs from totalNights when recalculation is applied. */
+      staleNightsDelta: fc.integer({ min: 1, max: 60 }),
     })
     .map((seed): StayEntry => {
       const startDate = seed.isBackdated
@@ -830,6 +841,13 @@ export function arbStayEntryWith(
       const invoicePresent = seed.hasFinalInvoice && isBillable;
 
       const checkedOut = seed.status === "FINISHED" && !seed.isBackdated;
+
+      // `actualNightsStayed` is deliberately stale when
+      // `recalculationApplied` is true — tests must prove no code relies
+      // on this deprecated field (task 14.3 scope).
+      const staleActualNights = seed.recalculationApplied
+        ? nights + seed.staleNightsDelta
+        : null;
 
       return {
         id,
@@ -855,7 +873,9 @@ export function arbStayEntryWith(
         earlyCheckoutApplied: seed.earlyCheckoutApplied,
         // Early_Checkout sets total nights to the nights actually stayed and
         // keeps the pre-checkout figures as audit values (Req 12.6, 12.15).
-        actualNightsStayed: seed.earlyCheckoutApplied ? nights : null,
+        actualNightsStayed: seed.earlyCheckoutApplied
+          ? nights
+          : staleActualNights,
         originalTotalNights: seed.earlyCheckoutApplied
           ? nights + seed.extraOriginalNights
           : null,
@@ -863,6 +883,8 @@ export function arbStayEntryWith(
           seed.earlyCheckoutApplied && paymentAmount !== null
             ? seed.originalTotalAmount
             : null,
+        // Independent axis (task 14.3): decoupled from earlyCheckoutApplied.
+        recalculationApplied: seed.recalculationApplied,
         checkedOutAt: checkedOut ? fixtureTimestamp(seed.ageSeconds) : null,
         finalInvoicePaymentId: invoicePresent ? fixtureUuid(55, 1) : null,
         finalInvoiceGeneratedAt: invoicePresent
@@ -903,14 +925,195 @@ export const arbNonActiveStayEntry: fc.Arbitrary<StayEntry> = arbStayEntryWith({
   status: fc.constantFrom<StayStatus>("PENDING", "FINISHED", "EXPIRED"),
 });
 
-// ─── 10. Early_Checkout submissions ──────────────────────────────────────────
+// ─── 10. Recalculate_Stay submissions (Revision 2) ──────────────────────────
 
 /**
- * An Early_Checkout form submission as it arrives — the numeric fields are typed
- * `unknown` because a submission legitimately carries anything a form or an
- * action payload can produce, and the property under test asserts acceptance is
- * *exactly* "integer in `[1, bookedTotalNights − 1]`" paired with "amount in
- * `[1, 9,999,999]`" (Req 12.3, 12.4, 12.5).
+ * A Recalculate_Stay (Save_Stay_Details) form submission as it arrives. The
+ * amount field is typed `unknown` because submissions legitimately carry
+ * anything a form or an action payload can produce, and the property under test
+ * asserts acceptance is *exactly* "recalculatedEndDate in [startDate,
+ * bookedEndDate]" paired with "integer in [1, 9,999,999]"
+ * (Req 12.3, 12.4, 12.5).
+ *
+ * Requirements: 12.3, 12.4, 13.1
+ */
+export interface RecalculateStaySubmissionSample {
+  startDate: string;
+  bookedEndDate: string;
+  recalculatedEndDate: unknown;
+  recalculatedStayAmount: unknown;
+}
+
+/**
+ * Candidate end dates spanning ±400 days around a reference, biased to the four
+ * boundary positions the date range predicate turns on:
+ * - `startDate − 1` (one below the lower bound — rejected)
+ * - `startDate` (lower bound — accepted)
+ * - `bookedEndDate` (upper bound — accepted)
+ * - `bookedEndDate + 1` (one above the upper bound — rejected)
+ *
+ * Plus valid interior dates and dates well outside the range.
+ */
+function arbCandidateEndDate(
+  startDate: string,
+  bookedEndDate: string,
+): fc.Arbitrary<unknown> {
+  return fc.oneof(
+    // Boundary positions — the four that matter most.
+    {
+      arbitrary: fc.constantFrom<unknown>(
+        shiftISODate(startDate, -1), // one day before startDate — rejected
+        startDate, // lower bound — accepted
+        bookedEndDate, // upper bound — accepted
+        shiftISODate(bookedEndDate, 1), // one day after bookedEndDate — rejected
+      ),
+      weight: 5,
+    },
+    // Valid interior dates between startDate and bookedEndDate.
+    {
+      arbitrary: fc
+        .integer({ min: 0, max: 400 })
+        .map((days) => shiftISODate(startDate, days)) as fc.Arbitrary<unknown>,
+      weight: 3,
+    },
+    // Dates far in the past (outside range).
+    {
+      arbitrary: fc
+        .integer({ min: 50, max: 400 })
+        .map((days) => shiftISODate(startDate, -days)) as fc.Arbitrary<unknown>,
+      weight: 2,
+    },
+    // Dates far in the future (outside range).
+    {
+      arbitrary: fc
+        .integer({ min: 2, max: 400 })
+        .map((days) =>
+          shiftISODate(bookedEndDate, days),
+        ) as fc.Arbitrary<unknown>,
+      weight: 2,
+    },
+    // Non-date shapes a payload can carry — rejection expected.
+    {
+      arbitrary: fc.constantFrom<unknown>(
+        "",
+        "not-a-date",
+        "2025-13-01",
+        "2025-00-15",
+        null,
+        undefined,
+        123,
+        true,
+      ),
+      weight: 2,
+    },
+  );
+}
+
+/**
+ * Candidate recalculated-stay-amounts spanning the accepted range and every
+ * rejection shape. Biased to fractions (must be rejected — integer only),
+ * 0 (rejected), 1 (lower bound), 9,999,999 (upper bound), 10,000,000 (rejected).
+ */
+const arbCandidateRecalculateAmount: fc.Arbitrary<unknown> = fc.oneof(
+  // Valid integers inside the accepted range.
+  { arbitrary: arbTotalStayAmount as fc.Arbitrary<unknown>, weight: 4 },
+  // Boundary and invalid values.
+  {
+    arbitrary: fc.constantFrom<unknown>(
+      0,
+      -1,
+      REFERENCE_MIN_STAY_AMOUNT,
+      REFERENCE_MAX_STAY_AMOUNT,
+      REFERENCE_ABOVE_MAX_STAY_AMOUNT,
+    ),
+    weight: 4,
+  },
+  // Fractional values — must be rejected (integer only).
+  {
+    arbitrary: fc.constantFrom<unknown>(0.5, 1.5, 0.01, 99.99, 1_234.56),
+    weight: 3,
+  },
+  // Non-numeric shapes a payload can carry.
+  {
+    arbitrary: fc.constantFrom<unknown>(
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "1000",
+      "",
+      null,
+      undefined,
+      true,
+    ),
+    weight: 2,
+  },
+);
+
+/**
+ * Recalculate_Stay submissions spanning the accepted range and every rejection
+ * shape. The `startDate` and `bookedEndDate` pair defines the valid date
+ * window; `recalculatedEndDate` is drawn across boundaries and invalid shapes.
+ *
+ * Requirements: 12.3, 12.4, 13.1
+ */
+export const arbRecalculateStaySubmission: fc.Arbitrary<RecalculateStaySubmissionSample> =
+  fc
+    .tuple(
+      arbISTDate,
+      fc.integer({ min: 1, max: REFERENCE_MAX_TOTAL_NIGHTS }),
+    )
+    .chain(([startDate, nights]) => {
+      const bookedEndDate = computeReferenceEndDate(startDate, nights);
+      return fc.record({
+        startDate: fc.constant(startDate),
+        bookedEndDate: fc.constant(bookedEndDate),
+        recalculatedEndDate: arbCandidateEndDate(startDate, bookedEndDate),
+        recalculatedStayAmount: arbCandidateRecalculateAmount,
+      });
+    });
+
+/**
+ * A guaranteed-valid Recalculate_Stay submission: `recalculatedEndDate` inside
+ * `[startDate, bookedEndDate]` inclusive and `recalculatedStayAmount` a valid
+ * integer in `[1, 9,999,999]`. For the math and branch properties.
+ *
+ * Requirements: 12.3, 12.4
+ */
+export interface ValidRecalculateStaySubmission {
+  startDate: string;
+  bookedEndDate: string;
+  recalculatedEndDate: string;
+  recalculatedStayAmount: number;
+}
+
+export const arbValidRecalculateStaySubmission: fc.Arbitrary<ValidRecalculateStaySubmission> =
+  fc
+    .tuple(
+      arbISTDate,
+      fc.integer({ min: 1, max: REFERENCE_MAX_TOTAL_NIGHTS }),
+    )
+    .chain(([startDate, nights]) => {
+      const bookedEndDate = computeReferenceEndDate(startDate, nights);
+      // Valid end date: any date in [startDate, bookedEndDate] inclusive.
+      // Offset 0 = startDate, offset (nights-1) = bookedEndDate.
+      return fc.record({
+        startDate: fc.constant(startDate),
+        bookedEndDate: fc.constant(bookedEndDate),
+        recalculatedEndDate: fc
+          .integer({ min: 0, max: nights - 1 })
+          .map((offset) => shiftISODate(startDate, offset)),
+        recalculatedStayAmount: fc.integer({
+          min: REFERENCE_MIN_STAY_AMOUNT,
+          max: REFERENCE_MAX_STAY_AMOUNT,
+        }),
+      });
+    });
+
+// ─── 10b. Legacy Early_Checkout submissions (deprecated) ─────────────────────
+
+/**
+ * @deprecated Use {@link RecalculateStaySubmissionSample} and
+ * {@link arbRecalculateStaySubmission} instead. Retained only because existing
+ * property tests (earlyCheckoutSchema, earlyCheckoutMath) still import it.
  */
 export interface EarlyCheckoutSubmissionSample {
   bookedTotalNights: number;
@@ -978,7 +1181,10 @@ const arbCandidateRecalculatedAmount: fc.Arbitrary<unknown> = fc.oneof(
   },
 );
 
-/** Early_Checkout submissions spanning the accepted range and every rejection shape. */
+/**
+ * @deprecated Use {@link arbRecalculateStaySubmission} instead. Retained for
+ * backward compatibility with existing property tests.
+ */
 export const arbEarlyCheckoutSubmission: fc.Arbitrary<EarlyCheckoutSubmissionSample> =
   fc
     .integer({ min: 1, max: REFERENCE_MAX_TOTAL_NIGHTS })
@@ -990,13 +1196,20 @@ export const arbEarlyCheckoutSubmission: fc.Arbitrary<EarlyCheckoutSubmissionSam
       }),
     );
 
-/** A guaranteed-valid Early_Checkout submission, for the math and branch properties. */
+/**
+ * @deprecated Use {@link ValidRecalculateStaySubmission} and
+ * {@link arbValidRecalculateStaySubmission} instead. Retained for backward
+ * compatibility with existing property tests.
+ */
 export interface ValidEarlyCheckoutSubmission {
   bookedTotalNights: number;
   actualNightsStayed: number;
   recalculatedStayAmount: number;
 }
 
+/**
+ * @deprecated Use {@link arbValidRecalculateStaySubmission} instead.
+ */
 export const arbValidEarlyCheckoutSubmission: fc.Arbitrary<ValidEarlyCheckoutSubmission> =
   fc
     .integer({ min: 2, max: REFERENCE_MAX_TOTAL_NIGHTS })
@@ -1008,11 +1221,13 @@ export const arbValidEarlyCheckoutSubmission: fc.Arbitrary<ValidEarlyCheckoutSub
       }),
     );
 
+// ─── 10c. Recalculated amount positioning ───────────────────────────────────
+
 /**
  * A Recalculated_Stay_Amount positioned relative to a known Total_Paid so all
- * three Early_Checkout branches are reached: greater than Total_Paid (collect
- * the balance), exactly equal (check out immediately), and less (record a
- * refund of the excess). (Req 12.7, 12.8, 12.12)
+ * three Save_Stay_Details branches are reached: greater than Total_Paid (collect
+ * the balance), exactly equal (settled), and less (record a refund of the
+ * excess). (Req 12.7, 12.8, 12.12)
  */
 export function arbRecalculatedAmountAround(
   totalPaid: number,
@@ -1048,3 +1263,161 @@ export function arbRecalculatedAmountAround(
     { arbitrary: arbTotalStayAmount, weight: 2 },
   );
 }
+
+// ─── 11. Recalculation & Extension history records ───────────────────────────
+
+/**
+ * A single `StayRecalculation` record — one row in the recalculation history.
+ * Fields mirror the database schema; dates and timestamps use the same
+ * deterministic helpers as the ledger fixtures so counterexamples replay.
+ *
+ * Requirements: 13.1, 13.2, 13.5
+ */
+export function arbStayRecalculation(options: {
+  stayEntryId?: string;
+  customerProfileId?: string;
+  /** Index controlling `id` and `createdAt` ordering. */
+  index?: number;
+} = {}): fc.Arbitrary<StayRecalculation> {
+  const {
+    stayEntryId = DEFAULT_STAY_ID,
+    customerProfileId = DEFAULT_CUSTOMER_PROFILE_ID,
+    index = 0,
+  } = options;
+
+  return fc
+    .record({
+      nightsBefore: fc.integer({ min: 1, max: REFERENCE_MAX_TOTAL_NIGHTS }),
+      nightsAfter: fc.integer({ min: 1, max: REFERENCE_MAX_TOTAL_NIGHTS }),
+      totalAmountBefore: fc.oneof(
+        { arbitrary: fc.constant<number | null>(null), weight: 1 },
+        { arbitrary: arbTotalStayAmount as fc.Arbitrary<number | null>, weight: 4 },
+      ),
+      totalAmountAfter: arbTotalStayAmount,
+      dateOffset: fc.integer({ min: -200, max: 200 }),
+      nightsDelta: fc.integer({ min: -60, max: 60 }),
+      recalculatedOnOffset: fc.integer({ min: 0, max: 400 }),
+      createdAtOffset: fc.integer({ min: 0, max: 100_000 }),
+    })
+    .map((seed): StayRecalculation => {
+      const endDateBefore = shiftISODate(REFERENCE_TODAY_IST, seed.dateOffset);
+      const endDateAfter = shiftISODate(endDateBefore, seed.nightsDelta);
+      return {
+        id: fixtureUuid(77, index + 1),
+        stayEntryId,
+        customerProfileId,
+        nightsBefore: seed.nightsBefore,
+        nightsAfter: seed.nightsAfter,
+        totalAmountBefore: seed.totalAmountBefore,
+        totalAmountAfter: seed.totalAmountAfter,
+        endDateBefore,
+        endDateAfter,
+        recalculatedOn: shiftISODate(
+          REFERENCE_TODAY_IST,
+          seed.recalculatedOnOffset,
+        ),
+        createdAt: fixtureTimestamp(index * 120 + seed.createdAtOffset),
+      };
+    });
+}
+
+/**
+ * A single `StayExtension` record — one row in the extension history.
+ * Fields mirror the database schema.
+ *
+ * Requirements: 13.6, 13.7
+ */
+export function arbStayExtension(options: {
+  stayEntryId?: string;
+  customerProfileId?: string;
+  /** Index controlling `id` and `createdAt` ordering. */
+  index?: number;
+} = {}): fc.Arbitrary<StayExtension> {
+  const {
+    stayEntryId = DEFAULT_STAY_ID,
+    customerProfileId = DEFAULT_CUSTOMER_PROFILE_ID,
+    index = 0,
+  } = options;
+
+  return fc
+    .record({
+      additionalNights: fc.integer({ min: 1, max: 60 }),
+      additionalAmount: arbTotalStayAmount,
+      nightsBefore: fc.integer({ min: 1, max: REFERENCE_MAX_TOTAL_NIGHTS }),
+      nightsAfter: fc.integer({ min: 2, max: REFERENCE_MAX_TOTAL_NIGHTS + 60 }),
+      totalAmountBefore: fc.oneof(
+        { arbitrary: fc.constant<number | null>(null), weight: 1 },
+        { arbitrary: arbTotalStayAmount as fc.Arbitrary<number | null>, weight: 4 },
+      ),
+      totalAmountAfter: arbTotalStayAmount,
+      extendedOnOffset: fc.integer({ min: 0, max: 400 }),
+      createdAtOffset: fc.integer({ min: 0, max: 100_000 }),
+    })
+    .map((seed): StayExtension => ({
+      id: fixtureUuid(66, index + 1),
+      stayEntryId,
+      customerProfileId,
+      additionalNights: seed.additionalNights,
+      additionalAmount: seed.additionalAmount,
+      nightsBefore: seed.nightsBefore,
+      nightsAfter: seed.nightsAfter,
+      totalAmountBefore: seed.totalAmountBefore,
+      totalAmountAfter: seed.totalAmountAfter,
+      extendedOn: shiftISODate(REFERENCE_TODAY_IST, seed.extendedOnOffset),
+      createdAt: fixtureTimestamp(index * 120 + seed.createdAtOffset),
+    }));
+}
+
+/**
+ * An interleaved sequence of extensions and recalculations for property tests
+ * asserting the two histories never cross over (Req 13.6, 13.7). Produces 0–10
+ * entries of each type; `createdAt` ascends within each list but the two lists
+ * are interleaved — i.e. an extension at timestamp T may be followed by a
+ * recalculation at T+1 and then another extension at T+2.
+ *
+ * Requirements: 13.6, 13.7
+ */
+export interface InterleavedHistorySequence {
+  extensions: StayExtension[];
+  recalculations: StayRecalculation[];
+}
+
+export const arbInterleavedHistorySequence: fc.Arbitrary<InterleavedHistorySequence> =
+  fc
+    .record({
+      extensionCount: fc.integer({ min: 0, max: 10 }),
+      recalculationCount: fc.integer({ min: 0, max: 10 }),
+    })
+    .chain(({ extensionCount, recalculationCount }) =>
+      fc.record({
+        extensions:
+          extensionCount === 0
+            ? fc.constant<StayExtension[]>([])
+            : fc
+                .tuple(
+                  ...Array.from({ length: extensionCount }, (_, i) =>
+                    arbStayExtension({ index: i }),
+                  ),
+                )
+                .map((exts) =>
+                  // Ensure ascending createdAt by sorting, preserving the generated content.
+                  [...exts].sort((a, b) =>
+                    a.createdAt.localeCompare(b.createdAt),
+                  ),
+                ),
+        recalculations:
+          recalculationCount === 0
+            ? fc.constant<StayRecalculation[]>([])
+            : fc
+                .tuple(
+                  ...Array.from({ length: recalculationCount }, (_, i) =>
+                    arbStayRecalculation({ index: i }),
+                  ),
+                )
+                .map((recs) =>
+                  [...recs].sort((a, b) =>
+                    a.createdAt.localeCompare(b.createdAt),
+                  ),
+                ),
+      }),
+    );

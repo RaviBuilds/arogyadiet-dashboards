@@ -1,0 +1,769 @@
+﻿
+> vitest_output.txt:19: Γ¥» src/shared/components/admin/customers/_
+_tests__/QuickOnboardingForm.accommodation.test.tsx (6 tests | 1 
+failed) 13266ms
+  vitest_output.txt:20:     ├ù shows the alert for a past end 
+date, clears it as nights change, and never leaves the Category & 
+Plan step 1972ms
+  vitest_output.txt:21:stderr | 
+src/test/dietitian/read-only-workspace.property.test.tsx > 
+Property 28: The 
+  vitest_output.txt:22:read-only workspace renders the customer's 
+data and adherence numbers, with all mutating 
+  vitest_output.txt:23:controls removed > admin Meal tab: 
+create/export/edit/deactivate controls are present iff 
+  vitest_output.txt:24:Access_Level is not dietitian (Req 16.1)
+  vitest_output.txt:25:Overview fetch error: Error: `cookies` was 
+called outside a request scope. Read more: 
+  vitest_output.txt:26:https://nextjs.org/docs/messages/next-dynami
+c-api-wrong-context
+  vitest_output.txt:27:    at throwForMissingRequestStore 
+(E:\Local Clients\Next.js\arogyadiet\node_modules\next\
+> vitest_output.txt:82: Γ¥» src/shared/components/customer/__tests_
+_/ProfileCompletionDialog.test.tsx (17 tests | 1 failed) 28288ms
+  vitest_output.txt:83:     ├ù accepts a zero-field Save and 
+submits an empty patch 295ms
+> vitest_output.txt:84:stderr | src/shared/components/admin/custome
+rs/__tests__/QuickOnboardingForm.test.tsx > 
+  vitest_output.txt:85:QuickOnboardingForm ΓÇö 5 PM cutoff 
+acknowledgment gate (Req 7.1ΓÇô7.4) > warns past the 
+  vitest_output.txt:86:cutoff and gates Onboard behind the 
+acknowledgment
+  vitest_output.txt:87:RadioGroup is changing from uncontrolled to 
+controlled. Components should not switch from 
+  vitest_output.txt:88:controlled to uncontrolled (or vice versa). 
+Decide between using a controlled or 
+  vitest_output.txt:89:uncontrolled value for the lifetime of the 
+component.
+  vitest_output.txt:90:
+> vitest_output.txt:91:stderr | src/shared/components/admin/custome
+rs/__tests__/QuickOnboardingForm.test.tsx > 
+  vitest_output.txt:92:QuickOnboardingForm ΓÇö 5 PM cutoff 
+acknowledgment gate (Req 7.1ΓÇô7.4) > warns past the 
+  vitest_output.txt:93:cutoff and gates Onboard behind the 
+acknowledgment
+  vitest_output.txt:94:RadioGroup is changing from uncontrolled to 
+controlled. Components should not switch from 
+  vitest_output.txt:95:controlled to uncontrolled (or vice versa). 
+Decide between using a controlled or 
+  vitest_output.txt:96:uncontrolled value for the lifetime of the 
+component.
+  vitest_output.txt:97:
+> vitest_output.txt:98:stderr | src/shared/components/admin/custome
+rs/__tests__/QuickOnboardingForm.test.tsx > 
+  vitest_output.txt:99:QuickOnboardingForm ΓÇö KIT product payment 
+review (Req 4.1) > displays KIT product name, 
+  vitest_output.txt:100:base price, tax amount (5%), and total 
+price
+  vitest_output.txt:101:RadioGroup is changing from uncontrolled 
+to controlled. Components should not switch from 
+  vitest_output.txt:102:controlled to uncontrolled (or vice 
+versa). Decide between using a controlled or 
+  vitest_output.txt:103:uncontrolled value for the lifetime of the 
+component.
+  vitest_output.txt:104:
+> vitest_output.txt:105:stderr | src/shared/components/admin/custom
+ers/__tests__/QuickOnboardingForm.test.tsx > 
+  vitest_output.txt:106:QuickOnboardingForm ΓÇö KIT product 
+payment review (Req 4.1) > displays KIT product name, 
+  vitest_output.txt:107:base price, tax amount (5%), and total 
+price
+  vitest_output.txt:108:RadioGroup is changing from uncontrolled 
+to controlled. Components should not switch from 
+  vitest_output.txt:109:controlled to uncontrolled (or vice 
+versa). Decide between using a controlled or 
+  vitest_output.txt:110:uncontrolled value for the lifetime of the 
+component.
+  vitest_output.txt:111:
+> vitest_output.txt:112: Γ¥» src/shared/components/admin/customers/
+__tests__/QuickOnboardingForm.test.tsx (3 tests | 2 failed) 7507ms
+  vitest_output.txt:113:     ├ù warns past the cutoff and gates 
+Onboard behind the acknowledgment 2247ms
+  vitest_output.txt:114:     ├ù displays KIT product name, base 
+price, tax amount (5%), and total price 2760ms
+  vitest_output.txt:115: Γ¥» 
+src/services/__tests__/onboardingService.property.test.ts (18 
+tests | 8 failed) 589ms
+  vitest_output.txt:116:     ├ù persists a correctly-shaped record 
+when the gate passes (PAID, one valid category, unused mobile) 56ms
+  vitest_output.txt:117:     ├ù rejects a duplicate mobile with no 
+new record and compensates the auth identity (Req 4.7) 19ms
+  vitest_output.txt:118:     ├ù the Quick_Onboarding_Form schema 
+accepts a complete payload and identifies each missing required 
+field (Req 4.1/4.2/4.6) 221ms
+  vitest_output.txt:119:     ├ù leaves post-state == pre-state and 
+compensates auth when the atomic write fails 36ms
+  vitest_output.txt:120:     ├ù creates no record and no auth 
+identity when the clinic/franchise scope is unresolved (Req 14.6) 
+50ms
+> vitest_output.txt:124: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts (22 tests | 3 
+failed) 466ms
+  vitest_output.txt:125:       ├ù end date extends monotonically 
+with each additional skip 32ms
+  vitest_output.txt:126:       ├ù valid FOOD_TAKEN payloads with 
+optional fields pass schema validation 31ms
+  vitest_output.txt:127:       ├ù transitioning from FOOD_TAKEN to 
+FOOD_SKIPPED excludes optional fields from output 52ms
+  vitest_output.txt:128: Γ¥» src/services/__tests__/AccommodationSe
+rvice.visibility.property.test.ts (13 tests | 3 failed) 169ms
+  vitest_output.txt:129:     ├ù non-billable stays (shared payment 
+or zero/null total) yield all-false visibility 30ms
+  vitest_output.txt:130:     ├ù non-billable stays with zero total 
+yield all-false visibility 9ms
+  vitest_output.txt:131:     ├ù showEarlyCheckout is true exactly 
+when ACTIVE and no early checkout has been applied 5ms
+  vitest_output.txt:132: Γ¥» 
+src/actions/__tests__/stayRefundActions.property.test.ts (4 tests 
+| 2 failed) 169ms
+> vitest_output.txt:141: Γ¥» src/shared/components/customer/subscri
+ption/manage/__tests__/billing-client.test.tsx (2 tests | 1 
+failed) 187ms
+  vitest_output.txt:142:     ├ù shows the onboarding invoice 
+amount, date and PAID status 134ms
+  vitest_output.txt:143: Γ¥» src/actions/master-actions/__tests__/k
+itchen-clinic-city.property.test.ts (2 tests | 1 failed) 88ms
+  vitest_output.txt:144:     ├ù kitchen create/update is accepted 
+iff the referenced city exists (Req 2.6) 34ms
+  vitest_output.txt:145: Γ¥» src/services/__tests__/AccommodationSe
+rvice.earlyCheckoutMath.property.test.ts (9 tests | 9 failed) 92ms
+  vitest_output.txt:146:     ├ù balance.totalStayAmount equals the 
+Recalculated_Stay_Amount (Req 12.6) 28ms
+  vitest_output.txt:147:     ├ù balance.totalPaid equals the 
+reference Total_Paid from the existing ledger (Req 12.6) 13ms
+  vitest_output.txt:148:     ├ù balance.remainingBalance equals 
+Recalculated_Stay_Amount minus Total_Paid (Req 12.6) 7ms
+  vitest_output.txt:149:     ├ù selects COLLECT_BALANCE when 
+Recalculated_Stay_Amount > Total_Paid (Req 12.7) 4ms
+> vitest_output.txt:805: Γ¥» 
+src/actions/__tests__/addressActions.regression.test.ts (8 tests | 
+7 failed) 21ms
+  vitest_output.txt:806:     ├ù returns the pincode error shape 
+when the pincode is not deliverable 8ms
+  vitest_output.txt:807:     ├ù returns the over-limit error when 
+creating a 3rd address (>=2 existing) 1ms
+  vitest_output.txt:808:     ├ù creates a valid address: returns 
+success, inserts the row, notifies, and revalidates 1ms
+  vitest_output.txt:809:     ├ù edits a valid address: returns 
+success and updates the existing row 1ms
+  vitest_output.txt:810:     ├ù invokes stampCustomerClinic on a 
+valid create with the resolved address id and pincode 1ms
+  vitest_output.txt:811:     ├ù invokes stampCustomerClinic on a 
+valid edit with the edited address id 1ms
+  vitest_output.txt:812:     ├ù does not change the return shape 
+regardless of the stamp outcome 1ms
+  vitest_output.txt:813: Γ¥» 
+src/services/__tests__/stayPaymentLedger.stateful.property.test.ts 
+(1 test | 1 failed) 22ms
+> vitest_output.txt:815: Γ¥» 
+src/actions/__tests__/categoryGuards.test.ts (0 test)
+> vitest_output.txt:816: Γ¥» src/app/customer/(main)/subscription/_
+_tests__/subscription-page.test.tsx (2 tests | 2 failed) 14ms
+  vitest_output.txt:817:     ├ù shows the onboarding subscription 
+plan name, start date and status 9ms
+  vitest_output.txt:818:     ├ù shows the no-subscription message 
+when none is attached 1ms
+  vitest_output.txt:819:stderr | 
+  vitest_output.txt:820:src/shared/components/admin/customers/__tes
+ts__/AccommodationTab.refresh.test.tsx > 
+  vitest_output.txt:821:AccommodationTab ΓÇö ledger refetch after 
+Record Payment (Req 5.9, 6.6) > refetches the 
+  vitest_output.txt:822:ledger after a SUCCESSFUL payment, with no 
+navigation
+  vitest_output.txt:823:An error occurred in the 
+<StayRecalculationHistoryCard> component.
+  vitest_output.txt:824:
+> vitest_output.txt:912: Γ¥» src/lib/invoices/__tests__/accommodati
+onFinalInvoice.consolidation.property.test.ts (1 test | 1 failed) 
+91ms
+  vitest_output.txt:913:     ├ù contains exactly one line item and 
+never touches or leaks the ledger 89ms
+> vitest_output.txt:914: Γ¥» src/services/__tests__/AccommodationSe
+rvice.headlineFlows.integration.test.ts (2 tests | 1 failed) 24ms
+  vitest_output.txt:915:     ├ù records the refund, finishes the 
+stay, and produces exactly one invoice with the recalculated 
+amount and actual nights 7ms
+  vitest_output.txt:916:
+  vitest_output.txt:917:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Failed Suites 1 
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+  vitest_output.txt:918:
+> vitest_output.txt:919: FAIL  
+src/actions/__tests__/categoryGuards.test.ts [ 
+> 
+vitest_output.txt:920:src/actions/__tests__/categoryGuards.test.ts 
+]
+  vitest_output.txt:921:Error: Cannot find package '@jest/globals' 
+imported from E:/Local 
+> vitest_output.txt:922:Clients/Next.js/arogyadiet/src/actions/__te
+sts__/categoryGuards.test.ts
+> vitest_output.txt:923: Γ¥» 
+src/actions/__tests__/categoryGuards.test.ts:8:1
+  vitest_output.txt:924:      6|  */
+  vitest_output.txt:925:      7|
+  vitest_output.txt:926:      8| import { describe, it, expect, 
+beforeEach } from "@jest/globals";
+  vitest_output.txt:927:       | ^
+  vitest_output.txt:928:      9|
+  vitest_output.txt:929:     10| describe("Category Guards for 
+Meal Subscription Operations", () => {
+  vitest_output.txt:930:
+  vitest_output.txt:931:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»Γ
+Ä»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[1/78]ΓÄ»
+> vitest_output.txt:936: FAIL  
+src/actions/__tests__/addressActions.regression.test.ts > 
+saveAddressAction ΓÇö 
+  vitest_output.txt:937:preserved behavior (Req 6.7) > returns the 
+pincode error shape when the pincode is not 
+  vitest_output.txt:938:deliverable
+  vitest_output.txt:939:TypeError: 
+supabase.from(...).select(...).eq(...).in is not a function
+  vitest_output.txt:940: Γ¥» customerRequiresServiceablePincode 
+src/lib/address/customerServiceability.ts:29:6
+  vitest_output.txt:941:     27|     .select("customer_category")
+  vitest_output.txt:942:     28|     .eq("customer_profile_id", 
+customerProfileId)
+  vitest_output.txt:943:     29|     .in("status", ["ACTIVE", 
+"PENDING"]);
+  vitest_output.txt:944:       |      ^
+> vitest_output.txt:948: Γ¥» 
+src/actions/__tests__/addressActions.regression.test.ts:213:20
+  vitest_output.txt:949:
+  vitest_output.txt:950:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»Γ
+Ä»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[2/78]ΓÄ»
+  vitest_output.txt:951:
+> vitest_output.txt:952: FAIL  
+src/actions/__tests__/addressActions.regression.test.ts > 
+saveAddressAction ΓÇö 
+  vitest_output.txt:953:preserved behavior (Req 6.7) > returns the 
+over-limit error when creating a 3rd address 
+  vitest_output.txt:954:(>=2 existing)
+  vitest_output.txt:955:TypeError: 
+supabase.from(...).select(...).eq(...).in is not a function
+  vitest_output.txt:956: Γ¥» customerRequiresServiceablePincode 
+src/lib/address/customerServiceability.ts:29:6
+  vitest_output.txt:957:     27|     .select("customer_category")
+  vitest_output.txt:958:     28|     .eq("customer_profile_id", 
+customerProfileId)
+  vitest_output.txt:959:     29|     .in("status", ["ACTIVE", 
+"PENDING"]);
+  vitest_output.txt:960:       |      ^
+> vitest_output.txt:964: Γ¥» 
+src/actions/__tests__/addressActions.regression.test.ts:224:20
+  vitest_output.txt:965:
+  vitest_output.txt:966:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»Γ
+Ä»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[3/78]ΓÄ»
+  vitest_output.txt:967:
+> vitest_output.txt:968: FAIL  
+src/actions/__tests__/addressActions.regression.test.ts > 
+saveAddressAction ΓÇö 
+  vitest_output.txt:969:preserved behavior (Req 6.7) > creates a 
+valid address: returns success, inserts the row, 
+  vitest_output.txt:970:notifies, and revalidates
+  vitest_output.txt:971:TypeError: 
+supabase.from(...).select(...).eq(...).in is not a function
+  vitest_output.txt:972: Γ¥» customerRequiresServiceablePincode 
+src/lib/address/customerServiceability.ts:29:6
+  vitest_output.txt:973:     27|     .select("customer_category")
+  vitest_output.txt:974:     28|     .eq("customer_profile_id", 
+customerProfileId)
+  vitest_output.txt:975:     29|     .in("status", ["ACTIVE", 
+"PENDING"]);
+  vitest_output.txt:976:       |      ^
+> vitest_output.txt:980: Γ¥» 
+src/actions/__tests__/addressActions.regression.test.ts:233:20
+  vitest_output.txt:981:
+  vitest_output.txt:982:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»Γ
+Ä»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[4/78]ΓÄ»
+  vitest_output.txt:983:
+> vitest_output.txt:984: FAIL  
+src/actions/__tests__/addressActions.regression.test.ts > 
+saveAddressAction ΓÇö 
+  vitest_output.txt:985:preserved behavior (Req 6.7) > edits a 
+valid address: returns success and updates the 
+  vitest_output.txt:986:existing row
+  vitest_output.txt:987:TypeError: 
+supabase.from(...).select(...).eq(...).in is not a function
+  vitest_output.txt:988: Γ¥» customerRequiresServiceablePincode 
+src/lib/address/customerServiceability.ts:29:6
+  vitest_output.txt:989:     27|     .select("customer_category")
+  vitest_output.txt:990:     28|     .eq("customer_profile_id", 
+customerProfileId)
+  vitest_output.txt:991:     29|     .in("status", ["ACTIVE", 
+"PENDING"]);
+  vitest_output.txt:992:       |      ^
+> vitest_output.txt:996: Γ¥» 
+src/actions/__tests__/addressActions.regression.test.ts:259:20
+  vitest_output.txt:997:
+  vitest_output.txt:998:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»Γ
+Ä»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[5/78]ΓÄ»
+  vitest_output.txt:999:
+> vitest_output.txt:1000: FAIL  
+src/actions/__tests__/addressActions.regression.test.ts > 
+saveAddressAction ΓÇö 
+  vitest_output.txt:1001:clinic stamping is the only addition (Req 
+6.7) > invokes stampCustomerClinic on a valid 
+  vitest_output.txt:1002:create with the resolved address id and 
+pincode
+  vitest_output.txt:1003:TypeError: 
+supabase.from(...).select(...).eq(...).in is not a function
+  vitest_output.txt:1004: Γ¥» customerRequiresServiceablePincode 
+src/lib/address/customerServiceability.ts:29:6
+  vitest_output.txt:1005:     27|     .select("customer_category")
+  vitest_output.txt:1006:     28|     .eq("customer_profile_id", 
+customerProfileId)
+  vitest_output.txt:1007:     29|     .in("status", ["ACTIVE", 
+"PENDING"]);
+  vitest_output.txt:1008:       |      ^
+> vitest_output.txt:1012: Γ¥» 
+src/actions/__tests__/addressActions.regression.test.ts:275:20
+  vitest_output.txt:1013:
+  vitest_output.txt:1014:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[6/78]ΓÄ»
+  vitest_output.txt:1015:
+> vitest_output.txt:1016: FAIL  
+src/actions/__tests__/addressActions.regression.test.ts > 
+saveAddressAction ΓÇö 
+  vitest_output.txt:1017:clinic stamping is the only addition (Req 
+6.7) > invokes stampCustomerClinic on a valid 
+  vitest_output.txt:1018:edit with the edited address id
+  vitest_output.txt:1019:TypeError: 
+supabase.from(...).select(...).eq(...).in is not a function
+  vitest_output.txt:1020: Γ¥» customerRequiresServiceablePincode 
+src/lib/address/customerServiceability.ts:29:6
+  vitest_output.txt:1021:     27|     .select("customer_category")
+  vitest_output.txt:1022:     28|     .eq("customer_profile_id", 
+customerProfileId)
+  vitest_output.txt:1023:     29|     .in("status", ["ACTIVE", 
+"PENDING"]);
+  vitest_output.txt:1024:       |      ^
+> vitest_output.txt:1028: Γ¥» 
+src/actions/__tests__/addressActions.regression.test.ts:292:5
+  vitest_output.txt:1029:
+  vitest_output.txt:1030:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[7/78]ΓÄ»
+  vitest_output.txt:1031:
+> vitest_output.txt:1032: FAIL  
+src/actions/__tests__/addressActions.regression.test.ts > 
+saveAddressAction ΓÇö 
+  vitest_output.txt:1033:clinic stamping is the only addition (Req 
+6.7) > does not change the return shape 
+  vitest_output.txt:1034:regardless of the stamp outcome
+  vitest_output.txt:1035:TypeError: 
+supabase.from(...).select(...).eq(...).in is not a function
+  vitest_output.txt:1036: Γ¥» customerRequiresServiceablePincode 
+src/lib/address/customerServiceability.ts:29:6
+  vitest_output.txt:1037:     27|     .select("customer_category")
+  vitest_output.txt:1038:     28|     .eq("customer_profile_id", 
+customerProfileId)
+  vitest_output.txt:1039:     29|     .in("status", ["ACTIVE", 
+"PENDING"]);
+  vitest_output.txt:1040:       |      ^
+> vitest_output.txt:1044: Γ¥» 
+src/actions/__tests__/addressActions.regression.test.ts:301:12
+  vitest_output.txt:1045:
+  vitest_output.txt:1046:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[8/78]ΓÄ»
+  vitest_output.txt:1047:
+> vitest_output.txt:1048: FAIL  
+src/actions/__tests__/kitTracker.property.test.ts > KIT Tracker 
+Property Tests > 
+  vitest_output.txt:1049:Property 7: Tracker_End_Date Computation 
+> end date extends monotonically with each 
+  vitest_output.txt:1050:additional skip
+  vitest_output.txt:1051:Error: Property failed after 15 tests
+  vitest_output.txt:1052:{ seed: 372576253, path: "14:39:39", 
+endOnFailure: true }
+  vitest_output.txt:1053:Counterexample: [new Date(NaN),1,0]
+  vitest_output.txt:1054:Shrunk 2 time(s)
+  vitest_output.txt:1055:
+  vitest_output.txt:1056:Hint: Enable verbose mode in order to 
+have the list of all failing values encountered 
+> vitest_output.txt:1066: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:282:10
+  vitest_output.txt:1067:    280|
+  vitest_output.txt:1068:    281|     it("end date extends 
+monotonically with each additional skip", () ΓÇª
+  vitest_output.txt:1069:    282|       fc.assert(
+  vitest_output.txt:1070:       |          ^
+  vitest_output.txt:1071:    283|         fc.property(
+  vitest_output.txt:1072:    284|           fc.date({ min: new 
+Date("2020-01-01"), max: new Date("2029-1ΓÇª
+  vitest_output.txt:1073:
+  vitest_output.txt:1074:Caused by: AssertionError: expected NaN 
+to be 86400000 // Object.is equality
+> vitest_output.txt:1082: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:295:73
+  vitest_output.txt:1083: Γ¥» Property.predicate 
+../../../Local%20Clients/Next.js/arogyadiet/node_modules/fast-chec
+  vitest_output.txt:1084:k/lib/fast-check.js:1333:99
+  vitest_output.txt:1085: Γ¥» Property.run ../../../Local%20Clients
+/Next.js/arogyadiet/node_modules/fast-check/lib/
+  vitest_output.txt:1086:fast-check.js:1302:24
+  vitest_output.txt:1087: Γ¥» runIt ../../../Local%20Clients/Next.j
+s/arogyadiet/node_modules/fast-check/lib/fast-ch
+  vitest_output.txt:1088:eck.js:2484:24
+  vitest_output.txt:1089: Γ¥» check ../../../Local%20Clients/Next.j
+s/arogyadiet/node_modules/fast-check/lib/fast-ch
+  vitest_output.txt:1090:eck.js:2516:204
+> vitest_output.txt:1093: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:282:10
+  vitest_output.txt:1094:
+  vitest_output.txt:1095:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[9/78]ΓÄ»
+  vitest_output.txt:1096:
+> vitest_output.txt:1097: FAIL  
+src/actions/__tests__/kitTracker.property.test.ts > KIT Tracker 
+Property Tests > 
+  vitest_output.txt:1098:Property 12: Optional Field Validation 
+and Persistence > valid FOOD_TAKEN payloads with 
+  vitest_output.txt:1099:optional fields pass schema validation
+  vitest_output.txt:1100:Error: Property failed after 53 tests
+  vitest_output.txt:1101:{ seed: 1095060522, path: 
+"52:0:0:2:0:3:1", endOnFailure: true }
+  vitest_output.txt:1102:Counterexample: [{"status":"FOOD_TAKEN","a
+ctivityMinutes":undefined,"activityName":undefin
+  vitest_output.txt:1103:ed,"weightKg":0.28}]
+  vitest_output.txt:1104:Shrunk 6 time(s)
+  vitest_output.txt:1105:
+> vitest_output.txt:1116: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:362:10
+  vitest_output.txt:1117:    360|       });
+  vitest_output.txt:1118:    361|
+  vitest_output.txt:1119:    362|       fc.assert(
+  vitest_output.txt:1120:       |          ^
+  vitest_output.txt:1121:    363|         
+fc.property(arbValidPayload, (payload) => {
+  vitest_output.txt:1122:    364|           const result = 
+dailyLogSchema.safeParse(payload);
+  vitest_output.txt:1123:
+  vitest_output.txt:1124:Caused by: AssertionError: expected false 
+to be true // Object.is equality
+> vitest_output.txt:1132: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:365:34
+  vitest_output.txt:1133: Γ¥» Property.predicate 
+../../../Local%20Clients/Next.js/arogyadiet/node_modules/fast-chec
+  vitest_output.txt:1134:k/lib/fast-check.js:1333:99
+  vitest_output.txt:1135: Γ¥» Property.run ../../../Local%20Clients
+/Next.js/arogyadiet/node_modules/fast-check/lib/
+  vitest_output.txt:1136:fast-check.js:1302:24
+  vitest_output.txt:1137: Γ¥» runIt ../../../Local%20Clients/Next.j
+s/arogyadiet/node_modules/fast-check/lib/fast-ch
+  vitest_output.txt:1138:eck.js:2484:24
+  vitest_output.txt:1139: Γ¥» check ../../../Local%20Clients/Next.j
+s/arogyadiet/node_modules/fast-check/lib/fast-ch
+  vitest_output.txt:1140:eck.js:2516:204
+> vitest_output.txt:1143: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:362:10
+  vitest_output.txt:1144:
+  vitest_output.txt:1145:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[10/78]ΓÄ»
+  vitest_output.txt:1146:
+> vitest_output.txt:1147: FAIL  
+src/actions/__tests__/kitTracker.property.test.ts > KIT Tracker 
+Property Tests > 
+  vitest_output.txt:1148:Property 13: Food_Skipped Field Clearing 
+> transitioning from FOOD_TAKEN to FOOD_SKIPPED 
+  vitest_output.txt:1149:excludes optional fields from output
+  vitest_output.txt:1150:Error: Property failed after 23 tests
+  vitest_output.txt:1151:{ seed: -327032048, path: 
+"22:0:0:6:0:0:3:0:2", endOnFailure: true }
+  vitest_output.txt:1152:Counterexample: [{"status":"FOOD_TAKEN","a
+ctivityMinutes":undefined,"activityName":undefin
+  vitest_output.txt:1153:ed,"weightKg":133.58}]
+  vitest_output.txt:1154:Shrunk 8 time(s)
+  vitest_output.txt:1155:
+> vitest_output.txt:1166: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:492:10
+  vitest_output.txt:1167:    490|       });
+  vitest_output.txt:1168:    491|
+  vitest_output.txt:1169:    492|       fc.assert(
+  vitest_output.txt:1170:       |          ^
+  vitest_output.txt:1171:    493|         
+fc.property(arbTakenPayload, (takenPayload) => {
+  vitest_output.txt:1172:    494|           // First validate the 
+taken payload works
+  vitest_output.txt:1173:
+  vitest_output.txt:1174:Caused by: AssertionError: expected false 
+to be true // Object.is equality
+> vitest_output.txt:1182: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:496:39
+  vitest_output.txt:1183: Γ¥» Property.predicate 
+../../../Local%20Clients/Next.js/arogyadiet/node_modules/fast-chec
+  vitest_output.txt:1184:k/lib/fast-check.js:1333:99
+  vitest_output.txt:1185: Γ¥» Property.run ../../../Local%20Clients
+/Next.js/arogyadiet/node_modules/fast-check/lib/
+  vitest_output.txt:1186:fast-check.js:1302:24
+  vitest_output.txt:1187: Γ¥» runIt ../../../Local%20Clients/Next.j
+s/arogyadiet/node_modules/fast-check/lib/fast-ch
+  vitest_output.txt:1188:eck.js:2484:24
+  vitest_output.txt:1189: Γ¥» check ../../../Local%20Clients/Next.j
+s/arogyadiet/node_modules/fast-check/lib/fast-ch
+  vitest_output.txt:1190:eck.js:2516:204
+> vitest_output.txt:1193: Γ¥» 
+src/actions/__tests__/kitTracker.property.test.ts:492:10
+  vitest_output.txt:1194:
+  vitest_output.txt:1195:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[11/78]ΓÄ»
+  vitest_output.txt:1196:
+  vitest_output.txt:1197: FAIL  
+src/actions/__tests__/stayRefundActions.property.test.ts > 
+Feature: 
+  vitest_output.txt:1198:accommodation-payment-lifecycle, Property 
+22: Refund validation and ledger effect > 
+  vitest_output.txt:1199:returns fieldErrors.amount naming the 
+refundable excess when the amount exceeds it
+  vitest_output.txt:1200:Error: Property failed after 1 tests
+  vitest_output.txt:1201:{ seed: -431153555, path: "3:0:0", 
+endOnFailure: true }
+> vitest_output.txt:1744: FAIL  src/services/__tests__/Accommodatio
+nService.headlineFlows.integration.test.ts > 
+  vitest_output.txt:1745:Feature: accommodation-payment-lifecycle 
+ΓÇö headline flow: early checkout with a refund 
+  vitest_output.txt:1746:> records the refund, finishes the stay, 
+and produces exactly one invoice with the 
+  vitest_output.txt:1747:recalculated amount and actual nights
+  vitest_output.txt:1748:TypeError: earlyCheckout is not a function
+> vitest_output.txt:1749: Γ¥» src/services/__tests__/AccommodationS
+ervice.headlineFlows.integration.test.ts:570:27
+  vitest_output.txt:1750:    568|     // 2. Early checkout: actual 
+nights 4, recalculated amount 55,000 ΓÇª
+  vitest_output.txt:1751:    569|     // (70,000) now exceeds the 
+new total, producing a refund-due situΓÇª
+  vitest_output.txt:1752:    570|     const outcome = await 
+earlyCheckout(stay.id, 4, 55000);
+  vitest_output.txt:1753:       |                           ^
+  vitest_output.txt:1754:    571|     if ("error" in outcome) {
+  vitest_output.txt:1755:    572|       throw new Error(`expected 
+a successful outcome, got ${outcome.erΓÇª
+  vitest_output.txt:1756:
+  vitest_output.txt:1757:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[23/78]ΓÄ»
+> vitest_output.txt:3569:src/lib/invoices/__tests__/accommodationFi
+nalInvoice.consolidation.property.test.ts > 
+  vitest_output.txt:3570:Feature: accommodation-payment-lifecycle, 
+Property 14: Final invoice excludes 
+  vitest_output.txt:3571:per-transaction detail > contains exactly 
+one line item and never touches or leaks the 
+  vitest_output.txt:3572:ledger
+  vitest_output.txt:3573:Error: Property failed after 3 tests
+  vitest_output.txt:3574:{ seed: -61368589, path: 
+"2:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0", 
+  vitest_output.txt:3575:endOnFailure: true }
+  vitest_output.txt:3576:Counterexample: [{"stayType":"AC 
+Villa","occupancyType":"Single","startDate":"2024-01-01",
+  vitest_output.txt:3577:"totalNights":1,"actualNightsStayed":2,"to
+talForGst":1,"paymentAmount":0,"earlyCheckoutApp
+> vitest_output.txt:3604:src/lib/invoices/__tests__/accommodationFi
+nalInvoice.consolidation.property.test.ts:283:33
+  vitest_output.txt:3605: Γ¥» AsyncProperty.run 
+../../../Local%20Clients/Next.js/arogyadiet/node_modules/fast-check
+  vitest_output.txt:3606:/lib/fast-check.js:1197:19
+  vitest_output.txt:3607: Γ¥» asyncRunIt ../../../Local%20Clients/N
+ext.js/arogyadiet/node_modules/fast-check/lib/fa
+  vitest_output.txt:3608:st-check.js:2495:15
+  vitest_output.txt:3609: Γ¥» 
+> vitest_output.txt:3610:src/lib/invoices/__tests__/accommodationFi
+nalInvoice.consolidation.property.test.ts:245:5
+  vitest_output.txt:3611:
+  vitest_output.txt:3612:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[61/78]ΓÄ»
+  vitest_output.txt:3613:
+  vitest_output.txt:3614: FAIL  src/lib/invoices/__tests__/accommod
+ationFinalInvoice.figures.property.test.ts > 
+  vitest_output.txt:3615:Feature: accommodation-payment-lifecycle, 
+Property 13: Final invoice figures reflect 
+  vitest_output.txt:3616:early checkout > uses 
+actual_nights_stayed (NOT total_nights) and the stay's stored GST 
+  vitest_output.txt:3617:breakup when Early_Checkout WAS applied
+  vitest_output.txt:3618:Error: Property failed after 1 tests
+> vitest_output.txt:3680: FAIL  src/shared/components/customer/__te
+sts__/ProfileCompletionDialog.test.tsx > 
+  vitest_output.txt:3681:ProfileCompletionDialog ΓÇö optional 
+fields (Req 9.2) > accepts a zero-field Save and 
+  vitest_output.txt:3682:submits an empty patch
+  vitest_output.txt:3683:TestingLibraryElementError: Unable to 
+find an accessible element with the role "button" 
+  vitest_output.txt:3684:and name `/^save$/i`
+  vitest_output.txt:3685:
+  vitest_output.txt:3686:Here are the accessible roles:
+  vitest_output.txt:3687:
+  vitest_output.txt:3688:  dialog:
+> vitest_output.txt:4091: Γ¥» src/shared/components/customer/__test
+s__/ProfileCompletionDialog.test.tsx:61:29
+  vitest_output.txt:4092:     59|     
+render(<ProfileCompletionDialog isTestEmail={false} />);
+  vitest_output.txt:4093:     60|
+  vitest_output.txt:4094:     61|     await 
+user.click(screen.getByRole("button", { name: /^save$/i }));
+  vitest_output.txt:4095:       |                             ^
+  vitest_output.txt:4096:     62|
+  vitest_output.txt:4097:     63|     
+expect(saveProfileCompletionAction).toHaveBeenCalledTimes(1);
+  vitest_output.txt:4098:
+  vitest_output.txt:4099:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[64/78]ΓÄ»
+> vitest_output.txt:4101: FAIL  src/app/customer/(main)/subscriptio
+n/__tests__/subscription-page.test.tsx > 
+  vitest_output.txt:4102:Account view ΓÇö subscription display 
+(Req 11.1) > shows the onboarding subscription plan 
+  vitest_output.txt:4103:name, start date and status
+  vitest_output.txt:4104:Error: `headers` was called outside a 
+request scope. Read more: 
+  vitest_output.txt:4105:https://nextjs.org/docs/messages/next-dyna
+mic-api-wrong-context
+  vitest_output.txt:4106: Γ¥» throwForMissingRequestStore 
+  vitest_output.txt:4107:node_modules/next/src/server/app-render/wo
+rk-unit-async-storage.external.ts:415:8
+  vitest_output.txt:4108: Γ¥» callingExpression 
+node_modules/next/src/server/request/headers.ts:168:30
+  vitest_output.txt:4109: Γ¥» src/lib/customer/get-session.ts:32:29
+> vitest_output.txt:4117: Γ¥» src/app/customer/(main)/subscription/
+__tests__/subscription-page.test.tsx:71:12
+  vitest_output.txt:4118:
+  vitest_output.txt:4119:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[65/78]ΓÄ»
+  vitest_output.txt:4120:
+> vitest_output.txt:4121: FAIL  src/app/customer/(main)/subscriptio
+n/__tests__/subscription-page.test.tsx > 
+  vitest_output.txt:4122:Account view ΓÇö no-subscription empty 
+state (Req 11.2) > shows the no-subscription 
+  vitest_output.txt:4123:message when none is attached
+  vitest_output.txt:4124:Error: `headers` was called outside a 
+request scope. Read more: 
+  vitest_output.txt:4125:https://nextjs.org/docs/messages/next-dyna
+mic-api-wrong-context
+  vitest_output.txt:4126: Γ¥» throwForMissingRequestStore 
+  vitest_output.txt:4127:node_modules/next/src/server/app-render/wo
+rk-unit-async-storage.external.ts:415:8
+  vitest_output.txt:4128: Γ¥» callingExpression 
+node_modules/next/src/server/request/headers.ts:168:30
+  vitest_output.txt:4129: Γ¥» src/lib/customer/get-session.ts:32:29
+> vitest_output.txt:4137: Γ¥» src/app/customer/(main)/subscription/
+__tests__/subscription-page.test.tsx:86:12
+  vitest_output.txt:4138:
+  vitest_output.txt:4139:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[66/78]ΓÄ»
+  vitest_output.txt:4140:
+  vitest_output.txt:4141: FAIL  src/shared/components/admin/custome
+rs/__tests__/AccommodationTab.refresh.test.tsx 
+  vitest_output.txt:4142:> AccommodationTab ΓÇö ledger refetch 
+after Record Payment (Req 5.9, 6.6) > refetches the 
+  vitest_output.txt:4143:ledger after a SUCCESSFUL payment, with 
+no navigation
+  vitest_output.txt:4144:TestingLibraryElementError: Unable to 
+find role="button" and name `/^record payment$/i`
+  vitest_output.txt:4145:
+> vitest_output.txt:4257: FAIL  src/shared/components/admin/custome
+rs/__tests__/QuickOnboardingForm.accommodation.t
+  vitest_output.txt:4258:est.tsx > QuickOnboardingForm ΓÇö 
+backdated completion alert (Req 2.2, 2.3, 2.4) > shows 
+  vitest_output.txt:4259:the alert for a past end date, clears it 
+as nights change, and never leaves the Category 
+  vitest_output.txt:4260:& Plan step
+  vitest_output.txt:4261:TestingLibraryElementError: Unable to 
+find a label with the text of: /stay start date/i
+  vitest_output.txt:4262:
+  vitest_output.txt:4263:Ignored nodes: comments, script, style
+  vitest_output.txt:4264:[36m<body>[39m
+  vitest_output.txt:4265:  [36m<div>[39m
+> vitest_output.txt:4426: Γ¥» src/shared/components/admin/customers
+/__tests__/QuickOnboardingForm.accommodation.tes
+  vitest_output.txt:4427:t.tsx:334:35
+  vitest_output.txt:4428:    332|     // "Today" is mocked as 
+2025-06-15. A start date 20 days ago with a
+  vitest_output.txt:4429:    333|     // 1-night stay computes an 
+end date well in the past.
+  vitest_output.txt:4430:    334|     const startDateInput = 
+screen.getByLabelText(/stay start date/i);
+  vitest_output.txt:4431:       |                                  
+ ^
+  vitest_output.txt:4432:    335|     await 
+user.clear(startDateInput);
+  vitest_output.txt:4433:    336|     await 
+user.type(startDateInput, "2025-05-26");
+  vitest_output.txt:4434:
+> vitest_output.txt:4437: FAIL  src/shared/components/admin/custome
+rs/__tests__/QuickOnboardingForm.test.tsx > 
+  vitest_output.txt:4438:QuickOnboardingForm ΓÇö 5 PM cutoff 
+acknowledgment gate (Req 7.1ΓÇô7.4) > warns past the 
+  vitest_output.txt:4439:cutoff and gates Onboard behind the 
+acknowledgment
+  vitest_output.txt:4440:TestingLibraryElementError: Unable to 
+find an element with the text: /cutoff 
+  vitest_output.txt:4441:acknowledgment required/i. This could be 
+because the text is broken up by multiple 
+  vitest_output.txt:4442:elements. In this case, you can provide a 
+function for your text matcher to make your 
+  vitest_output.txt:4443:matcher more flexible.
+  vitest_output.txt:4444:
+  vitest_output.txt:4445:Ignored nodes: comments, script, style
+> vitest_output.txt:4608: Γ¥» src/shared/components/admin/customers
+/__tests__/QuickOnboardingForm.test.tsx:232:14
+  vitest_output.txt:4609:    230|     // Req 7.1: a cutoff warning 
+is displayed.
+  vitest_output.txt:4610:    231|     expect(
+  vitest_output.txt:4611:    232|       screen.getByText(/cutoff 
+acknowledgment required/i),
+  vitest_output.txt:4612:       |              ^
+  vitest_output.txt:4613:    233|     ).toBeInTheDocument();
+  vitest_output.txt:4614:    234|
+  vitest_output.txt:4615:
+  vitest_output.txt:4616:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[72/78]ΓÄ»
+> vitest_output.txt:4618: FAIL  src/shared/components/admin/custome
+rs/__tests__/QuickOnboardingForm.test.tsx > 
+  vitest_output.txt:4619:QuickOnboardingForm ΓÇö KIT product 
+payment review (Req 4.1) > displays KIT product name, 
+  vitest_output.txt:4620:base price, tax amount (5%), and total 
+price
+  vitest_output.txt:4621:TestingLibraryElementError: Unable to 
+find an element with the text: Γé╣1,404.00. This 
+  vitest_output.txt:4622:could be because the text is broken up by 
+multiple elements. In this case, you can 
+  vitest_output.txt:4623:provide a function for your text matcher 
+to make your matcher more flexible.
+  vitest_output.txt:4624:
+  vitest_output.txt:4625:Ignored nodes: comments, script, style
+  vitest_output.txt:4626:[36m<body>[39m
+> vitest_output.txt:4788: Γ¥» src/shared/components/admin/customers
+/__tests__/QuickOnboardingForm.test.tsx:304:19
+  vitest_output.txt:4789:    302|     // Verify tax amount (5%) is 
+displayed
+  vitest_output.txt:4790:    303|     expect(screen.getByText("Tax 
+(5%)")).toBeInTheDocument();
+  vitest_output.txt:4791:    304|     
+expect(screen.getByText("Γé╣1,404.00")).toBeInTheDocument();
+  vitest_output.txt:4792:       |                   ^
+  vitest_output.txt:4793:    305|
+  vitest_output.txt:4794:    306|     // Verify total price is 
+displayed
+  vitest_output.txt:4795:
+  vitest_output.txt:4796:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[73/78]ΓÄ»
+> vitest_output.txt:4914:src/shared/components/customer/subscriptio
+n/manage/__tests__/billing-client.test.tsx > 
+  vitest_output.txt:4915:BillingClient ΓÇö invoice display (Req 
+11.3) > shows the onboarding invoice amount, date 
+  vitest_output.txt:4916:and PAID status
+  vitest_output.txt:4917:TestingLibraryElementError: Found 
+multiple elements with the text: Γé╣2499.00
+  vitest_output.txt:4918:
+  vitest_output.txt:4919:Here are the matching elements:
+  vitest_output.txt:4920:
+  vitest_output.txt:4921:Ignored nodes: comments, script, style
+  vitest_output.txt:4922:[36m<td[39m
+> vitest_output.txt:5107:src/shared/components/customer/subscriptio
+n/manage/__tests__/billing-client.test.tsx:37:19
+  vitest_output.txt:5108:     35|
+  vitest_output.txt:5109:     36|     // Amount (Req 11.3).
+  vitest_output.txt:5110:     37|     
+expect(screen.getByText("Γé╣2499.00")).toBeInTheDocument();
+  vitest_output.txt:5111:       |                   ^
+  vitest_output.txt:5112:     38|     // Issue date (Req 11.3).
+  vitest_output.txt:5113:     39|     expect(screen.getByText(/01 
+Mar 2024/i)).toBeInTheDocument();
+  vitest_output.txt:5114:
+  vitest_output.txt:5115:ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[78/78]ΓÄ»
+
+

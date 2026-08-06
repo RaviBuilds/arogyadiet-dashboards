@@ -112,8 +112,7 @@ export async function generateInvoiceData(
         base_amount,
         tax_amount,
         tax_percentage,
-        actual_nights_stayed,
-        early_checkout_applied
+        recalculation_applied
       )
     `
     )
@@ -143,9 +142,13 @@ export async function generateInvoiceData(
       return null;
     }
 
-    const nightsForInvoice = stay.early_checkout_applied
-      ? Number(stay.actual_nights_stayed)
-      : Number(stay.total_nights);
+    // Req 8.3, 8.4: the figures always come from the CURRENT live columns —
+    // Save_Stay_Details / Recalculate_Stay is repeatable, so a cached
+    // `actual_nights_stayed` snapshot can go stale between invocations.
+    // `recalculation_applied` is read for PRESENTATION only (labelling the
+    // line item as recalculated), never for selecting between values.
+    const nightsForInvoice = Number(stay.total_nights);
+    const totalForInvoice = Number(payment.amount);
     const endDateForInvoice = addDaysToISODate(
       stay.start_date,
       nightsForInvoice - 1
@@ -156,16 +159,20 @@ export async function generateInvoiceData(
     const accTaxPercentCalc = Number(stay.tax_percentage);
     const accDiscountAmount = 0;
 
+    const accSubtitle = stay.recalculation_applied
+      ? `${nightsForInvoice} night(s) (recalculated): ${stay.start_date} to ${endDateForInvoice}`
+      : `${nightsForInvoice} night(s): ${stay.start_date} to ${endDateForInvoice}`;
+
     const accLineItems: InvoiceLineItem[] = [
       {
         description: `Accommodation Stay — ${stay.stay_type} (${stay.occupancy_type})`,
-        subtitle: `${nightsForInvoice} night(s): ${stay.start_date} to ${endDateForInvoice}`,
+        subtitle: accSubtitle,
         amount: accBaseAmount,
       },
     ];
 
     const accFinalPrice = accBaseAmount - accDiscountAmount;
-    const accTotalAmount = Number(payment.amount);
+    const accTotalAmount = totalForInvoice;
 
     const accIsManual = payment.payment_method === "MANUAL";
     const accMethodLabel = accIsManual ? "Manual" : payment.payment_method;
@@ -207,6 +214,125 @@ export async function generateInvoiceData(
         totalAmount: accTotalAmount,
       },
       isPending: accIsPending,
+    };
+  }
+
+  // ─── ACCOMMODATION_REFUND_INVOICE branch (Req 14.7) ──────────────────────
+  // A second branch beside the final-invoice one above, checked in the same
+  // early block before any addon_orders lookup or ADDON/KIT/MEAL branching.
+  // A Refund_Invoice documents ONE REFUND `stay_payment_transactions` row —
+  // never the stay's totals, running balance, or any other transaction — so
+  // it is fetched by `payment.stay_payment_transaction_id` rather than
+  // derived from `stay.payment_amount` / the GST breakup used above.
+  // `payment.stay_entries` is already populated here: `record_stay_refund_
+  // with_invoice()` writes `stay_entry_id` on the Refund_Invoice row itself,
+  // so the same embed used by the final-invoice branch also resolves
+  // `stay_type` / `occupancy_type` for this branch — no extra join needed for
+  // that part.
+  if (payment.invoice_type === "ACCOMMODATION_REFUND_INVOICE") {
+    const stay = payment.stay_entries;
+
+    if (!stay) {
+      console.error(
+        `Accommodation refund invoice ${paymentId} has no linked stay_entries row`
+      );
+      return null;
+    }
+
+    if (!payment.stay_payment_transaction_id) {
+      console.error(
+        `Accommodation refund invoice ${paymentId} has no linked stay_payment_transaction_id`
+      );
+      return null;
+    }
+
+    // Straightforward second lookup keyed by the FK on `payment`, rather than
+    // an embed on the main query above: `payments` and
+    // `stay_payment_transactions` are linked by TWO distinct FKs
+    // (`payments.stay_payment_transaction_id` → this row, and
+    // `stay_payment_transactions.refund_invoice_payment_id` → back to the
+    // invoice), so a plain second query avoids any relationship-embed
+    // ambiguity.
+    const { data: refundTx, error: refundTxError } = await supabaseAdmin
+      .from("stay_payment_transactions")
+      .select("transaction_type, amount, transaction_date, comment, remark")
+      .eq("id", payment.stay_payment_transaction_id)
+      .single();
+
+    if (refundTxError || !refundTx) {
+      console.error(
+        `Error fetching linked REFUND transaction for invoice ${paymentId}:`,
+        refundTxError
+      );
+      return null;
+    }
+
+    // Flat-amount document: the line item and every pricing figure come from
+    // the transaction's own amount, not from `payment.amount`/`stay.*` — the
+    // two happen to be equal by construction (record_stay_refund_with_invoice
+    // inserts both rows with the same amount in one transaction), but reading
+    // the transaction directly keeps this branch honest about its source of
+    // truth per Req 14.7.
+    const refundAmount = Number(refundTx.amount);
+
+    const refundLineItems: InvoiceLineItem[] = [
+      {
+        description: `Accommodation Stay Refund — ${stay.stay_type} (${stay.occupancy_type})`,
+        subtitle: `Refund dated ${refundTx.transaction_date} · ${refundTx.remark}`,
+        amount: refundAmount,
+      },
+    ];
+
+    const refundIsManual = payment.payment_method === "MANUAL";
+    const refundMethodLabel = refundIsManual
+      ? "Manual"
+      : payment.payment_method;
+    const refundIsPending = payment.status === "PENDING";
+
+    const refundPrimaryAddress =
+      profile?.addresses?.find((a: any) => a.is_primary) ||
+      profile?.addresses?.[0];
+
+    return {
+      paymentId: payment.id,
+      // Visibly distinct from the final invoice's `INV-…` (Req 14.7 design
+      // note) so the two documents are never confused.
+      invoiceNumber: `RFND-${payment.id.split("-")[0].toUpperCase()}`,
+      date: payment.created_at,
+      status: payment.status,
+      paymentMethod: refundMethodLabel,
+      paymentReference: payment.payment_reference,
+      paymentNotes: payment.payment_notes,
+      customerName: customerUser?.full_name || "N/A",
+      customerEmail: customerUser?.email || "",
+      customerMobile: customerUser?.mobile || "",
+      address: refundPrimaryAddress
+        ? {
+            street_1: refundPrimaryAddress.street_1,
+            street_2: refundPrimaryAddress.street_2,
+            landmark: refundPrimaryAddress.landmark,
+            city: refundPrimaryAddress.city,
+            state: refundPrimaryAddress.state,
+            pincode: refundPrimaryAddress.pincode,
+          }
+        : undefined,
+      subscriptionCode: sub?.subscription_code,
+      lineItems: refundLineItems,
+      // A flat-amount document: no base/GST breakup exists for a single
+      // REFUND transaction, so base = final = total = the transaction's own
+      // amount and tax/discount are 0. The existing GST columns are carried
+      // through unchanged (all zero) so the shared InvoiceDocument renderer
+      // still lays out identically for layout parity, per the design note —
+      // it just prints ₹0.00 rows instead of hiding them.
+      pricing: {
+        baseAmount: refundAmount,
+        taxAmount: 0,
+        taxPercent: 0,
+        discountAmount: 0,
+        finalPrice: refundAmount,
+        totalAmount: refundAmount,
+      },
+      isPending: refundIsPending,
     };
   }
 

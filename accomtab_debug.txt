@@ -1,0 +1,313 @@
+﻿
+ RUN  v4.1.9 E:/Local Clients/Next.js/arogyadiet
+
+node.exe : stderr | 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx > 
+AccommodationTab ΓÇö ledger refetch after Record Payment (Req 5.9, 6.6) > refetches the 
+ledger after a SUCCESSFUL payment, with no navigation
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo              : NotSpecified: (stderr     | src/sh...h no navigati    
+on:String) [], RemoteExc    eption
+    + FullyQualifiedErrorId     : NativeCommandError
+ 
+An error occurred in the <StayRecalculationHistoryCard> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+
+stderr | src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx 
+> AccommodationTab ΓÇö ledger refetch after Record Payment (Req 5.9, 6.6) > refetches the 
+ledger after a FAILED payment, with no navigation
+An error occurred in the <StayRecalculationHistoryCard> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+
+stderr | src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx 
+> AccommodationTab ΓÇö ledger refetch after a Stay_Extension (Req 11.4) > refetches the 
+ledger and the stay list after a successful extension, with no navigation
+An error occurred in the <StayRecalculationHistoryCard> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+
+stderr | src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx 
+> AccommodationTab ΓÇö receipt link present per payment history row (Req 10.3) > renders a 
+receipt link for the ledger's transaction
+An error occurred in the <StayRecalculationHistoryCard> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+
+ Γ¥» src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx (4 tests | 4 failed) 5210ms
+     ├ù refetches the ledger after a SUCCESSFUL payment, with no navigation 1501ms
+     ├ù refetches the ledger after a FAILED payment, with no navigation 1230ms
+     ├ù refetches the ledger and the stay list after a successful extension, with no navigation 1193ms
+     ├ù renders a receipt link for the ledger's transaction 1275ms
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Failed Tests 4 ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+
+ FAIL  src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx > 
+AccommodationTab ΓÇö ledger refetch after Record Payment (Req 5.9, 6.6) > refetches the 
+ledger after a SUCCESSFUL payment, with no navigation
+TestingLibraryElementError: Unable to find role="button" and name `/^record payment$/i`
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ Γ¥» waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ Γ¥» node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ Γ¥» renderTabAndWaitForLoad 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx:185:16
+    183|   );
+    184|   // The Record Payment form only renders once the ledger has loaded.
+    185|   await screen.findByRole("button", { name: /^record payment$/i });
+       |                ^
+    186| }
+    187|
+ Γ¥» 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx:202:5
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[1/4]ΓÄ»
+
+ FAIL  src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx > 
+AccommodationTab ΓÇö ledger refetch after Record Payment (Req 5.9, 6.6) > refetches the 
+ledger after a FAILED payment, with no navigation
+TestingLibraryElementError: Unable to find role="button" and name `/^record payment$/i`
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ Γ¥» waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ Γ¥» node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ Γ¥» renderTabAndWaitForLoad 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx:185:16
+    183|   );
+    184|   // The Record Payment form only renders once the ledger has loaded.
+    185|   await screen.findByRole("button", { name: /^record payment$/i });
+       |                ^
+    186| }
+    187|
+ Γ¥» 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx:226:5
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[2/4]ΓÄ»
+
+ FAIL  src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx > 
+AccommodationTab ΓÇö ledger refetch after a Stay_Extension (Req 11.4) > refetches the 
+ledger and the stay list after a successful extension, with no navigation
+TestingLibraryElementError: Unable to find role="button" and name `/^record payment$/i`
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ Γ¥» waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ Γ¥» node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ Γ¥» renderTabAndWaitForLoad 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx:185:16
+    183|   );
+    184|   // The Record Payment form only renders once the ledger has loaded.
+    185|   await screen.findByRole("button", { name: /^record payment$/i });
+       |                ^
+    186| }
+    187|
+ Γ¥» 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx:261:5
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[3/4]ΓÄ»
+
+ FAIL  src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx > 
+AccommodationTab ΓÇö receipt link present per payment history row (Req 10.3) > renders a 
+receipt link for the ledger's transaction
+TestingLibraryElementError: Unable to find role="button" and name `/^record payment$/i`
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ Γ¥» waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ Γ¥» node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ Γ¥» renderTabAndWaitForLoad 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx:185:16
+    183|   );
+    184|   // The Record Payment form only renders once the ledger has loaded.
+    185|   await screen.findByRole("button", { name: /^record payment$/i });
+       |                ^
+    186| }
+    187|
+ Γ¥» 
+src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx:293:5
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[4/4]ΓÄ»
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Unhandled Errors ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+
+Vitest caught 4 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests 
+are not affected.
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Uncaught Exception ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+TypeError: recalculations is not iterable
+ Γ¥» buildRecalculationHistoryRows src/lib/accommodation/recalculationHistory.ts:51:22
+     49| ): RecalculationHistoryRow[] {
+     50|   // Sort a copy by (recalculatedOn, createdAt) ascending ΓÇö oldest firΓÇª
+     51|   const sorted = [...recalculations].sort((a, b) => {
+       |                      ^
+     52|     const dateCompare = a.recalculatedOn.localeCompare(b.recalculatedOΓÇª
+     53|     if (dateCompare !== 0) return dateCompare;
+ Γ¥» StayRecalculationHistoryCard 
+src/shared/components/admin/customers/StayRecalculationHistoryCard.tsx:75:5
+ Γ¥» Object.react_stack_bottom_frame 
+node_modules/react-dom/cjs/react-dom-client.development.js:25904:20
+ Γ¥» renderWithHooks node_modules/react-dom/cjs/react-dom-client.development.js:7662:22
+ Γ¥» updateFunctionComponent 
+node_modules/react-dom/cjs/react-dom-client.development.js:10166:19
+ Γ¥» beginWork node_modules/react-dom/cjs/react-dom-client.development.js:11778:18
+ Γ¥» runWithFiberInDEV node_modules/react-dom/cjs/react-dom-client.development.js:874:13
+ Γ¥» performUnitOfWork node_modules/react-dom/cjs/react-dom-client.development.js:17641:22
+ Γ¥» workLoopSync node_modules/react-dom/cjs/react-dom-client.development.js:17469:41
+ Γ¥» renderRootSync node_modules/react-dom/cjs/react-dom-client.development.js:17450:11
+
+This error originated in 
+"src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx" test 
+file. It doesn't mean the error was thrown inside the file itself, but while it was 
+running.
+The latest test that might've caused the error is "refetches the ledger after a SUCCESSFUL 
+payment, with no navigation". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented 
+test before it was thrown.
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Uncaught Exception ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+TypeError: recalculations is not iterable
+ Γ¥» buildRecalculationHistoryRows src/lib/accommodation/recalculationHistory.ts:51:22
+     49| ): RecalculationHistoryRow[] {
+     50|   // Sort a copy by (recalculatedOn, createdAt) ascending ΓÇö oldest firΓÇª
+     51|   const sorted = [...recalculations].sort((a, b) => {
+       |                      ^
+     52|     const dateCompare = a.recalculatedOn.localeCompare(b.recalculatedOΓÇª
+     53|     if (dateCompare !== 0) return dateCompare;
+ Γ¥» StayRecalculationHistoryCard 
+src/shared/components/admin/customers/StayRecalculationHistoryCard.tsx:75:5
+ Γ¥» Object.react_stack_bottom_frame 
+node_modules/react-dom/cjs/react-dom-client.development.js:25904:20
+ Γ¥» renderWithHooks node_modules/react-dom/cjs/react-dom-client.development.js:7662:22
+ Γ¥» updateFunctionComponent 
+node_modules/react-dom/cjs/react-dom-client.development.js:10166:19
+ Γ¥» beginWork node_modules/react-dom/cjs/react-dom-client.development.js:11778:18
+ Γ¥» runWithFiberInDEV node_modules/react-dom/cjs/react-dom-client.development.js:874:13
+ Γ¥» performUnitOfWork node_modules/react-dom/cjs/react-dom-client.development.js:17641:22
+ Γ¥» workLoopSync node_modules/react-dom/cjs/react-dom-client.development.js:17469:41
+ Γ¥» renderRootSync node_modules/react-dom/cjs/react-dom-client.development.js:17450:11
+
+This error originated in 
+"src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx" test 
+file. It doesn't mean the error was thrown inside the file itself, but while it was 
+running.
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+     Errors  4 errors
+   Start at  09:52:41
+   Duration  22.99s (transform 1.03s, setup 1.82s, import 11.66s, tests 5.21s, environment 3.07s)
+
+The latest test that might've caused the error is "refetches the ledger after a FAILED 
+payment, with no navigation". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented 
+test before it was thrown.
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Uncaught Exception ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+TypeError: recalculations is not iterable
+ Γ¥» buildRecalculationHistoryRows src/lib/accommodation/recalculationHistory.ts:51:22
+     49| ): RecalculationHistoryRow[] {
+     50|   // Sort a copy by (recalculatedOn, createdAt) ascending ΓÇö oldest firΓÇª
+     51|   const sorted = [...recalculations].sort((a, b) => {
+       |                      ^
+     52|     const dateCompare = a.recalculatedOn.localeCompare(b.recalculatedOΓÇª
+     53|     if (dateCompare !== 0) return dateCompare;
+ Γ¥» StayRecalculationHistoryCard 
+src/shared/components/admin/customers/StayRecalculationHistoryCard.tsx:75:5
+ Γ¥» Object.react_stack_bottom_frame 
+node_modules/react-dom/cjs/react-dom-client.development.js:25904:20
+ Γ¥» renderWithHooks node_modules/react-dom/cjs/react-dom-client.development.js:7662:22
+ Γ¥» updateFunctionComponent 
+node_modules/react-dom/cjs/react-dom-client.development.js:10166:19
+ Γ¥» beginWork node_modules/react-dom/cjs/react-dom-client.development.js:11778:18
+ Γ¥» runWithFiberInDEV node_modules/react-dom/cjs/react-dom-client.development.js:874:13
+ Γ¥» performUnitOfWork node_modules/react-dom/cjs/react-dom-client.development.js:17641:22
+ Γ¥» workLoopSync node_modules/react-dom/cjs/react-dom-client.development.js:17469:41
+ Γ¥» renderRootSync node_modules/react-dom/cjs/react-dom-client.development.js:17450:11
+
+This error originated in 
+"src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx" test 
+file. It doesn't mean the error was thrown inside the file itself, but while it was 
+running.
+The latest test that might've caused the error is "refetches the ledger and the stay list 
+after a successful extension, with no navigation". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented 
+test before it was thrown.
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Uncaught Exception ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+TypeError: recalculations is not iterable
+ Γ¥» buildRecalculationHistoryRows src/lib/accommodation/recalculationHistory.ts:51:22
+     49| ): RecalculationHistoryRow[] {
+     50|   // Sort a copy by (recalculatedOn, createdAt) ascending ΓÇö oldest firΓÇª
+     51|   const sorted = [...recalculations].sort((a, b) => {
+       |                      ^
+     52|     const dateCompare = a.recalculatedOn.localeCompare(b.recalculatedOΓÇª
+     53|     if (dateCompare !== 0) return dateCompare;
+ Γ¥» StayRecalculationHistoryCard 
+src/shared/components/admin/customers/StayRecalculationHistoryCard.tsx:75:5
+ Γ¥» Object.react_stack_bottom_frame 
+node_modules/react-dom/cjs/react-dom-client.development.js:25904:20
+ Γ¥» renderWithHooks node_modules/react-dom/cjs/react-dom-client.development.js:7662:22
+ Γ¥» updateFunctionComponent 
+node_modules/react-dom/cjs/react-dom-client.development.js:10166:19
+ Γ¥» beginWork node_modules/react-dom/cjs/react-dom-client.development.js:11778:18
+ Γ¥» runWithFiberInDEV node_modules/react-dom/cjs/react-dom-client.development.js:874:13
+ Γ¥» performUnitOfWork node_modules/react-dom/cjs/react-dom-client.development.js:17641:22
+ Γ¥» workLoopSync node_modules/react-dom/cjs/react-dom-client.development.js:17469:41
+ Γ¥» renderRootSync node_modules/react-dom/cjs/react-dom-client.development.js:17450:11
+
+This error originated in 
+"src/shared/components/admin/customers/__tests__/AccommodationTab.refresh.test.tsx" test 
+file. It doesn't mean the error was thrown inside the file itself, but while it was 
+running.
+The latest test that might've caused the error is "renders a receipt link for the ledger's 
+transaction". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented 
+test before it was thrown.
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+
