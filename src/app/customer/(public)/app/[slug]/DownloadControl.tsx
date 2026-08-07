@@ -60,8 +60,17 @@ declare global {
 export function DownloadControl({ slug, siteKey }: DownloadControlProps) {
   const [state, setState] = useState<DownloadState>({ kind: "LOADING_WIDGET" });
   const [widgetId, setWidgetId] = useState<string | null>(null);
+  const [isIos, setIsIos] = useState(false);
   const widgetContainerRef = useRef<HTMLDivElement>(null);
   const hasRenderedRef = useRef(false);
+
+  // Detect iOS user agent client-side (Req 11.1, 11.2, 11.3)
+  // Server-side sniffing would vary the cached HTML per visitor and defeat revalidate
+  useEffect(() => {
+    const ua = navigator.userAgent.toLowerCase();
+    const isAppleDevice = /iphone|ipad|ipod|mac os/.test(ua);
+    setIsIos(isAppleDevice);
+  }, []);
 
   // Compute whether the download button should be disabled.
   // Enabled only in the READY state (Req 5.4, 5.5).
@@ -126,8 +135,13 @@ export function DownloadControl({ slug, siteKey }: DownloadControlProps) {
         // Handle specific error responses
         if (response.status === 429) {
           // Rate limited (Req 7.8)
-          const retryAfter = data.retryAfterSeconds ?? 60;
-          setState({ kind: "RATE_LIMITED", retryAfterSeconds: retryAfter });
+          // Try to get retry-after from response body first, then from header
+          let retryAfterSeconds = data.retryAfterSeconds ?? 60;
+          const retryAfterHeader = response.headers.get("Retry-After");
+          if (retryAfterHeader) {
+            retryAfterSeconds = parseInt(retryAfterHeader, 10) || retryAfterSeconds;
+          }
+          setState({ kind: "RATE_LIMITED", retryAfterSeconds: retryAfterSeconds });
         } else if (response.status === 403) {
           // Verification failed
           setState({ kind: "CHALLENGE_FAILED" });
@@ -237,6 +251,21 @@ export function DownloadControl({ slug, siteKey }: DownloadControlProps) {
     }
   };
 
+  // iOS user agent suppresses control and widget while leaving release details rendered (Req 11.1, 11.2, 11.3)
+  if (isIos) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+        <p className="text-sm font-medium text-amber-800">
+          <strong>iOS not supported</strong>
+        </p>
+        <p className="mt-1 text-sm text-amber-700">
+          The ArogyaDiet app is available for Android devices only. The iOS version
+          is coming soon. Please check back later.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* Turnstile script loaded with next/script at strategy="afterInteractive" */}
@@ -247,7 +276,7 @@ export function DownloadControl({ slug, siteKey }: DownloadControlProps) {
       />
 
       {/* Widget container - only shown when not in unavailable state */}
-      {state.kind !== "WIDGET_UNAVAILABLE" && (
+      {state.kind !== "WIDGET_UNAVAILABLE" && !isIos && (
         <div
           ref={widgetContainerRef}
           className="flex justify-center"
@@ -272,19 +301,21 @@ export function DownloadControl({ slug, siteKey }: DownloadControlProps) {
       )}
 
       {/* Download button - disabled in every state except READY (Req 5.4, 5.5) */}
-      <Button
-        size="lg"
-        disabled={isButtonDisabled}
-        onClick={handleDownload}
-        aria-describedby="download-state-message"
-        className={cn(
-          "w-full font-semibold",
-          state.kind === "READY" && "bg-primary text-primary-foreground hover:bg-primary/90"
-        )}
-      >
-        {getButtonIcon()}
-        <span className="ml-2">{getButtonLabel()}</span>
-      </Button>
+      {!isIos && (
+        <Button
+          size="lg"
+          disabled={isButtonDisabled}
+          onClick={handleDownload}
+          aria-describedby="download-state-message"
+          className={cn(
+            "w-full font-semibold",
+            state.kind === "READY" && "bg-primary text-primary-foreground hover:bg-primary/90"
+          )}
+        >
+          {getButtonIcon()}
+          <span className="ml-2">{getButtonLabel()}</span>
+        </Button>
+      )}
 
       {/* Unavailable notice when widget cannot be loaded (Req 5.10) */}
       {state.kind === "WIDGET_UNAVAILABLE" && (

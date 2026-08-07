@@ -23,11 +23,14 @@ import { LoginBrandPanel } from "./LoginBrandPanel";
 
 export default function CustomerLogin() {
   return (
-    <div className="relative flex min-h-svh w-full overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50/40 lg:flex-row lg:bg-none">
+    // Mobile keeps its natural flow (the card can grow past the fold when the
+    // keyboard is up); from `lg` the split screen is pinned to exactly one
+    // viewport so neither pane scrolls.
+    <div className="relative flex min-h-svh w-full overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50/40 lg:h-svh lg:min-h-0 lg:flex-row lg:overflow-hidden lg:bg-none">
       <LoginBrandPanel />
 
       {/* ── Right pane: the login card ─────────────────────────────────── */}
-      <div className="relative flex min-h-svh w-full flex-1 flex-col items-center justify-center overflow-hidden p-5 sm:p-6 lg:bg-gradient-to-b lg:from-emerald-50/60 lg:via-white lg:to-emerald-50/40">
+      <div className="relative flex min-h-svh w-full flex-1 flex-col items-center justify-center overflow-hidden p-5 sm:p-6 lg:h-svh lg:min-h-0 lg:bg-gradient-to-b lg:from-emerald-50/60 lg:via-white lg:to-emerald-50/40">
         {/* Ambient background — wellness texture that gives the card something
             to sit against instead of blank whitespace. Stronger than before so
             it actually reads, but still soft enough never to fight the card. */}
