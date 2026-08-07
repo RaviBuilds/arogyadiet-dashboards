@@ -24,6 +24,7 @@ import {
   computeEndDate,
   determineInitialStatus,
 } from "@/lib/accommodation/backdatedStay";
+import { isAwaitingCheckout } from "@/lib/accommodation/stayLifecycle";
 import {
   PAYMENT_TRANSACTION_LABELS,
   type StayStatus,
@@ -194,6 +195,12 @@ export {
   describeBackdatedStayOutcome,
   type BackdatedStayOutcome,
 } from "@/lib/accommodation/backdatedStay";
+
+export {
+  isAwaitingCheckout,
+  isCurrentStay,
+  type StayLifecycleFields,
+} from "@/lib/accommodation/stayLifecycle";
 
 // ---------------------------------------------------------------------------
 // Nights ↔ End Date Conversion (Recalculate_Stay)
@@ -720,11 +727,13 @@ export function shouldSkipBilling(
  * Rules:
  * - Non-billable stays (shared-payment OR zero/null total) show none of
  *   the money-related actions.
- * - showRecordPayment: (ACTIVE or FINISHED+isBackdated), positive total,
- *   non-shared, and balance not yet fully paid.
+ * - showRecordPayment: (ACTIVE, Awaiting_Checkout, or FINISHED+isBackdated),
+ *   positive total, non-shared, and balance not yet fully paid.
  * - showFullyPaidMessage: same status eligibility, positive total, non-shared,
  *   and balance IS fully paid.
- * - showMarkCheckedOut: ACTIVE, non-backdated, non-shared, positive total.
+ * - showMarkCheckedOut: ACTIVE non-backdated, or Awaiting_Checkout
+ *   ({@link isAwaitingCheckout} — FINISHED by the cron with no `checkedOutAt`
+ *   and not backdated); non-shared, positive total.
  *   Disabled (markCheckedOutEnabled false) until BOTH the balance is exactly
  *   zero AND `todayIST` has reached the stay's inclusive end date. The date
  *   condition means a normal checkout can only be actioned from 00:00 IST on
@@ -747,13 +756,15 @@ export function shouldSkipBilling(
  *   `earlyCheckoutApplied` clause and no elapsed-nights clause, so a first
  *   application never suppresses the action and a late amount-only correction
  *   is never blocked (Req 12.1, 12.10).
- * - showMarkAsRefunded: ACTIVE + billable + `balance.refundDue > 0`. Derived
- *   from the *balance* rather than from "a recalculation just happened", which
- *   is what makes it standalone: it survives a page reload and stays true until
- *   the refund is actually recorded (Req 12.12, 14.1).
+ * - showMarkAsRefunded: (ACTIVE or Awaiting_Checkout) + billable +
+ *   `balance.refundDue > 0`. Derived from the *balance* rather than from "a
+ *   recalculation just happened", which is what makes it standalone: it survives
+ *   a page reload and stays true until the refund is actually recorded
+ *   (Req 12.12, 14.1).
  *
- * By construction, showMarkCheckedOut (ACTIVE non-backdated) and
- * showGenerateFinalInvoice (FINISHED + isBackdated) are mutually exclusive.
+ * By construction, showMarkCheckedOut (ACTIVE non-backdated, or
+ * Awaiting_Checkout) and showGenerateFinalInvoice (FINISHED + isBackdated) are
+ * mutually exclusive: `isAwaitingCheckout` excludes backdated stays.
  *
  * Req 5.1, 5.10, 7.1, 7.2, 9.1, 9.2, 9.4, 12.1, 12.10, 12.11, 12.12, 12.13, 14.1
  */
@@ -787,16 +798,25 @@ export function deriveStayActionVisibility(
   const isFinished = stay.status === "FINISHED";
   const isBackdated = stay.isBackdated;
 
+  // Awaiting_Checkout: FINISHED by the daily cron because the end date passed,
+  // but never closed by an admin. Financially it is still an OPEN stay — the
+  // balance may be short or over — so every money affordance an ACTIVE stay
+  // gets applies here too, and Mark as Checked Out is the action that finally
+  // closes it. Treating it as terminal is what made the stay disappear from the
+  // Accommodation tab with its money unsettled.
+  const awaitingCheckout = isAwaitingCheckout(stay);
+
   // Statuses eligible for payment collection / fully-paid display:
-  // ACTIVE, or FINISHED with isBackdated (Req 5.1, 9.1)
-  const paymentEligible = isActive || (isFinished && isBackdated);
+  // ACTIVE, Awaiting_Checkout, or FINISHED with isBackdated (Req 5.1, 9.1)
+  const paymentEligible = isActive || awaitingCheckout || (isFinished && isBackdated);
 
   const showRecordPayment = paymentEligible && !balance.isFullyPaid;
   const showFullyPaidMessage = paymentEligible && balance.isFullyPaid;
 
-  // Mark as Checked Out: ACTIVE, non-backdated (Req 7.1)
-  // Disjoint from Generate Final Invoice by construction (ACTIVE vs FINISHED)
-  const showMarkCheckedOut = isActive && !isBackdated;
+  // Mark as Checked Out: ACTIVE non-backdated, or Awaiting_Checkout (Req 7.1).
+  // Still disjoint from Generate Final Invoice, which is Backdated_Stay-only
+  // and `awaitingCheckout` excludes backdated stays by construction.
+  const showMarkCheckedOut = (isActive && !isBackdated) || awaitingCheckout;
 
   // The stay must have actually reached its inclusive end date. YYYY-MM-DD
   // strings compare correctly lexicographically, so this is true from 00:00 IST
@@ -828,10 +848,13 @@ export function deriveStayActionVisibility(
   // never drift apart (Req 12.1, 12.10).
   const showRecalculateStay = isRecalculationEligible(stay);
 
-  // Mark as refunded: ACTIVE + billable + money owed back. Read off the derived
-  // balance, so it reappears on every reload until the REFUND transaction is
-  // recorded (Req 12.12, 14.1).
-  const showMarkAsRefunded = isActive && balance.refundDue > 0;
+  // Mark as refunded: ACTIVE or Awaiting_Checkout, billable, money owed back.
+  // Read off the derived balance, so it reappears on every reload until the
+  // REFUND transaction is recorded (Req 12.12, 14.1). Awaiting_Checkout is
+  // included because an over-payment is precisely what must be settled BEFORE
+  // checkout — `finalize_stay_checkout` demands an exactly-zero balance, so
+  // without this the stay could never be closed at all.
+  const showMarkAsRefunded = (isActive || awaitingCheckout) && balance.refundDue > 0;
 
   return {
     showRecordPayment,

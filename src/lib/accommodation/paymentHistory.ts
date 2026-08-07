@@ -94,3 +94,123 @@ export function buildExtensionHistoryRows(
     totalAmountAfter: ext.totalAmountAfter,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Per-stay document set (the "Invoices" dialog on Accommodation History)
+// ---------------------------------------------------------------------------
+
+/**
+ * One downloadable money document belonging to a stay.
+ *
+ * Two different backing records sit behind these rows, which is why `kind`
+ * exists rather than a single flat list:
+ *
+ * - RECEIPT — an ADVANCE or PARTIAL_BALANCE_PAYMENT ledger row. Money IN has no
+ *   `payments` row at all; its document is generated on demand from the ledger
+ *   entry by `buildPaymentReceiptData`, so it is keyed on the TRANSACTION id.
+ * - REFUND_INVOICE / FINAL_INVOICE — real `payments` rows, keyed on the PAYMENT
+ *   id, and rendered by the shared invoice route.
+ *
+ * Getting those two keys the wrong way round produces a 404, so the href is
+ * built here once rather than at each call site.
+ */
+export interface StayDocumentRow {
+  /** Stable React key — unique across both id spaces. */
+  key: string;
+  kind: "RECEIPT" | "REFUND_INVOICE" | "FINAL_INVOICE";
+  typeLabel: string;
+  amount: number;
+  /** YYYY-MM-DD for a ledger row; null for the final invoice, which has no ledger date. */
+  date: string | null;
+  /**
+   * Reference shown to the admin. Receipts use the exact `RCPT-` form the
+   * printed receipt carries (see `buildPaymentReceiptData`) so the two match;
+   * invoices use the short id, which is what the Billing tab's Reference column
+   * already shows for the same row. Neither is invented for display only.
+   */
+  reference: string;
+  /**
+   * Portal-relative path. No `/admin` prefix: the middleware prefixes the
+   * portal itself, and the Billing tab's invoice link uses the same shape.
+   */
+  href: string;
+}
+
+/** `RCPT-<first uuid segment, uppercased>` — identical to buildPaymentReceiptData. */
+function receiptNumber(transactionId: string): string {
+  return `RCPT-${transactionId.split("-")[0].toUpperCase()}`;
+}
+
+/**
+ * Builds the full set of downloadable documents for one stay, oldest first,
+ * with the Final_Consolidated_Invoice last because it closes the stay out.
+ *
+ * Every payment the customer made is included, not just the invoiced ones: an
+ * ADVANCE and each PARTIAL_BALANCE_PAYMENT get a receipt, each REFUND gets its
+ * Refund_Invoice, and the stay gets its one final invoice once it exists. A
+ * REFUND whose `refundInvoicePaymentId` is missing is skipped rather than
+ * rendered as a dead link — that can only happen for rows predating the
+ * Refund_Invoice migration.
+ *
+ * Pure function — no side effects, and neither argument is mutated.
+ */
+export function buildStayDocumentRows(
+  transactions: readonly StayPaymentTransaction[],
+  stay: {
+    customerProfileId: string;
+    finalInvoicePaymentId: string | null;
+    paymentAmount: number | null;
+  }
+): StayDocumentRow[] {
+  const base = `/customers/${stay.customerProfileId}/billing`;
+
+  // Same ordering as buildPaymentHistoryRows, so the dialog and the
+  // Accommodation tab's Payment History read in the same sequence.
+  const sorted = [...transactions].sort((a, b) => {
+    const dateCompare = a.transactionDate.localeCompare(b.transactionDate);
+    if (dateCompare !== 0) return dateCompare;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+
+  const rows: StayDocumentRow[] = [];
+
+  for (const tx of sorted) {
+    if (tx.transactionType === "REFUND") {
+      if (!tx.refundInvoicePaymentId) continue;
+      rows.push({
+        key: `refund-${tx.id}`,
+        kind: "REFUND_INVOICE",
+        typeLabel: PAYMENT_TRANSACTION_LABELS.REFUND,
+        amount: tx.amount,
+        date: tx.transactionDate,
+        reference: tx.refundInvoicePaymentId.slice(0, 8),
+        href: `${base}/invoice/${tx.refundInvoicePaymentId}`,
+      });
+      continue;
+    }
+
+    rows.push({
+      key: `receipt-${tx.id}`,
+      kind: "RECEIPT",
+      typeLabel: PAYMENT_TRANSACTION_LABELS[tx.transactionType],
+      amount: tx.amount,
+      date: tx.transactionDate,
+      reference: receiptNumber(tx.id),
+      href: `${base}/stay-receipt/${tx.id}`,
+    });
+  }
+
+  if (stay.finalInvoicePaymentId) {
+    rows.push({
+      key: `final-${stay.finalInvoicePaymentId}`,
+      kind: "FINAL_INVOICE",
+      typeLabel: "Final Invoice",
+      amount: stay.paymentAmount ?? 0,
+      date: null,
+      reference: stay.finalInvoicePaymentId.slice(0, 8),
+      href: `${base}/invoice/${stay.finalInvoicePaymentId}`,
+    });
+  }
+
+  return rows;
+}
