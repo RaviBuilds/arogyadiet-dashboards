@@ -1,55 +1,71 @@
 // src/app/customer/(public)/app/[slug]/page.tsx
 // Download Page for APK distribution — publicly accessible, server-rendered.
 //
-// This page is the public download surface for both the Customer and Rider apps.
-// It renders identical content for anonymous and authenticated visitors (Req 1.4).
+// Visual language is deliberately inherited from the customer login brand panel
+// (`src/app/customer/(auth)/login/LoginBrandPanel.tsx`): deep gradient panel,
+// ambient glow wells, botanical line art, `font-display` headline, glass pills.
+// A visitor arriving here from the QR code on the login screen should feel they
+// stayed inside the same product. The rider page carries the same grammar in the
+// delivery-partner red/amber palette.
 //
-// Key behaviors:
-//   - revalidate = 300: Manifest is read at most once per 5 minutes per slug
-//   - generateStaticParams: Pre-renders both slugs at build time
-//   - generateMetadata: Per-slug page title and description
-//   - params is awaited (Promise in Next.js 16+)
+// LAYOUT — mobile is the primary case, not the fallback. Effectively every
+// visitor arrives by scanning a QR code with a phone camera, so the phone order
+// is the designed order:
+//
+//     badge → headline → device mockup → download card → description → features
+//
+// The visitor learns what the app is, sees it, and can install it before any
+// supporting copy. Desktop keeps the editorial two-column arrangement with the
+// mockup on the right.
+//
+// This is expressed as ONE DOM order re-placed by explicit grid coordinates at
+// `lg`, rather than with `order-*` utilities: the DOM order is the mobile order,
+// so reading order, tab order and visual order agree on the viewport that
+// matters, and the desktop rearrangement is purely presentational.
+//
+// Key behaviours:
+//   - revalidate = 300: manifest is read at most once per 5 minutes per slug
+//   - generateStaticParams: pre-renders both slugs at build time
+//   - generateMetadata: per-slug title and description
+//   - params is awaited (it is a Promise in this Next.js version)
 //   - Invalid slug calls notFound()
 //   - Manifest failure degrades release details without failing the page
-//   - <noscript> block for JavaScript-required message
-//   - Omits download control when Turnstile site key is absent
+//   - <noscript> block carries the JavaScript-required message
+//   - Download control is omitted entirely when the Turnstile site key is absent
 //
 // Requirements: 1.1, 1.2, 1.3, 1.6, 1.7, 5.11, 5.12, 9.8
 
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+
 import { parseAppSlug, type AppSlug } from "@/lib/appDistribution/slug";
 import { readReleaseManifest } from "@/lib/appDistribution/storage";
 import { resolveTurnstileSiteKey } from "@/lib/appDistribution/config";
 import { APP_CONTENT } from "@/lib/appDistribution/content";
 import type { ReleaseManifest } from "@/lib/appDistribution/manifest";
-import { AppDownloadHero, ReleaseDetails, InstallGuide } from "./_components";
+
+import {
+  APP_THEME,
+  AppIntro,
+  AppMockup,
+  AppNarrative,
+  BrandBackdrop,
+  ReleaseDetails,
+} from "./_components";
 import { DownloadControl } from "./DownloadControl";
 
 /**
- * Revalidation interval in seconds.
- * The manifest is read at most once per 5 minutes per slug, rather than on every visit.
- * This prevents scrapers from hammering storage while still allowing new releases
- * to become visible within 5 minutes with no redeployment.
+ * The manifest is read at most once per five minutes per slug rather than on
+ * every visit, so a scraper cannot hammer storage, while a new release still
+ * becomes visible within five minutes with no redeployment.
  */
 export const revalidate = 300;
 
-/**
- * Generate static parameters for both app slugs.
- * Pre-renders the Customer and Rider download pages at build time.
- */
+/** Pre-renders the customer and rider download pages at build time. */
 export async function generateStaticParams(): Promise<{ slug: AppSlug }[]> {
   return [{ slug: "customer" }, { slug: "rider" }];
 }
 
-/**
- * Generate metadata for the download page.
- * Returns title and description based on the app slug.
- *
- * @param props - Page props
- * @param props.params - Route parameters (Promise in Next.js 16+)
- * @returns Page metadata
- */
 export async function generateMetadata({
   params,
 }: {
@@ -59,9 +75,7 @@ export async function generateMetadata({
   const slug = parseAppSlug(slugValue);
 
   if (!slug) {
-    return {
-      title: "App Not Found",
-    };
+    return { title: "App Not Found" };
   }
 
   const content = APP_CONTENT[slug];
@@ -77,142 +91,122 @@ export async function generateMetadata({
   };
 }
 
-/**
- * Props for the AppDownloadPage component.
- */
 interface AppDownloadPageProps {
   params: Promise<{ slug: string }>;
 }
 
-/**
- * AppDownloadPage is the public download surface for APK distribution.
- *
- * This is a React Server Component that:
- *   1. Validates the slug and calls notFound() for invalid values (Req 1.6)
- *   2. Reads the release manifest from storage (may be null on failure)
- *   3. Checks if Turnstile is configured
- *   4. Renders the page with hero, release details, install guide, and download control
- *
- * The page renders identically for anonymous and authenticated visitors (Req 1.4),
- * and excludes all authenticated user data, session identifiers, and PII (Req 1.5).
- *
- * When the manifest is unavailable, ReleaseDetails renders a degraded notice
- * while the rest of the page continues to render (Req 9.8).
- *
- * When the Turnstile site key is absent, the download control is omitted entirely
- * and an unavailable notice is rendered instead (Req 5.12).
- *
- * A <noscript> block informs visitors with JavaScript disabled that they cannot
- * download without JavaScript (Req 5.11).
- *
- * @param props - Page props
- * @param props.params - Route parameters (Promise in Next.js 16+)
- * @returns The download page component
- */
 export default async function AppDownloadPage({
   params,
 }: AppDownloadPageProps): Promise<React.ReactElement> {
-  // Await params (Promise in Next.js 16+)
+  // `params` is a Promise in this Next.js version.
   const { slug: slugValue } = await params;
 
-  // Validate slug - invalid slug returns 404 (Req 1.6)
+  // Invalid slug is a 404, not a 400 — this is a page, not an API (Req 1.6).
   const slug = parseAppSlug(slugValue);
   if (!slug) {
     notFound();
   }
 
-  // Read the release manifest (may be null on failure)
-  // Manifest failure degrades release details without failing the page (Req 9.8)
+  const theme = APP_THEME[slug];
+
+  // A manifest failure degrades the release facts; it never fails the page,
+  // because the app pitch and the download action are still useful (Req 9.8).
   let manifest: ReleaseManifest | null = null;
   try {
     const result = await readReleaseManifest(slug);
     if (result.ok) {
       manifest = result.manifest;
     } else {
-      // Log the failure reason server-side
       console.warn(
         `[AppDownloadPage] Failed to read manifest for ${slug}: ${result.reason} - ${result.detail}`,
       );
     }
   } catch (error) {
-    // Unexpected error - log and continue with null manifest
     console.error(
       `[AppDownloadPage] Unexpected error reading manifest for ${slug}:`,
       error,
     );
   }
 
-  // Check if Turnstile is configured (Req 5.12)
+  // With no site key there is no way to verify a human, so the control is
+  // omitted rather than rendered in a state that cannot succeed (Req 5.12).
   const turnstileSiteKey = resolveTurnstileSiteKey();
-  const isTurnstileConfigured = turnstileSiteKey !== null;
-
-  // Log warning if Turnstile is not configured
-  if (!isTurnstileConfigured) {
+  if (turnstileSiteKey === null) {
     console.warn(
       `[AppDownloadPage] NEXT_PUBLIC_TURNSTILE_SITE_KEY is not configured. Download control will be unavailable for ${slug}.`,
     );
   }
 
-  // Get content for the app
-  const content = APP_CONTENT[slug];
-
   return (
-    <div className="min-h-screen bg-background">
-      {/* Main content container */}
-      <div className="container mx-auto px-4 py-8 lg:py-12">
-        {/* Page header with title */}
-        <header className="mb-8 text-center lg:text-left">
-          <h1 className="text-3xl lg:text-4xl font-bold tracking-tight mb-2">
-            {content.title}
-          </h1>
-        </header>
+    <main
+      className={`relative min-h-svh w-full overflow-hidden ${theme.pageGradient}`}
+    >
+      <BrandBackdrop theme={theme} />
 
-        {/* Main grid layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
-          {/* Left column: Hero and Download Control */}
-          <div className="space-y-6">
-            {/* Hero section with phone mockup and features */}
-            <AppDownloadHero slug={slug} />
+      {/* Bottom padding respects the home-indicator inset so the download card
+          never sits under a gesture bar on a notched phone. */}
+      <div className="relative z-10 mx-auto flex min-h-svh w-full max-w-6xl flex-col justify-center px-5 pt-10 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:px-8 sm:pt-12 lg:px-12 lg:py-16">
+        <div
+          className="
+            reveal-rise
+            grid grid-cols-1 gap-7
+            sm:gap-8
+            lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]
+            lg:items-center lg:gap-x-14 lg:gap-y-8
+          "
+        >
+          {/* 1 — Badge + headline. Desktop: left column, first row. */}
+          <AppIntro slug={slug} theme={theme} />
 
-            {/* Download control or unavailable notice */}
-            {isTurnstileConfigured ? (
-              // Download control with Turnstile widget (Req 5.1, 5.2, 5.3)
-              <div className="p-6 bg-muted/30 rounded-lg border">
+          {/* 2 — Device mockup. Desktop: right column, spanning all three rows
+                  and vertically centred against the editorial column. */}
+          <AppMockup
+            slug={slug}
+            theme={theme}
+            className="lg:col-start-2 lg:row-start-1 lg:row-span-3 lg:self-center"
+          />
+
+          {/* 3 — Download card. Desktop: left column, third row (below copy). */}
+          <div
+            className="
+              flex flex-col gap-4 rounded-2xl bg-white/10 p-4
+              ring-1 ring-white/15 backdrop-blur-md
+              sm:p-5
+              lg:col-start-1 lg:row-start-3 lg:max-w-md
+            "
+          >
+            {turnstileSiteKey !== null ? (
+              <div className={theme.controlChrome}>
                 <DownloadControl slug={slug} siteKey={turnstileSiteKey} />
               </div>
             ) : (
-              // Turnstile not configured - render unavailable notice (Req 5.12)
-              <div className="p-4 bg-muted/50 rounded-lg border border-dashed">
-                <p className="text-sm text-muted-foreground text-center">
-                  Downloads are temporarily unavailable. Please try again later or
-                  contact support.
-                </p>
-              </div>
+              <p className={`text-center text-sm ${theme.bodyText}`}>
+                Downloads are temporarily unavailable. Please try again shortly.
+              </p>
             )}
 
-            {/* JavaScript required notice for noscript visitors (Req 5.11) */}
+            <ReleaseDetails manifest={manifest} theme={theme} />
+
+            {/* Visitors with JavaScript disabled cannot complete the
+                verification step, so tell them plainly (Req 5.11). */}
             <noscript>
-              <div className="p-4 bg-amber-50 dark:bg-amber-950/20 rounded-lg border border-amber-200 dark:border-amber-800">
-                <p className="text-sm text-amber-800 dark:text-amber-200 text-center">
-                  <strong>JavaScript required:</strong> To verify your download
-                  request and protect our bandwidth, this page uses a security
-                  verification step that requires JavaScript. Please enable
-                  JavaScript in your browser settings and refresh the page.
-                </p>
-              </div>
+              <p className={`text-xs leading-relaxed ${theme.bodyText}`}>
+                <strong className="text-white">JavaScript required:</strong>{" "}
+                downloading the app involves a short security check that needs
+                JavaScript. Please enable it in your browser and reload this page.
+              </p>
             </noscript>
           </div>
 
-          {/* Right column: Release Details and Install Guide */}
-          <div className="space-y-6">
-            {/* Release details - handles null manifest gracefully (Req 9.8) */}
-            <ReleaseDetails manifest={manifest} />
-
-            {/* Installation guide */}
-            <InstallGuide />
-          </div>
+          {/* 4 — Description + features. Desktop: left column, second row, so it
+                  sits between the headline and the download card. */}
+          <AppNarrative
+            slug={slug}
+            theme={theme}
+            className="lg:col-start-1 lg:row-start-2"
+          />
         </div>
       </div>
-    </div>
+    </main>
   );
 }

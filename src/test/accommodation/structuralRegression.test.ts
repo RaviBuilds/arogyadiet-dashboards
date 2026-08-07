@@ -104,10 +104,16 @@ describe("Structural invariant: status = 'FINISHED' writes (Req 12.9, 12.13)", (
       }
     }
 
-    // The only SQL file that should contain a non-comment `status = 'FINISHED'`
-    // write is create-stay-payment-lifecycle.sql (inside finalize_stay_checkout).
+    // `status = 'FINISHED'` may appear only inside finalize_stay_checkout() —
+    // originally defined in create-stay-payment-lifecycle.sql and later
+    // REPLACED in update-stay-awaiting-checkout.sql, which widened the gate to
+    // accept an Awaiting_Checkout stay (FINISHED by the cron, never closed by an
+    // admin) and made the checkout stamp land on the stay's end date. Both files
+    // are the same authoritative function, so the invariant is unchanged: no
+    // OTHER SQL may write this status.
     const allowedSqlFiles = new Set([
       "scripts/create-stay-payment-lifecycle.sql",
+      "scripts/update-stay-awaiting-checkout.sql",
     ]);
 
     const unexpected = matches.filter((m) => !allowedSqlFiles.has(m.file));

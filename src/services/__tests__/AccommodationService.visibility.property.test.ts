@@ -5,20 +5,28 @@
 //
 // For any Stay_Entry, derived balance, and final-invoice presence flag,
 // `deriveStayActionVisibility` SHALL report:
-// - `showRecordPayment` true exactly when the stay is billable, its status is
-//   ACTIVE or FINISHED, and Remaining_Balance is greater than zero;
+// - `showRecordPayment` true exactly when the stay is billable, it is ACTIVE,
+//   Awaiting_Checkout, or FINISHED+backdated, and Remaining_Balance is greater
+//   than zero;
 // - `showFullyPaidMessage` true exactly when the stay is billable and
 //   Remaining_Balance is zero;
-// - `showMarkCheckedOut` true exactly when the status is ACTIVE and the stay is
-//   not a Backdated_Stay, with `markCheckedOutEnabled` true only when
-//   Remaining_Balance is exactly zero AND todayIST >= stay.endDate;
+// - `showMarkCheckedOut` true exactly when the stay is billable and either
+//   ACTIVE and not a Backdated_Stay, or Awaiting_Checkout, with
+//   `markCheckedOutEnabled` true only when Remaining_Balance is exactly zero
+//   AND todayIST >= stay.endDate;
 // - `showGenerateFinalInvoice` true exactly when the stay is a billable
 //   Backdated_Stay with Remaining_Balance zero and no existing
 //   Final_Consolidated_Invoice;
 // - `showRecalculateStay` true exactly when the status is ACTIVE and the stay
 //   is billable — independent of `recalculationApplied` (repeatable);
-// - `showMarkAsRefunded` true exactly when ACTIVE + billable + refundDue > 0.
+// - `showMarkAsRefunded` true exactly when (ACTIVE or Awaiting_Checkout) +
+//   billable + refundDue > 0.
 // `showMarkCheckedOut` and `showGenerateFinalInvoice` SHALL never both be true.
+//
+// Awaiting_Checkout — FINISHED with no `checkedOutAt` and not backdated — is the
+// state the daily cron produces when a stay simply reaches its end date. It is
+// financially OPEN, so it carries the same money affordances as an ACTIVE stay
+// and is the second path to Mark as Checked Out.
 
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
@@ -27,6 +35,7 @@ import { deriveStayActionVisibility } from "@/services/AccommodationService";
 import type { StayBalanceSnapshot, StayEntry } from "@/types/accommodation";
 import {
   arbStayEntryWith,
+  arbAwaitingCheckoutStayEntry,
   arbTotalStayAmountOrZero,
   arbTotalStayAmount,
   shiftISODate,
@@ -46,13 +55,32 @@ function isBillable(stay: StayEntry): boolean {
 }
 
 /**
- * Whether payment collection is eligible: billable AND (ACTIVE, or FINISHED+backdated).
- * Matches Req 5.1, 9.1.
+ * Awaiting_Checkout: FINISHED by the cron on its end date, never closed by an
+ * admin (`checkedOutAt` null), and not a Backdated_Stay. Spelled out here
+ * independently of the production `isAwaitingCheckout` so the test states the
+ * rule rather than restating the implementation.
+ */
+function isAwaitingCheckoutStay(stay: StayEntry): boolean {
+  return stay.status === "FINISHED" && !stay.checkedOutAt && !stay.isBackdated;
+}
+
+/**
+ * Whether payment collection is eligible: billable AND (ACTIVE,
+ * Awaiting_Checkout, or FINISHED+backdated). Matches Req 5.1, 9.1.
  */
 function isPaymentEligible(stay: StayEntry): boolean {
   return (
     isBillable(stay) &&
-    (stay.status === "ACTIVE" || (stay.status === "FINISHED" && stay.isBackdated))
+    (stay.status === "ACTIVE" ||
+      isAwaitingCheckoutStay(stay) ||
+      (stay.status === "FINISHED" && stay.isBackdated))
+  );
+}
+
+/** Whether Mark as Checked Out applies: a live non-backdated stay, or one awaiting checkout. */
+function isCheckoutEligible(stay: StayEntry): boolean {
+  return (
+    (stay.status === "ACTIVE" && !stay.isBackdated) || isAwaitingCheckoutStay(stay)
   );
 }
 
@@ -187,7 +215,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
     );
   });
 
-  it("showRecordPayment is true exactly when billable, (ACTIVE or FINISHED+backdated), and balance > 0", () => {
+  it("showRecordPayment is true exactly when billable, (ACTIVE, Awaiting_Checkout, or FINISHED+backdated), and balance > 0", () => {
     fc.assert(
       fc.property(
         arbStayEntryWith({
@@ -214,7 +242,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
     );
   });
 
-  it("showFullyPaidMessage is true exactly when billable, (ACTIVE or FINISHED+backdated), and balance is zero", () => {
+  it("showFullyPaidMessage is true exactly when billable, (ACTIVE, Awaiting_Checkout, or FINISHED+backdated), and balance is zero", () => {
     fc.assert(
       fc.property(
         arbStayEntryWith({
@@ -240,7 +268,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
     );
   });
 
-  it("showMarkCheckedOut is true exactly when ACTIVE, non-backdated, and billable", () => {
+  it("showMarkCheckedOut is true exactly when billable and (ACTIVE non-backdated, or Awaiting_Checkout)", () => {
     fc.assert(
       fc.property(
         arbStayEntryWith({
@@ -257,10 +285,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
             REFERENCE_TODAY_IST,
           );
 
-          const expected =
-            stay.status === "ACTIVE" && !stay.isBackdated;
-
-          expect(result.showMarkCheckedOut).toBe(expected);
+          expect(result.showMarkCheckedOut).toBe(isCheckoutEligible(stay));
         },
       ),
       { numRuns: 100 },
@@ -285,8 +310,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
           );
 
           const expected =
-            stay.status === "ACTIVE" &&
-            !stay.isBackdated &&
+            isCheckoutEligible(stay) &&
             balance.isFullyPaid &&
             REFERENCE_TODAY_IST >= stay.endDate;
 
@@ -357,6 +381,80 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
             expect(on.markCheckedOutEnabled).toBe(true);
             expect(on.markCheckedOutBlockedReason).toBeNull();
           }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  it("an Awaiting_Checkout stay keeps every money affordance and offers checkout, never Generate Final Invoice", () => {
+    fc.assert(
+      fc.property(
+        arbAwaitingCheckoutStayEntry,
+        arbBalance,
+        fc.boolean(),
+        (stay, balance, hasFinalInvoice) => {
+          // A day past the end date: the calendar situation of a stay the cron
+          // has already finished.
+          const today = shiftISODate(stay.endDate, 1);
+          const result = deriveStayActionVisibility(
+            stay,
+            balance,
+            hasFinalInvoice,
+            today,
+          );
+
+          // Settling the balance is available in whichever direction it leans.
+          expect(result.showRecordPayment).toBe(!balance.isFullyPaid);
+          expect(result.showFullyPaidMessage).toBe(balance.isFullyPaid);
+          expect(result.showMarkAsRefunded).toBe(balance.refundDue > 0);
+
+          // Checkout is offered, and gated only on the balance — the end date
+          // has demonstrably been reached.
+          expect(result.showMarkCheckedOut).toBe(true);
+          expect(result.markCheckedOutEnabled).toBe(balance.isFullyPaid);
+          expect(result.markCheckedOutBlockedReason).toBe(
+            balance.isFullyPaid ? null : "BALANCE_OUTSTANDING",
+          );
+
+          // Generate Final Invoice stays Backdated_Stay-only: checkout is what
+          // produces this stay's invoice.
+          expect(result.showGenerateFinalInvoice).toBe(false);
+
+          // Re-pricing remains an action on a live stay only.
+          expect(result.showRecalculateStay).toBe(false);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  it("a FINISHED stay that WAS checked out is closed — no payment, refund, or checkout affordances", () => {
+    fc.assert(
+      fc.property(
+        arbStayEntryWith({
+          status: fc.constant<StayStatus>("FINISHED"),
+          isBackdated: fc.constant(false),
+          checkedOut: fc.constant(true),
+          sharedPayment: fc.constant(false),
+          totalStayAmount: arbTotalStayAmount,
+        }),
+        arbBalance,
+        fc.boolean(),
+        (stay, balance, hasFinalInvoice) => {
+          const result = deriveStayActionVisibility(
+            stay,
+            balance,
+            hasFinalInvoice,
+            REFERENCE_TODAY_IST,
+          );
+
+          expect(result.showRecordPayment).toBe(false);
+          expect(result.showFullyPaidMessage).toBe(false);
+          expect(result.showMarkAsRefunded).toBe(false);
+          expect(result.showMarkCheckedOut).toBe(false);
+          expect(result.markCheckedOutEnabled).toBe(false);
+          expect(result.showGenerateFinalInvoice).toBe(false);
         },
       ),
       { numRuns: 100 },
@@ -469,7 +567,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
     );
   });
 
-  it("showMarkAsRefunded is true iff ACTIVE + billable + refundDue > 0 (Req 14.1)", () => {
+  it("showMarkAsRefunded is true iff (ACTIVE or Awaiting_Checkout) + billable + refundDue > 0 (Req 14.1)", () => {
     fc.assert(
       fc.property(
         arbStayEntryWith({
@@ -487,7 +585,7 @@ describe("Feature: accommodation-payment-lifecycle, Property 10: Stay action vis
           );
 
           const expected =
-            stay.status === "ACTIVE" &&
+            (stay.status === "ACTIVE" || isAwaitingCheckoutStay(stay)) &&
             isBillable(stay) &&
             balance.refundDue > 0;
 

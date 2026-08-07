@@ -745,6 +745,14 @@ export interface StayEntryOptions {
   totalNights?: fc.Arbitrary<number>;
   /** Whether a Final_Consolidated_Invoice already exists (Req 8.6, 9.2). */
   hasFinalInvoice?: fc.Arbitrary<boolean>;
+  /**
+   * Whether an admin has actually closed the stay (`checkedOutAt` stamped).
+   * Independent axis, and only meaningful for a FINISHED non-backdated stay:
+   * the daily cron marks a stay FINISHED the moment its end date passes without
+   * stamping anything, so FINISHED + `checkedOutAt` null (Awaiting_Checkout) is
+   * a real and common state that must be generated, not assumed away.
+   */
+  checkedOut?: fc.Arbitrary<boolean>;
 }
 
 /**
@@ -762,6 +770,9 @@ export interface StayEntryOptions {
  *   `originalTotalAmount`, and null on both when it is false
  * - `finalInvoicePaymentId` and `finalInvoiceGeneratedAt` are set together, only
  *   for a billable stay, and `finalInvoiceError` only ever appears without them
+ * - `checkedOutAt` is stamped only for a FINISHED non-backdated stay, and within
+ *   that set it is a free axis, so Awaiting_Checkout (FINISHED with the stamp
+ *   still null) is part of the space
  *
  * (Req 3.1, 4.7, 8.2, 8.7, 12.6, 12.15)
  */
@@ -789,6 +800,7 @@ export function arbStayEntryWith(
     totalStayAmount = arbTotalStayAmountOrZero,
     totalNights = arbTotalNights,
     hasFinalInvoice = fc.boolean(),
+    checkedOut = fc.boolean(),
   } = options;
 
   return fc
@@ -824,6 +836,7 @@ export function arbStayEntryWith(
       ageSeconds: fc.integer({ min: 0, max: 100_000 }),
       /** Stale night count that differs from totalNights when recalculation is applied. */
       staleNightsDelta: fc.integer({ min: 1, max: 60 }),
+      checkedOut,
     })
     .map((seed): StayEntry => {
       const startDate = seed.isBackdated
@@ -840,7 +853,14 @@ export function arbStayEntryWith(
       const isBillable = paymentAmount !== null && paymentAmount > 0;
       const invoicePresent = seed.hasFinalInvoice && isBillable;
 
-      const checkedOut = seed.status === "FINISHED" && !seed.isBackdated;
+      // Only a FINISHED non-backdated stay can carry a checkout stamp — a
+      // Backdated_Stay is born FINISHED and closes out through Generate Final
+      // Invoice, and nothing else has been through checkout at all. Within that
+      // set the stamp is a free axis, so FINISHED + null (Awaiting_Checkout:
+      // the cron finished it, no admin closed it) is generated alongside
+      // FINISHED + stamped (genuinely closed).
+      const checkedOutStamped =
+        seed.status === "FINISHED" && !seed.isBackdated && seed.checkedOut;
 
       // `actualNightsStayed` is deliberately stale when
       // `recalculationApplied` is true — tests must prove no code relies
@@ -885,7 +905,9 @@ export function arbStayEntryWith(
             : null,
         // Independent axis (task 14.3): decoupled from earlyCheckoutApplied.
         recalculationApplied: seed.recalculationApplied,
-        checkedOutAt: checkedOut ? fixtureTimestamp(seed.ageSeconds) : null,
+        checkedOutAt: checkedOutStamped
+          ? fixtureTimestamp(seed.ageSeconds)
+          : null,
         finalInvoicePaymentId: invoicePresent ? fixtureUuid(55, 1) : null,
         finalInvoiceGeneratedAt: invoicePresent
           ? fixtureTimestamp(seed.ageSeconds + 10)
@@ -910,6 +932,21 @@ export const arbActiveBillableStayEntry: fc.Arbitrary<StayEntry> =
     earlyCheckoutApplied: fc.constant(false),
     totalStayAmount: arbTotalStayAmount,
     hasFinalInvoice: fc.constant(false),
+  });
+
+/**
+ * An Awaiting_Checkout stay: FINISHED by the daily cron because its end date
+ * passed, never closed by an admin (`checkedOutAt` null), and not backdated.
+ * Billable, so every money affordance is in play — this is the stay that still
+ * needs its balance settled before Mark as Checked Out can fire.
+ */
+export const arbAwaitingCheckoutStayEntry: fc.Arbitrary<StayEntry> =
+  arbStayEntryWith({
+    status: fc.constant<StayStatus>("FINISHED"),
+    isBackdated: fc.constant(false),
+    checkedOut: fc.constant(false),
+    sharedPayment: fc.constant(false),
+    totalStayAmount: arbTotalStayAmount,
   });
 
 /** A Backdated_Stay: FINISHED at creation, `isBackdated` set (Req 3.1, 9.1). */

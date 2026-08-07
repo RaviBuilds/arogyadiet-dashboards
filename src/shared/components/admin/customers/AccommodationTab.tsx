@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { format, isValid } from "date-fns";
 import { getAllStaysAction } from "@/actions/stayActions";
+import { isAwaitingCheckout } from "@/lib/accommodation/stayLifecycle";
 import type {
   StayEntry,
   StayLedgerView,
@@ -52,6 +54,10 @@ function getStatusBadgeClasses(status: string): string {
       return "border-emerald-500 text-emerald-600 bg-emerald-50";
     case "PENDING":
       return "border-amber-500 text-amber-600 bg-amber-50";
+    case "AWAITING CHECKOUT":
+      // Deliberately louder than FINISHED's grey: this stay is waiting on the
+      // admin, not filed away.
+      return "border-orange-500 text-orange-700 bg-orange-50";
     case "FINISHED":
       return "border-slate-300 text-slate-600 bg-slate-50";
     case "EXPIRED":
@@ -79,6 +85,8 @@ interface AccommodationTabProps {
 }
 
 export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
+  const router = useRouter();
+
   // ── All stays for this customer (every status) ──
   const [allStays, setAllStays] = useState<StayEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,24 +130,39 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerProfileId]);
 
-  // Derive the truly-active stay (for the overview card and health logs) the
-  // same way getActiveStayAction did: ACTIVE first, else the earliest PENDING.
+  // Derive the stay that owns the "Current Stay" surface.
+  //
+  // ACTIVE first, then Awaiting_Checkout, then the earliest PENDING. The middle
+  // rung is the one that used to be missing: the daily cron flips a stay to
+  // FINISHED the moment its end date passes, which stamps no `checkedOutAt`,
+  // settles no money, and generates no invoice. Such a stay still needs the
+  // admin to collect the remainder or refund the excess and then press Mark as
+  // Checked Out, so it has to keep the full live treatment — dates, payment
+  // figures, and actions — instead of vanishing into "No current stay" with its
+  // money open. It outranks a PENDING stay because it is the one blocking work.
+  // `allStays` is already start_date-descending, so `find` picks the most recent.
   const activeStay = allStays.find((s) => s.status === "ACTIVE") ?? null;
+  const awaitingCheckoutStay = allStays.find(isAwaitingCheckout) ?? null;
   const earliestPendingStay =
     allStays
       .filter((s) => s.status === "PENDING")
       .sort((a, b) => a.startDate.localeCompare(b.startDate))[0] ?? null;
-  const currentStay = activeStay ?? earliestPendingStay;
+  const currentStay = activeStay ?? awaitingCheckoutStay ?? earliestPendingStay;
 
-  // Default the payment-panel selection: prefer the ACTIVE stay, otherwise
-  // the most recent Backdated_Stay still awaiting a final invoice. Keep an
-  // existing selection if it still exists.
+  // Default the payment-panel selection, in the same order of urgency: the
+  // ACTIVE stay, then one awaiting checkout, then the most recent
+  // Backdated_Stay still awaiting a final invoice. Keep an existing selection
+  // if it still exists.
   useEffect(() => {
     if (selectedStayId && allStays.some((s) => s.id === selectedStayId)) {
       return;
     }
     if (activeStay) {
       setSelectedStayId(activeStay.id);
+      return;
+    }
+    if (awaitingCheckoutStay) {
+      setSelectedStayId(awaitingCheckoutStay.id);
       return;
     }
     const backdatedNeedingAttention = allStays.find(
@@ -176,22 +199,33 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
     bumpRefresh();
   };
 
+  // Checkout, final-invoice generation, and refunds each write a `payments`
+  // row. Those rows are read by the Billing tab, which is rendered from props
+  // fetched during the page's SERVER render — not by this tab. Refetching stays
+  // and the ledger only refreshes this subtree, so without a route refresh the
+  // Billing tab keeps showing a snapshot taken before the invoice existed, and
+  // the admin is told "invoice generated" while Payment History shows nothing.
+  // `router.refresh()` re-runs the server render, which is the same convention
+  // every other mutation in Customer360Dashboard already follows.
   const handleRefundSuccess = (result: {
     balance: StayBalanceSnapshot;
     refundInvoicePaymentId: string;
   }) => {
     setBalanceOverride(result.balance);
     bumpRefresh();
+    router.refresh();
   };
 
   const handleCheckedOut = () => {
     bumpRefresh();
     fetchAllStays();
+    router.refresh();
   };
 
   const handleInvoiceGenerated = () => {
     bumpRefresh();
     fetchAllStays();
+    router.refresh();
   };
 
   // Save Stay Details never transitions Stay_Status and never generates a
@@ -253,8 +287,20 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
     );
   }
 
-  // Determine if "Add New Stay" is allowed (no ACTIVE or PENDING stay)
-  const canAddNewStay = !currentStay || (currentStay.status !== "ACTIVE" && currentStay.status !== "PENDING");
+  // Is the Current Stay one the cron finished but nobody closed? Drives the
+  // card's wording, its badge, and the callout that tells the admin what is
+  // left to do.
+  const currentStayAwaitingCheckout = !!currentStay && isAwaitingCheckout(currentStay);
+
+  // "Add New Stay" is allowed only when nothing occupies the Current Stay
+  // surface. An Awaiting_Checkout stay counts as occupying it: the previous
+  // guest's books are still open, and starting a new stay on top of that is how
+  // an unsettled balance gets forgotten.
+  const canAddNewStay =
+    !currentStay ||
+    (currentStay.status !== "ACTIVE" &&
+      currentStay.status !== "PENDING" &&
+      !currentStayAwaitingCheckout);
 
   const selectedStay = currentLedger?.stay ?? null;
   const visibility = currentLedger?.visibility ?? null;
@@ -291,7 +337,9 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
         <div>
           <h2 className="text-xl font-bold tracking-tight">Current Stay</h2>
           <p className="text-sm text-muted-foreground">
-            Active or upcoming stay details for this customer.
+            {currentStayAwaitingCheckout
+              ? "This stay has ended but has not been checked out yet."
+              : "Active or upcoming stay details for this customer."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -344,13 +392,42 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
         <Card className="border-primary/20 bg-primary/5">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Active Stay Overview</CardTitle>
-              <Badge variant="outline" className={getStatusBadgeClasses(currentStay.status)}>
-                {currentStay.status}
+              <CardTitle className="text-lg">
+                {currentStayAwaitingCheckout
+                  ? "Stay Overview — Awaiting Checkout"
+                  : "Active Stay Overview"}
+              </CardTitle>
+              {/* The raw status would read FINISHED here, which is misleading:
+                  the stay is over on the calendar but still open on the books.
+                  The badge names the state the admin has to act on. */}
+              <Badge
+                variant="outline"
+                className={getStatusBadgeClasses(
+                  currentStayAwaitingCheckout ? "AWAITING CHECKOUT" : currentStay.status
+                )}
+              >
+                {currentStayAwaitingCheckout ? "AWAITING CHECKOUT" : currentStay.status}
               </Badge>
             </div>
           </CardHeader>
           <CardContent>
+            {currentStayAwaitingCheckout && (
+              <div className="mb-4 flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-3">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
+                <div className="text-sm text-orange-900">
+                  <p className="font-medium">
+                    Ended on {formatDate(currentStay.endDate)} — checkout still
+                    pending.
+                  </p>
+                  <p className="mt-0.5 text-orange-800">
+                    Settle the balance first (collect what is owed, or refund the
+                    excess), then use Mark as Checked Out below. The checkout will
+                    be recorded on {formatDate(currentStay.endDate)}, the stay&apos;s
+                    end date.
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="flex items-start gap-3">
                 <Home className="h-5 w-5 text-muted-foreground mt-0.5" />
@@ -548,7 +625,9 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
               <p className="text-sm text-muted-foreground">
                 {selectedStay && selectedStay.id !== currentStay?.id
                   ? `Viewing the stay from ${formatDate(selectedStay.startDate)} to ${formatDate(selectedStay.endDate)}.`
-                  : "Payment history and checkout actions for the current stay. Balance is shown in the overview above."}
+                  : currentStayAwaitingCheckout
+                    ? "Settle the balance here, then mark the stay as checked out. Balance is shown in the overview above."
+                    : "Payment history and checkout actions for the current stay. Balance is shown in the overview above."}
               </p>
             </div>
             {visibility?.showMarkAsRefunded && (

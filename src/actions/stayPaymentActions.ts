@@ -107,6 +107,9 @@ function mapTransactionRow(row: StayPaymentTransactionRow): StayPaymentTransacti
     remark: row.remark,
     createdBy: row.created_by,
     createdAt: row.created_at,
+    // The repository already selects this column; dropping it here left every
+    // REFUND row on the client with no way to reach its Refund_Invoice.
+    refundInvoicePaymentId: row.refund_invoice_payment_id,
   };
 }
 

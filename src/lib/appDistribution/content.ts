@@ -63,8 +63,8 @@ export const APP_CONTENT: Record<AppSlug, AppContent> = {
       },
     ],
     screenshot: {
-      src: "/app-screenshots/customer.svg",
-      alt: "ArogyaDiet Customer App showing subscription management screen with meal plan details and delivery tracking",
+      src: "/app-screenshots/customer.png",
+      alt: "ArogyaDiet Customer App home screen showing a 30-day plan at 100 percent complete, today's meal with a photo, and a notice that a delivery partner has been assigned",
     },
   },
   rider: {
@@ -99,8 +99,8 @@ export const APP_CONTENT: Record<AppSlug, AppContent> = {
       },
     ],
     screenshot: {
-      src: "/app-screenshots/rider.svg",
-      alt: "ArogyaDiet Rider App showing route overview screen with delivery stops list and real-time GPS tracking",
+      src: "/app-screenshots/rider.png",
+      alt: "ArogyaDiet Rider App home screen showing an On Duty toggle with background tracking active, today's overview of pending drops and estimated payout, and a Start Route button",
     },
   },
 };

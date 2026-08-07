@@ -179,6 +179,20 @@ interface CustomerAddress {
   updated_at?: string;
 }
 
+/**
+ * Human-readable names for `payments.invoice_type`. Unmapped values fall back to
+ * the raw enum, which is how the accommodation types used to surface — a row
+ * reading "ACCOMMODATION_FINAL_INVOICE" in the Plan / Type column.
+ */
+const INVOICE_TYPE_LABELS: Record<string, string> = {
+  SUBSCRIPTION: "Meal Subscription",
+  ADDON: "Shop Order",
+  ACCOMMODATION_STAY: "Accommodation Stay",
+  ACCOMMODATION_EXTENSION: "Stay Extension",
+  ACCOMMODATION_FINAL_INVOICE: "Accommodation — Final Invoice",
+  ACCOMMODATION_REFUND_INVOICE: "Accommodation — Refund",
+};
+
 interface BillingPayment {
   id: string;
   amount: number | string;
@@ -1312,11 +1326,9 @@ export function Customer360Dashboard({
                             ? payment.subscriptions[0]
                             : payment.subscriptions;
                           const invoiceTypeLabel =
-                            payment.invoice_type === "ADDON"
-                              ? "Shop Order"
-                              : payment.invoice_type === "SUBSCRIPTION"
-                                ? "Meal Subscription"
-                                : payment.invoice_type ?? null;
+                            INVOICE_TYPE_LABELS[payment.invoice_type ?? ""] ??
+                            payment.invoice_type ??
+                            null;
                           const planName =
                             subscription?.subscription_plans?.name ??
                             invoiceTypeLabel ??

@@ -24,6 +24,7 @@ import {
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent } from "@/shared/components/ui/card";
+import { StayDocumentsDialog } from "./StayDocumentsDialog";
 import {
   Table,
   TableBody,
@@ -347,6 +348,14 @@ export function CustomerHistoryTab({
             <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Status
             </TableHead>
+            {/* Accommodation is the only category whose money is split across
+                several documents — a receipt per payment plus the invoices — so
+                it is the only one that needs a way to reach them all. */}
+            {category === "ACCOMMODATION" && (
+              <TableHead className="text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Invoices
+              </TableHead>
+            )}
             <TableHead className="pr-6 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Report
             </TableHead>
@@ -389,6 +398,17 @@ export function CustomerHistoryTab({
               <TableCell>
                 <StatusBadge status={row.status} />
               </TableCell>
+              {category === "ACCOMMODATION" && (
+                <TableCell className="text-center">
+                  {/* For accommodation rows `row.id` IS the stay id — the same
+                      value the report route is keyed on. */}
+                  <StayDocumentsDialog
+                    stayId={row.id}
+                    stayLabel={row.title}
+                    stayPeriod={`${formatDate(row.startDate)} – ${formatDate(row.endDate)}`}
+                  />
+                </TableCell>
+              )}
               <TableCell className="pr-6 text-center">
                 <ReportDownloadButton row={row} />
               </TableCell>

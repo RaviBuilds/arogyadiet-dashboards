@@ -138,10 +138,16 @@ export async function extendStayAction(
 }
 
 /**
- * Marks an ACTIVE stay as checked out (FINISHED).
+ * Marks a stay as checked out (FINISHED).
  *
- * Server-side gate: rejects an outstanding balance and a non-ACTIVE stay
- * regardless of client-side button state.
+ * Applies to an ACTIVE stay and to an Awaiting_Checkout one — FINISHED by the
+ * daily cron because its end date passed, but never closed by an admin, so its
+ * money is still unsettled. For that second case `finalize_stay_checkout`
+ * records the checkout at the stay's end date rather than at now(), because that
+ * is the day the guest actually left; only the paperwork is late.
+ *
+ * Server-side gate: rejects an outstanding balance and a stay that is not
+ * checkout-eligible, regardless of client-side button state.
  *
  * Flow: admin auth → call AccommodationService.checkoutStay → map reason
  * to user-facing error or return the outcome.
@@ -202,7 +208,10 @@ export async function markStayCheckedOutAction(
           error: `The full balance must be paid before checkout. Outstanding: ₹${result.remainingBalance ?? 0}.`,
         };
       case "NOT_ACTIVE":
-        return { error: "Checkout applies only to active stays." };
+        return {
+          error:
+            "This stay cannot be checked out — it has already been closed, or it never started.",
+        };
       case "NOT_FOUND":
         return { error: "Stay entry not found." };
       default:
