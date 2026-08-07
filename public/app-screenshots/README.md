@@ -1,57 +1,50 @@
 # App Screenshots
 
-This directory contains screenshots for the ArogyaDiet mobile apps displayed on the download pages.
+Device mockups shown on the public APK download pages.
 
-## Current Files
+## Current files
 
-| File | Description | Size |
-|------|-------------|------|
-| `customer.svg` | Placeholder screenshot of the Customer App | 375x812px |
-| `rider.svg` | Placeholder screenshot of the Rider App | 375x812px |
+| File | Description | Intrinsic size |
+|------|-------------|----------------|
+| `customer.png` | Customer App home screen | 1857 x 3096 |
+| `rider.png` | Rider App on-duty home screen | 1857 x 3096 |
 
-## Replacing Placeholders
+## Important: the artwork includes its own device frame
 
-The current files are SVG placeholders. Replace them with actual app screenshots:
+Both files are **pre-rendered 3D device mockups on a transparent background** — the
+phone bezel, notch and shadow are baked into the image. `AppMockup.tsx` therefore
+renders the image bare, with only a soft halo behind it.
 
-### For PNG Screenshots (Recommended for production)
-1. Capture screenshots from the actual apps
-2. Save as `customer.png` and `rider.png` (375x812px recommended)
-3. Update `src/lib/appDistribution/content.ts` to reference `.png` files:
-   - Change `/app-screenshots/customer.svg` to `/app-screenshots/customer.png`
-   - Change `/app-screenshots/rider.svg` to `/app-screenshots/rider.png`
-4. Delete the SVG placeholder files
+If you replace these with **flat screenshots** (no frame, opaque background), the
+page will look wrong: a bare rectangle floating on the gradient. In that case
+either re-render the screenshot into a device frame first, or reintroduce a CSS
+phone frame in `AppMockup.tsx`.
 
-### Screenshot Guidelines
+## Replacing them
 
-#### Customer App Screenshot
-Should showcase one of:
-- Subscription management screen with meal plan details
-- Delivery tracking view
-- Pause/resume functionality
-- Address change feature
+1. Export the new mockup as a transparent PNG at roughly 1857 x 3096 (any
+   9:19.5-ish phone ratio works; the component reserves the aspect ratio from the
+   `width`/`height` props, so update those if your ratio differs).
+2. Save as `customer.png` / `rider.png` — same filenames, no spaces. Spaces in a
+   filename become `%20` in the URL and are easy to get wrong.
+3. Update the `alt` text in `src/lib/appDistribution/content.ts` if the mockup now
+   shows a different screen. The alt text describes the screen content, so a stale
+   description is worse than a generic one.
 
-#### Rider App Screenshot
-Should showcase one of:
-- Route overview with delivery stops list
-- GPS duty tracking screen
-- Delivery confirmation interface
-- Payout summary view
+No `next.config.ts` change is needed — these are local static files, and the
+`images.remotePatterns` whitelist only applies to remote sources.
 
-## Technical Requirements
+## Where they are used
 
-- **Format**: PNG (recommended) or SVG
-- **Size**: Mobile aspect ratio (9:19.5 or similar), optimized for phone frame display
-- **Quality**: High resolution, clear text, representative of actual app UI
-- **Content**: Use realistic but non-sensitive sample data
+Referenced from `src/lib/appDistribution/content.ts`, rendered by
+`src/app/customer/(public)/app/[slug]/_components/AppMockup.tsx` on:
 
-## Usage
+- `/app/customer`
+- `/app/rider`
 
-These images are referenced in `src/lib/appDistribution/content.ts` and displayed in the CSS phone frame on the download pages at:
-- `/app/customer` - Customer app download page
-- `/app/rider` - Rider app download page
+## Guidelines
 
-## Notes
-
-- These are local static files to avoid touching `next.config.ts` remote image patterns
-- The Supabase bucket is now private, so remote URLs would not work
-- SVG placeholders render immediately; replace with actual screenshots before production
+- Use realistic but non-sensitive sample data. These pages are public and
+  unauthenticated, so anything visible in the mockup is effectively published.
+- Keep the important content in the upper two thirds — the mockup is scaled to fit
+  the column and the lower portion reads as secondary.

@@ -25,14 +25,22 @@ export default async function RiderLogin() {
         </p>
       </div>
 
-      {/* QR code panel — sibling panel for large viewports only (Req 13.3-13.6) */}
-      {/* Rider login has no equivalent desktop panel to nest inside, */}
-      {/* so this panel carries its own hidden lg:flex (Req 13.2) */}
-      <div className="hidden lg:flex relative z-10 ml-12 flex-col items-center justify-center">
+      {/* QR code panel — large viewports only (Req 13.2, 13.3-13.6).
+          Positioned rather than in flow: as an in-flow sibling of the login card
+          inside a `justify-center` row, it centred the card-plus-QR pair as a
+          group and left the login card visibly off-centre. Taking it out of flow
+          keeps the card centred on the viewport, which is the axis the eye
+          actually reads, while the code sits alongside it.
+
+          At the `lg` breakpoint the centred 400px card ends around x=712 and this
+          panel starts near x=772, so the two never collide. */}
+      <div className="absolute right-6 top-1/2 z-10 hidden -translate-y-1/2 lg:block xl:right-12">
         <AppDownloadQrBlock
           slug="rider"
           size={160}
-          className="rounded-xl border border-slate-200 bg-white/80 p-6 text-slate-700 shadow-sm backdrop-blur-sm"
+          showUrl={false}
+          className="rounded-2xl border border-slate-200/70 bg-white/80 p-6 text-center text-slate-600 shadow-sm backdrop-blur-sm"
+          frameClassName="mx-auto"
         />
       </div>
     </div>
