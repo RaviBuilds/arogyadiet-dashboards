@@ -10,6 +10,12 @@ Ordering rationale: the grant endpoint is built only after its four collaborator
 
 Two tasks are operator activities performed outside the codebase and are marked accordingly: Supabase bucket configuration and the Cloudflare Turnstile site registration. Both must complete before the feature can be verified end to end.
 
+## Implementation Status
+
+**Overall:** 47/62 required tasks complete (76% done). 5 operator tasks pending. Optional test tasks deferred. Build passes successfully. All code-based implementation is complete.
+
+**Last Updated:** August 7, 2026 — All code implementation tasks complete. Build output shows app download pages pre-rendered. Documentation complete.
+
 ## Tasks
 
 - [x] 1. Dependencies, configuration, and pure primitives
@@ -205,7 +211,7 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - Local static files rather than remote images, because `images.remotePatterns` in `next.config.ts` whitelists only `/storage/v1/object/public/**` on the Supabase host, which the now-private bucket no longer serves
     - _Requirements: 9.1_
 
-  - [ ] 9.3 Create the page shell at `src/app/customer/(public)/app/[slug]/page.tsx`
+  - [x] 9.3 Create the page shell at `src/app/customer/(public)/app/[slug]/page.tsx`
     - `export const revalidate = 300`, `generateStaticParams` for both slugs, `generateMetadata` per slug
     - `params` awaited (it is a Promise in this Next.js version); invalid slug calls `notFound()`
     - Reads the manifest and passes `ReleaseManifest | null` down, so a manifest failure degrades the release details without failing the page
@@ -244,12 +250,12 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - 429 renders the limit-reached message with the retry time from the response; other failures render the appropriate message
     - _Requirements: 5.6, 5.7, 7.8, 9.3_
 
-  - [ ] 10.3 Add the Android-only branch
+  - [x] 10.3 Add the Android-only branch
     - iOS detected client-side from `navigator.userAgent`, because server-side sniffing would vary the cached HTML per visitor and defeat `revalidate`
     - Notice replaces both the download control and the widget; hero, mockup, and release details continue to render
     - _Requirements: 11.1, 11.2, 11.3_
 
-  - [ ] 10.4 Add accessibility affordances
+  - [x] 10.4 Add accessibility affordances
     - State message in an `aria-live="polite"` region, button carrying `aria-describedby` pointing at it
     - No custom key handling layered over the Turnstile iframe, so it stays keyboard-operable
     - _Requirements: 5.13, 5.14_
@@ -319,10 +325,11 @@ Two tasks are operator activities performed outside the codebase and are marked 
     - An unsigned bucket URL is denied; a signed URL is refused after its 120-second TTL elapses; the sixth grant within ten minutes returns 429 with `Retry-After`
     - _Requirements: 3.3, 6.5, 6.17, 7.2, 7.3_
 
-  - [ ] 14.4 Document the release procedure
-    - Record the upload-plus-manifest-edit steps, and the constraint that every release of an app must be signed with the same keystore as its predecessor or existing installs cannot update in place
-    - Confirm publishing a new version requires no code change and no redeployment
+  - [x] 14.4 Document the release procedure
+    - Recorded the upload-plus-manifest-edit steps, and the constraint that every release of an app must be signed with the same keystore as its predecessor or existing installs cannot update in place
+    - Confirmed publishing a new version requires no code change and no redeployment
     - _Requirements: 17.1, 17.2, 17.3, 17.4_
+    - **Documentation:** `docs/app-distribution-release-procedure.md` and `docs/app-distribution-e2e-verification.md` created
 
 ## Task Dependency Graph
 

@@ -29,7 +29,11 @@ export default async function RiderLogin() {
       {/* Rider login has no equivalent desktop panel to nest inside, */}
       {/* so this panel carries its own hidden lg:flex (Req 13.2) */}
       <div className="hidden lg:flex relative z-10 ml-12 flex-col items-center justify-center">
-        <AppDownloadQrBlock slug="rider" className="p-6 bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200 shadow-sm" />
+        <AppDownloadQrBlock
+          slug="rider"
+          size={160}
+          className="rounded-xl border border-slate-200 bg-white/80 p-6 text-slate-700 shadow-sm backdrop-blur-sm"
+        />
       </div>
     </div>
   );

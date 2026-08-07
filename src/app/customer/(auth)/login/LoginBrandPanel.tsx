@@ -39,8 +39,10 @@ const FEATURES = [
 
 export async function LoginBrandPanel() {
   return (
+    // Height is pinned to the viewport and the content scales down at `lg` so
+    // the whole story fits a laptop screen without the page ever scrolling.
     <div
-      className="reveal-rise relative hidden w-1/2 shrink-0 overflow-hidden bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-800 lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16"
+      className="reveal-rise relative hidden w-1/2 shrink-0 overflow-hidden bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-800 lg:flex lg:h-svh lg:flex-col lg:justify-between lg:gap-[clamp(0.5rem,2svh,1.5rem)] lg:px-10 lg:py-[clamp(1.25rem,3svh,4rem)] xl:px-14 2xl:px-16"
       style={{ ["--reveal-delay" as string]: "0ms" }}
     >
       {/* ── Ambient glow wells (stronger — they carry the depth) ───────── */}
@@ -63,16 +65,19 @@ export async function LoginBrandPanel() {
           width={150}
           height={50}
           priority
-          className="h-auto w-[128px] drop-shadow-[0_2px_10px_rgba(0,0,0,0.35)] brightness-0 invert"
+          className="h-auto w-[clamp(6rem,13svh,9.5rem)] drop-shadow-[0_2px_10px_rgba(0,0,0,0.35)] brightness-0 invert"
         />
       </div>
 
       {/* ── Middle group: headline + features, kept together for a calm,
              intentional vertical rhythm (no loose justify-between gap). ──── */}
-      <div className="relative z-10 flex flex-col gap-9">
+      {/* Type and rhythm scale with viewport height (`svh` inside `clamp`) so a
+          short laptop screen compresses the story instead of scrolling it, and a
+          tall screen still gets the original generous proportions. */}
+      <div className="relative z-10 flex min-h-0 flex-col gap-[clamp(0.75rem,2.4svh,2.25rem)]">
         {/* The emotional headline */}
         <div className="max-w-md">
-          <h1 className="font-display text-[2.6rem] font-semibold leading-[1.05] tracking-tight text-white xl:text-[3rem]">
+          <h1 className="font-display text-[clamp(1.6rem,4.2svh,3rem)] font-semibold leading-[1.05] tracking-tight text-white">
             Healthy choices.
             <br />
             Healthier life.
@@ -80,27 +85,29 @@ export async function LoginBrandPanel() {
             <span className="text-emerald-300">One day at a time.</span>
           </h1>
 
-          <p className="mt-6 max-w-sm text-[0.95rem] leading-relaxed text-emerald-50/75">
+          <p className="mt-[clamp(0.5rem,1.7svh,1.5rem)] max-w-sm text-[clamp(0.8rem,1.6svh,0.95rem)] leading-relaxed text-emerald-50/75">
             Meals, nutrition kits and wellness stays — personal nutrition and
             daily consistency, guiding your transformation every single day.
           </p>
 
-          <div className="mt-7 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-emerald-100 ring-1 ring-white/15 backdrop-blur-sm">
+          <div className="mt-[clamp(0.5rem,1.9svh,1.75rem)] inline-flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 text-[clamp(0.75rem,1.5svh,0.875rem)] font-medium text-emerald-100 ring-1 ring-white/15 backdrop-blur-sm xl:px-4 xl:py-2">
             <Sprout className="h-4 w-4 text-emerald-300" aria-hidden="true" />
             Your transformation begins today
           </div>
         </div>
 
         {/* Feature points — substance, not statistics */}
-        <ul className="flex flex-col gap-3.5">
+        <ul className="flex flex-col gap-[clamp(0.4rem,1.5svh,0.875rem)]">
           {FEATURES.map(({ icon: Icon, title, copy }) => (
             <li key={title} className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15 backdrop-blur-sm">
+              <span className="mt-0.5 flex size-[clamp(1.75rem,3.4svh,2.25rem)] shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15 backdrop-blur-sm">
                 <Icon className="h-4 w-4 text-emerald-300" aria-hidden="true" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-white">{title}</p>
-                <p className="text-xs leading-relaxed text-emerald-50/60">
+                <p className="text-[clamp(0.78rem,1.6svh,0.875rem)] font-semibold text-white">
+                  {title}
+                </p>
+                <p className="text-[clamp(0.68rem,1.4svh,0.75rem)] leading-relaxed text-emerald-50/60">
                   {copy}
                 </p>
               </div>
@@ -108,12 +115,20 @@ export async function LoginBrandPanel() {
           ))}
         </ul>
 
-        {/* QR code for app download — large viewport only (inherited from parent panel) */}
-        <AppDownloadQrBlock slug="customer" />
+        {/* QR code for app download — large viewport only (inherited from parent
+            panel). The URL caption is suppressed here: the panel is height-bound
+            and the destination is already in the code's accessible label. */}
+        <AppDownloadQrBlock
+          slug="customer"
+          size={176}
+          showUrl={false}
+          className="text-emerald-50/80"
+          frameClassName="w-[clamp(5.75rem,14svh,8.5rem)] [&>svg]:h-auto [&>svg]:w-full"
+        />
       </div>
 
       {/* ── Quiet footer note, anchored to the bottom ──────────────────── */}
-      <p className="relative z-10 text-xs text-emerald-100/50">
+      <p className="relative z-10 text-[clamp(0.65rem,1.3svh,0.75rem)] text-emerald-100/50">
         ArogyaDiet — nourishing everyday life.
       </p>
     </div>

@@ -24,6 +24,7 @@ import { resolveTurnstileSiteKey } from "@/lib/appDistribution/config";
 import { APP_CONTENT } from "@/lib/appDistribution/content";
 import type { ReleaseManifest } from "@/lib/appDistribution/manifest";
 import { AppDownloadHero, ReleaseDetails, InstallGuide } from "./_components";
+import { DownloadControl } from "./DownloadControl";
 
 /**
  * Revalidation interval in seconds.
@@ -175,16 +176,9 @@ export default async function AppDownloadPage({
 
             {/* Download control or unavailable notice */}
             {isTurnstileConfigured ? (
-              // Download control will be a client component
-              // For now, render a placeholder that will be replaced by DownloadControl
-              // The download control is rendered client-side with Turnstile widget
-              <div
-                className="p-4 bg-muted/50 rounded-lg border"
-                data-download-control-placeholder="true"
-              >
-                <p className="text-sm text-muted-foreground">
-                  Download control will be rendered here by the client component.
-                </p>
+              // Download control with Turnstile widget (Req 5.1, 5.2, 5.3)
+              <div className="p-6 bg-muted/30 rounded-lg border">
+                <DownloadControl slug={slug} siteKey={turnstileSiteKey} />
               </div>
             ) : (
               // Turnstile not configured - render unavailable notice (Req 5.12)
