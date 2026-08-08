@@ -35,7 +35,7 @@
 // The page is an RSC shell: it guards the "customers" admin operations group,
 // reads with the service-role client, and hands plain data to a client table.
 
-import { AlertCircle, ShoppingBag } from "lucide-react";
+import { AlertCircle, Package, ShoppingBag } from "lucide-react";
 
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { checkClinicScope, getCurrentAdminContext, guardAdminGroup } from "@/lib/auth/adminAccess";
@@ -278,11 +278,20 @@ export default async function AdminAllShopOrdersPage({
         title="All Shop Orders"
         description="Every shop-product order in one ledger — bought by customers themselves, placed by an admin for a subscriber, or sold across the counter to a walk-in buyer."
         action={
-          <Button asChild variant="outline" data-variant="outline">
-            <Link href="/customers/assisted-order">
-              <ShoppingBag /> Place an order
-            </Link>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Jump to the clinic stock view so the stock-out this order
+                caused can be confirmed without hunting through the nav. */}
+            <Button asChild variant="outline" data-variant="outline">
+              <Link href="/kitchen-shop/inventory">
+                <Package /> Shop product stock
+              </Link>
+            </Button>
+            <Button asChild variant="outline" data-variant="outline">
+              <Link href="/customers/assisted-order">
+                <ShoppingBag /> Place an order
+              </Link>
+            </Button>
+          </div>
         }
       />
 

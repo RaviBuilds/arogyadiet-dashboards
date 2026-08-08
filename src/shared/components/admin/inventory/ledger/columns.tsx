@@ -60,7 +60,9 @@ export function getLedgerCategoryValue(entry: TransactionLedgerEntry): string {
     return entry.sourceType ? INVENTORY_SOURCE_LABELS[entry.sourceType] : "";
   }
   if (entry.transactionType === "OUT") {
-    return entry.reason ?? "";
+    // Prefer the resolved label so a `shop-clinic:<uuid>` marker filters and
+    // exports by clinic name rather than by raw UUID.
+    return entry.destinationLabel ?? entry.reason ?? "";
   }
   return "";
 }
@@ -92,12 +94,13 @@ function SourceOrDestinationCell({
   }
 
   if (entry.transactionType === "OUT") {
-    if (!entry.reason) {
+    const label = entry.destinationLabel ?? entry.reason;
+    if (!label) {
       return <span className="text-sm text-muted-foreground">—</span>;
     }
     return (
       <Badge variant="outline" className={DESTINATION_BADGE_STYLES}>
-        {entry.reason}
+        {label}
       </Badge>
     );
   }

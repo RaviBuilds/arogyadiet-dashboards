@@ -194,7 +194,13 @@ describe("Accessibility (mechanical subset) — Stock In dialog", () => {
   it("open dialog (quantity input + actions rendered) has no serious/critical violations", async () => {
     const user = userEvent.setup();
 
-    render(<ShopStockInDialog product={LINKED_PRODUCT} clinicId="clinic-1" />);
+    render(
+      <ShopStockInDialog
+        product={LINKED_PRODUCT}
+        clinicId="clinic-1"
+        clinicName="Madhapur Clinic"
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: /stock in/i }));
 
@@ -208,7 +214,13 @@ describe("Accessibility (mechanical subset) — Stock In dialog", () => {
   it("open dialog with an invalid quantity entered (error message shown) has no serious/critical violations", async () => {
     const user = userEvent.setup();
 
-    render(<ShopStockInDialog product={LINKED_PRODUCT} clinicId="clinic-1" />);
+    render(
+      <ShopStockInDialog
+        product={LINKED_PRODUCT}
+        clinicId="clinic-1"
+        clinicName="Madhapur Clinic"
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: /stock in/i }));
     await screen.findByRole("dialog");
@@ -231,7 +243,12 @@ describe("Accessibility (mechanical subset) — Stock-in cart", () => {
   it("empty-cart state has no serious/critical violations", async () => {
     const user = userEvent.setup();
 
-    render(<ShopStockInCart />);
+    render(
+      <ShopStockInCart
+        selectedClinicId="clinic-1"
+        selectedClinicName="Madhapur Clinic"
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: /open stock-in cart/i }));
 
@@ -245,12 +262,18 @@ describe("Accessibility (mechanical subset) — Stock-in cart", () => {
 
     useInventoryStore.getState().addShopStockInLine({
       clinicId: "clinic-1",
+      clinicName: "Madhapur Clinic",
       productId: "product-1",
       name: "Ashwagandha Capsules",
       qty: 10,
     });
 
-    render(<ShopStockInCart />);
+    render(
+      <ShopStockInCart
+        selectedClinicId="clinic-1"
+        selectedClinicName="Madhapur Clinic"
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: /open stock-in cart/i }));
 

@@ -114,10 +114,17 @@ export default function RiderManagement({
   data = [],
   allAreas = [],
   clinics = [],
+  lockedClinicId = null,
 }: {
   data?: RiderData[];
   allAreas?: any[];
   clinics?: ClinicOption[];
+  /**
+   * Set for a Clinic_Scoped_Admin: every row is already confined to this one
+   * clinic server-side, so the "All Clinics" filter renders as a static
+   * label instead of a dropdown.
+   */
+  lockedClinicId?: string | null;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Today's Activity");
@@ -183,6 +190,11 @@ export default function RiderManagement({
       a.name.localeCompare(b.name),
     );
   }, [data]);
+
+  // Display name for the locked clinic filter (Clinic_Scoped_Admin).
+  const lockedClinicName = lockedClinicId
+    ? clinicOptions.find((c) => c.id === lockedClinicId)?.name ?? "Your Clinic"
+    : null;
 
   const filteredData = useMemo(() => {
     // Clinic filter (pure predicate over loaded rows) combined with search.
@@ -436,22 +448,32 @@ export default function RiderManagement({
                 onTermChange={setSearchTerm}
                 options={searchOptions}
               />
-              <Select
-                value={clinicFilter ?? ALL_CLINICS}
-                onValueChange={(val) => setClinicFilter(val)}
-              >
-                <SelectTrigger className="w-[200px] border-slate-200 bg-white transition-all duration-200">
-                  <SelectValue placeholder="Filter by clinic..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_CLINICS}>All Clinics</SelectItem>
-                  {clinicOptions.map((clinic) => (
-                    <SelectItem key={clinic.id} value={clinic.id}>
-                      {clinic.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {lockedClinicName ? (
+                <div
+                  className="flex w-[200px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                  aria-label={`Clinic: ${lockedClinicName}`}
+                >
+                  <Building2 className="h-4 w-4 text-emerald-600" />
+                  <span className="truncate font-medium">{lockedClinicName}</span>
+                </div>
+              ) : (
+                <Select
+                  value={clinicFilter ?? ALL_CLINICS}
+                  onValueChange={(val) => setClinicFilter(val)}
+                >
+                  <SelectTrigger className="w-[200px] border-slate-200 bg-white transition-all duration-200">
+                    <SelectValue placeholder="Filter by clinic..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_CLINICS}>All Clinics</SelectItem>
+                    {clinicOptions.map((clinic) => (
+                      <SelectItem key={clinic.id} value={clinic.id}>
+                        {clinic.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           }
           actions={

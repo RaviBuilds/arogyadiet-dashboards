@@ -12,7 +12,6 @@ import {
   getFranchiseShopProducts,
   type FranchiseShopProduct,
 } from "@/actions/admin-actions/franchiseProductActions";
-import { guardAdminPage } from "@/lib/auth/adminAccess";
 import { resolveDestination, type KnownDestinations } from "@/lib/shop/clinicStock";
 import type { ClinicShopProductRow } from "@/types/clinicShop";
 import InventoryPageClient, {
@@ -23,30 +22,25 @@ import { Alert, AlertDescription } from "@/shared/components/ui/alert";
 
 export const revalidate = 0;
 
-interface ShopProductsPageProps {
+interface MasterShopProductsPageProps {
   // Next.js 16: `searchParams` is a Promise and must be awaited.
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
 /**
- * Warehouse_Shop_Products_Page (clinic-scoped-shop-inventory spec — Task 7.3).
- *
- * This page previously carried NO page guard at all. `guardAdminPage("inventory")`
- * closes that gap: a non-ADMIN session is redirected to `/unauthorized`, and an
- * `operations`-level Admin (including a Clinic_Scoped_Admin) is redirected to
- * their own landing route — which is exactly Requirement 16.7.
- *
- * The Destination_Selector is URL-driven (`?destination=`) rather than client
- * state, so the selected destination's data is resolved and fetched here,
- * server-side, under the same authorization check the rest of this page uses
- * (Req 5.14), and the page re-renders without a manual refresh when the
- * selector's `router.replace` changes the search param (Req 5.9).
+ * Master_Warehouse_Shop_Products_Page — the Master portal's counterpart to
+ * `/admin/inventory/shop-products`. The Warehouse System nav (InventoryHeader)
+ * always links to `${basePath}/shop-products`; under the Master portal that
+ * resolves to `/inventory/warehouse/shop-products`, which previously had no
+ * page here and 404'd. Role authorization for MASTER_ADMIN is already
+ * enforced by the parent `warehouse/layout.tsx` (which redirects any non
+ * MASTER_ADMIN to `/unauthorized`), so this page does not additionally call
+ * `guardAdminPage` — that guard is ADMIN-portal-specific and would incorrectly
+ * reject a MASTER_ADMIN session.
  */
-export default async function ShopProductsPage({
+export default async function MasterShopProductsPage({
   searchParams,
-}: ShopProductsPageProps) {
-  await guardAdminPage("inventory");
-
+}: MasterShopProductsPageProps) {
   const resolvedParams = await searchParams;
   const rawDestinationParamValue = resolvedParams.destination;
   const rawDestinationParam = Array.isArray(rawDestinationParamValue)
@@ -86,7 +80,6 @@ export default async function ShopProductsPage({
     if (result.success) {
       clinicProducts = result.data;
     } else {
-      // Req 5.13: the page shows no Shop_Product rows on a load failure.
       destinationDataError =
         "The destination data could not be loaded. " + result.error;
     }
@@ -97,7 +90,6 @@ export default async function ShopProductsPage({
         destination.franchiseId,
       );
     } catch {
-      // Req 19.8: the franchise data could not be loaded.
       destinationDataError = "The franchise data could not be loaded.";
     }
   } else {

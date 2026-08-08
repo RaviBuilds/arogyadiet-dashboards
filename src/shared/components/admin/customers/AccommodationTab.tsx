@@ -246,6 +246,16 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
     fetchAllStays();
   };
 
+  // A new stay may arrive with an Advance_Amount already collected, which is one
+  // ADVANCE row in the ledger. Refetching the stay list re-points the payment
+  // panel at the new stay, and the refresh bump makes sure its ledger is read
+  // fresh rather than reused from the previous selection.
+  const handleNewStayCreated = () => {
+    bumpRefresh();
+    fetchAllStays();
+    router.refresh();
+  };
+
   if (loading && allStays.length === 0) {
     return (
       <div className="space-y-6">
@@ -731,7 +741,7 @@ export function AccommodationTab({ customerProfileId }: AccommodationTabProps) {
         customerProfileId={customerProfileId}
         open={showNewStayDialog}
         onOpenChange={setShowNewStayDialog}
-        onSuccess={fetchAllStays}
+        onSuccess={handleNewStayCreated}
       />
     </div>
   );

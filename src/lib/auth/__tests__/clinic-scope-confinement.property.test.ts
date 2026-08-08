@@ -1,19 +1,36 @@
 // src/lib/auth/__tests__/clinic-scope-confinement.property.test.ts
-// Feature: clinic-scoped-shop-inventory, Property 17
+// Feature: clinic-scoped-shop-inventory, Property 17 (superseded — see note)
 //
-// Property 17: Clinic scope confines Shop Products reads and nothing else.
+// Property 17: Clinic scope confines Shop Products reads, and now ALSO
+// confines the Customers / Subscriptions / Riders workspace reads to the same
+// assigned clinic.
+//
+// SUPERSEDED NOTE: this property originally asserted the Customers,
+// Subscriptions and Riders workspace pages NEVER filtered by
+// `admin_clinic_id` ("clinic scope confines Shop Products and nothing else").
+// That was a deliberate design choice at the time, but it left a real gap: a
+// frontdesk admin scoped to one clinic (e.g. Madhapur) could still see every
+// other clinic's and franchise's customer/subscription/rider data through
+// those three workspaces, because they were explicitly never filtered. This
+// has been widened — the Customers, Subscriptions and Riders pages now DO
+// confine their queries to `admin_clinic_id` for a Clinic_Scoped_Admin, via
+// the same `resolveReadableClinicId` chokepoint Shop Products already used.
+// An Unscoped_Operations_Admin (and MASTER_ADMIN) is completely unaffected —
+// `resolveReadableClinicId(null, requested)` still always passes through.
 //
 // For any clinic-scoped admin and any requested clinic identifier, a Clinic
 // Shop Stock or Clinic Shop Ledger read resolves to the admin's assigned
 // clinic when the request matches it or names nothing, and is rejected
 // otherwise; and for any customer, subscription, or rider data set, the rows
-// returned to that admin are identical to those returned to an unscoped
-// admin.
+// returned to that admin are now ALSO confined to the assigned clinic — no
+// wider than Shop Products, and never leaking another clinic's or
+// franchise's rows.
 //
-// Validates: Requirements 12.1, 12.9, 14.1, 14.2, 14.3, 14.4, 14.5, 14.6,
-//            14.7, 14.9
+// Validates: Requirements 12.1, 12.9, 14.4, 14.5, 14.6, 14.7 (14.1-14.3, 14.9
+// — the old "and nothing else" requirements — are superseded by the new
+// clinic-confinement behavior described above)
 //
-// HOW THE TWO HALVES ARE COVERED:
+// HOW THIS IS COVERED:
 //   - The Shop Products / ledger confinement half is exercised twice: once
 //     directly over the pure chokepoint `resolveReadableClinicId` against a
 //     reference predicate transcribed independently from Req 14.6/14.7/12.9,
@@ -21,10 +38,11 @@
 //     (which resolve the caller's context via the mocked Supabase SSR client
 //     and then delegate to the same chokepoint) — proving the real
 //     context-resolution path agrees with the pure model.
-//   - The "and nothing else" half (Req 14.1, 14.2, 14.3, 14.9) is a structural
-//     fact, not a runtime one: the customers, subscriptions and riders
-//     workspace listing pages must never filter on `admin_clinic_id` or call
-//     the clinic-scope guards. Checked the same way
+//   - The Customers / Subscriptions / Riders confinement half is a structural
+//     fact, not a runtime one (those pages read via the service-role client,
+//     which bypasses RLS): each workspace page must resolve `clinicId` from
+//     `getCurrentAdminContext()` and apply an `admin_clinic_id`/`clinic_id`
+//     filter when it is set. Checked the same way
 //     `operational-write-denial.property.test.ts` checks architectural facts —
 //     `readFileSync` + regex assertions on the source, not a live property.
 //
@@ -241,14 +259,17 @@ describe("Property 17: Clinic scope confines Shop Products reads and nothing els
     );
   });
 
-  // ─── Property 17, part 3: "and nothing else" is structural ────────────────
+  // ─── Property 17, part 3: Customers/Subscriptions/Riders confinement is
+  // structural ──────────────────────────────────────────────────────────────
   //
-  // The customers, subscriptions and riders workspace listing pages must
-  // apply no filter based on `admin_clinic_id` / the admin's Clinic_Scope_
-  // Assignment, and must never call the clinic-scope guards (Req 14.1, 14.2,
-  // 14.3, 14.9).
+  // Each of the customers, subscriptions and riders workspace listing pages
+  // must resolve the admin's Clinic_Scope_Assignment (via
+  // `getCurrentAdminContext()`, which is what carries `clinicId` — the
+  // `admin_clinic_id` column) and apply a clinic filter to its query when
+  // that assignment is set, so a Clinic_Scoped_Admin's read is confined to
+  // their one clinic exactly like Shop Products.
 
-  it("the customers, subscriptions and riders workspace pages apply no clinic-scope filter (Req 14.1, 14.2, 14.3, 14.9)", () => {
+  it("the customers, subscriptions and riders workspace pages resolve the admin's clinic scope and confine their queries to it (Req 14.4-14.7)", () => {
     const workspacePages = [
       path.join("src", "app", "admin", "(main)", "customers", "page.tsx"),
       path.join("src", "app", "admin", "(main)", "subscriptions", "page.tsx"),
@@ -257,8 +278,15 @@ describe("Property 17: Clinic scope confines Shop Products reads and nothing els
 
     for (const relPath of workspacePages) {
       const source = readFileSync(path.join(REPO_ROOT, relPath), "utf8");
-      expect(source).not.toMatch(/admin_clinic_id/);
-      expect(source).not.toMatch(/assertClinicScope|checkClinicScope/);
+      // Resolves the admin's Clinic_Scope_Assignment via the same context
+      // resolver Shop Products uses (either directly, or through
+      // `guardCustomersWorkspace()`'s `clinicId` passthrough on Customers).
+      expect(source).toMatch(/getCurrentAdminContext|guardCustomersWorkspace/);
+      expect(source).toMatch(/clinicId/);
+      // Applies a clinic-scoped filter (`clinic_id` on the confined table, or
+      // the embedded `customer_profiles.clinic_id` filter used by
+      // Subscriptions) rather than reading every clinic unconditionally.
+      expect(source).toMatch(/\.eq\(\s*["'](clinic_id|customer_profiles\.clinic_id)["']/);
     }
   });
 });

@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchCatalogProducts } from "@/lib/products/catalog-queries";
+import { resolveInventoryProductImageUrl } from "@/services/inventoryEngine";
 import { checkWarehouseAccess } from "@/lib/auth/adminAccess";
 import { computeAggregateStock } from "@/lib/shop/clinicStock";
 import { listOverlaysForProduct } from "@/repositories/clinic/clinicProductRepository";
@@ -49,6 +50,13 @@ type ActionResult = { success: boolean; error?: string };
 
 const INVENTORY_PATH = "/admin/kitchen-shop/inventory";
 const INVENTORY_SHOP_PRODUCTS_PATH = "/admin/inventory/shop-products";
+const MASTER_INVENTORY_SHOP_PRODUCTS_PATH = "/inventory/warehouse/shop-products";
+
+function revalidateInventoryProductSurfaces(): void {
+  revalidatePath(INVENTORY_PATH);
+  revalidatePath(INVENTORY_SHOP_PRODUCTS_PATH);
+  revalidatePath(MASTER_INVENTORY_SHOP_PRODUCTS_PATH);
+}
 
 function getFormString(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -148,6 +156,19 @@ export async function adminUpsertProduct(
       existingProduct?.inventory_product_id ?? null;
 
     if (nextInventoryProductId !== existingInventoryProductId) {
+      // Once a Shop Product has been linked to a Master Catalog Product, the
+      // link is permanent — it can never be changed or cleared from here on,
+      // regardless of aggregate stock. This is stricter than (and supersedes)
+      // the "aggregate stock must be 0" rule, which only ever applied to a
+      // still-unlinked product receiving its first link.
+      if (existingInventoryProductId !== null) {
+        return {
+          success: false,
+          error:
+            "This product is already linked to a Master Catalog Product. The link cannot be changed once set.",
+        };
+      }
+
       let overlays;
       try {
         overlays = await listOverlaysForProduct(data.id);
@@ -258,8 +279,7 @@ export async function adminUpsertProduct(
     return { success: false, error: error.message };
   }
 
-  revalidatePath(INVENTORY_PATH);
-  revalidatePath(INVENTORY_SHOP_PRODUCTS_PATH);
+  revalidateInventoryProductSurfaces();
   return { success: true };
 }
 
@@ -284,8 +304,7 @@ export async function adminDeleteProduct(id: string): Promise<ActionResult> {
     return { success: false, error: error.message };
   }
 
-  revalidatePath(INVENTORY_PATH);
-  revalidatePath(INVENTORY_SHOP_PRODUCTS_PATH);
+  revalidateInventoryProductSurfaces();
   return { success: true };
 }
 
@@ -308,8 +327,7 @@ export async function adminToggleProductVisibility(
     return { success: false, error: error.message };
   }
 
-  revalidatePath(INVENTORY_PATH);
-  revalidatePath(INVENTORY_SHOP_PRODUCTS_PATH);
+  revalidateInventoryProductSurfaces();
   return { success: true };
 }
 
@@ -362,5 +380,122 @@ export async function getMasterCatalogProductOptionsAction(): Promise<
       name: row.name,
       base_uom: row.base_uom,
     })),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lookupMasterCatalogProductByCodeAction
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Preview of a Master_Catalog_Product resolved by its Product_Code. */
+export interface MasterCatalogProductPreview {
+  id: string;
+  name: string;
+  productCode: string;
+  baseUom: string;
+  category: string;
+  imageUrl: string | null;
+}
+
+/**
+ * Resolve a Master_Catalog_Product by its unique Product_Code so a Shop
+ * Product can be linked to it by typing the code shown on the Master Catalog
+ * product card, instead of picking from a dropdown.
+ */
+export async function lookupMasterCatalogProductByCodeAction(
+  code: string,
+): Promise<DataActionResult<MasterCatalogProductPreview>> {
+  const gate = await checkWarehouseAccess("product_management");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  const normalizedCode = code.trim().toUpperCase();
+
+  if (!normalizedCode) {
+    return { success: false, error: "Enter a product code." };
+  }
+
+  const supabaseAdmin = createAdminClient();
+
+  const { data, error } = await supabaseAdmin
+    .from("inventory_products")
+    .select("id, name, product_code, base_uom, category, image_url")
+    .eq("product_code", normalizedCode)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      success: false,
+      error: "The product code could not be verified.",
+    };
+  }
+
+  if (!data) {
+    return {
+      success: false,
+      error: `No Master Catalog Product found with code "${normalizedCode}".`,
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      id: data.id,
+      name: data.name,
+      productCode: data.product_code,
+      baseUom: data.base_uom,
+      category: data.category,
+      imageUrl: resolveInventoryProductImageUrl(data.image_url ?? null),
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getMasterCatalogProductByIdAction
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve a Master_Catalog_Product's preview by id, for re-displaying an
+ * already-linked Shop_Product's locked Product_Link in the edit form (Req:
+ * once linked at creation, the link can never be changed).
+ */
+export async function getMasterCatalogProductByIdAction(
+  inventoryProductId: string,
+): Promise<DataActionResult<MasterCatalogProductPreview>> {
+  const gate = await checkWarehouseAccess("product_management");
+  if (!gate.ok) return { success: false, error: gate.error };
+
+  const supabaseAdmin = createAdminClient();
+
+  const { data, error } = await supabaseAdmin
+    .from("inventory_products")
+    .select("id, name, product_code, base_uom, category, image_url")
+    .eq("id", inventoryProductId)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      success: false,
+      error: "The linked product could not be loaded.",
+    };
+  }
+
+  if (!data) {
+    return {
+      success: false,
+      error: "The linked Master Catalog Product was not found.",
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      id: data.id,
+      name: data.name,
+      productCode: data.product_code,
+      baseUom: data.base_uom,
+      category: data.category,
+      imageUrl: resolveInventoryProductImageUrl(data.image_url ?? null),
+    },
   };
 }

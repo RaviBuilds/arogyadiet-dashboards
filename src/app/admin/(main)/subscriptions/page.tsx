@@ -1,12 +1,15 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { AdminSubscriptionsWrapper } from "./AdminSubscriptionsWrapper";
-import { guardAdminGroup } from "@/lib/auth/adminAccess";
+import { guardAdminGroup, getCurrentAdminContext } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
 export default async function SubscriptionsPage() {
   await guardAdminGroup("subscriptions");
+  // Clinic-scope confinement (Clinic_Scoped_Admin, e.g. a frontdesk user
+  // assigned to one Core Clinic): `clinicId` is `null` for an unscoped admin.
+  const { clinicId } = await getCurrentAdminContext();
   const supabaseAdmin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -18,11 +21,20 @@ export default async function SubscriptionsPage() {
     .select("*")
     .order("duration_days", { ascending: true });
 
-  // 2. Fetch all user subscriptions for modeling/analytics
-  const { data: activeSubs } = await supabaseAdmin
-    .from("subscriptions")
-    .select("id, status, starts_on, ends_on, plan_id, franchise_id, subscription_plans(name)")
-    .in("status", ["ACTIVE", "PENDING"]);
+  // 2. Fetch all user subscriptions for modeling/analytics.
+  // Clinic-scope confinement: when the admin is confined to a Core Clinic,
+  // join `customer_profiles` with `!inner` (only when scoped, to avoid
+  // changing the query shape for every unscoped admin) so the embedded
+  // `customer_profiles.clinic_id` filter below can apply at the DB level.
+  let activeSubsQuery = supabaseAdmin.from("subscriptions").select(
+    clinicId
+      ? "id, status, starts_on, ends_on, plan_id, franchise_id, subscription_plans(name), customer_profiles!inner(clinic_id)"
+      : "id, status, starts_on, ends_on, plan_id, franchise_id, subscription_plans(name)",
+  ).in("status", ["ACTIVE", "PENDING"]);
+  if (clinicId) {
+    activeSubsQuery = activeSubsQuery.eq("customer_profiles.clinic_id", clinicId);
+  }
+  const { data: activeSubs } = await activeSubsQuery;
 
   // 3. Fetch global discount coupons (not tied to any customer)
   const { data: globalCoupons } = await supabaseAdmin
@@ -36,7 +48,16 @@ export default async function SubscriptionsPage() {
 
   // 4. Fetch subscription records (active / pending / expired-stopped) for the
   // record list tabs that were moved here from the Customers portal.
-  const recordSelectFields = `
+  // Clinic-scope confinement: switch the `customer_profiles` embed to
+  // `!inner` only when the admin is clinic-scoped, so the embedded
+  // `customer_profiles.clinic_id` filter can be applied at the DB level below.
+  const recordSelectFields = clinicId
+    ? `
+    id, starts_on, effective_end_on, ends_on, total_days, pause_credits_total, pause_credits_used, status, franchise_id,
+    customer_profiles!inner ( clinic_id, users!customer_profiles_user_id_fkey ( full_name, email ) ),
+    subscription_plans ( name )
+  `
+    : `
     id, starts_on, effective_end_on, ends_on, total_days, pause_credits_total, pause_credits_used, status, franchise_id,
     customer_profiles ( users!customer_profiles_user_id_fkey ( full_name, email ) ),
     subscription_plans ( name )
@@ -64,23 +85,31 @@ export default async function SubscriptionsPage() {
     };
   };
 
-  const { data: rawActiveRecords } = await supabaseAdmin
+  let activeRecordsQuery = supabaseAdmin
     .from("subscriptions")
     .select(recordSelectFields)
     .eq("status", "ACTIVE")
     .order("starts_on", { ascending: false });
-
-  const { data: rawPendingRecords } = await supabaseAdmin
+  let pendingRecordsQuery = supabaseAdmin
     .from("subscriptions")
     .select(recordSelectFields)
     .eq("status", "PENDING")
     .order("starts_on", { ascending: true });
-
-  const { data: rawStoppedRecords } = await supabaseAdmin
+  let stoppedRecordsQuery = supabaseAdmin
     .from("subscriptions")
     .select(recordSelectFields)
     .in("status", ["STOPPED", "CANCELLED", "EXPIRED"])
     .order("ends_on", { ascending: false });
+
+  if (clinicId) {
+    activeRecordsQuery = activeRecordsQuery.eq("customer_profiles.clinic_id", clinicId);
+    pendingRecordsQuery = pendingRecordsQuery.eq("customer_profiles.clinic_id", clinicId);
+    stoppedRecordsQuery = stoppedRecordsQuery.eq("customer_profiles.clinic_id", clinicId);
+  }
+
+  const { data: rawActiveRecords } = await activeRecordsQuery;
+  const { data: rawPendingRecords } = await pendingRecordsQuery;
+  const { data: rawStoppedRecords } = await stoppedRecordsQuery;
 
   const subscriptionRecordsActive = (rawActiveRecords || []).map(mapSubRow);
   const subscriptionRecordsPending = (rawPendingRecords || []).map(mapSubRow);
@@ -99,6 +128,7 @@ export default async function SubscriptionsPage() {
         subscriptionRecordsActive={subscriptionRecordsActive}
         subscriptionRecordsPending={subscriptionRecordsPending}
         subscriptionRecordsStopped={subscriptionRecordsStopped}
+        lockedClinicId={clinicId}
       />
     </div>
   );

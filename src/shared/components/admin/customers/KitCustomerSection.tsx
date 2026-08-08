@@ -36,7 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
-import { Eye, MoreHorizontal, Edit, Trash2, Truck, Package } from "lucide-react";
+import { Building2, Eye, MoreHorizontal, Edit, Trash2, Truck, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { DataTableCard } from "../core/DataTableCard";
@@ -87,6 +87,12 @@ interface KitCustomerSectionProps {
   clinicFilter: ClinicFilterSelection;
   setClinicFilter: (val: ClinicFilterSelection) => void;
   clinicOptions: { id: string; name: string }[];
+  /**
+   * Set for a Clinic_Scoped_Admin: every row is already confined to this one
+   * clinic server-side, so the filter renders as a static label with this
+   * name instead of a dropdown (there is nothing else to select).
+   */
+  lockedClinicName?: string | null;
   showArchived: boolean;
   setShowArchived: (val: boolean) => void;
   showExpired: boolean;
@@ -114,6 +120,7 @@ export function KitCustomerSection({
   clinicFilter,
   setClinicFilter,
   clinicOptions,
+  lockedClinicName = null,
   showArchived,
   setShowArchived,
   showExpired,
@@ -337,6 +344,15 @@ export function KitCustomerSection({
             onTermChange={setSearchTerm}
             options={searchOptions}
           />
+          {lockedClinicName ? (
+            <div
+              className="flex w-[200px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+              aria-label={`Clinic: ${lockedClinicName}`}
+            >
+              <Building2 className="h-4 w-4 text-emerald-600" />
+              <span className="truncate font-medium">{lockedClinicName}</span>
+            </div>
+          ) : (
           <Select
             value={clinicFilter ?? ALL_CLINICS}
             onValueChange={(val) => setClinicFilter(val)}
@@ -353,6 +369,7 @@ export function KitCustomerSection({
               ))}
             </SelectContent>
           </Select>
+          )}
           <Button
             type="button"
             variant={showArchived ? "default" : "outline"}

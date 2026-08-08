@@ -1,24 +1,50 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyAdmins, sendNotificationToUser } from "@/lib/notifications";
 
+type CustomerProfileRef = {
+  user_id: string | null;
+  users?:
+    | { full_name?: string | null }
+    | { full_name?: string | null }[]
+    | null;
+};
+
+/**
+ * Resolves the customer's `users.id` and display name in a single round trip so
+ * admin-facing notifications can name the customer the alert is about.
+ */
+async function resolveCustomerRef(
+  customerProfileId: string,
+): Promise<{ userId: string | null; customerName: string }> {
+  const supabaseAdmin = createAdminClient();
+  const { data } = await supabaseAdmin
+    .from("customer_profiles")
+    .select("user_id, users!customer_profiles_user_id_fkey(full_name)")
+    .eq("id", customerProfileId)
+    .maybeSingle<CustomerProfileRef>();
+
+  const user = Array.isArray(data?.users) ? data?.users[0] : data?.users;
+
+  return {
+    userId: data?.user_id ?? null,
+    customerName: user?.full_name?.trim() || "Customer",
+  };
+}
+
 export async function notifySubscriptionStopped(
   customerProfileId: string,
   subscriptionId: string,
 ): Promise<void> {
   try {
-    const supabaseAdmin = createAdminClient();
-    const { data: profile } = await supabaseAdmin
-      .from("customer_profiles")
-      .select("user_id")
-      .eq("id", customerProfileId)
-      .maybeSingle();
+    const { userId, customerName } =
+      await resolveCustomerRef(customerProfileId);
 
     const customerTitle = "Subscription Stopped";
     const customerMessage =
       "Your subscription has been stopped. Contact support if you have questions.";
 
-    if (profile?.user_id) {
-      await sendNotificationToUser(profile.user_id, {
+    if (userId) {
+      await sendNotificationToUser(userId, {
         title: customerTitle,
         message: customerMessage,
         actionUrl: "/customer/dashboard",
@@ -31,7 +57,7 @@ export async function notifySubscriptionStopped(
     }
 
     const adminTitle = "Subscription Stopped";
-    const adminMessage = "A customer subscription has been stopped.";
+    const adminMessage = `Subscription of customer ${customerName} has been stopped.`;
 
     await notifyAdmins({
       title: adminTitle,
@@ -53,19 +79,15 @@ export async function notifySubscriptionExpired(
   subscriptionId: string,
 ): Promise<void> {
   try {
-    const supabaseAdmin = createAdminClient();
-    const { data: profile } = await supabaseAdmin
-      .from("customer_profiles")
-      .select("user_id")
-      .eq("id", customerProfileId)
-      .maybeSingle();
+    const { userId, customerName } =
+      await resolveCustomerRef(customerProfileId);
 
     const customerTitle = "Subscription Expired";
     const customerMessage =
       "Your subscription plan has expired. Renew now to continue enjoying your meals!";
 
-    if (profile?.user_id) {
-      await sendNotificationToUser(profile.user_id, {
+    if (userId) {
+      await sendNotificationToUser(userId, {
         title: customerTitle,
         message: customerMessage,
         actionUrl: "/customer/dashboard",
@@ -78,7 +100,7 @@ export async function notifySubscriptionExpired(
     }
 
     const adminTitle = "Subscription Expired";
-    const adminMessage = "A customer subscription has expired naturally.";
+    const adminMessage = `Subscription of customer ${customerName} has expired naturally.`;
 
     await notifyAdmins({
       title: adminTitle,

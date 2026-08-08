@@ -97,6 +97,13 @@ export interface ClinicShopProductRow {
   inventory_product_id: string | null;
   inventory_product_name: string | null;
   base_uom: string | null;
+  /**
+   * Primary catalogue thumbnail for the product: the first entry of
+   * `products.image_urls`, falling back to `products.banner_image_url`, or
+   * `null` when the product has no artwork. Derived rather than a raw column so
+   * consumers do not have to repeat the fallback.
+   */
+  image_url: string | null;
   /** Effective_Clinic_Stock: 0 when no overlay row exists. */
   stock_quantity: number;
   /** Effective_Clinic_Visibility: hidden when no overlay row exists. */

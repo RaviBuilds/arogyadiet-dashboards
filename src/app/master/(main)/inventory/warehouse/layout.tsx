@@ -31,7 +31,10 @@ export default async function MasterWarehouseLayout({
         }
       />
       <main className="flex-1">{children}</main>
-      <OperationsCart />
+      {/* Shop Products owns its own Stock In cart (`ShopStockInCart`), so the
+          master-catalog staging cart is suppressed there to avoid two
+          floating cart buttons overlapping. */}
+      <OperationsCart hideOnPathSuffixes={["/shop-products"]} />
     </div>
   );
 }

@@ -165,6 +165,8 @@ export type InventoryProduct = {
   baseUom: BaseUom;
   minStockThreshold: number;
   defaultDurabilityDays: number;
+  /** Product_Code — unique, auto-generated 5-character alphanumeric code. */
+  productCode: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -367,6 +369,20 @@ export type TransactionLedgerEntry = {
   sourceName: string | null;
   /** Outgoing entries only — why the stock left (DISPATCH_STOCK_REASONS). */
   reason: DispatchStockReason | null;
+  /**
+   * Human-readable destination for display and filtering. Equals `reason` for
+   * plain text snapshots (e.g. "Sent to Madhapur Clinic"), but resolves the
+   * machine-readable `shop-clinic:<uuid>` marker written by
+   * `clinic_shop_stock_in` into something an operator can read. `reason` keeps
+   * the raw stored value so the audit trail is unchanged.
+   */
+  destinationLabel: string | null;
+  /**
+   * Destination Core Clinic id when the reason encodes one
+   * (`shop-clinic:<uuid>`). Enables filtering the ledger by clinic without
+   * string-matching a name that may have since been edited.
+   */
+  destinationClinicId: string | null;
   /** For franchise dispatch entries — the transfer ID to fetch package images */
   franchiseTransferId: string | null;
   /** Whether the franchise transfer has package images attached */
@@ -565,6 +581,7 @@ type InventoryProductRow = {
   base_uom: BaseUom;
   min_stock_threshold: string | number;
   default_durability_days: number;
+  product_code: string;
   created_at: string;
   updated_at: string;
 };
@@ -840,11 +857,47 @@ type TransactionLedgerRow = {
   inventory_lots: TransactionLedgerLotSummary | TransactionLedgerLotSummary[];
 };
 
+/**
+ * Prefix written into `inventory_transactions.reason` by the
+ * `clinic_shop_stock_in` RPC, followed by the destination clinic's UUID. Kept
+ * as a machine-readable marker in the database (spec Req 7.9); the UI resolves
+ * it to a clinic name for display via {@link resolveDestinationLabel}.
+ */
+export const SHOP_CLINIC_REASON_PREFIX = "shop-clinic:";
+
+/** Extracts the destination clinic id from a `shop-clinic:<uuid>` reason. */
+export function parseShopClinicReason(
+  reason: string | null,
+): string | null {
+  if (!reason || !reason.startsWith(SHOP_CLINIC_REASON_PREFIX)) return null;
+  const id = reason.slice(SHOP_CLINIC_REASON_PREFIX.length).trim();
+  return id.length > 0 ? id : null;
+}
+
+/**
+ * Resolve a stored `reason` into the label shown in the ledger's Destination
+ * column. A `shop-clinic:<uuid>` marker becomes
+ * "Shop Stock In · <clinic name>"; anything else passes through unchanged.
+ * An unresolvable clinic id (deleted clinic) degrades to a readable
+ * "Shop Stock In · Unknown clinic" rather than leaking a raw UUID.
+ */
+export function resolveDestinationLabel(
+  reason: string | null,
+  clinicNamesById: ReadonlyMap<string, string>,
+): string | null {
+  if (!reason) return null;
+  const clinicId = parseShopClinicReason(reason);
+  if (!clinicId) return reason;
+  return `Shop Stock In · ${clinicNamesById.get(clinicId) ?? "Unknown clinic"}`;
+}
+
 export function mapTransactionLedgerRow(
   row: TransactionLedgerRow,
+  clinicNamesById: ReadonlyMap<string, string> = new Map(),
 ): TransactionLedgerEntry {
   const lot = normalizeJoin(row.inventory_lots);
   const product = normalizeJoin(lot.inventory_products);
+  const reason = row.reason ?? null;
 
   return {
     id: row.id,
@@ -856,7 +909,9 @@ export function mapTransactionLedgerRow(
     quantityChanged: Number(row.quantity_changed),
     sourceType: lot.source_type ?? null,
     sourceName: lot.source_name ?? null,
-    reason: row.reason ?? null,
+    reason,
+    destinationLabel: resolveDestinationLabel(reason, clinicNamesById),
+    destinationClinicId: parseShopClinicReason(reason),
     franchiseTransferId: row.franchise_transfer_id ?? null,
     hasPackageImages: false, // Resolved separately after mapping
   };
@@ -874,6 +929,7 @@ export function mapInventoryProductRow(
     baseUom: row.base_uom,
     minStockThreshold: Number(row.min_stock_threshold),
     defaultDurabilityDays: row.default_durability_days,
+    productCode: row.product_code,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

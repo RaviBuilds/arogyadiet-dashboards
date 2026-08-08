@@ -4,7 +4,10 @@ import {
   notifyAdmins,
   sendNotificationToUser,
 } from "@/lib/notifications";
-import { getRiderNameByProfileId } from "@/lib/notifications/lookups";
+import {
+  getCustomerNameByProfileId,
+  getRiderNameByProfileId,
+} from "@/lib/notifications/lookups";
 
 async function resolveCustomerUserId(
   customerProfileId: string,
@@ -171,9 +174,18 @@ export async function notifyDelivered(orderId: string): Promise<void> {
     const order = await resolveOrderContext(orderId);
     if (!order) return;
 
+    const [riderName, customerName] = await Promise.all([
+      order.assigned_rider_id
+        ? getRiderNameByProfileId(order.assigned_rider_id)
+        : Promise.resolve("Rider"),
+      order.customer_profile_id
+        ? getCustomerNameByProfileId(order.customer_profile_id)
+        : Promise.resolve("Customer"),
+    ]);
+
     await notifyAdmins({
-      title: "Your order delivered!",
-      message: "Meal has been delivered.",
+      title: "Meal Delivered",
+      message: `Hi Admin, meal delivered to customer ${customerName} by rider ${riderName}.`,
       actionUrl: "/admin/operations",
       sendEmail: false,
     });

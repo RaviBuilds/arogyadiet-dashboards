@@ -66,7 +66,7 @@ function toAssistedOrderProduct(row: ClinicShopProductRow): AssistedOrderProduct
         ? null
         : Number(row.sale_price),
     taxPercent: null,
-    imageUrl: null,
+    imageUrl: row.image_url,
     availableStock: row.stock_quantity,
   };
 }

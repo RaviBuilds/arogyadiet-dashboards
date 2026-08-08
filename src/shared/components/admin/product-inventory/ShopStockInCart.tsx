@@ -8,21 +8,36 @@
 // Stock_In lines (`shopStockInCart`) and exposes exactly one submission
 // action — there is no inbound/outbound duality here like `OperationsCart`.
 //
-// Multi-clinic-group submission: `shopStockInLine` carries its own
-// `clinicId`, but `clinicStockInAction` takes a single `clinicId` for the
-// whole batch. In practice every line added in one session shares the
-// Clinic_Mode page's current destination clinic, but to stay correct if the
-// admin changes the destination selector mid-session, lines are grouped by
-// `clinicId` and submitted as one `clinicStockInAction` call per group. Each
-// group's outcome is independent: a group that succeeds has its lines
-// removed from the cart (Req 7.6, "clear after commit"); a group that fails
-// keeps its lines in the cart untouched (Req 7.10, 7.12, 7.14, "retain on
-// rejection") and its error is surfaced via toast.
+// SINGLE-CLINIC CART: `clinicStockInAction` commits to one clinic, so this
+// cart holds lines for exactly one clinic at a time. `ShopStockInDialog`
+// refuses to add a line for a second clinic, which makes "every line shares
+// one clinicId" an invariant rather than a hope — so `shopStockInCart[0]`
+// identifies the whole cart's destination.
+//
+// When the destination selector is moved to a different clinic while lines
+// are still pending, the cart does NOT silently commit to the clinic the
+// operator is no longer looking at (stock-in is irreversible: it depletes
+// warehouse lots FIFO and writes an immutable ledger entry). Instead submit
+// is disabled and the operator is given two explicit ways out — switch the
+// selector back to the cart's clinic, or discard the cart and start over for
+// the selected clinic.
+//
+// On success the committed lines are removed (Req 7.6, "clear after commit");
+// on rejection every pending line is retained (Req 7.10, 7.12, 7.14) and the
+// error is surfaced via toast.
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { Loader2, Package, ShoppingCart, Trash2 } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  AlertCircle,
+  Loader2,
+  Package,
+  ShoppingCart,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
+
+import { Alert, AlertDescription } from "@/shared/components/ui/alert";
 
 import { clinicStockInAction } from "@/actions/admin-actions/clinicShopInventoryActions";
 import { useInventoryStore } from "@/shared/stores/useInventoryStore";
@@ -79,8 +94,20 @@ function CartLineRow({
   );
 }
 
-export function ShopStockInCart() {
+interface ShopStockInCartProps {
+  /** The Clinic_Mode page's currently selected destination clinic. */
+  selectedClinicId: string;
+  /** Display name of the currently selected destination clinic. */
+  selectedClinicName: string;
+}
+
+export function ShopStockInCart({
+  selectedClinicId,
+  selectedClinicName,
+}: ShopStockInCartProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -88,67 +115,59 @@ export function ShopStockInCart() {
   const removeShopStockInLine = useInventoryStore(
     (state) => state.removeShopStockInLine,
   );
+  const clearShopStockInCart = useInventoryStore(
+    (state) => state.clearShopStockInCart,
+  );
 
   const isEmpty = shopStockInCart.length === 0;
 
+  // Single-clinic invariant: every line in the cart shares one clinic, because
+  // `ShopStockInDialog` is blocked from adding a line for a second clinic. So
+  // the first line identifies the whole cart's destination.
+  const cartClinicId = shopStockInCart[0]?.clinicId ?? null;
+  const cartClinicName = shopStockInCart[0]?.clinicName ?? "another clinic";
+  const isCrossClinic =
+    cartClinicId !== null && cartClinicId !== selectedClinicId;
+
+  /** Point the destination selector at the cart's clinic (Req 5.9's URL model). */
+  function handleSwitchToCartClinic() {
+    if (!cartClinicId) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("destination", `clinic:${cartClinicId}`);
+    router.replace(`${pathname}?${params.toString()}`);
+    setIsOpen(false);
+  }
+
+  function handleDiscardCart() {
+    clearShopStockInCart();
+    toast.success(`Cart cleared. You can now stock in for ${selectedClinicName}.`);
+  }
+
   function handleSubmit() {
-    if (shopStockInCart.length === 0) return;
+    // Never submit a cart whose destination is not the clinic on screen.
+    if (isEmpty || isCrossClinic || !cartClinicId) return;
 
     startTransition(async () => {
-      // Group pending lines by destination clinic (see file header).
-      const groups = new Map<
-        string,
-        { clinicId: string; productId: string; quantity: number }[]
-      >();
-      for (const line of shopStockInCart) {
-        const group = groups.get(line.clinicId) ?? [];
-        group.push({
-          clinicId: line.clinicId,
-          productId: line.productId,
-          quantity: line.qty,
-        });
-        groups.set(line.clinicId, group);
-      }
+      const lines = shopStockInCart.map((line) => ({
+        productId: line.productId,
+        quantity: line.qty,
+      }));
 
-      let succeededGroups = 0;
-      let failedGroups = 0;
-      const errors: string[] = [];
+      const result = await clinicStockInAction(lines, cartClinicId);
 
-      for (const [clinicId, lines] of groups) {
-        const result = await clinicStockInAction(
-          lines.map(({ productId, quantity }) => ({ productId, quantity })),
-          clinicId,
-        );
-
-        if (result.success) {
-          succeededGroups += 1;
-          // Clear only this group's lines — lines for other (failed) groups
-          // must be retained (Req 7.10, 7.12, 7.14).
-          for (const line of lines) {
-            removeShopStockInLine(clinicId, line.productId);
-          }
-        } else {
-          failedGroups += 1;
-          errors.push(result.error ?? "The stock-in submission failed.");
+      if (result.success) {
+        // Clear the committed lines (Req 7.6, "clear after commit").
+        for (const line of shopStockInCart) {
+          removeShopStockInLine(line.clinicId, line.productId);
         }
-      }
-
-      if (succeededGroups > 0) {
-        toast.success(
-          succeededGroups === 1
-            ? "Stock-in submitted successfully."
-            : `${succeededGroups} stock-in group(s) submitted successfully.`,
-        );
+        toast.success("Stock-in submitted successfully.");
         router.refresh();
-      }
-
-      if (failedGroups > 0) {
-        errors.forEach((error) => toast.error(error));
-      }
-
-      if (succeededGroups > 0 && failedGroups === 0) {
         setIsOpen(false);
+        return;
       }
+
+      // Retain every pending line on rejection (Req 7.10, 7.12, 7.14).
+      toast.error(result.error ?? "The stock-in submission failed.");
     });
   }
 
@@ -178,10 +197,47 @@ export function ShopStockInCart() {
             <SheetHeader className="px-6 pt-6 pb-0">
               <SheetTitle>Stock In Cart</SheetTitle>
               <SheetDescription>
-                Review pending Stock In lines before submitting them to the
-                destination clinic.
+                {isEmpty
+                  ? "Review pending Stock In lines before submitting them to the destination clinic."
+                  : `Pending Stock In lines for ${cartClinicName}.`}
               </SheetDescription>
             </SheetHeader>
+
+            {isCrossClinic ? (
+              <div className="px-6 pt-4">
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="space-y-3">
+                    <span className="block">
+                      This cart holds stock-in lines for{" "}
+                      <strong>{cartClinicName}</strong>, but{" "}
+                      <strong>{selectedClinicName}</strong> is selected. Submit
+                      is disabled to prevent stocking the wrong clinic.
+                    </span>
+                    <span className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleSwitchToCartClinic}
+                        disabled={isPending}
+                      >
+                        Switch to {cartClinicName}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDiscardCart}
+                        disabled={isPending}
+                      >
+                        Clear cart and stock in for {selectedClinicName}
+                      </Button>
+                    </span>
+                  </AlertDescription>
+                </Alert>
+              </div>
+            ) : null}
 
             <ScrollArea className="my-4 flex-1 overflow-y-auto px-6 pr-4">
               {isEmpty ? (
@@ -214,7 +270,7 @@ export function ShopStockInCart() {
               <Button
                 type="button"
                 className="h-12 w-full text-lg"
-                disabled={isEmpty || isPending}
+                disabled={isEmpty || isPending || isCrossClinic}
                 onClick={handleSubmit}
               >
                 {isPending ? (
@@ -222,6 +278,8 @@ export function ShopStockInCart() {
                     <Loader2 className="animate-spin" />
                     Submitting...
                   </>
+                ) : isCrossClinic ? (
+                  `Submit disabled — cart is for ${cartClinicName}`
                 ) : (
                   "Submit Stock In"
                 )}

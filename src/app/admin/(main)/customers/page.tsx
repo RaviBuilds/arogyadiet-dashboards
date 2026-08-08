@@ -15,12 +15,16 @@ export default async function CustomersPage({
 }: {
   searchParams?: Promise<{ action?: string }>;
 }) {
-  const { isDietitian } = await guardCustomersWorkspace();
+  const { isDietitian, clinicId } = await guardCustomersWorkspace();
   const params = await searchParams;
   const autoOpenCreate = params?.action === "create";
   const supabaseAdmin = createAdminClient();
 
-  const { data: rawCustomers, error } = await supabaseAdmin.from("customer_profiles")
+  // Clinic-scope confinement (Clinic_Scoped_Admin, e.g. a frontdesk user
+  // assigned to one Core Clinic): confine the customer directory query itself
+  // to the assigned clinic, at the database level. `clinicId` is `null` for an
+  // unscoped admin, so this is a no-op for every existing caller.
+  let customersQuery = supabaseAdmin.from("customer_profiles")
     .select(`
       id,
       is_active,
@@ -38,6 +42,10 @@ export default async function CustomersPage({
       addresses ( pincode, is_primary, lat, lng ),
       subscriptions ( status, customer_category, subscription_plans ( name ), kit_products ( name ) )
     `);
+  if (clinicId) {
+    customersQuery = customersQuery.eq("clinic_id", clinicId);
+  }
+  const { data: rawCustomers, error } = await customersQuery;
 
   if (error) console.error("Error fetching customers:", error);
 
@@ -186,6 +194,19 @@ export default async function CustomersPage({
   let scopedPendingSubs = pendingSubs;
   let scopedStoppedSubs = stoppedSubs;
 
+  // ─── Clinic-scope confinement (frontdesk / Clinic_Scoped_Admin) ───────────
+  // `customers` above is already confined to the assigned clinic at the query
+  // level. The Overview subscription lists (`activeSubs`/`pendingSubs`/
+  // `stoppedSubs`) are fetched unfiltered (subscriptions carry no clinic_id of
+  // their own), so correlate them by the same customer email set the wrapper
+  // already uses elsewhere, keeping every list consistent with the one clinic.
+  if (clinicId) {
+    const clinicEmails = new Set(scopedCustomers.map((c) => c.email));
+    scopedActiveSubs = scopedActiveSubs.filter((s) => clinicEmails.has(s.email));
+    scopedPendingSubs = scopedPendingSubs.filter((s) => clinicEmails.has(s.email));
+    scopedStoppedSubs = scopedStoppedSubs.filter((s) => clinicEmails.has(s.email));
+  }
+
   if (isDietitian) {
     const dietitianCtx = await getCurrentDietitianContext();
     if (dietitianCtx) {
@@ -227,6 +248,7 @@ export default async function CustomersPage({
         stoppedSubscriptions={scopedStoppedSubs}
         autoOpenCreate={autoOpenCreate}
         isDietitian={isDietitian}
+        lockedClinicId={clinicId}
       />
     </div>
   );

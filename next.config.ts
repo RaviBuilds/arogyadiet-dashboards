@@ -12,6 +12,17 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  experimental: {
+    serverActions: {
+      // Product forms submit their image gallery through a Server Action as
+      // FormData. `ProductMediaGallery` accepts multiple images at up to 5 MB
+      // each, so the default 1 MB Server Action body limit rejects a normal
+      // multi-image submission with "Body exceeded 1 MB limit". 25 MB leaves
+      // room for a handful of full-size images while still bounding how much
+      // a single request can make the server parse.
+      bodySizeLimit: "25mb",
+    },
+  },
   serverExternalPackages: [
     "@capacitor-community/background-geolocation",
     "@capacitor-community/keep-awake",

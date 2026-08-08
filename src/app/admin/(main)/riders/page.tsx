@@ -2,12 +2,15 @@ import { createClient as createAdminClient } from "@supabase/supabase-js";
 import type { RiderData } from "@/shared/components/admin/riders/RiderManagement";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
 import { AdminRidersWrapper } from "./AdminRidersWrapper";
-import { guardAdminGroup } from "@/lib/auth/adminAccess";
+import { guardAdminGroup, getCurrentAdminContext } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
 export default async function RidersPage() {
   await guardAdminGroup("riders");
+  // Clinic-scope confinement (Clinic_Scoped_Admin, e.g. a frontdesk user
+  // assigned to one Core Clinic): `clinicId` is `null` for an unscoped admin.
+  const { clinicId } = await getCurrentAdminContext();
   // Use Service Role for Admin Dashboard to securely bypass RLS
   const supabaseAdmin = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -117,17 +120,29 @@ export default async function RidersPage() {
   };
 
   // Removed foreignTable order/limit to prevent PostgREST parsing crashes.
+  // Clinic-scope confinement: when the admin is confined to a Core Clinic,
+  // filter the rider directory query at the DB level.
+  let ridersQuery = supabaseAdmin
+    .from("rider_profiles")
+    .select(
+      `id, employee_code, is_active, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, franchise_id, clinic_id, clinics (name), users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
+    )
+    .eq("is_active", true);
+  if (clinicId) {
+    ridersQuery = ridersQuery.eq("clinic_id", clinicId);
+  }
+
+  let serviceAreasQuery = supabaseAdmin
+    .from("rider_service_areas")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (clinicId) {
+    serviceAreasQuery = serviceAreasQuery.eq("clinic_id", clinicId);
+  }
+
   const [ridersRes, areasRes, clinicsRes] = await Promise.all([
-    supabaseAdmin
-      .from("rider_profiles")
-      .select(
-        `id, employee_code, is_active, is_online, last_online_at, last_offline_at, emergency_contact, created_at, joining_date, franchise_id, clinic_id, clinics (name), users!inner (id, full_name, mobile, email), rider_service_areas (pincode), delivery_batches (id, status, expected_payout, created_at, delivery_date, delivery_orders (id, status, pickup_marked_at)), rider_monthly_summaries (total_earnings), rider_payouts (amount_withdrawn, payment_date)`,
-      )
-      .eq("is_active", true),
-    supabaseAdmin
-      .from("rider_service_areas")
-      .select("*")
-      .order("created_at", { ascending: false }),
+    ridersQuery,
+    serviceAreasQuery,
     supabaseAdmin
       .from("clinics")
       .select("id, name, franchise_id")
@@ -231,6 +246,7 @@ export default async function RidersPage() {
         data={riders}
         allAreas={areasRes.data || []}
         clinics={clinicsRes.data || []}
+        lockedClinicId={clinicId}
       />
     </div>
   );

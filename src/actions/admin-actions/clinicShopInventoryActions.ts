@@ -78,11 +78,13 @@ export interface DestinationOptionsResult {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const WAREHOUSE_SHOP_PRODUCTS_PATH = "/admin/inventory/shop-products";
+const MASTER_SHOP_PRODUCTS_PATH = "/inventory/warehouse/shop-products";
 const OPERATIONS_SHOP_PRODUCTS_PATH = "/admin/kitchen-shop/inventory";
 const FRANCHISE_SHOP_PRODUCTS_PATH = "/franchise/shop-products";
 
 function revalidateShopProductSurfaces(): void {
   revalidatePath(WAREHOUSE_SHOP_PRODUCTS_PATH);
+  revalidatePath(MASTER_SHOP_PRODUCTS_PATH);
   revalidatePath(OPERATIONS_SHOP_PRODUCTS_PATH);
 }
 
@@ -227,6 +229,31 @@ export async function setProductInventoryLinkAction(
     };
   }
 
+  const admin = createAdminClient();
+
+  const { data: existingProduct, error: existingError } = await admin
+    .from("products")
+    .select("inventory_product_id")
+    .eq("id", parsed.data.productId)
+    .maybeSingle();
+
+  if (existingError) {
+    return {
+      success: false,
+      error: "The product's current link could not be verified.",
+    };
+  }
+
+  // Once a Shop Product has been linked, the link is permanent — it can
+  // never be changed or cleared, matching adminUpsertProduct's guard.
+  if (existingProduct?.inventory_product_id) {
+    return {
+      success: false,
+      error:
+        "This product is already linked to a Master Catalog Product. The link cannot be changed once set.",
+    };
+  }
+
   let overlays: ClinicProductOverlayRow[];
   try {
     overlays = await listOverlaysForProduct(parsed.data.productId);
@@ -244,8 +271,6 @@ export async function setProductInventoryLinkAction(
         "The Product Link can be changed only while every clinic holds 0 stock of this product.",
     };
   }
-
-  const admin = createAdminClient();
 
   if (parsed.data.inventoryProductId) {
     const { data: linkedProduct, error: linkedError } = await admin
@@ -371,7 +396,7 @@ export async function getClinicShopViewAction(
   const { data: products, error: productsError } = await admin
     .from("products")
     .select(
-      "id, sku, name, original_price, sale_price, is_active, inventory_product_id, inventory_products(name, base_uom)",
+      "id, sku, name, original_price, sale_price, is_active, image_urls, banner_image_url, inventory_product_id, inventory_products(name, base_uom)",
     )
     .is("deleted_at", null)
     .order("name", { ascending: true });
@@ -414,6 +439,10 @@ export async function getClinicShopViewAction(
       inventory_product_id: product.inventory_product_id ?? null,
       inventory_product_name: joinedInventoryProduct?.name ?? null,
       base_uom: joinedInventoryProduct?.base_uom ?? null,
+      image_url:
+        (Array.isArray(product.image_urls) ? product.image_urls[0] : null) ??
+        product.banner_image_url ??
+        null,
       stock_quantity: effective.stockQuantity,
       is_visible: effective.isVisible,
       catalog_active: product.is_active,
