@@ -37,6 +37,140 @@ function addIssue(
 }
 
 /**
+ * Inclusive night count between two YYYY-MM-DD dates: `end − start + 1`, so a
+ * stay that starts and ends on the same date is exactly 1 night.
+ *
+ * The pure JS counterpart of `computeEndDate`'s inverse and of the
+ * `save_stay_details()` RPC's `(p_recalculated_end_date - v_stay.start_date) + 1`.
+ * Defined here rather than imported from `@/lib/accommodation/backdatedStay`
+ * because that module imports this one — the arithmetic is plain UTC day
+ * subtraction, so there is no behavioural fork.
+ *
+ * Exported so the Add-New-Stay dialog can display the very same derived night
+ * count that this file validates.
+ */
+export function nightsBetweenInclusive(
+  startDate: string,
+  endDate: string,
+): number {
+  const [sy, sm, sd] = startDate.split("-").map(Number);
+  const [ey, em, ed] = endDate.split("-").map(Number);
+  const start = Date.UTC(sy, sm - 1, sd);
+  const end = Date.UTC(ey, em - 1, ed);
+  return Math.round((end - start) / 86_400_000) + 1;
+}
+
+/**
+ * Shape shared by the accommodation onboarding form and the Add-New-Stay
+ * dialog: the Total_Stay_Amount / Advance_Amount split, gated behind the
+ * Shared_Payment toggle.
+ */
+interface StayPaymentSplitFields {
+  isSharedPayment: boolean;
+  paymentHostMobile?: string;
+  totalStayAmount?: number;
+  advanceAmountPaid?: number;
+}
+
+/**
+ * Payment-split refinement shared by every surface that creates a Stay_Entry
+ * (Req 4.2, 4.3, 4.4).
+ *
+ * Shared payment on  → `paymentHostMobile` is required and the money fields are
+ *                      irrelevant (a Shared_Payment stay carries no
+ *                      Total_Stay_Amount and no ledger at all).
+ * Shared payment off → both amounts are required and the advance may not exceed
+ *                      the total.
+ *
+ * Enforced server-side regardless of whether the field was visible — or even
+ * rendered — on the client.
+ */
+function refineStayPaymentSplit(
+  data: StayPaymentSplitFields,
+  ctx: z.RefinementCtx,
+): void {
+  if (data.isSharedPayment) {
+    if (!data.paymentHostMobile) {
+      addIssue(
+        ctx,
+        "paymentHostMobile",
+        "Payment host mobile number is required for shared payment.",
+      );
+    }
+    return;
+  }
+
+  if (data.totalStayAmount == null) {
+    addIssue(ctx, "totalStayAmount", "Total stay amount is required.");
+  }
+  if (data.advanceAmountPaid == null) {
+    addIssue(
+      ctx,
+      "advanceAmountPaid",
+      "Advance amount paid is required (enter 0 if none).",
+    );
+  }
+  if (
+    data.totalStayAmount != null &&
+    data.advanceAmountPaid != null &&
+    data.advanceAmountPaid > data.totalStayAmount
+  ) {
+    addIssue(
+      ctx,
+      "advanceAmountPaid",
+      "Advance amount cannot exceed the total stay amount.",
+    );
+  }
+}
+
+/**
+ * Start-date range refinement shared by every surface that creates a
+ * Stay_Entry (Req 1.2, 1.3, 3.4, 3.5).
+ *
+ * Toggle ON  → the date must be in the past, no earlier than
+ *              `MAX_BACKDATED_DAYS` before today (IST).
+ * Toggle OFF → the date must not be in the past, and no later than
+ *              `MAX_FORWARD_START_DAYS` ahead of today.
+ *
+ * Lexicographic comparison is correct for YYYY-MM-DD strings.
+ */
+function refineStayStartDate(
+  data: { startDate: string; backdatedStayEnabled: boolean },
+  ctx: z.RefinementCtx,
+): void {
+  const today = getISTDateString(0);
+
+  if (data.startDate < today) {
+    if (!data.backdatedStayEnabled) {
+      addIssue(
+        ctx,
+        "startDate",
+        "Backdated stay entry must be enabled to select a past start date.",
+      );
+    }
+    if (data.startDate < addDaysToISODate(today, -MAX_BACKDATED_DAYS)) {
+      addIssue(
+        ctx,
+        "startDate",
+        "Start date exceeds the maximum 30-day backdated range.",
+      );
+    }
+  } else if (data.backdatedStayEnabled) {
+    addIssue(
+      ctx,
+      "startDate",
+      "With backdated stay enabled, the start date must be in the past.",
+    );
+  } else if (data.startDate > addDaysToISODate(today, MAX_FORWARD_START_DAYS)) {
+    addIssue(
+      ctx,
+      "startDate",
+      "Start date cannot be more than 365 days in the future.",
+    );
+  }
+}
+
+/**
  * Schema for accommodation-specific onboarding in the Quick_Onboard_Form.
  *
  * Includes conditional validation via superRefine:
@@ -98,72 +232,10 @@ export const accommodationOnboardingSchema = z
   })
   .superRefine((data, ctx) => {
     // ── Payment split (Req 4.2, 4.3, 4.4) ────────────────────────────────────
-    // Enforced server-side even when the fields were hidden client-side.
-    if (data.isSharedPayment) {
-      if (!data.paymentHostMobile) {
-        addIssue(
-          ctx,
-          "paymentHostMobile",
-          "Payment host mobile number is required for shared payment.",
-        );
-      }
-    } else {
-      if (data.totalStayAmount == null) {
-        addIssue(ctx, "totalStayAmount", "Total stay amount is required.");
-      }
-      if (data.advanceAmountPaid == null) {
-        addIssue(
-          ctx,
-          "advanceAmountPaid",
-          "Advance amount paid is required (enter 0 if none).",
-        );
-      }
-      if (
-        data.totalStayAmount != null &&
-        data.advanceAmountPaid != null &&
-        data.advanceAmountPaid > data.totalStayAmount
-      ) {
-        addIssue(
-          ctx,
-          "advanceAmountPaid",
-          "Advance amount cannot exceed the total stay amount.",
-        );
-      }
-    }
+    refineStayPaymentSplit(data, ctx);
 
     // ── Start date ranges (Req 1.2, 1.3, 3.4, 3.5) ───────────────────────────
-    const today = getISTDateString(0);
-
-    if (data.startDate < today) {
-      if (!data.backdatedStayEnabled) {
-        addIssue(
-          ctx,
-          "startDate",
-          "Backdated stay entry must be enabled to select a past start date.",
-        );
-      }
-      if (data.startDate < addDaysToISODate(today, -MAX_BACKDATED_DAYS)) {
-        addIssue(
-          ctx,
-          "startDate",
-          "Start date exceeds the maximum 30-day backdated range.",
-        );
-      }
-    } else if (data.backdatedStayEnabled) {
-      addIssue(
-        ctx,
-        "startDate",
-        "With backdated stay enabled, the start date must be in the past.",
-      );
-    } else if (
-      data.startDate > addDaysToISODate(today, MAX_FORWARD_START_DAYS)
-    ) {
-      addIssue(
-        ctx,
-        "startDate",
-        "Start date cannot be more than 365 days in the future.",
-      );
-    }
+    refineStayStartDate(data, ctx);
   });
 
 /** Inferred input type for the accommodation onboarding form. */
@@ -190,22 +262,101 @@ export const extendStaySchema = z.object({
 /** Inferred input type for extending a stay. */
 export type ExtendStayInput = z.infer<typeof extendStaySchema>;
 
+/** Maximum nights a single stay may run for. */
+export const MAX_STAY_NIGHTS = 365;
+
 /**
- * Schema for creating a new stay entry for returning guests.
+ * Schema for creating a new stay entry for a RETURNING accommodation guest,
+ * from the Customer_360 Accommodation tab's Add New Stay dialog.
  *
- * Covers all required fields for a fresh stay: dates, accommodation type,
- * occupancy, payment, and meal preference.
+ * Deliberately mirrors {@link accommodationOnboardingSchema} field-for-field on
+ * everything that describes a *stay* — it shares the very same
+ * {@link refineStayPaymentSplit} and {@link refineStayStartDate} refinements —
+ * and carries none of the fields that describe a *customer* (name, mobile,
+ * gender, temp PIN, medical history), because the customer already exists. The
+ * one shape difference from onboarding is deliberate:
  *
- * Validates: Requirements 13.5
+ * - `endDate` REPLACES `totalNights`. The admin picks the stay's inclusive last
+ *   night on a calendar and the night count is DERIVED (`end − start + 1`), so
+ *   there is no second number that can disagree with the dates. This matches
+ *   both the Current Stay card's "End Date" and `recalculateStaySchema`, and is
+ *   the exact value `computeEndDate` reproduces from the persisted
+ *   `total_nights`.
+ *
+ * The legacy single `paymentAmount` field is GONE, replaced by the
+ * `totalStayAmount` / `advanceAmountPaid` split plus the Shared_Payment and
+ * Backdated_Stay toggles.
+ *
+ * Validates: Requirements 1.2, 1.3, 2.1, 3.4, 3.5, 4.2, 4.3, 4.4, 13.5
  */
-export const createStaySchema = z.object({
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  totalNights: z.coerce.number().int().min(1).max(365),
-  stayType: z.enum(["AC Villa", "Village Style Hut"]),
-  occupancyType: z.enum(["Single", "Double"]),
-  paymentAmount: z.coerce.number().min(1).max(9999999),
-  mealPreference: z.enum(["VEG", "EGG", "CHICKEN"]),
-});
+export const createStaySchema = z
+  .object({
+    startDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Select a valid start date."),
+    /** Inclusive last night of the stay; total nights is derived from it. */
+    endDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Select a valid end date."),
+    stayType: z.enum(["AC Villa", "Village Style Hut"]),
+    occupancyType: z.enum(["Single", "Double"]),
+    mealPreference: z.enum(["VEG", "EGG", "CHICKEN"]),
+    /** Backdated_Stay_Toggle — unlocks Past_Stay_Start selection (Req 1.1, 3.4). */
+    backdatedStayEnabled: z.boolean().default(false),
+    /** Total_Stay_Amount inclusive of 18% GST (Req 4.2). */
+    totalStayAmount: z.coerce.number().min(1).max(MAX_STAY_AMOUNT).optional(),
+    /** Advance_Amount collected now; 0 means "no advance" (Req 4.3). */
+    advanceAmountPaid: z.coerce.number().min(0).max(MAX_STAY_AMOUNT).optional(),
+    isSharedPayment: z.boolean().default(false),
+    // `.optional()` alone only permits `undefined`, but the dialog's default
+    // value for an untouched (non-shared-payment) field is `""` — matching
+    // `accommodationOnboardingSchema.paymentHostMobile`'s same fix. Without the
+    // `.or(z.literal(""))`, every submission with Shared_Payment off fails this
+    // regex on the base object schema before `superRefine` ever runs, and since
+    // the field isn't rendered in that case, the resulting error is invisible:
+    // `zodResolver` blocks the submit client-side with no toast and no network
+    // request at all.
+    paymentHostMobile: z
+      .string()
+      .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit mobile number.")
+      .optional()
+      .or(z.literal("")),
+    /**
+     * Optional Dietitian_Link. A Stay_Entry has no dietitian of its own — this
+     * updates the CUSTOMER's `dietitian_id`, so leaving it empty keeps whoever
+     * is already assigned. Empty string is normalised to "unchanged" downstream.
+     */
+    dietitianUserId: z
+      .string()
+      .uuid("Select a valid dietitian.")
+      .optional()
+      .or(z.literal("")),
+  })
+  .superRefine((data, ctx) => {
+    refineStayPaymentSplit(data, ctx);
+    refineStayStartDate(data, ctx);
+
+    // ── End date / derived nights ────────────────────────────────────────────
+    // The start date itself is selectable and yields exactly 1 night, so the
+    // lower bound is inclusive.
+    if (data.endDate < data.startDate) {
+      addIssue(
+        ctx,
+        "endDate",
+        "End date must be on or after the start date; selecting the start date itself gives a 1-night stay.",
+      );
+      return;
+    }
+
+    const nights = nightsBetweenInclusive(data.startDate, data.endDate);
+    if (nights > MAX_STAY_NIGHTS) {
+      addIssue(
+        ctx,
+        "endDate",
+        `A stay cannot run longer than ${MAX_STAY_NIGHTS} nights (this one is ${nights}).`,
+      );
+    }
+  });
 
 /** Inferred input type for creating a new stay entry. */
 export type CreateStayInput = z.infer<typeof createStaySchema>;

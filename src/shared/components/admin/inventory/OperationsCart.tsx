@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Camera, Inbox, Loader2, Package, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -73,8 +73,23 @@ function StagingCartItem({
   );
 }
 
-export default function OperationsCart() {
+interface OperationsCartProps {
+  /**
+   * Route suffixes on which this cart must not render. The warehouse layouts
+   * mount this cart for the whole `/inventory/**` subtree, but some pages own
+   * their own cart (e.g. Shop Products renders `ShopStockInCart`) and would
+   * otherwise show two floating cart buttons stacked on each other. Route
+   * knowledge stays with the layout that owns the routes rather than being
+   * hardcoded here.
+   */
+  hideOnPathSuffixes?: readonly string[];
+}
+
+export default function OperationsCart({
+  hideOnPathSuffixes,
+}: OperationsCartProps = {}) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [isInboundPending, startInboundTransition] = useTransition();
@@ -109,6 +124,14 @@ export default function OperationsCart() {
   }, []);
 
   if (!isMounted) {
+    return null;
+  }
+
+  const isHiddenRoute = (hideOnPathSuffixes ?? []).some(
+    (suffix) => pathname === suffix || pathname.endsWith(suffix),
+  );
+
+  if (isHiddenRoute) {
     return null;
   }
 

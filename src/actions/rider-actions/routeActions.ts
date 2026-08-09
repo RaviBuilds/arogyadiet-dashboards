@@ -9,6 +9,10 @@ import {
 } from "@/lib/delivery/deliveryStatusNotifications";
 import { FAILED_DELIVERY_REASONS } from "@/lib/delivery/failedDeliveryReasons";
 import { buildPushPayload, notifyAdmins } from "@/lib/notifications";
+import {
+  getCustomerNameByProfileId,
+  getRiderNameByProfileId,
+} from "@/lib/notifications/lookups";
 import { revalidatePath } from "next/cache";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -236,7 +240,7 @@ export async function requestFailedDeliveryAction(
 
   const { data: order, error: fetchError } = await supabase
     .from("delivery_orders")
-    .select("id, status")
+    .select("id, status, customer_profile_id")
     .eq("id", orderId)
     .eq("assigned_rider_id", riderProfileId)
     .maybeSingle();
@@ -285,9 +289,17 @@ export async function requestFailedDeliveryAction(
     return { success: false, error: logError.message };
   }
 
+  // Name the rider and customer so admins can triage the request straight from
+  // the notification without opening the operations board.
+  const [failedRiderName, failedCustomerName] = await Promise.all([
+    getRiderNameByProfileId(riderProfileId),
+    order.customer_profile_id
+      ? getCustomerNameByProfileId(order.customer_profile_id)
+      : Promise.resolve("Customer"),
+  ]);
+
   const failedTitle = "Failed Delivery Approval";
-  const failedMessage =
-    "Hi Admin, Rider sent failed delivery approval request.";
+  const failedMessage = `Hi Admin, rider ${failedRiderName} sent a failed delivery approval request for customer ${failedCustomerName}.`;
 
   await notifyAdmins({
     title: failedTitle,

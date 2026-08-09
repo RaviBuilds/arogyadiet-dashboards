@@ -304,16 +304,19 @@ export async function guardAdminGroup(
  * exists ONLY for that one page family; every other operations-group page
  * keeps using `guardAdminGroup` unchanged.
  *
- * Returns `{ config, isDietitian }` so the caller (the customers pages) can
- * thread `isDietitian` down to `CustomerDashboard`/`Customer360Dashboard` to
- * drive the read-only rendering (Req 16.1) without a second context
- * resolution.
+ * Returns `{ config, isDietitian, clinicId }` so the caller (the customers
+ * pages) can thread `isDietitian` down to `CustomerDashboard`/
+ * `Customer360Dashboard` to drive the read-only rendering (Req 16.1), and
+ * `clinicId` (the admin's Clinic_Scope_Assignment) to confine the workspace's
+ * own reads and lock its business-unit / clinic selectors to a single Core
+ * Clinic, all without a second context resolution.
  */
 export async function guardCustomersWorkspace(): Promise<{
   config: AccessConfiguration;
   isDietitian: boolean;
+  clinicId: string | null;
 }> {
-  const { roleCode, config } = await getCurrentAdminContext();
+  const { roleCode, config, clinicId } = await getCurrentAdminContext();
   if (roleCode !== "ADMIN" && roleCode !== "MASTER_ADMIN") {
     redirect("/unauthorized");
   }
@@ -321,7 +324,7 @@ export async function guardCustomersWorkspace(): Promise<{
   if (!isDietitian && !hasGroupAccess(config, "customers")) {
     redirect(landingRouteFor(config.level));
   }
-  return { config, isDietitian };
+  return { config, isDietitian, clinicId };
 }
 
 /**

@@ -43,6 +43,7 @@ import {
 import {
   CalendarDays,
   CheckCheck,
+  Download,
   Loader2,
   MoreHorizontal,
   ShoppingBag,
@@ -536,8 +537,12 @@ export default function AllShopOrdersView({
                     </TableCell>
 
                     <TableCell>
-                      {canEdit || canMarkDelivered ? (
-                        <DropdownMenu>
+                      {/* Always rendered: "Download receipt" applies to every
+                          order, including delivered/handed-over ones, which is
+                          precisely when a customer asks for proof of purchase.
+                          Previously this menu was hidden once an order was no
+                          longer editable. */}
+                      <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
                               variant="ghost"
@@ -550,6 +555,19 @@ export default function AllShopOrdersView({
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
+                            {/* Available for every order: the receipt is proof
+                                of purchase for stock that already left the
+                                clinic, so it must be reprintable at any time. */}
+                            <DropdownMenuItem asChild>
+                              <a
+                                href={`/api/shop-receipt/${order.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <Download className="mr-2 h-4 w-4" />
+                                Download receipt
+                              </a>
+                            </DropdownMenuItem>
                             {canEdit ? (
                               <DropdownMenuItem
                                 onClick={() => openEditModal(order)}
@@ -567,10 +585,7 @@ export default function AllShopOrdersView({
                               </DropdownMenuItem>
                             ) : null}
                           </DropdownMenuContent>
-                        </DropdownMenu>
-                      ) : (
-                        <span className="sr-only">No actions available</span>
-                      )}
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );

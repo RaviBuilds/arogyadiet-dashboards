@@ -185,6 +185,15 @@ export default function ProductCard({
               </span>
             </div>
 
+            {product.productCode ? (
+              <span
+                className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wide text-slate-500"
+                title="Product Code — enter this in Shop Products to link"
+              >
+                {product.productCode}
+              </span>
+            ) : null}
+
             <Popover>
               <PopoverTrigger asChild>
                 <Button

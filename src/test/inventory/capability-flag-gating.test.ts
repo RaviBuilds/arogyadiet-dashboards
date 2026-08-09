@@ -48,6 +48,7 @@ const arbCatalogProduct: fc.Arbitrary<InventoryCatalogProduct> = fc.record({
   baseUom: arbBaseUom,
   minStockThreshold: fc.nat({ max: 1000 }),
   defaultDurabilityDays: fc.nat({ max: 365 }),
+  productCode: fc.stringMatching(/^[A-Z0-9]{5}$/),
   createdAt: arbValidDate.map((d) => d.toISOString()),
   updatedAt: arbValidDate.map((d) => d.toISOString()),
   totalStock: fc.integer({ min: 0, max: 100000 }),

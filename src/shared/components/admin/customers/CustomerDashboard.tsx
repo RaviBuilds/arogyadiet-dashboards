@@ -144,6 +144,7 @@ export default function CustomerDashboard({
   stoppedSubscriptions = [],
   autoOpenCreate = false,
   isDietitian = false,
+  lockedClinicId = null,
 }: {
   customers?: CustomerData[];
   activeSubscriptions?: ActiveSubscriptionData[];
@@ -158,6 +159,13 @@ export default function CustomerDashboard({
    * defaults to `false` so every existing caller keeps its current behavior.
    */
   isDietitian?: boolean;
+  /**
+   * The signed-in admin's Clinic_Scope_Assignment. When set, every row is
+   * already confined to this one clinic server-side, so the "All Clinics"
+   * filter control is replaced with a static clinic label instead of a
+   * dropdown (there is nothing else to select).
+   */
+  lockedClinicId?: string | null;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("Overview");
@@ -192,6 +200,14 @@ export default function CustomerDashboard({
       a.name.localeCompare(b.name),
     );
   }, [customers]);
+
+  // Display name for the locked clinic filter (Clinic_Scoped_Admin): every
+  // loaded row already belongs to `lockedClinicId`, so its name is whatever
+  // `clinicOptions` resolved (falls back to a generic label if the clinic has
+  // no customers yet, so the label never disappears).
+  const lockedClinicName = lockedClinicId
+    ? clinicOptions.find((c) => c.id === lockedClinicId)?.name ?? "Your Clinic"
+    : null;
 
   // Dynamically extract unique active plans for the filter dropdown
   const uniquePlans = useMemo(() => {
@@ -686,6 +702,7 @@ export default function CustomerDashboard({
           clinicFilter={clinicFilter}
           setClinicFilter={setClinicFilter}
           clinicOptions={clinicOptions}
+          lockedClinicName={lockedClinicName}
           locationFlags={locationFlags}
           setLocationFlags={setLocationFlags}
           filterDiet={filterDiet}
@@ -723,6 +740,7 @@ export default function CustomerDashboard({
           clinicFilter={clinicFilter}
           setClinicFilter={setClinicFilter}
           clinicOptions={clinicOptions}
+          lockedClinicName={lockedClinicName}
           showArchived={showArchived}
           setShowArchived={setShowArchived}
           showExpired={showExpired}

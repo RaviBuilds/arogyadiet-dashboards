@@ -267,11 +267,14 @@ interface LedgerWorkspaceProps {
   data: TransactionLedgerEntry[];
   /** Active franchise destinations for the franchise filter in outgoing entries. */
   franchiseDestinations?: { id: string; name: string }[];
+  /** Core clinic destinations for the clinic filter in outgoing entries. */
+  clinicDestinations?: { id: string; name: string }[];
 }
 
 export default function LedgerWorkspace({
   data,
   franchiseDestinations = [],
+  clinicDestinations = [],
 }: LedgerWorkspaceProps) {
   const [activeId, setActiveId] = useState<SectionId>("incoming");
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
@@ -282,6 +285,13 @@ export default function LedgerWorkspace({
    * Only applied to outgoing entries (where franchise_transfer_id exists).
    */
   const [franchiseFilter, setFranchiseFilter] = useState<string | null>(null);
+  /**
+   * Clinic filter: UUID of the selected clinic, or null = show all. Only
+   * applied to outgoing entries. Matches both kinds of clinic-bound movement:
+   * shop stock-in (structured `destinationClinicId`) and Dispatch Stock (which
+   * stores only a "Sent to <name>" text snapshot).
+   */
+  const [clinicFilter, setClinicFilter] = useState<string | null>(null);
 
   // Apply the page-level date filter before anything else, so the section
   // counts, summary metrics and table all reflect the same window.
@@ -362,7 +372,9 @@ export default function LedgerWorkspace({
       (entry) => entry.transactionType === "OUT" || entry.transactionType === "EXPIRED",
     );
     const fromData = outgoingAll
-      .map((entry) => entry.reason)
+      // Use the resolved label so the Destination filter lists clinic names
+      // rather than raw `shop-clinic:<uuid>` markers.
+      .map((entry) => entry.destinationLabel ?? entry.reason)
       .filter((reason): reason is string => !!reason);
 
     const merged = new Set<string>([...STATIC_DISPATCH_REASONS, ...fromData]);
@@ -375,13 +387,45 @@ export default function LedgerWorkspace({
    * name pattern.
    */
   const activeSectionData = useMemo(() => {
-    const base = activeData;
-    if (activeId !== "outgoing" || !franchiseFilter) return base;
-    const selected = franchiseDestinations.find((f) => f.id === franchiseFilter);
-    if (!selected) return base;
-    const matchReason = `Sent to ${selected.name}`;
-    return base.filter((entry) => entry.reason === matchReason || entry.franchiseTransferId !== null);
-  }, [activeData, activeId, franchiseFilter, franchiseDestinations]);
+    let base = activeData;
+    if (activeId !== "outgoing") return base;
+
+    if (franchiseFilter) {
+      const selected = franchiseDestinations.find(
+        (f) => f.id === franchiseFilter,
+      );
+      if (selected) {
+        const matchReason = `Sent to ${selected.name}`;
+        base = base.filter(
+          (entry) =>
+            entry.reason === matchReason || entry.franchiseTransferId !== null,
+        );
+      }
+    }
+
+    if (clinicFilter) {
+      const selected = clinicDestinations.find((c) => c.id === clinicFilter);
+      if (selected) {
+        // Shop stock-in carries the clinic id structurally; Dispatch Stock
+        // only left a name snapshot, so match that too.
+        const dispatchSnapshot = `Sent to ${selected.name}`;
+        base = base.filter(
+          (entry) =>
+            entry.destinationClinicId === selected.id ||
+            entry.reason === dispatchSnapshot,
+        );
+      }
+    }
+
+    return base;
+  }, [
+    activeData,
+    activeId,
+    franchiseFilter,
+    franchiseDestinations,
+    clinicFilter,
+    clinicDestinations,
+  ]);
 
   // Use dynamic outgoing categories for the outgoing section.
   const activeSectionCategories =
@@ -561,6 +605,45 @@ export default function LedgerWorkspace({
               )}
             >
               {franchise.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Clinic filter — outgoing section only. Selects every movement bound
+          for one clinic: shop stock-in plus Dispatch Stock to that clinic. */}
+      {activeId === "outgoing" && clinicDestinations.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <span className="text-sm font-medium text-slate-700">
+            Filter by clinic:
+          </span>
+          <button
+            type="button"
+            onClick={() => setClinicFilter(null)}
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+              clinicFilter === null
+                ? "bg-rose-600 text-white"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+            )}
+          >
+            All
+          </button>
+          {clinicDestinations.map((clinic) => (
+            <button
+              key={clinic.id}
+              type="button"
+              onClick={() =>
+                setClinicFilter(clinicFilter === clinic.id ? null : clinic.id)
+              }
+              className={cn(
+                "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                clinicFilter === clinic.id
+                  ? "bg-rose-600 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+              )}
+            >
+              {clinic.name}
             </button>
           ))}
         </div>

@@ -31,6 +31,7 @@ import {
   CheckCircle2,
   Loader2,
   Minus,
+  Package,
   Plus,
   Search,
   ShoppingCart,
@@ -751,26 +752,52 @@ export default function AssistedOrderBuilder({
                       key={product.id}
                       className="flex items-center justify-between gap-3 rounded-lg border p-3"
                     >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {product.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatMoney(unit)}
-                          {product.category ? ` · ${product.category}` : ""}
-                        </p>
-                        <p
-                          className={cn(
-                            "text-xs",
-                            outOfStock
-                              ? "text-destructive"
-                              : "text-muted-foreground",
+                      <div className="flex min-w-0 items-center gap-3">
+                        {/* Thumbnail: plain <img> (not next/image) to match the
+                            other shop/inventory product cards and avoid the
+                            remote-pattern config those URLs would need. */}
+                        <div className="relative size-12 shrink-0 overflow-hidden rounded-md border bg-muted">
+                          {product.imageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={product.imageUrl}
+                              alt={product.name}
+                              loading="lazy"
+                              className={cn(
+                                "h-full w-full object-cover",
+                                outOfStock && "opacity-50 grayscale",
+                              )}
+                            />
+                          ) : (
+                            <div
+                              aria-hidden
+                              className="flex h-full w-full items-center justify-center text-muted-foreground"
+                            >
+                              <Package className="size-5" />
+                            </div>
                           )}
-                        >
-                          {outOfStock
-                            ? "Out of stock"
-                            : `${product.availableStock} in stock`}
-                        </p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {product.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatMoney(unit)}
+                            {product.category ? ` · ${product.category}` : ""}
+                          </p>
+                          <p
+                            className={cn(
+                              "text-xs",
+                              outOfStock
+                                ? "text-destructive"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {outOfStock
+                              ? "Out of stock"
+                              : `${product.availableStock} in stock`}
+                          </p>
+                        </div>
                       </div>
                       {line ? (
                         <div className="flex items-center gap-1">

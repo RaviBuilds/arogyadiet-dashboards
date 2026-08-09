@@ -25,7 +25,10 @@ export default async function InventoryLayout({
           Inventory-only admins land here, so the bell must be present. */}
       <InventoryHeader userId={userId ?? undefined} />
       <main className="flex-1">{children}</main>
-      <OperationsCart />
+      {/* Shop Products owns its own Stock In cart (`ShopStockInCart`), so the
+          master-catalog staging cart is suppressed there to avoid two
+          floating cart buttons overlapping. */}
+      <OperationsCart hideOnPathSuffixes={["/shop-products"]} />
     </div>
   );
 }

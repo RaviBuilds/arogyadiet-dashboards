@@ -13,6 +13,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentAdminContext } from "@/lib/auth/adminAccess";
 import * as AccommodationService from "@/services/AccommodationService";
+import { validatePaymentHost } from "@/services/AccommodationPaymentHostService";
 import {
   accommodationOnboardingSchema,
   type AccommodationOnboardingInput,
@@ -32,124 +33,9 @@ export type ProfileCompletionActionResult =
   | { success: true }
   | { error: string; fieldErrors?: Record<string, string> };
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Validates that a payment host mobile belongs to an existing accommodation
- * customer with an ACTIVE or PENDING stay, and is not the same mobile as the
- * customer being onboarded (self-reference check).
- *
- * Returns the payment host's customer_profile_id on success, or an error object.
- *
- * Req 2.3, 2.4, 2.5
- */
-async function validatePaymentHost(
-  paymentHostMobile: string,
-  customerMobile: string
-): Promise<
-  | { success: true; paymentHostProfileId: string }
-  | { error: string; fieldErrors: Record<string, string> }
-> {
-  // Self-reference check (Req 2.5)
-  if (paymentHostMobile === customerMobile) {
-    return {
-      error: "A customer cannot be their own payment host.",
-      fieldErrors: {
-        paymentHostMobile:
-          "Payment host mobile cannot be the same as the customer's mobile number.",
-      },
-    };
-  }
-
-  const admin = createAdminClient();
-
-  // Look up the payment host by mobile number via the users table
-  const { data: hostUser, error: userError } = await admin
-    .from("users")
-    .select("id, mobile, customer_profiles!customer_profiles_user_id_fkey(id)")
-    .eq("mobile", paymentHostMobile)
-    .maybeSingle();
-
-  if (userError) {
-    return {
-      error: "Failed to validate payment host. Please try again.",
-      fieldErrors: { paymentHostMobile: "Unable to verify this mobile number." },
-    };
-  }
-
-  if (!hostUser) {
-    return {
-      error: "Payment host not found.",
-      fieldErrors: {
-        paymentHostMobile:
-          "No customer found with this mobile number.",
-      },
-    };
-  }
-
-  // Extract the customer profile from the host user
-  const profiles = hostUser.customer_profiles as
-    | Array<{ id: string }>
-    | { id: string }
-    | null;
-  const hostProfile = Array.isArray(profiles)
-    ? profiles[0]
-    : profiles;
-
-  if (!hostProfile?.id) {
-    return {
-      error: "Payment host does not have a customer profile.",
-      fieldErrors: {
-        paymentHostMobile:
-          "The referenced customer is not found or not eligible.",
-      },
-    };
-  }
-
-  const hostProfileId = hostProfile.id;
-
-  // Check if the host has an ACTIVE or PENDING stay (Req 2.3)
-  // First check for an accommodation subscription
-  const { data: hostSubscription } = await admin
-    .from("subscriptions")
-    .select("id, customer_category")
-    .eq("customer_profile_id", hostProfileId)
-    .eq("customer_category", "ACCOMMODATION")
-    .maybeSingle();
-
-  if (!hostSubscription) {
-    return {
-      error: "Payment host is not an accommodation customer.",
-      fieldErrors: {
-        paymentHostMobile:
-          "The referenced customer is not found or not eligible.",
-      },
-    };
-  }
-
-  // Check for ACTIVE or PENDING stay
-  const { data: hostStay } = await admin
-    .from("stay_entries")
-    .select("id, status")
-    .eq("customer_profile_id", hostProfileId)
-    .in("status", ["ACTIVE", "PENDING"])
-    .limit(1)
-    .maybeSingle();
-
-  if (!hostStay) {
-    return {
-      error: "Payment host does not have an active or pending stay.",
-      fieldErrors: {
-        paymentHostMobile:
-          "The referenced customer is not found or not eligible.",
-      },
-    };
-  }
-
-  return { success: true, paymentHostProfileId: hostProfileId };
-}
+// `validatePaymentHost` used to live here as a private helper. It now sits in
+// `@/services/AccommodationPaymentHostService` so the Add-New-Stay dialog for a
+// returning guest resolves a Payment_Host through the exact same rules.
 
 // ---------------------------------------------------------------------------
 // onboardAccommodationCustomerAction

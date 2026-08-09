@@ -39,7 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/components/ui/select";
-import { Edit, Eye, MoreHorizontal, Trash2, Users } from "lucide-react";
+import { Building2, Edit, Eye, MoreHorizontal, Trash2, Users } from "lucide-react";
 
 import { DataTableCard } from "../core/DataTableCard";
 import { SectionHeader } from "../core/SectionHeader";
@@ -78,6 +78,12 @@ interface MealCustomerSectionProps {
   clinicFilter: ClinicFilterSelection;
   setClinicFilter: (val: ClinicFilterSelection) => void;
   clinicOptions: { id: string; name: string }[];
+  /**
+   * Set for a Clinic_Scoped_Admin: every row is already confined to this one
+   * clinic server-side, so the filter renders as a static label with this
+   * name instead of a dropdown (there is nothing else to select).
+   */
+  lockedClinicName?: string | null;
   locationFlags: string[];
   setLocationFlags: (val: string[]) => void;
   filterDiet: string;
@@ -117,6 +123,7 @@ export function MealCustomerSection({
   clinicFilter,
   setClinicFilter,
   clinicOptions,
+  lockedClinicName = null,
   locationFlags,
   setLocationFlags,
   filterDiet,
@@ -197,22 +204,32 @@ export function MealCustomerSection({
             onTermChange={setSearchTerm}
             options={searchOptions}
           />
-          <Select
-            value={clinicFilter ?? ALL_CLINICS}
-            onValueChange={(val) => setClinicFilter(val)}
-          >
-            <SelectTrigger className="w-[200px] border-slate-200 bg-white transition-all duration-200">
-              <SelectValue placeholder="Filter by clinic..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_CLINICS}>All Clinics</SelectItem>
-              {clinicOptions.map((clinic) => (
-                <SelectItem key={clinic.id} value={clinic.id}>
-                  {clinic.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {lockedClinicName ? (
+            <div
+              className="flex w-[200px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+              aria-label={`Clinic: ${lockedClinicName}`}
+            >
+              <Building2 className="h-4 w-4 text-emerald-600" />
+              <span className="truncate font-medium">{lockedClinicName}</span>
+            </div>
+          ) : (
+            <Select
+              value={clinicFilter ?? ALL_CLINICS}
+              onValueChange={(val) => setClinicFilter(val)}
+            >
+              <SelectTrigger className="w-[200px] border-slate-200 bg-white transition-all duration-200">
+                <SelectValue placeholder="Filter by clinic..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_CLINICS}>All Clinics</SelectItem>
+                {clinicOptions.map((clinic) => (
+                  <SelectItem key={clinic.id} value={clinic.id}>
+                    {clinic.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Button
             type="button"
             variant={showArchived ? "default" : "outline"}

@@ -34,6 +34,10 @@ function toInventoryCatalogProduct(
     baseUom: product.baseUom,
     minStockThreshold: 0,
     defaultDurabilityDays: 0,
+    // Franchise catalog products mirror the warehouse master catalog by id,
+    // but the franchise inventory service doesn't carry product_code through
+    // — this view is franchise-scoped stock, not the Master Catalog editor.
+    productCode: "",
     createdAt: "",
     updatedAt: "",
     totalStock: product.onHandQuantity,

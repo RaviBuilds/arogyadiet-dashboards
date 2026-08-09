@@ -46,6 +46,14 @@ export interface ShopStockInDialogProduct {
 interface ShopStockInDialogProps {
   product: ShopStockInDialogProduct;
   clinicId: string;
+  /** Display name of the destination clinic, stored on the pending line. */
+  clinicName: string;
+  /**
+   * When set, the Stock In action is disabled and this message explains why.
+   * Used to block adding a line while the cart already holds lines for a
+   * different clinic, which would otherwise mix destinations in one cart.
+   */
+  blockedReason?: string | null;
   /** Optional: called after a valid quantity is added to the cart. */
   onAdded?: () => void;
 }
@@ -67,6 +75,8 @@ function rejectionMessage(reason: string): string {
 export function ShopStockInDialog({
   product,
   clinicId,
+  clinicName,
+  blockedReason,
   onAdded,
 }: ShopStockInDialogProps) {
   const [open, setOpen] = useState(false);
@@ -76,6 +86,10 @@ export function ShopStockInDialog({
   );
 
   const isUnlinked = !product.inventory_product_id;
+  // An unlinked product can never be stocked in (Req 7.15); a cross-clinic
+  // cart blocks it only until the cart is resolved.
+  const disabledMessage = isUnlinked ? UNLINKED_MESSAGE : (blockedReason ?? null);
+  const isDisabled = disabledMessage !== null;
 
   // Empty input is treated as "not yet entered" rather than an immediate
   // NOT_INTEGER error, so the field does not open already showing red.
@@ -91,7 +105,9 @@ export function ShopStockInDialog({
   const isValid = validation !== null && validation.ok;
 
   const handleOpenChange = (next: boolean) => {
-    if (isUnlinked) return; // never openable for an unlinked product (Req 7.15)
+    // Never openable for an unlinked product (Req 7.15) or while a
+    // cross-clinic cart blocks new lines.
+    if (isDisabled) return;
     setOpen(next);
     if (!next) {
       setRawValue("");
@@ -103,6 +119,7 @@ export function ShopStockInDialog({
 
     addShopStockInLine({
       clinicId,
+      clinicName,
       productId: product.id,
       name: product.name,
       qty: validation.value,
@@ -119,7 +136,7 @@ export function ShopStockInDialog({
       variant="ghost"
       size="sm"
       className="h-8 gap-1.5 text-slate-600 hover:text-slate-900"
-      disabled={isUnlinked}
+      disabled={isDisabled}
       onClick={() => handleOpenChange(true)}
     >
       <Plus className="h-3.5 w-3.5" />
@@ -129,17 +146,17 @@ export function ShopStockInDialog({
 
   return (
     <>
-      {isUnlinked ? (
+      {disabledMessage ? (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
               {/* span wrapper so the tooltip fires even though the button is disabled */}
-              <span className="inline-flex" title={UNLINKED_MESSAGE}>
+              <span className="inline-flex" title={disabledMessage}>
                 {trigger}
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs">
-              {UNLINKED_MESSAGE}
+              {disabledMessage}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

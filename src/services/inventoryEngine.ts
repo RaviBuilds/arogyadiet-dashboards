@@ -142,7 +142,7 @@ export async function createInventoryProduct(
       default_durability_days: data.defaultDurabilityDays,
     })
     .select(
-      "id, name, image_url, category, type, base_uom, min_stock_threshold, default_durability_days, created_at, updated_at",
+      "id, name, image_url, category, type, base_uom, min_stock_threshold, default_durability_days, product_code, created_at, updated_at",
     )
     .single();
 
@@ -200,7 +200,7 @@ export async function updateInventoryProduct(
     .update(payload)
     .eq("id", id)
     .select(
-      "id, name, image_url, category, type, base_uom, min_stock_threshold, default_durability_days, created_at, updated_at",
+      "id, name, image_url, category, type, base_uom, min_stock_threshold, default_durability_days, product_code, created_at, updated_at",
     )
     .single();
 
@@ -242,7 +242,17 @@ export async function deleteInventoryProduct(id: string): Promise<void> {
   }
 }
 
-function resolveInventoryProductImageUrl(path: string | null): string | null {
+/**
+ * Resolves a stored `inventory_products.image_url` value into a fully
+ * qualified, publicly fetchable URL. The column stores either a bare storage
+ * object key (uploaded via `uploadInventoryProductImage`) or an already
+ * absolute `http(s)://` URL (legacy rows) — this normalizes both to the same
+ * shape so any caller can render it directly in an `<img>` without knowing
+ * which form is stored.
+ */
+export function resolveInventoryProductImageUrl(
+  path: string | null,
+): string | null {
   if (!path) return null;
   if (path.startsWith("http")) return path;
 
@@ -290,7 +300,7 @@ export async function getInventoryMasterCatalog(): Promise<
     supabase
       .from("inventory_products")
       .select(
-        "id, name, image_url, category, type, base_uom, min_stock_threshold, default_durability_days, created_at, updated_at",
+        "id, name, image_url, category, type, base_uom, min_stock_threshold, default_durability_days, product_code, created_at, updated_at",
       )
       .is("deleted_at", null)
       .order("created_at", { ascending: false }),
@@ -634,7 +644,18 @@ export async function getTransactionLedger(
     throw new Error(error.message);
   }
 
-  const entries = (data ?? []).map((row) => mapTransactionLedgerRow(row));
+  // Resolve clinic names so `shop-clinic:<uuid>` reasons render as a clinic
+  // name instead of a raw UUID. Every clinic is fetched (not just core ones)
+  // so a historical entry still resolves if the clinic later moved under a
+  // franchise; a name that cannot be resolved degrades gracefully.
+  const { data: clinicRows } = await supabase.from("clinics").select("id, name");
+  const clinicNamesById = new Map<string, string>(
+    (clinicRows ?? []).map((clinic) => [clinic.id, clinic.name]),
+  );
+
+  const entries = (data ?? []).map((row) =>
+    mapTransactionLedgerRow(row, clinicNamesById),
+  );
 
   // Resolve which franchise transfers have package images
   const transferIds = entries

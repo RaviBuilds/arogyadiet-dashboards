@@ -41,6 +41,12 @@ type OutboundCartInput = Omit<OutboundCartItem, "id">;
 export type ShopStockInLine = {
   id: string;
   clinicId: string;
+  /**
+   * Display name of the destination clinic, captured at add-time. Stored on
+   * the line so the cart can name the clinic its pending lines belong to
+   * (e.g. in the cross-clinic warning) without a second lookup.
+   */
+  clinicName: string;
   productId: string;
   name: string;
   qty: number;

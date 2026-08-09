@@ -30,6 +30,7 @@ import { toggleFranchiseProductVisibility } from "@/actions/admin-actions/franch
 import type { FranchiseShopProduct } from "@/actions/admin-actions/franchiseProductActions";
 import type { ClinicShopProductRow } from "@/types/clinicShop";
 import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader";
+import { MasterCatalogLinkByCode } from "@/shared/components/admin/product-inventory/MasterCatalogLinkByCode";
 import { ProductDescriptionEditor } from "@/shared/components/admin/product-inventory/ProductDescriptionEditor";
 import { ProductFranchiseAvailabilityDialog } from "@/shared/components/admin/product-inventory/ProductFranchiseAvailabilityDialog";
 import { ShopStockInDialog } from "@/shared/components/admin/product-inventory/ShopStockInDialog";
@@ -38,6 +39,7 @@ import {
   ProductMediaGallery,
   type ProductMediaGalleryHandle,
 } from "@/shared/components/admin/product-inventory/ProductMediaGallery";
+import { useInventoryStore } from "@/shared/stores/useInventoryStore";
 import { DataTable } from "@/shared/components/ui/data-table";
 import {
   AlertDialog,
@@ -95,9 +97,9 @@ const VALID_ACCESS_MODES: AccessMode[] = ["view-only", "full-access"];
  */
 export type ShopProductsMode =
   | { kind: "all-clinics" }
-  | { kind: "clinic"; clinicId: string }
+  | { kind: "clinic"; clinicId: string; clinicName?: string }
   | { kind: "franchise"; franchiseId: string }
-  | { kind: "operations-view"; clinicId: string | null };
+  | { kind: "operations-view"; clinicId: string | null; clinicName?: string };
 
 interface InventoryPageClientProps {
   /** Aggregate-catalogue rows — used by `all-clinics` and the legacy/`operations-view` path. */
@@ -243,6 +245,7 @@ export default function InventoryPageClient({
     return (
       <ClinicModeTable
         clinicId={mode.clinicId}
+        clinicName={mode.clinicName}
         products={clinicProducts}
         pageTitle={pageTitle}
         pageDescription={pageDescription}
@@ -273,6 +276,7 @@ export default function InventoryPageClient({
     return (
       <ClinicModeTable
         clinicId={mode.clinicId}
+        clinicName={mode.clinicName}
         products={clinicProducts}
         pageTitle={pageTitle}
         pageDescription={pageDescription}
@@ -315,20 +319,28 @@ function AggregateModeTable({
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const mediaGalleryRef = useRef<ProductMediaGalleryHandle>(null);
+  // Master_Catalog_Product link (Requirement 3) for the create/edit form.
+  // Seeded from `editingProduct.inventory_product_id` on edit, `null` on
+  // create — mirrors the pattern already used for `editingProduct` itself.
+  const [selectedInventoryProductId, setSelectedInventoryProductId] =
+    useState<string | null>(null);
 
   const handleProductModalOpenChange = (open: boolean) => {
     setProductModalOpen(open);
     if (!open) {
       setEditingProduct(null);
+      setSelectedInventoryProductId(null);
     }
   };
 
   const openCreateModal = () => {
     setEditingProduct(null);
+    setSelectedInventoryProductId(null);
   };
 
   const openEditModal = (product: AdminInventoryProduct) => {
     setEditingProduct(product);
+    setSelectedInventoryProductId(product.inventory_product_id ?? null);
   };
 
   const handleToggleVisibility = (product: AdminInventoryProduct) => {
@@ -385,6 +397,9 @@ function AggregateModeTable({
     startTransition(async () => {
       const formData = new FormData(event.currentTarget);
       mediaGalleryRef.current?.applyToFormData(formData);
+      if (selectedInventoryProductId) {
+        formData.set("inventoryProductId", selectedInventoryProductId);
+      }
       const result = await adminUpsertProduct(formData);
 
       if (result.success) {
@@ -839,10 +854,20 @@ function AggregateModeTable({
                       field. The "Stock" table column above still shows the
                       legacy/aggregate figure — that is a display concern, not
                       a stock-entry input, and stays out of scope here.
-                      Master Catalog Product linking (Requirement 3) is task
-                      7.8's territory and is intentionally not wired into this
-                      form yet.
                     */}
+
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="inventoryProductId" className="text-xs font-medium text-slate-700">
+                        Master Catalog Link
+                      </Label>
+                      <MasterCatalogLinkByCode
+                        id="inventoryProductId"
+                        value={selectedInventoryProductId}
+                        onChange={setSelectedInventoryProductId}
+                        locked={Boolean(editingProduct)}
+                        disabled={isPending}
+                      />
+                    </div>
 
                     <div className="space-y-2">
                       <Label htmlFor="taxPercent" className="text-xs font-medium text-slate-700">Tax Percent (%)</Label>
@@ -923,6 +948,8 @@ function AggregateModeTable({
 
 interface ClinicModeTableProps {
   clinicId: string;
+  /** Display name of the selected clinic, used in cross-clinic cart copy. */
+  clinicName?: string;
   products: ClinicShopProductRow[];
   pageTitle: string;
   pageDescription: string;
@@ -938,6 +965,7 @@ interface ClinicModeTableProps {
 
 function ClinicModeTable({
   clinicId,
+  clinicName,
   products,
   pageTitle,
   pageDescription,
@@ -946,6 +974,22 @@ function ClinicModeTable({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // Fall back to a neutral label when the page did not resolve a clinic name,
+  // so copy never renders "undefined".
+  const resolvedClinicName = clinicName ?? "the selected clinic";
+
+  // Single-clinic cart guard: while the cart holds lines for a different
+  // clinic, adding a line for this one is blocked so the two destinations
+  // can never be mixed in one cart. The cart panel itself explains the state
+  // and offers the two ways out.
+  const shopStockInCart = useInventoryStore((state) => state.shopStockInCart);
+  const cartClinicId = shopStockInCart[0]?.clinicId ?? null;
+  const cartClinicName = shopStockInCart[0]?.clinicName ?? "another clinic";
+  const stockInBlockedReason =
+    cartClinicId !== null && cartClinicId !== clinicId
+      ? `The stock-in cart already holds lines for ${cartClinicName}. Submit or clear that cart before stocking in for ${resolvedClinicName}.`
+      : null;
 
   const handleToggleVisibility = (product: ClinicShopProductRow) => {
     setTogglingId(product.id);
@@ -1085,13 +1129,22 @@ function ClinicModeTable({
                   <ShopStockInDialog
                     product={row.original}
                     clinicId={clinicId}
+                    clinicName={resolvedClinicName}
+                    blockedReason={stockInBlockedReason}
                   />
                 </div>
               ),
             } satisfies ColumnDef<ClinicShopProductRow>,
           ]),
     ],
-    [isPending, togglingId, clinicId, isReadOnly],
+    [
+      isPending,
+      togglingId,
+      clinicId,
+      isReadOnly,
+      resolvedClinicName,
+      stockInBlockedReason,
+    ],
   );
 
   const totalProducts = products.length;
@@ -1119,7 +1172,12 @@ function ClinicModeTable({
         </div>
       </div>
 
-      {isReadOnly ? null : <ShopStockInCart />}
+      {isReadOnly ? null : (
+        <ShopStockInCart
+          selectedClinicId={clinicId}
+          selectedClinicName={resolvedClinicName}
+        />
+      )}
     </div>
   );
 }
