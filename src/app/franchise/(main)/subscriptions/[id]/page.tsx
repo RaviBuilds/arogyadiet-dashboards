@@ -12,6 +12,7 @@ import {
   franchiseManagePendingSubscription,
   franchiseUpdateActiveSubscriptionDates,
   franchiseStopActiveSubscription,
+  franchiseRecalculateSubscriptionTenure,
   franchiseBulkUpdatePausePreferences,
   franchiseBulkUpdateMealPreferences,
   franchiseBulkUpdateAddressPreferences,
@@ -89,6 +90,14 @@ export default async function FranchiseSubscription360Page({
     .select("id, code, name")
     .order("code", { ascending: true });
 
+  // meal-subscription-early-closure: see the admin page's equivalent comment.
+  const { data: invoicePayment } = await supabase
+    .from("payments")
+    .select("id, base_amount, tax_amount, delivery_charge, misc_charge, misc_charge_label, amount, amount_paid, balance_due, status")
+    .eq("subscription_id", id)
+    .eq("invoice_type", "SUBSCRIPTION")
+    .maybeSingle();
+
   const customerUser = Array.isArray(subData.customer_profiles?.users)
     ? subData.customer_profiles.users[0]
     : subData.customer_profiles?.users;
@@ -116,11 +125,14 @@ export default async function FranchiseSubscription360Page({
         allCustomerSubs={allCustomerSubs || []}
         mealCategories={mealCategories || []}
         deliveryOrders={deliveryOrders || []}
+        invoicePayment={invoicePayment ?? null}
         actions={{
           managePendingSubscription: franchiseManagePendingSubscription as any,
           updateActiveSubscriptionDates:
             franchiseUpdateActiveSubscriptionDates as any,
           stopActiveSubscription: franchiseStopActiveSubscription as any,
+          recalculateSubscriptionTenure:
+            franchiseRecalculateSubscriptionTenure as any,
           bulkUpdatePausePreferences: franchiseBulkUpdatePausePreferences,
           bulkUpdateMealPreferences: franchiseBulkUpdateMealPreferences,
           bulkUpdateAddressPreferences: franchiseBulkUpdateAddressPreferences,

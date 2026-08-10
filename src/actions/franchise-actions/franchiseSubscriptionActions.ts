@@ -441,6 +441,7 @@ import {
   managePendingSubscription,
   updateActiveSubscriptionDates,
   stopActiveSubscription,
+  recalculateSubscriptionTenureAction,
 } from "@/actions/admin-actions/adminLifecycleActions";
 import {
   adminBulkUpdatePausePreferences,
@@ -513,6 +514,15 @@ export async function franchiseStopActiveSubscription(subscriptionId: string) {
   const guard = await guardSubscription(subscriptionId);
   if (!guard.success) return { success: false, error: guard.error };
   return stopActiveSubscription(subscriptionId);
+}
+
+export async function franchiseRecalculateSubscriptionTenure(
+  subscriptionId: string,
+  input: unknown,
+) {
+  const guard = await guardSubscription(subscriptionId);
+  if (!guard.success) return { success: false as const, error: guard.error };
+  return recalculateSubscriptionTenureAction(subscriptionId, input);
 }
 
 export async function franchiseBulkUpdatePausePreferences(

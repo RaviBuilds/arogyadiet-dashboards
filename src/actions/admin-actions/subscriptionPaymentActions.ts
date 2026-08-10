@@ -30,8 +30,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getISTDateString } from "@/lib/dates/ist";
 import { logAdminAction } from "@/lib/logger";
 import { recordSubscriptionPayment } from "@/repositories/subscriptionPaymentRepository";
-import { syncInvoicePaymentProjection } from "@/services/SubscriptionPaymentService";
-import { recordSubscriptionPaymentSchema } from "@/validations/subscriptionPaymentSchema";
+import {
+  getSubscriptionBalance,
+  syncInvoicePaymentProjection,
+} from "@/services/SubscriptionPaymentService";
+import {
+  recordSubscriptionPaymentSchema,
+  recordSubscriptionRefundSchema,
+} from "@/validations/subscriptionPaymentSchema";
 
 export type RecordPaymentActionResult =
   | {
@@ -244,6 +250,215 @@ export async function recordSubscriptionBalancePaymentAction(
       success: false,
       error:
         "The payment was recorded, but the invoice totals could not be refreshed. Reload the page; if the figures still look wrong, contact support.",
+    };
+  }
+
+  return {
+    success: true,
+    totalPaid: result.totalPaid,
+    remainingBalance: result.remainingBalance,
+    isFullyPaid: Math.round(result.remainingBalance * 100) === 0,
+  };
+}
+
+// ─── Early Closure / Tenure Recalculation — locked-amount refund ────────────
+//
+// Feature: meal-subscription-early-closure
+//
+// Deliberately separate from recordSubscriptionBalancePaymentAction rather than
+// a shared form with a REFUND option: a refund here must be for EXACTLY the
+// server-derived excess, never an admin-typed figure, because it exists to
+// settle an over-collection created by shortening the subscription's tenure.
+// The client never gets to edit the amount field; it only ever displays the
+// live `refundDue` and resubmits it, and the RPC re-derives the excess from the
+// ledger inside the row lock regardless of what was sent.
+
+export type RecordRefundActionResult =
+  | {
+      success: true;
+      totalPaid: number;
+      remainingBalance: number;
+      isFullyPaid: boolean;
+    }
+  | {
+      success: false;
+      error: string;
+      fieldErrors?: Record<string, string>;
+      /** Present when the requested amount no longer matches the live excess. */
+      excess?: number;
+    };
+
+/**
+ * Record a refund against a subscription that was over-collected (typically
+ * after a tenure recalculation shortened it below what was already paid).
+ *
+ * @param subscriptionId the subscription being refunded
+ * @param customerProfileId used only to revalidate the right Customer 360 path
+ * @param input           raw form input; `amount` MUST equal the live
+ *                         `refundDue` at submit time — enforced here, not just
+ *                         by the UI, so a stale or tampered client request
+ *                         cannot refund an arbitrary figure.
+ */
+export async function recordSubscriptionRefundAction(
+  subscriptionId: string,
+  customerProfileId: string,
+  input: unknown,
+): Promise<RecordRefundActionResult> {
+  const ctx = await getCurrentAdminContext();
+
+  if (!ctx.userId) {
+    return { success: false, error: "You must be signed in to process a refund." };
+  }
+
+  const admin = createAdminClient();
+
+  const { data: subscription, error: subError } = await admin
+    .from("subscriptions")
+    .select("id, customer_profile_id, franchise_id, total_payable")
+    .eq("id", subscriptionId)
+    .maybeSingle();
+
+  if (subError || !subscription) {
+    return { success: false, error: "Subscription not found." };
+  }
+
+  if (ctx.roleCode === "ADMIN" || ctx.roleCode === "MASTER_ADMIN") {
+    const gate = await checkGroupManage("customers");
+    if (!gate.ok) {
+      return { success: false, error: gate.error };
+    }
+  } else if (ctx.roleCode === "FRANCHISE_ADMIN") {
+    const callerFranchiseId = await resolveCallerFranchiseId(ctx.userId);
+    if (
+      !callerFranchiseId ||
+      subscription.franchise_id !== callerFranchiseId
+    ) {
+      return {
+        success: false,
+        error: "You do not have permission to process refunds for this customer.",
+      };
+    }
+  } else {
+    return {
+      success: false,
+      error: "You do not have permission to process refunds.",
+    };
+  }
+
+  // ── Re-validate ───────────────────────────────────────────────────────────
+  const parsed = recordSubscriptionRefundSchema.safeParse(input);
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      const path = issue.path[0]?.toString();
+      if (path && !fieldErrors[path]) fieldErrors[path] = issue.message;
+    }
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Please correct the refund details.",
+      fieldErrors,
+    };
+  }
+
+  const { amount, remark, comment, transactionDate } = parsed.data;
+
+  // The amount is LOCKED to the live excess — re-derive it server-side rather
+  // than trusting the client's copy, and reject a submission that no longer
+  // matches (the balance may have moved between page load and submit, e.g. a
+  // second admin already processed part of it).
+  const liveBalance = await getSubscriptionBalance(subscriptionId, admin);
+  const liveExcess = liveBalance ? Math.max(-liveBalance.remainingBalance, 0) : 0;
+
+  if (liveExcess <= 0) {
+    return {
+      success: false,
+      error: "There is no refund due on this subscription.",
+    };
+  }
+
+  if (Math.round(amount * 100) !== Math.round(liveExcess * 100)) {
+    return {
+      success: false,
+      error: `The refund amount must exactly match the current excess of ₹${liveExcess.toFixed(2)}. Reload and try again.`,
+      excess: liveExcess,
+      fieldErrors: { amount: `Must equal ₹${liveExcess.toFixed(2)}.` },
+    };
+  }
+
+  // ── Row-locked append ─────────────────────────────────────────────────────
+  const result = await recordSubscriptionPayment(
+    {
+      subscriptionId,
+      transactionType: "REFUND",
+      amount,
+      transactionDate: transactionDate ?? getISTDateString(0),
+      paymentMethod: "REFUND",
+      remark,
+      comment: comment?.trim() || null,
+      createdBy: ctx.userId,
+    },
+    admin,
+  );
+
+  if (!result.ok) {
+    switch (result.reason) {
+      case "REFUND_EXCEEDS_EXCESS":
+        return {
+          success: false,
+          error: "The refund exceeds the excess paid.",
+          excess: result.excess,
+          fieldErrors: {
+            amount: `Cannot exceed the excess of ₹${result.excess.toFixed(2)}.`,
+          },
+        };
+      case "AMOUNT_NOT_POSITIVE":
+        return {
+          success: false,
+          error: "Amount must be greater than ₹0.",
+          fieldErrors: { amount: "Amount must be greater than ₹0." },
+        };
+      case "NO_TOTAL_PAYABLE":
+        return {
+          success: false,
+          error: "This subscription has no recorded balance to refund against.",
+        };
+      case "NOT_FOUND":
+        return { success: false, error: "Subscription not found." };
+      case "DUPLICATE_ADVANCE":
+        return {
+          success: false,
+          error: "An advance payment already exists for this subscription.",
+        };
+      default:
+        return {
+          success: false,
+          error:
+            "message" in result && result.message
+              ? result.message
+              : "The refund could not be recorded.",
+        };
+    }
+  }
+
+  const sync = await syncInvoicePaymentProjection(subscriptionId, admin);
+
+  await logAdminAction("CREATE", "subscription_refund", subscriptionId, {
+    amount,
+    remark,
+    totalPaid: result.totalPaid,
+    remainingBalance: result.remainingBalance,
+    transactionId: result.transaction.id,
+    invoiceSynced: sync.ok,
+  });
+
+  revalidatePath(`/admin/customers/${customerProfileId}`);
+  revalidatePath(`/franchise/customers/${customerProfileId}`);
+
+  if (!sync.ok) {
+    return {
+      success: false,
+      error:
+        "The refund was recorded, but the invoice totals could not be refreshed. Reload the page; if the figures still look wrong, contact support.",
     };
   }
 

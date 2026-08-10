@@ -60,6 +60,17 @@ export default async function Subscription360Page({ params }: { params: Promise<
     .select("id, code, name")
     .order("code", { ascending: true });
 
+  // meal-subscription-early-closure: the invoice breakup (base_amount,
+  // tax_amount, delivery_charge as actually invoiced) lives on `payments`, not
+  // `subscriptions` — needed by the Recalculate Subscription Tenure dialog to
+  // show the current figures and enforce "new charge must be lower".
+  const { data: invoicePayment } = await supabaseAdmin
+    .from("payments")
+    .select("id, base_amount, tax_amount, delivery_charge, misc_charge, misc_charge_label, amount, amount_paid, balance_due, status")
+    .eq("subscription_id", id)
+    .eq("invoice_type", "SUBSCRIPTION")
+    .maybeSingle();
+
   const customerUser = Array.isArray(subData.customer_profiles?.users)
     ? subData.customer_profiles.users[0]
     : subData.customer_profiles?.users;
@@ -81,6 +92,7 @@ export default async function Subscription360Page({ params }: { params: Promise<
         allCustomerSubs={allCustomerSubs || []}
         mealCategories={mealCategories || []}
         deliveryOrders={deliveryOrders || []}
+        invoicePayment={invoicePayment ?? null}
       />
     </div>
   );

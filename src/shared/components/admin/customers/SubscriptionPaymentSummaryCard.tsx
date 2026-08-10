@@ -26,6 +26,7 @@ import {
 } from "@/shared/components/ui/card";
 import type { SubscriptionPaymentSummary } from "@/services/SubscriptionPaymentService";
 import { RecordSubscriptionPaymentForm } from "./RecordSubscriptionPaymentForm";
+import { RecordSubscriptionRefundForm } from "./RecordSubscriptionRefundForm";
 
 /**
  * SubscriptionPaymentSummaryCard — the payment position of ONE subscription, at
@@ -440,6 +441,20 @@ export function SubscriptionPaymentSummaryCard({
               customerProfileId={customerProfileId}
               balanceDue={summary.balanceDue}
               amountPaid={summary.amountPaid}
+            />
+          </div>
+        )}
+
+        {/* ── Process a refund ──
+            Only while the customer was over-collected (meal-subscription-early
+            -closure). The amount is locked to the live excess — never
+            admin-typed — see RecordSubscriptionRefundForm. */}
+        {hasRefund && customerProfileId && (
+          <div className="mt-4 border-t pt-4">
+            <RecordSubscriptionRefundForm
+              subscriptionId={summary.subscriptionId}
+              customerProfileId={customerProfileId}
+              refundDue={summary.refundDue}
             />
           </div>
         )}

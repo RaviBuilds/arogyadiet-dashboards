@@ -166,3 +166,71 @@ export function getPastDateRangeForAddSub(
 
   return { start, end: yesterday };
 }
+
+// ─── Subscription Early Closure — Recalculation End-Date Bounds ──────────────
+//
+// Feature: meal-subscription-early-closure
+//
+// Mirrors `earliestStartDate`, but for an END date instead of a start date, and
+// for a SHORTENING action instead of a fresh onboarding. The rule (Cutoff_Time
+// = 17:00 IST, same constant as onboarding):
+//   - BEFORE 17:00 IST on the current IST day → the plan may be closed as of
+//     TODAY (IST). Today's deliveries have not necessarily gone out yet.
+//   - AT/AFTER 17:00 IST → the earliest closable date shifts to TOMORROW (IST),
+//     since today's delivery run may already be committed.
+// The latest selectable end date is always `currentEffectiveEndDate - 1 day` —
+// this is a shortening-only tool, so picking the existing end date is never
+// offered (Req: "no logic of selecting same end date").
+
+/**
+ * Returns the earliest selectable new end date (YYYY-MM-DD, IST) for
+ * recalculating/closing an active subscription, given the instant `now`.
+ * Pure over `now` and `cutoffHourIST`.
+ */
+export function earliestRecalculationEndDate(
+  now: Date,
+  cutoffHourIST: number = ONBOARDING_CUTOFF_HOUR_IST,
+): string {
+  const istHour = istHourOf(now);
+  const istToday = istDateStringOf(now);
+  const daysToAdd = istHour >= cutoffHourIST ? 1 : 0;
+  return addDaysToISODate(istToday, daysToAdd);
+}
+
+/**
+ * Returns the full selectable range { min, max } (inclusive, YYYY-MM-DD) for
+ * the new end date, given `now` and the subscription's CURRENT effective end
+ * date. `max` is `currentEffectiveEndDate - 1`; if the earliest closable date
+ * (from the cutoff) is already past that, the range is empty (`min > max`) and
+ * the dialog should disable submission — this happens only for a subscription
+ * whose current end date is today or tomorrow, leaving no room to shorten it
+ * further under the cutoff rule.
+ */
+export function getRecalculationEndDateRange(
+  now: Date,
+  currentEffectiveEndDate: string,
+  cutoffHourIST: number = ONBOARDING_CUTOFF_HOUR_IST,
+): { min: string; max: string } {
+  const min = earliestRecalculationEndDate(now, cutoffHourIST);
+  const max = addDaysToISODate(currentEffectiveEndDate, -1);
+  return { min, max };
+}
+
+/**
+ * Returns `true` iff `newEndDate` (YYYY-MM-DD) is a valid recalculation target:
+ * on/after the earliest closable date AND strictly before the current
+ * effective end date. Pure over its inputs.
+ */
+export function isRecalculationEndDateAllowed(
+  newEndDate: string,
+  now: Date,
+  currentEffectiveEndDate: string,
+  cutoffHourIST: number = ONBOARDING_CUTOFF_HOUR_IST,
+): boolean {
+  const { min, max } = getRecalculationEndDateRange(
+    now,
+    currentEffectiveEndDate,
+    cutoffHourIST,
+  );
+  return newEndDate >= min && newEndDate <= max && min <= max;
+}

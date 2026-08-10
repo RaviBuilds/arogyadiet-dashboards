@@ -160,6 +160,47 @@ export const OUTSTANDING_BALANCE_ADMIN_MESSAGE =
  */
 export const SETTLED_PAYMENT_STATUSES = ["PAID", "SUCCESS", "CAPTURED"] as const;
 
+// ─── Early Closure / Tenure Recalculation ───────────────────────────────────
+//
+// Feature: meal-subscription-early-closure
+//
+// Backed by `public.recalculate_subscription_tenure` RPC and
+// `public.subscription_recalculation_history`
+// (scripts/create-subscription-early-closure-recalculation.sql).
+
+/**
+ * Typed failure reasons returned by the `recalculate_subscription_tenure` RPC.
+ * Same `jsonb {ok, reason}` discipline as the payment RPC — mapped to a pinned
+ * user-facing message in the action layer rather than a raw Postgres error.
+ */
+export type RecalculateTenureFailure =
+  | { reason: "NOT_FOUND" }
+  | { reason: "NOT_ACTIVE"; status: string }
+  | { reason: "NO_INVOICE" }
+  /** The authoritative inclusive bounds the dialog must show. */
+  | { reason: "INVALID_END_DATE"; minEndDate: string; maxEndDate: string }
+  | { reason: "BASE_AMOUNT_NOT_LOWER"; currentBaseAmount: number }
+  | { reason: "DELIVERY_CHARGE_NOT_LOWER"; currentDeliveryCharge: number }
+  | { reason: "ERROR"; message: string };
+
+/** Outcome of a successful tenure recalculation. */
+export interface RecalculateTenureSuccess {
+  ok: true;
+  newEndDate: string;
+  newTotalPayable: number;
+  newBaseAmount: number;
+  newTaxAmount: number;
+  newDeliveryCharge: number;
+  /** Derived from the ledger (or the invoice's amount_paid when no ledger exists). */
+  totalPaid: number;
+  /** Positive = still owed by the customer; negative = refund due; 0 = exact. */
+  settlementAmount: number;
+}
+
+export type RecalculateTenureResult =
+  | RecalculateTenureSuccess
+  | ({ ok: false } & RecalculateTenureFailure);
+
 /**
  * Maps a raw `payments.status` to the three-state render model.
  *
