@@ -99,6 +99,16 @@ export interface OnboardSubscriptionInput {
   misc_charge?: number | null;
   /** Admin-supplied name for `misc_charge`, printed verbatim on the invoice. */
   misc_charge_label?: string | null;
+  /**
+   * Total_Payable snapshot = plan/kit amount + delivery charge + miscellaneous
+   * charge, frozen at creation (meal-subscription-partial-payment, D2).
+   *
+   * Deliberately a snapshot rather than re-derived from `subscription_plans.price`
+   * at read time: plan prices change, and re-deriving would silently re-price a
+   * subscription that was already settled. Omitted → the RPC falls back to
+   * `payment.amount`.
+   */
+  total_payable?: number | null;
   franchise_id?: string | null;
   initial_meal_category_id?: string | null;  // NEW: For daily preferences generation
 }
@@ -120,6 +130,30 @@ export interface OnboardPaymentInput {
   payment_reference?: string | null;
   payment_notes?: string | null;
   franchise_id?: string | null;
+}
+
+/**
+ * The OPTIONAL `payment_collection` block
+ * (meal-subscription-partial-payment, Phase 1.9).
+ *
+ * Omitting it reproduces the previous behaviour exactly — status `PAID`,
+ * `amount_paid = amount`, `balance_due = 0`, and no ledger row — so KIT
+ * onboarding and bulk migration are unaffected without being touched.
+ *
+ * Present with `paid_in_full: false`, the RPC additionally writes ONE `ADVANCE`
+ * row into `subscription_payment_transactions` and marks the invoice
+ * `PARTIALLY_PAID`. MEAL only; the RPC rejects any other category.
+ */
+export interface OnboardPaymentCollectionInput {
+  /** `false` collects only an advance and leaves a balance outstanding. */
+  paid_in_full: boolean;
+  /**
+   * The advance actually collected. Required when `paid_in_full` is false, and
+   * must satisfy `0 < amount_paid <= total_payable` (enforced by the RPC too).
+   */
+  amount_paid?: number | null;
+  /** Business date of the collection; defaults to `CURRENT_DATE` in the RPC. */
+  transaction_date?: string | null;
 }
 
 /** The `address` block of the RPC payload. */
@@ -147,6 +181,8 @@ export interface OnboardCustomerRpcInput {
   subscription: OnboardSubscriptionInput;
   payment: OnboardPaymentInput;
   address: OnboardAddressInput;
+  /** Optional advance/partial payment collection (MEAL only). */
+  payment_collection?: OnboardPaymentCollectionInput;
 }
 
 /** The ids returned by a successful atomic onboarding write. */
@@ -156,6 +192,17 @@ export interface OnboardIds {
   subscription_id: string;
   payment_id: string;
   address_id: string;
+  /**
+   * The `ADVANCE` ledger row, present only when onboarding collected a partial
+   * payment. `null`/absent means the subscription was paid in full.
+   */
+  advance_transaction_id?: string | null;
+  /** Echoed back by the RPC so the caller never re-derives what was committed. */
+  total_payable?: number | null;
+  amount_paid?: number | null;
+  balance_due?: number | null;
+  /** `PAID` or `PARTIALLY_PAID`, as actually written to `payments.status`. */
+  payment_status?: string | null;
 }
 
 /**

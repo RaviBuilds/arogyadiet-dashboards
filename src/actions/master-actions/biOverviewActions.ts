@@ -35,31 +35,59 @@ export async function getOverviewKPIs(
   const prevMonthStart = prevStart;
   const prevMonthEnd = prevEnd;
 
-  // MRR - current month revenue
-  const { data: currentPayments } = await supabase
-    .from("payments")
-    .select("amount")
-    .in("status", ["PAID", "SUCCESS", "CAPTURED"])
-    .gte("created_at", `${thisMonthStart}T00:00:00`)
-    .lte("created_at", `${today}T23:59:59`);
+  // MRR - current month revenue (+ PARTIALLY_PAID → amount_paid only)
+  const [{ data: currentPayments }, { data: currentPartialPayments }] =
+    await Promise.all([
+      supabase
+        .from("payments")
+        .select("amount")
+        .in("status", ["PAID", "SUCCESS", "CAPTURED"])
+        .gte("created_at", `${thisMonthStart}T00:00:00`)
+        .lte("created_at", `${today}T23:59:59`),
+      supabase
+        .from("payments")
+        .select("amount_paid")
+        .eq("status", "PARTIALLY_PAID")
+        .gte("created_at", `${thisMonthStart}T00:00:00`)
+        .lte("created_at", `${today}T23:59:59`),
+    ]);
 
-  const mrr = (currentPayments || []).reduce(
-    (sum, p) => sum + Number(p.amount || 0),
-    0
-  );
+  const mrr =
+    (currentPayments || []).reduce(
+      (sum, p) => sum + Number(p.amount || 0),
+      0,
+    ) +
+    (currentPartialPayments || []).reduce(
+      (sum: number, p: any) => sum + Number(p.amount_paid || 0),
+      0,
+    );
 
   // Previous month revenue for growth %
-  const { data: prevPayments } = await supabase
-    .from("payments")
-    .select("amount")
-    .in("status", ["PAID", "SUCCESS", "CAPTURED"])
-    .gte("created_at", `${prevMonthStart}T00:00:00`)
-    .lte("created_at", `${prevMonthEnd}T23:59:59`);
+  const [{ data: prevPayments }, { data: prevPartialPayments }] =
+    await Promise.all([
+      supabase
+        .from("payments")
+        .select("amount")
+        .in("status", ["PAID", "SUCCESS", "CAPTURED"])
+        .gte("created_at", `${prevMonthStart}T00:00:00`)
+        .lte("created_at", `${prevMonthEnd}T23:59:59`),
+      supabase
+        .from("payments")
+        .select("amount_paid")
+        .eq("status", "PARTIALLY_PAID")
+        .gte("created_at", `${prevMonthStart}T00:00:00`)
+        .lte("created_at", `${prevMonthEnd}T23:59:59`),
+    ]);
 
-  const prevMrr = (prevPayments || []).reduce(
-    (sum, p) => sum + Number(p.amount || 0),
-    0
-  );
+  const prevMrr =
+    (prevPayments || []).reduce(
+      (sum, p) => sum + Number(p.amount || 0),
+      0,
+    ) +
+    (prevPartialPayments || []).reduce(
+      (sum: number, p: any) => sum + Number(p.amount_paid || 0),
+      0,
+    );
 
   const mrrGrowthPercent =
     prevMrr > 0
@@ -133,13 +161,21 @@ export async function getRevenueGrowthTrend(
 
   const days = eachDayOfInterval({ start: rangeStart, end: rangeEnd });
 
-  // Get all payments in range
-  const { data: payments } = await supabase
-    .from("payments")
-    .select("amount, created_at")
-    .in("status", ["PAID", "SUCCESS", "CAPTURED"])
-    .gte("created_at", `${format(rangeStart, "yyyy-MM-dd")}T00:00:00`)
-    .lte("created_at", `${format(rangeEnd, "yyyy-MM-dd")}T23:59:59`);
+  // Get all payments in range (+ PARTIALLY_PAID → amount_paid)
+  const [{ data: payments }, { data: partialPayments }] = await Promise.all([
+    supabase
+      .from("payments")
+      .select("amount, created_at")
+      .in("status", ["PAID", "SUCCESS", "CAPTURED"])
+      .gte("created_at", `${format(rangeStart, "yyyy-MM-dd")}T00:00:00`)
+      .lte("created_at", `${format(rangeEnd, "yyyy-MM-dd")}T23:59:59`),
+    supabase
+      .from("payments")
+      .select("amount_paid, created_at")
+      .eq("status", "PARTIALLY_PAID")
+      .gte("created_at", `${format(rangeStart, "yyyy-MM-dd")}T00:00:00`)
+      .lte("created_at", `${format(rangeEnd, "yyyy-MM-dd")}T23:59:59`),
+  ]);
 
   // Get all subscriptions created in range
   const { data: subs } = await supabase
@@ -151,9 +187,13 @@ export async function getRevenueGrowthTrend(
   return days.map((day) => {
     const dayStr = format(day, "yyyy-MM-dd");
 
-    const dayRevenue = (payments || [])
-      .filter((p) => p.created_at?.startsWith(dayStr))
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const dayRevenue =
+      (payments || [])
+        .filter((p) => p.created_at?.startsWith(dayStr))
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0) +
+      (partialPayments || [])
+        .filter((p: any) => p.created_at?.startsWith(dayStr))
+        .reduce((sum: number, p: any) => sum + Number(p.amount_paid || 0), 0);
 
     const daySubs = (subs || []).filter((s) =>
       s.created_at?.startsWith(dayStr)

@@ -45,6 +45,7 @@ import {
   updateProfileFields,
   type OnboardCustomerRpcInput,
   type OnboardIds,
+  type OnboardPaymentCollectionInput,
   type ProfileFieldPatch,
 } from "@/repositories/customerOnboardingRepository";
 import type { QuickOnboardingInput } from "@/validations/onboardingSchema";
@@ -248,6 +249,26 @@ export interface MiscChargeContext {
   miscChargeLabel: string;
 }
 
+/**
+ * Optional payment-collection context for onboarding a MEAL customer against an
+ * ADVANCE rather than the full Total_Payable
+ * (meal-subscription-partial-payment, Phase 2.5).
+ *
+ * Omit it entirely for the default full-payment behaviour, which is what KIT
+ * onboarding and bulk migration continue to get without any change.
+ *
+ * `advanceAmount` is the cash actually collected at the counter. The service
+ * validates it against the Total_Payable IT computes — never against a figure
+ * supplied by the client — so a tampered payload cannot activate a subscription
+ * for a rupee.
+ */
+export interface PaymentCollectionContext {
+  /** When false, only `advanceAmount` was collected and a balance remains. */
+  paidInFull: boolean;
+  /** The advance collected. Ignored when `paidInFull` is true. */
+  advanceAmount: number;
+}
+
 // ---------------------------------------------------------------------------
 // onboard — the atomic quick-onboarding write
 // ---------------------------------------------------------------------------
@@ -278,6 +299,8 @@ export interface MiscChargeContext {
  * @param pin      optional PIN context for setting a temp PIN at onboarding
  * @param delivery optional delivery charge recorded against the subscription
  * @param misc     optional miscellaneous charge + its admin-supplied invoice label
+ * @param collection optional advance/partial payment collection (MEAL only);
+ *                   omit for the default "paid in full" behaviour
  */
 export async function onboard(
   payload: QuickOnboardingInput,
@@ -285,6 +308,7 @@ export async function onboard(
   pin?: PinContext,
   delivery?: DeliveryChargeContext,
   misc?: MiscChargeContext,
+  collection?: PaymentCollectionContext,
 ): Promise<OnboardOutcome> {
   // (1) PAID precondition (Req 8.1/8.2). No customer record is persisted while
   //     Payment_Status is anything other than PAID.
@@ -482,6 +506,76 @@ export async function onboard(
     };
   }
 
+  // (6b) Resolve the money BEFORE creating the auth identity.
+  //
+  // Extra charges recorded alongside the plan amount. Both are optional and
+  // default to "not charged" so callers that omit them are unaffected. The
+  // miscellaneous label is only persisted when an amount is actually charged,
+  // matching the chk_*_misc_charge_label DB constraint.
+  const deliveryChargeAmount = delivery?.deliveryCharge ?? 0;
+  const miscChargeAmount = misc && misc.miscCharge > 0 ? misc.miscCharge : 0;
+  const miscChargeLabel =
+    miscChargeAmount > 0 ? misc!.miscChargeLabel.trim() : null;
+
+  // Total_Payable = plan/kit amount + delivery + miscellaneous. Computed HERE,
+  // from server-resolved plan pricing, and used for both `payments.amount` and
+  // `subscriptions.total_payable` so the two can never disagree. The client's
+  // displayed total is never trusted.
+  const totalPayable = calculateTotalPayable(
+    category === "MEAL" && plan ? plan.totalAmount : (kitProduct?.totalAmount ?? 0),
+    deliveryChargeAmount,
+    miscChargeAmount,
+  );
+
+  // Validate the advance against the total the SERVER computed, before any
+  // identity or row is created — a rejected advance must leave nothing behind.
+  let paymentCollection: OnboardPaymentCollectionInput | undefined;
+  if (collection && !collection.paidInFull) {
+    if (category !== "MEAL") {
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: "Partial payment is only supported for MEAL subscriptions.",
+      };
+    }
+
+    const advance = Number(collection.advanceAmount);
+
+    if (!Number.isFinite(advance) || advance <= 0) {
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: "Enter the advance amount collected from the customer.",
+        fieldErrors: {
+          advanceAmountPaid: "The advance amount must be greater than ₹0.",
+        },
+      };
+    }
+
+    // Compared in paise: `advance > totalPayable` on floats would reject a
+    // legitimate exact-full advance like 17054.45 whose sum drifts by 1e-12.
+    if (Math.round(advance * 100) > Math.round(totalPayable * 100)) {
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: "The advance amount cannot exceed the total payable amount.",
+        fieldErrors: {
+          advanceAmountPaid: `The advance cannot exceed ₹${totalPayable.toFixed(2)}.`,
+        },
+      };
+    }
+
+    // An advance that covers the whole total IS a full payment. Collapsing it
+    // here keeps the "no ledger ⇒ paid in full" invariant intact instead of
+    // leaving a zero-balance ledger row behind.
+    const isEffectivelyFull =
+      Math.round(advance * 100) === Math.round(totalPayable * 100);
+
+    paymentCollection = isEffectivelyFull
+      ? { paid_in_full: true }
+      : { paid_in_full: false, amount_paid: advance };
+  }
+
   // (7) Create the Supabase Auth phone identity FIRST — the only step outside
   //     the DB transaction (compensated by deletion on RPC failure below).
   const admin_client = createAdminClient();
@@ -518,15 +612,6 @@ export async function onboard(
     };
   }
   const authUserId = authData.user.id;
-
-  // Extra charges recorded alongside the plan amount. Both are optional and
-  // default to "not charged" so callers that omit them are unaffected. The
-  // miscellaneous label is only persisted when an amount is actually charged,
-  // matching the chk_*_misc_charge_label DB constraint.
-  const deliveryChargeAmount = delivery?.deliveryCharge ?? 0;
-  const miscChargeAmount = misc && misc.miscCharge > 0 ? misc.miscCharge : 0;
-  const miscChargeLabel =
-    miscChargeAmount > 0 ? misc!.miscChargeLabel.trim() : null;
 
   // (8) Atomic, all-or-nothing DB write (Req 6.6).
   const rpcInput: OnboardCustomerRpcInput = {
@@ -571,16 +656,17 @@ export async function onboard(
       delivery_charge: deliveryChargeAmount,
       misc_charge: miscChargeAmount,
       misc_charge_label: miscChargeLabel,
+      // The Total_Payable snapshot the balance derivation measures against.
+      total_payable: totalPayable,
       franchise_id: franchiseId,
       initial_meal_category_id: mealCategoryId,  // For daily preferences generation
     },
     payment: {
       // Total_Payable = plan/kit amount + delivery charge + miscellaneous charge.
-      amount: calculateTotalPayable(
-        category === "MEAL" && plan ? plan.totalAmount : (kitProduct?.totalAmount ?? 0),
-        deliveryChargeAmount,
-        miscChargeAmount,
-      ),
+      // Unchanged by partial payment: `amount` remains the full payable so the
+      // invoice's itemised breakup still reconciles (design decision D3). How
+      // much was actually collected lives in `amount_paid` / `balance_due`.
+      amount: totalPayable,
       base_amount: category === "MEAL" && plan ? plan.baseAmount : (kitProduct?.baseAmount ?? 0),
       tax_percent: category === "MEAL" && plan ? plan.taxPercent : (kitProduct?.taxPercent ?? 5),
       tax_amount: category === "MEAL" && plan ? plan.taxAmount : (kitProduct?.taxAmount ?? 0),
@@ -603,6 +689,9 @@ export async function onboard(
       franchise_id: franchiseId,
       clinic_id: clinicId,
     },
+    // Only sent when an advance was collected. Its ABSENCE is what gives every
+    // other caller (KIT, bulk migration) today's exact behaviour.
+    ...(paymentCollection ? { payment_collection: paymentCollection } : {}),
   };
 
   const result = await onboardCustomerAtomic(rpcInput);

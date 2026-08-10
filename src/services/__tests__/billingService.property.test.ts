@@ -72,6 +72,18 @@ class PaymentsQueryBuilder {
     return this;
   }
 
+  /**
+   * Supabase `.in(column, values)` filter — added for
+   * meal-subscription-partial-payment: the idempotency lookup in
+   * `recordOnboardingInvoice` now uses `.in("status", [...])` instead of
+   * `.eq("status", ...)`. Semantics: any row whose column value is IN the array.
+   */
+  in(column: string, values: unknown[]): this {
+    // Stored as a special filter entry; `matches()` knows how to handle it.
+    this.filters.push([`__in__${column}`, values]);
+    return this;
+  }
+
   limit(n: number): this {
     this.limitN = n;
     return this;
@@ -89,9 +101,14 @@ class PaymentsQueryBuilder {
 
   private matches(): FakePaymentRow[] {
     let rows = this.store.rows.filter((row) =>
-      this.filters.every(
-        ([col, val]) => (row as Record<string, unknown>)[col] === val,
-      ),
+      this.filters.every(([col, val]) => {
+        if (col.startsWith("__in__")) {
+          const realCol = col.slice(6);
+          return Array.isArray(val) &&
+            val.includes((row as Record<string, unknown>)[realCol]);
+        }
+        return (row as Record<string, unknown>)[col] === val;
+      }),
     );
     if (this.limitN != null) rows = rows.slice(0, this.limitN);
     return rows;

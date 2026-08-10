@@ -27,6 +27,12 @@ import {
 } from "@/lib/onboarding/dailyPreferences";
 import type { PastDayStatus } from "@/types/onboarding";
 import { cascadePendingSubscriptionDates } from "@/actions/manageMealActions";
+import { getOutstandingBalanceForCustomer } from "@/services/SubscriptionPaymentService";
+import { OUTSTANDING_BALANCE_ADMIN_MESSAGE } from "@/types/subscriptionPayment";
+import {
+  MISC_CHARGE_MAX,
+  MISC_CHARGE_LABEL_MAX_LENGTH,
+} from "@/lib/onboarding/miscCharge";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -66,6 +72,27 @@ const baseSchema = z.object({
   deliveryCharge: z.number().min(0).max(999999999.99).optional().default(0),
   /** The system-calculated delivery charge, used for admin override audit (Req 12.4) */
   autoCalculatedDeliveryCharge: z.number().min(0).optional(),
+
+  // ─── Extra charges + payment collection ──────────────────────────────────
+  // meal-subscription-partial-payment: brings this form to parity with the
+  // Quick Onboarding wizard, so adding a subscription to an already-onboarded
+  // customer offers the same options as onboarding one.
+  //
+  // All default to "not charged / paid in full", so every existing caller —
+  // bulk migration included — behaves exactly as before without being touched.
+
+  /** Optional ad-hoc charge (additional products, one-off services). */
+  miscCharge: z.number().min(0).max(MISC_CHARGE_MAX).optional().default(0),
+  /** Admin-supplied name for `miscCharge`, printed verbatim on the invoice. */
+  miscChargeLabel: z
+    .string()
+    .max(MISC_CHARGE_LABEL_MAX_LENGTH)
+    .optional()
+    .or(z.literal("")),
+  /** false ⇒ only an advance was collected and a balance remains. */
+  customerPaidFullAmount: z.boolean().optional().default(true),
+  /** The advance collected. Required when `customerPaidFullAmount` is false. */
+  advanceAmountPaid: z.number().min(0).max(9999999.99).optional(),
 });
 
 // ─── mode-specific extensions ────────────────────────────────────────────────
@@ -96,14 +123,26 @@ export type AddSubscriptionOptions = {
   skipStartDateCheck?: boolean;
   /** Skip the overlap check against active subscriptions (used for bulk migration). */
   skipOverlapCheck?: boolean;
+  /**
+   * Skip the outstanding-balance gate (used for bulk migration).
+   *
+   * Migration replays historical subscriptions that predate the partial-payment
+   * concept entirely, so enforcing the gate there would fail an import on data
+   * that is not in arrears. Interactive admin/franchise callers never set this.
+   */
+  skipOutstandingBalanceCheck?: boolean;
 };
 
 // ─── main action ─────────────────────────────────────────────────────────────
 
 export async function addSubscription(
+  // `z.input`, not `z.infer`: this function PARSES `formData`, so its parameter is
+  // the schema's input shape where fields carrying `.default()` are optional.
+  // Using the output type made every defaulted field mandatory for callers, which
+  // broke bulk migration the moment a new defaulted field was added.
   formData:
-    | z.infer<typeof existingPlanSchema>
-    | z.infer<typeof customPlanSchema>,
+    | z.input<typeof existingPlanSchema>
+    | z.input<typeof customPlanSchema>,
   isCustomPlan: boolean,
   options?: AddSubscriptionOptions,
 ): Promise<ActionResult> {
@@ -133,9 +172,71 @@ export async function addSubscription(
     skipStartDateCheck,
     deliveryCharge,
     autoCalculatedDeliveryCharge,
+    miscCharge,
+    miscChargeLabel,
+    customerPaidFullAmount,
+    advanceAmountPaid,
   } = parsed.data;
 
+  // The delivery charge must be ANSWERED, not defaulted. Checked against the RAW
+  // payload because the schema's `.default(0)` erases the difference between
+  // "0 was entered" and "the field never arrived" — and those mean opposite
+  // things: free delivery versus an admin who forgot to fill it in.
+  //
+  // Read from `formData` rather than `parsed.data` for the same reason. Bulk
+  // migration always sends the field explicitly, so it is unaffected.
+  {
+    const rawDelivery = (formData as Record<string, unknown>).deliveryCharge;
+    const deliveryProvided =
+      rawDelivery !== undefined &&
+      rawDelivery !== null &&
+      String(rawDelivery).trim() !== "";
+
+    if (!deliveryProvided) {
+      return {
+        success: false,
+        error: "Enter the delivery charge (enter 0 if delivery is free).",
+      };
+    }
+  }
+
+  // A miscellaneous amount with no name has no invoice description, and the
+  // chk_payments_misc_charge_label CHECK constraint would reject the row anyway.
+  const miscChargeAmount = miscCharge ?? 0;
+  const resolvedMiscLabel =
+    miscChargeAmount > 0 ? (miscChargeLabel ?? "").trim() : "";
+  if (miscChargeAmount > 0 && resolvedMiscLabel === "") {
+    return {
+      success: false,
+      error: "Enter a name for the miscellaneous charge (e.g. Additional product charges).",
+    };
+  }
+
   try {
+    // ─── Outstanding balance gate (meal-subscription-partial-payment, 5.3) ──
+    // A customer who still owes money on an existing/previous subscription
+    // cannot be given a new one until the balance is settled.
+    //
+    // Ledger-derived, so every subscription paid in full at onboarding (which is
+    // all of them created before this feature) has no ledger rows and can never
+    // trigger this.
+    //
+    // Bulk migration is exempted via `skipOutstandingBalanceCheck`: it replays
+    // historical subscriptions that predate the concept, and blocking them would
+    // make an import fail on data that is not actually in arrears.
+    if (!options?.skipOutstandingBalanceCheck) {
+      const outstanding = await getOutstandingBalanceForCustomer(
+        customerProfileId,
+        supabase,
+      );
+      if (outstanding.hasOutstanding) {
+        return {
+          success: false,
+          error: `${OUTSTANDING_BALANCE_ADMIN_MESSAGE} Outstanding: ₹${outstanding.totalOutstanding.toFixed(2)}.`,
+        };
+      }
+    }
+
     const start = startOfDay(new Date(startDate));
 
     if (!options?.skipStartDateCheck && !skipStartDateCheck && !pastDateEnabled) {
@@ -366,6 +467,64 @@ export async function addSubscription(
     const endsOn = format(effectiveEndDate, "yyyy-MM-dd");
     const subCode = generateSubscriptionCode();
 
+    // ─── Total_Payable + payment collection ────────────────────────────────
+    // meal-subscription-partial-payment. Resolved HERE, before any row is
+    // written, so a rejected advance leaves nothing behind.
+    //
+    // `totalAmount` differs by mode: for an existing plan it was recomputed
+    // server-side as the plan price and excludes delivery; for a custom plan it
+    // came from the form and already includes delivery (see the two setValue
+    // effects in AdminAddSubscriptionForm). Misc is added on top in both cases.
+    const planPlusDelivery = isCustomPlan
+      ? totalAmount
+      : parseFloat((totalAmount + deliveryCharge).toFixed(2));
+    const totalPayable = parseFloat(
+      (planPlusDelivery + miscChargeAmount).toFixed(2),
+    );
+
+    const isPaymentCollected = paymentStatus === "Payment Collected";
+    // A partial payment only means anything when money actually changed hands.
+    const isPartialPayment =
+      isPaymentCollected && customerPaidFullAmount === false;
+
+    let amountPaid: number;
+    if (!isPaymentCollected) {
+      amountPaid = 0;
+    } else if (isPartialPayment) {
+      const advance = advanceAmountPaid ?? 0;
+
+      if (!Number.isFinite(advance) || advance <= 0) {
+        return {
+          success: false,
+          error: "Enter the advance amount collected from the customer.",
+        };
+      }
+      // Compared in paise so an advance that exactly equals the total is accepted
+      // rather than rejected on float drift.
+      if (Math.round(advance * 100) > Math.round(totalPayable * 100)) {
+        return {
+          success: false,
+          error: `The advance amount cannot exceed the total payable of ₹${totalPayable.toFixed(2)}.`,
+        };
+      }
+      amountPaid = advance;
+    } else {
+      amountPaid = totalPayable;
+    }
+
+    const balanceDue = parseFloat((totalPayable - amountPaid).toFixed(2));
+    // An advance covering the whole total IS a full payment. Collapsing it here
+    // preserves the "no ledger ⇒ paid in full" invariant the outstanding-balance
+    // gate depends on, instead of leaving a zero-balance ledger row behind.
+    const createsAdvanceLedgerRow =
+      isPartialPayment && Math.round(balanceDue * 100) > 0;
+
+    const resolvedPaymentStatus = !isPaymentCollected
+      ? "PENDING"
+      : Math.round(balanceDue * 100) > 0
+        ? "PARTIALLY_PAID"
+        : "PAID";
+
     // Insert subscription row
     const { data: newSub, error: subInsertErr } = await supabase
       .from("subscriptions")
@@ -382,6 +541,10 @@ export async function addSubscription(
         pause_credits_used: 0,
         consumed_days: 0,
         delivery_charge: deliveryCharge,
+        // meal-subscription-partial-payment
+        misc_charge: miscChargeAmount,
+        misc_charge_label: resolvedMiscLabel || null,
+        total_payable: totalPayable,
       })
       .select("id")
       .single();
@@ -518,12 +681,11 @@ export async function addSubscription(
     // status: PAID (collected) or PENDING (not yet collected).
     const isPaid = paymentStatus === "Payment Collected";
 
-    // payments.amount = Total_Payable (plan amount + delivery charge) (Req 6.2)
-    // For existing plans: totalAmount is the plan price (computed server-side), add delivery.
-    // For custom plans: totalAmount from the form already includes delivery charge.
-    const paymentAmount = isCustomPlan
-      ? totalAmount  // custom mode: form's totalAmount already = base + tax + delivery
-      : parseFloat((totalAmount + deliveryCharge).toFixed(2)); // existing: plan price + delivery
+    // payments.amount = Total_Payable (plan + delivery + miscellaneous), resolved
+    // above before any write. It stays the FULL payable even on a part payment, so
+    // the invoice's itemised breakup still reconciles; how much was actually
+    // collected lives in amount_paid / balance_due (design decision D3).
+    const paymentAmount = totalPayable;
 
     const { data: newPayment, error: payErr } = await supabase
       .from("payments")
@@ -532,7 +694,7 @@ export async function addSubscription(
         subscription_id: newSub.id,
         payment_method: "MANUAL",
         amount: paymentAmount,
-        status: isPaid ? "PAID" : "PENDING",
+        status: resolvedPaymentStatus,
         paid_at: isPaid ? new Date().toISOString() : null,
         // Invoice breakdown columns (added via migration)
         base_amount: baseAmount,
@@ -540,6 +702,11 @@ export async function addSubscription(
         tax_amount: taxAmount,
         discount_amount: 0,
         delivery_charge: deliveryCharge,
+        // meal-subscription-partial-payment
+        misc_charge: miscChargeAmount,
+        misc_charge_label: resolvedMiscLabel || null,
+        amount_paid: amountPaid,
+        balance_due: balanceDue,
         invoice_type: "SUBSCRIPTION",
         payment_reference: paymentReference ?? null,
         payment_notes: paymentNotes ?? null,
@@ -585,6 +752,38 @@ export async function addSubscription(
         return { success: true, paymentId: fallbackPayment?.id };
       }
       throw new Error(payErr.message);
+    }
+
+    // ─── ADVANCE ledger row (meal-subscription-partial-payment) ────────────
+    // Written only when a balance actually remains, and only AFTER the invoice
+    // row has succeeded: if the payments insert had failed we would otherwise be
+    // left with a ledger claiming money against a subscription that has no
+    // invoice. (This action is a sequence of separate inserts rather than one
+    // transaction — a pre-existing trait, not introduced here — so ordering is
+    // the only lever available for consistency.)
+    if (createsAdvanceLedgerRow) {
+      const { error: ledgerErr } = await supabase
+        .from("subscription_payment_transactions")
+        .insert({
+          subscription_id: newSub.id,
+          customer_profile_id: customerProfileId,
+          transaction_type: "ADVANCE",
+          amount: amountPaid,
+          transaction_date: getISTDateString(0),
+          payment_method: "MANUAL",
+          payment_reference: paymentReference ?? null,
+          comment: "Advance collected when the subscription was added",
+        });
+
+      if (ledgerErr) throw new Error(ledgerErr.message);
+
+      await logAdminAction("CREATE", "subscription_advance_payment", newSub.id, {
+        customer_profile_id: customerProfileId,
+        total_payable: totalPayable,
+        amount_paid: amountPaid,
+        balance_due: balanceDue,
+        surface: "admin_add_subscription",
+      });
     }
 
     await logAdminAction("CREATE", "subscription", newSub.id, {

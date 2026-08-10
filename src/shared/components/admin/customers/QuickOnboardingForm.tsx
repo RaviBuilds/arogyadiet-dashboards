@@ -305,6 +305,25 @@ export function QuickOnboardingForm({
   const [miscChargeError, setMiscChargeError] = useState<string | null>(null);
   const [miscChargeLabelError, setMiscChargeLabelError] = useState<string | null>(null);
 
+  // ─── Partial Payment State (meal-subscription-partial-payment, Phase 3) ───
+  // Some customers pay the whole plan up front; others pay an advance at the
+  // counter and settle the rest over time. CHECKED by default, because paying in
+  // full is still the common case and the previous flow had no other option.
+  const [customerPaidFullAmount, setCustomerPaidFullAmount] = useState(true);
+  const [advanceAmountInput, setAdvanceAmountInput] = useState<string>("");
+  const [advanceAmount, setAdvanceAmount] = useState<number | null>(null);
+  const [advanceAmountError, setAdvanceAmountError] = useState<string | null>(null);
+
+  // The admin must explicitly confirm the pricing before the Onboard CTA unlocks.
+  //
+  // Stored as a SNAPSHOT of the figures that were confirmed, not a boolean.
+  // `pricingConfirmed` is then derived by comparing that snapshot to the live
+  // figures, so ANY later edit invalidates the confirmation automatically —
+  // including a field someone adds to the panel later and forgets to wire into a
+  // reset. A boolean plus a reset effect would silently rot the first time the
+  // dependency list fell out of date.
+  const [confirmedPricingKey, setConfirmedPricingKey] = useState<string | null>(null);
+
   // ─── Dietitian Dropdown State (dietitian-management, Req 7.1–7.6, 9.1–9.5) ─
   // MEAL (Core session): scoped to the resolved Clinic, loaded once the
   // address step resolves a Clinic.
@@ -434,13 +453,69 @@ export function QuickOnboardingForm({
   const miscAmount = miscCharge ?? 0;
   const totalPayable = planAmount + deliveryAmount + miscAmount;
 
+  // ─── Partial payment derivations ──────────────────────────────────────────
+  // The MEAL payment panel only exists once payment has been marked collected,
+  // so every gate below is scoped to that.
+  const isMealPaymentPanelOpen = primaryCategory === "MEAL" && paymentStatus === "PAID";
+
+  // Delivery charge must be ANSWERED, not merely left at its default. A typed 0
+  // is a valid answer ("free delivery"); an empty box is an unanswered question.
+  // Distinguishing them is the whole point — the old code silently treated both
+  // as 0, which quietly under-billed whenever the admin simply forgot.
+  const deliveryChargeMissing =
+    isMealPaymentPanelOpen && deliveryChargeInput.trim() === "";
+
+  const advanceAmountValue = advanceAmount ?? 0;
+  // Compared in paise for the same reason the server does: float subtraction of
+  // rupees leaves ~1e-13 residue, which would render a settled plan as
+  // "₹0.00 balance" while still counting as a balance.
+  const balanceRemaining =
+    Math.round(totalPayable * 100 - advanceAmountValue * 100) / 100;
+
+  // Money actually being collected right now.
+  const amountCollected = customerPaidFullAmount ? totalPayable : advanceAmountValue;
+
+  // An advance is required, must be positive, and cannot exceed the total.
+  const advanceAmountMissing =
+    isMealPaymentPanelOpen &&
+    !customerPaidFullAmount &&
+    (advanceAmount === null || advanceAmount <= 0);
+
+  // Confirmation is only demanded where there is pricing to confirm.
+  const requiresPricingConfirmation = isMealPaymentPanelOpen;
+  const canConfirmPricing =
+    !deliveryChargeMissing && !advanceAmountMissing && !hasChargeErrors &&
+    !Boolean(advanceAmountError) && Boolean(selectedPlan);
+
+  // Every figure the admin is signing off on. Changing any of them produces a
+  // different key, which invalidates a prior confirmation without needing an
+  // effect to reset it.
+  const pricingKey = [
+    selectedPlan?.id ?? "",
+    planAmount,
+    deliveryAmount,
+    miscAmount,
+    miscChargeLabel.trim(),
+    customerPaidFullAmount ? "full" : "advance",
+    advanceAmount ?? "",
+    paymentStatus,
+    primaryCategory,
+  ].join("|");
+
+  const pricingConfirmed =
+    confirmedPricingKey !== null && confirmedPricingKey === pricingKey;
+
   // Req 5.4, 5.5: Disable Onboard CTA when override checkbox visible but unchecked.
   const canOnboard =
     !isSubmitting &&
     paymentStatus === "PAID" &&
     (!showAutomationOverride || automationOverrideAcknowledged) &&
     (isAccommodation || addressResolved) &&
-    !hasChargeErrors;
+    !hasChargeErrors &&
+    !deliveryChargeMissing &&
+    !advanceAmountMissing &&
+    !Boolean(advanceAmountError) &&
+    (!requiresPricingConfirmation || pricingConfirmed);
 
   // A disabled CTA must always say why, otherwise the click just looks broken.
   const onboardBlockedReason =
@@ -455,7 +530,34 @@ export function QuickOnboardingForm({
               miscChargeError ??
               miscChargeLabelError ??
               "Correct the charge details before completing onboarding")
-            : null;
+            : deliveryChargeMissing
+              ? "Enter the delivery charge (enter 0 if delivery is free)"
+              : advanceAmountError
+                ? advanceAmountError
+                : advanceAmountMissing
+                  ? "Enter the advance amount collected from the customer"
+                  : requiresPricingConfirmation && !pricingConfirmed
+                    ? "Confirm the pricing before completing onboarding"
+                    : null;
+
+  /**
+   * Toggles "Customer paid full amount".
+   *
+   * Clearing the advance happens HERE, in the event handler, rather than in an
+   * effect watching the checkbox: it is a consequence of the click, not a
+   * synchronisation with an external system. Doing it in an effect would also
+   * trip `react-hooks/set-state-in-effect` and cause a cascading render.
+   */
+  const handlePaidFullAmountChange = (checked: boolean) => {
+    setCustomerPaidFullAmount(checked);
+
+    // A stale advance must never travel alongside a full-payment claim.
+    if (checked) {
+      setAdvanceAmountInput("");
+      setAdvanceAmount(null);
+      setAdvanceAmountError(null);
+    }
+  };
 
   // Req 5.7: When start date changes away from tomorrow, reset the acknowledgment field.
   useEffect(() => {
@@ -651,6 +753,62 @@ export function QuickOnboardingForm({
   const handleMiscChargeLabelInput = (rawValue: string) => {
     setMiscChargeLabel(rawValue);
     setMiscChargeLabelError(validateMiscChargeLabel(rawValue, miscCharge));
+  };
+
+  /**
+   * Validates and sets the advance amount collected at the counter
+   * (meal-subscription-partial-payment, Phase 3.4).
+   *
+   * Bounds mirror the server action and the NUMERIC(10,2) column, so the admin
+   * never gets a rejection after submitting. The upper bound is the live
+   * Total_Payable, which is why editing delivery or misc afterwards has to
+   * re-validate this too (handled by the confirmation reset).
+   */
+  const handleAdvanceAmountInput = (rawValue: string) => {
+    setAdvanceAmountInput(rawValue);
+
+    if (rawValue.trim() === "") {
+      setAdvanceAmount(null);
+      setAdvanceAmountError(null);
+      return;
+    }
+
+    const parsed = Number(rawValue);
+
+    if (!Number.isFinite(parsed)) {
+      setAdvanceAmount(null);
+      setAdvanceAmountError("Advance amount must be a valid number");
+      return;
+    }
+
+    if (parsed <= 0) {
+      setAdvanceAmount(null);
+      setAdvanceAmountError("Advance amount must be greater than ₹0");
+      return;
+    }
+
+    const decimalParts = rawValue.split(".");
+    if (decimalParts.length === 2 && decimalParts[1].length > 2) {
+      setAdvanceAmount(null);
+      setAdvanceAmountError("Advance amount cannot have more than 2 decimal places");
+      return;
+    }
+
+    // Paise comparison so an advance that exactly equals the total is accepted
+    // rather than tripping on float drift.
+    if (Math.round(parsed * 100) > Math.round(totalPayable * 100)) {
+      setAdvanceAmount(null);
+      setAdvanceAmountError(
+        `Advance cannot exceed the total payable of ₹${totalPayable.toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`,
+      );
+      return;
+    }
+
+    setAdvanceAmount(parsed);
+    setAdvanceAmountError(null);
   };
 
   /**
@@ -882,6 +1040,33 @@ export function QuickOnboardingForm({
       }
     }
 
+    // MEAL payment collection guards (meal-subscription-partial-payment,
+    // Phase 3.2/3.4/3.5). The CTA is already disabled in each of these cases;
+    // these re-checks catch a submit that arrives by any other route (Enter key,
+    // a stale render) so the server never has to reject it after the fact.
+    if (isMealPaymentPanelOpen) {
+      if (deliveryChargeMissing) {
+        setStep(3);
+        toast.error("Enter the delivery charge (enter 0 if delivery is free).");
+        return;
+      }
+
+      if (advanceAmountError || advanceAmountMissing) {
+        setStep(3);
+        toast.error(
+          advanceAmountError ??
+            "Enter the advance amount collected from the customer.",
+        );
+        return;
+      }
+
+      if (!pricingConfirmed) {
+        setStep(3);
+        toast.error("Confirm the pricing before onboarding the customer.");
+        return;
+      }
+    }
+
     // ACCOMMODATION flow: call onboardAccommodationCustomerAction (Req 1.9, 3.1)
     if (isAccommodation) {
       const accommodationPayload = {
@@ -969,6 +1154,15 @@ export function QuickOnboardingForm({
       calculatedDeliveryCharge: calculatedDeliveryCharge,
       miscCharge: miscCharge ?? 0,
       miscChargeLabel: miscCharge && miscCharge > 0 ? miscChargeLabel.trim() : "",
+      // Payment collection (meal-subscription-partial-payment, Phase 3.8).
+      // KIT has no payment panel, so it always reports a full payment — which is
+      // exactly the behaviour it had before this feature existed.
+      customerPaidFullAmount:
+        values.primaryCategory === "MEAL" ? customerPaidFullAmount : true,
+      advanceAmountPaid:
+        values.primaryCategory === "MEAL" && !customerPaidFullAmount
+          ? (advanceAmount ?? 0)
+          : undefined,
     };
 
     startTransition(async () => {
@@ -1970,8 +2164,12 @@ export function QuickOnboardingForm({
                 />
               </div>
 
-              {/* ── Delivery Charge Section (Req 7.1–7.7) ── */}
-              {primaryCategory === "MEAL" && (
+              {/* ── Delivery Charge Section (Req 7.1–7.7) ──
+                  Gated on the payment toggle as well as the category
+                  (meal-subscription-partial-payment, Phase 3.1): the panel
+                  collects what was actually taken at the counter, so it only
+                  makes sense once payment is marked collected. */}
+              {isMealPaymentPanelOpen && (
                 <div className="space-y-3 rounded-xl border border-slate-200 p-4">
                   <div className="flex items-center gap-2">
                     <Truck className="h-4 w-4 text-slate-500" />
@@ -1993,22 +2191,39 @@ export function QuickOnboardingForm({
                     </Button>
 
                     <div className="flex-1 max-w-xs space-y-1">
-                      <label className="text-xs font-medium text-slate-500">
-                        Delivery Charge (₹)
+                      <label
+                        htmlFor="deliveryCharge"
+                        className="text-xs font-medium text-slate-500"
+                      >
+                        Delivery Charge (₹) <span className="text-destructive">*</span>
                       </label>
                       <Input
+                        id="deliveryCharge"
                         type="text"
                         inputMode="decimal"
                         placeholder="0.00"
                         className="h-9"
+                        aria-invalid={Boolean(deliveryChargeError) || deliveryChargeMissing}
+                        aria-describedby="deliveryCharge-help"
                         value={deliveryChargeInput}
                         onChange={(e) => handleDeliveryChargeInput(e.target.value)}
                       />
                     </div>
                   </div>
 
+                  <p id="deliveryCharge-help" className="text-xs text-slate-500">
+                    Required. Press Calculate, or type the amount. Enter 0 if delivery is
+                    not being charged.
+                  </p>
+
                   {deliveryChargeError && (
                     <p className="text-xs text-destructive">{deliveryChargeError}</p>
+                  )}
+
+                  {!deliveryChargeError && deliveryChargeMissing && (
+                    <p className="text-xs text-destructive">
+                      Delivery charge is required. Enter 0 if not charged.
+                    </p>
                   )}
 
                   {distanceKm !== null && ratePerKm !== null && (
@@ -2081,6 +2296,78 @@ export function QuickOnboardingForm({
                     )}
                   </div>
 
+                  {/* ── How much was actually collected ──
+                      meal-subscription-partial-payment, Phase 3.3/3.4 */}
+                  <div className="space-y-3 border-t border-slate-100 pt-3">
+                    <label className="flex cursor-pointer items-start gap-2 select-none">
+                      <Checkbox
+                        id="customerPaidFullAmount"
+                        checked={customerPaidFullAmount}
+                        onCheckedChange={(checked) =>
+                          handlePaidFullAmountChange(checked === true)
+                        }
+                        aria-describedby="customerPaidFullAmount-help"
+                      />
+                      <span className="flex flex-col gap-0.5">
+                        <span className="text-sm font-semibold text-slate-800">
+                          Customer paid full amount
+                        </span>
+                        <span
+                          id="customerPaidFullAmount-help"
+                          className="text-xs text-slate-500"
+                        >
+                          Uncheck if the customer paid only an advance and will settle the
+                          balance later.
+                        </span>
+                      </span>
+                    </label>
+
+                    {!customerPaidFullAmount && (
+                      <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                        <div className="space-y-1 sm:max-w-xs">
+                          <label
+                            htmlFor="advanceAmountPaid"
+                            className="text-xs font-medium text-amber-800"
+                          >
+                            Advance amount paid (₹){" "}
+                            <span className="text-destructive">*</span>
+                          </label>
+                          <Input
+                            id="advanceAmountPaid"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            className="h-9 bg-white"
+                            aria-invalid={Boolean(advanceAmountError)}
+                            value={advanceAmountInput}
+                            onChange={(e) => handleAdvanceAmountInput(e.target.value)}
+                          />
+                        </div>
+
+                        {advanceAmountError && (
+                          <p className="text-xs text-destructive">{advanceAmountError}</p>
+                        )}
+
+                        {/* The figure the admin is really deciding about. Shown
+                            live rather than only after confirmation, because it
+                            is what they will quote to the customer. */}
+                        <div className="flex items-baseline justify-between gap-3 border-t border-amber-200 pt-2">
+                          <span className="text-xs font-semibold text-amber-900">
+                            Balance remaining
+                          </span>
+                          <span className="text-sm font-bold text-amber-900 tabular-nums">
+                            ₹
+                            {(advanceAmount === null ? totalPayable : balanceRemaining)
+                              .toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* ── Live payable breakup ── */}
                   {selectedPlan && (
                     <div className="space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
@@ -2120,8 +2407,67 @@ export function QuickOnboardingForm({
                           })}
                         </span>
                       </div>
+
+                      {/* Only rendered for a part payment. On a full payment the
+                          collected amount IS the total, and repeating it would
+                          just be noise. */}
+                      {!customerPaidFullAmount && advanceAmount !== null && (
+                        <div className="mt-1 space-y-1 border-t border-emerald-200 pt-1.5">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-xs font-medium text-emerald-800">
+                              Advance collected now
+                            </span>
+                            <span className="text-xs font-semibold text-emerald-900 tabular-nums">
+                              ₹
+                              {advanceAmount.toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                          </div>
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-xs font-bold text-amber-700">
+                              Balance due
+                            </span>
+                            <span className="text-xs font-bold text-amber-700 tabular-nums">
+                              ₹
+                              {balanceRemaining.toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
+
+                  {/* ── Pricing confirmation gate (Phase 3.5) ──
+                      The Onboard CTA stays disabled until the admin explicitly
+                      signs off on these figures. Any later edit clears it. */}
+                  <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                    {pricingConfirmed ? (
+                      <p className="text-xs font-semibold text-emerald-700">
+                        ✓ Pricing confirmed — you can now onboard the customer
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Review the amounts above, then confirm to enable onboarding.
+                      </p>
+                    )}
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={pricingConfirmed ? "outline" : "default"}
+                      disabled={pricingConfirmed || !canConfirmPricing}
+                      onClick={() => setConfirmedPricingKey(pricingKey)}
+                    >
+                      {pricingConfirmed
+                        ? "Pricing confirmed"
+                        : "I have confirmed the pricing"}
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -2244,10 +2590,31 @@ export function QuickOnboardingForm({
                         )}
                         {selectedPlan && (
                           <ReviewRow
-                            label="Total"
+                            label="Total payable"
                             value={`₹${totalPayable.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                             highlight
                           />
+                        )}
+                        {/* Collected vs outstanding, shown only once the admin has
+                            confirmed the pricing — before that the figures are
+                            still in flux and would be misleading here
+                            (meal-subscription-partial-payment, Phase 3.6). */}
+                        {selectedPlan && pricingConfirmed && (
+                          <>
+                            <ReviewRow
+                              label="Amount collected"
+                              value={`₹${amountCollected.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              highlight
+                            />
+                            <ReviewRow
+                              label="Balance due"
+                              value={
+                                customerPaidFullAmount
+                                  ? "₹0.00 — fully paid"
+                                  : `₹${balanceRemaining.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              }
+                            />
+                          </>
                         )}
                       </>
                     )}
@@ -2255,7 +2622,13 @@ export function QuickOnboardingForm({
                     <ReviewRow label="Start date" value={values.startDate} />
                     <ReviewRow
                       label="Payment"
-                      value={paymentStatus === "PAID" ? "✓ Paid" : "Pending"}
+                      value={
+                        paymentStatus !== "PAID"
+                          ? "Pending"
+                          : isMealPaymentPanelOpen && !customerPaidFullAmount
+                            ? "✓ Part payment collected"
+                            : "✓ Paid"
+                      }
                       highlight={paymentStatus === "PAID"}
                     />
                     {!isAccommodation && (
@@ -2326,9 +2699,17 @@ export function QuickOnboardingForm({
                 </Alert>
               )}
 
-              {paymentStatus !== "PAID" && (
-                <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                  Payment must be marked PAID before onboarding can proceed.
+              {/* Surface WHY onboarding is blocked inline, not only in the
+                  disabled button's tooltip — a tooltip is unreachable by touch
+                  and easy to miss. This previously only covered the unpaid case;
+                  it now covers the delivery-charge, advance-amount and
+                  pricing-confirmation gates too. */}
+              {onboardBlockedReason && (
+                <p
+                  role="status"
+                  className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+                >
+                  {onboardBlockedReason}.
                 </p>
               )}
             </div>

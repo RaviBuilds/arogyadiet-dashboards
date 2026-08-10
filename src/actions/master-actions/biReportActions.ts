@@ -138,16 +138,23 @@ async function generateFinanceTrend(
 ): Promise<{ trendData: ReportTrendPoint[]; totalRecords: number }> {
   const periods = getPeriods(request.timeframe, now);
 
-  const { data: payments } = await supabase
-    .from("payments")
-    .select("amount, created_at")
-    .in("status", ["PAID", "SUCCESS", "CAPTURED"])
-    .gte("created_at", `${periods[0].start}T00:00:00`);
+  const [{ data: payments }, { data: partialPayments }] = await Promise.all([
+    supabase
+      .from("payments")
+      .select("amount, created_at")
+      .in("status", ["PAID", "SUCCESS", "CAPTURED"])
+      .gte("created_at", `${periods[0].start}T00:00:00`),
+    supabase
+      .from("payments")
+      .select("amount_paid, created_at")
+      .eq("status", "PARTIALLY_PAID")
+      .gte("created_at", `${periods[0].start}T00:00:00`),
+  ]);
 
-  let totalRecords = payments?.length || 0;
+  let totalRecords = (payments?.length || 0) + (partialPayments?.length || 0);
 
   const trendData: ReportTrendPoint[] = periods.map((period) => {
-    const revenue = (payments || [])
+    const settled = (payments || [])
       .filter(
         (p) =>
           p.created_at?.split("T")[0] >= period.start &&
@@ -155,7 +162,15 @@ async function generateFinanceTrend(
       )
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-    return { period: period.label, value: revenue, label: "Revenue (₹)" };
+    const partial = (partialPayments || [])
+      .filter(
+        (p: any) =>
+          p.created_at?.split("T")[0] >= period.start &&
+          p.created_at?.split("T")[0] <= period.end
+      )
+      .reduce((sum: number, p: any) => sum + Number(p.amount_paid || 0), 0);
+
+    return { period: period.label, value: settled + partial, label: "Revenue (₹)" };
   });
 
   return { trendData, totalRecords };

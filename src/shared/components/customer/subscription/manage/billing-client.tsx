@@ -49,6 +49,8 @@ type BillingClientProps = {
 };
 
 const successfulStatuses = new Set(["PAID", "SUCCESS", "CAPTURED"]);
+/** Part payment is a real, viewable invoice — not a failure state. */
+const partiallyPaidStatus = "PARTIALLY_PAID";
 
 function formatPaymentMethod(method: string): string {
   if (method === "MANUAL") return "Manual";
@@ -171,7 +173,7 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                             ? "Meal Subscription"
                             : null;
 
-                      const showInvoiceButton = isSuccessful || isPendingManual;
+                      const showInvoiceButton = isSuccessful || isPendingManual || payment.status === partiallyPaidStatus;
 
                       return (
                         <tr
@@ -228,7 +230,7 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
                       : payment.invoice_type === "SUBSCRIPTION"
                         ? "Meal Subscription"
                         : null;
-                  const showInvoiceButton = isSuccessful || isPendingManual;
+                  const showInvoiceButton = isSuccessful || isPendingManual || payment.status === partiallyPaidStatus;
 
                   return (
                     <div
@@ -285,15 +287,18 @@ export function BillingClient({ payments, activeSub }: BillingClientProps) {
 
 function StatusPill({ status }: { status: string }) {
   const isSuccessful = successfulStatuses.has(status);
+  const isPartial = status === partiallyPaidStatus;
   return (
     <span
       className={cn(
         "inline-flex w-fit items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wider ring-1 ring-inset",
         isSuccessful
           ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-          : status === "PENDING"
+          : isPartial
             ? "bg-amber-50 text-amber-700 ring-amber-200"
-            : "bg-red-50 text-red-700 ring-red-200",
+            : status === "PENDING"
+              ? "bg-amber-50 text-amber-700 ring-amber-200"
+              : "bg-red-50 text-red-700 ring-red-200",
       )}
     >
       {isSuccessful ? (
@@ -301,7 +306,7 @@ function StatusPill({ status }: { status: string }) {
       ) : (
         <Clock className="h-3 w-3" />
       )}
-      {isSuccessful ? "Paid" : status}
+      {isSuccessful ? "Paid" : isPartial ? "Partially Paid" : status}
     </span>
   );
 }

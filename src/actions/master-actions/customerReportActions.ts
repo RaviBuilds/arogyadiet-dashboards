@@ -56,15 +56,26 @@ export async function getMasterCustomerKPIs(): Promise<CustomerKPIs> {
     ? Math.round((completedProfiles / totalRegistered) * 100)
     : 0;
 
-  // Average LTV: sum of all successful payments / total customers
-  const { data: payments } = await supabase
-    .from("payments")
-    .select("amount, status")
-    .in("status", ["PAID", "SUCCESS", "CAPTURED"]);
+  // Average LTV: sum of all successful payments / total customers.
+  // PARTIALLY_PAID rows contribute only what was actually collected (amount_paid),
+  // not the full payable — otherwise the unpaid balance would inflate LTV.
+  const [{ data: payments }, { data: partialPay }] = await Promise.all([
+    supabase
+      .from("payments")
+      .select("amount")
+      .in("status", ["PAID", "SUCCESS", "CAPTURED"]),
+    supabase
+      .from("payments")
+      .select("amount_paid")
+      .eq("status", "PARTIALLY_PAID"),
+  ]);
 
-  const totalRevenue = (payments || []).reduce(
-    (sum, p) => sum + Number(p.amount || 0), 0
-  );
+  const totalRevenue =
+    (payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0) +
+    (partialPay || []).reduce(
+      (sum: number, p: any) => sum + Number(p.amount_paid || 0),
+      0,
+    );
   const averageLTV = totalRegistered > 0
     ? Math.round(totalRevenue / totalRegistered)
     : 0;

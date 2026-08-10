@@ -75,6 +75,9 @@ const mealInvoiceData: InvoiceData = {
     totalAmount: 9440,
   },
   isPending: false,
+  // Settled invoice (meal-subscription-partial-payment): no partial-payment
+  // block, and the total row keeps its "Total Paid" label.
+  paymentState: "PAID",
 };
 
 const accommodationFinalInvoiceData: InvoiceData = {
@@ -113,6 +116,8 @@ const accommodationFinalInvoiceData: InvoiceData = {
     totalAmount: 23600,
   },
   isPending: false,
+  // Settled invoice — see the note on the MEAL fixture above.
+  paymentState: "PAID",
 };
 
 /**

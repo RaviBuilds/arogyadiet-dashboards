@@ -3,6 +3,7 @@ import { AdminPageHeader } from "@/shared/components/admin/core/AdminPageHeader"
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Customer360Dashboard } from "@/shared/components/admin/customers/Customer360Dashboard";
+import { getSubscriptionPaymentOverview } from "@/services/SubscriptionPaymentService";
 import { Button } from "@/shared/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { guardCustomersWorkspace } from "@/lib/auth/adminAccess";
@@ -202,6 +203,11 @@ export default async function Customer360Page({
         tax_percent,
         tax_amount,
         discount_amount,
+        delivery_charge,
+        misc_charge,
+        misc_charge_label,
+        amount_paid,
+        balance_due,
         invoice_type,
         payment_reference,
         payment_notes,
@@ -215,6 +221,12 @@ export default async function Customer360Page({
       .eq("customer_profile_id", id)
       .order("created_at", { ascending: false }),
   ]);
+
+  // ── 4b. Subscription payment position ─────────────────────────────────────
+  // Drives the "Subscription" tab: the price breakup, what has been collected,
+  // and whether a new subscription may be added at all
+  // (meal-subscription-partial-payment).
+  const subscriptionPayments = await getSubscriptionPaymentOverview(id);
 
   // ── 5. Shape the customer object ──────────────────────────────────────────
   const userData = data.users as any;
@@ -353,6 +365,7 @@ export default async function Customer360Page({
         initialCoupons={(coupons ?? []) as any[]}
         billingPayments={(payments ?? []) as any[]}
         hasActiveSubscription={hasActiveSubscription}
+        subscriptionPayments={subscriptionPayments}
         customerCategory={customerCategory}
         kitSubscription={kitSubscription}
         kitOverview={kitOverview}

@@ -1,6 +1,13 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getOutstandingBalanceForCustomer } from "@/services/SubscriptionPaymentService";
+import { OUTSTANDING_BALANCE_ADMIN_MESSAGE } from "@/types/subscriptionPayment";
+import {
+  MISC_CHARGE_MAX,
+  MISC_CHARGE_LABEL_MAX_LENGTH,
+} from "@/lib/onboarding/miscCharge";
+import { getISTDateString } from "@/lib/dates/ist";
 import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -28,6 +35,24 @@ const baseSchema = z.object({
   paymentNotes: z.string().optional(),
   startDate: z.string().refine((d) => !isNaN(new Date(d).getTime()), { message: "Invalid start date" }),
   franchiseId: z.string().uuid({ message: "Franchise ID is required" }),
+
+  // ─── Extra charges + payment collection ──────────────────────────────────
+  // Brought to parity with the admin action, because
+  // `AdminAddSubscriptionForm` is SHARED between both portals and sends these
+  // fields. Zod strips unknown keys, so without them a franchise admin's
+  // delivery charge, miscellaneous charge and advance payment were silently
+  // discarded — the subscription would be created at the wrong price.
+  // (`deliveryCharge` was already being dropped this way before this feature.)
+  deliveryCharge: z.number().min(0).max(999999999.99).optional().default(0),
+  autoCalculatedDeliveryCharge: z.number().min(0).optional(),
+  miscCharge: z.number().min(0).max(MISC_CHARGE_MAX).optional().default(0),
+  miscChargeLabel: z
+    .string()
+    .max(MISC_CHARGE_LABEL_MAX_LENGTH)
+    .optional()
+    .or(z.literal("")),
+  customerPaidFullAmount: z.boolean().optional().default(true),
+  advanceAmountPaid: z.number().min(0).max(9999999.99).optional(),
 });
 
 const existingPlanSchema = baseSchema.extend({
@@ -50,7 +75,8 @@ type ActionResult = { success: boolean; error?: string; paymentId?: string };
  * Same logic as admin addSubscription but stamps franchise_id on the subscription.
  */
 export async function franchiseAddSubscription(
-  formData: z.infer<typeof existingPlanSchema> | z.infer<typeof customPlanSchema>,
+  // `z.input` rather than `z.infer` — see the note on the admin `addSubscription`.
+  formData: z.input<typeof existingPlanSchema> | z.input<typeof customPlanSchema>,
   isCustomPlan: boolean,
 ): Promise<ActionResult> {
   const supabase = createAdminClient();
@@ -72,9 +98,29 @@ export async function franchiseAddSubscription(
     paymentNotes,
     startDate,
     franchiseId,
+    deliveryCharge,
+    miscCharge,
+    miscChargeLabel,
+    customerPaidFullAmount,
+    advanceAmountPaid,
   } = parsed.data;
 
   try {
+    // ─── Outstanding balance gate (meal-subscription-partial-payment, 5.3) ──
+    // Mirrors the admin-side gate in `addSubscription`. Franchise users hit the
+    // same rule: a customer with an unsettled balance cannot be sold a new
+    // subscription. Ledger-derived, so pre-existing subscriptions never trip it.
+    const outstanding = await getOutstandingBalanceForCustomer(
+      customerProfileId,
+      supabase,
+    );
+    if (outstanding.hasOutstanding) {
+      return {
+        success: false,
+        error: `${OUTSTANDING_BALANCE_ADMIN_MESSAGE} Outstanding: ₹${outstanding.totalOutstanding.toFixed(2)}.`,
+      };
+    }
+
     const start = startOfDay(new Date(startDate));
     const earliest = startOfDay(addDays(new Date(), 1));
     if (start < earliest) {
@@ -162,6 +208,80 @@ export async function franchiseAddSubscription(
     const endsOn = format(effectiveEndDate, "yyyy-MM-dd");
     const subCode = generateSubscriptionCode();
 
+    // ─── Total_Payable + payment collection (mirrors the admin action) ──────
+    // Resolved before any row is written, so a rejected advance leaves nothing
+    // behind. For a custom plan the form's `totalAmount` already includes
+    // delivery; for an existing plan it is the plan price alone.
+    // The delivery charge must be ANSWERED, not defaulted — checked against the
+    // RAW payload because the schema's `.default(0)` erases the difference
+    // between "0 was entered" (free delivery) and "the field never arrived" (the
+    // admin forgot). Mirrors the admin action.
+    const rawDelivery = (formData as Record<string, unknown>).deliveryCharge;
+    if (
+      rawDelivery === undefined ||
+      rawDelivery === null ||
+      String(rawDelivery).trim() === ""
+    ) {
+      return {
+        success: false,
+        error: "Enter the delivery charge (enter 0 if delivery is free).",
+      };
+    }
+
+    const miscChargeAmount = miscCharge ?? 0;
+    const resolvedMiscLabel =
+      miscChargeAmount > 0 ? (miscChargeLabel ?? "").trim() : "";
+    if (miscChargeAmount > 0 && resolvedMiscLabel === "") {
+      return {
+        success: false,
+        error: "Enter a name for the miscellaneous charge.",
+      };
+    }
+
+    const planPlusDelivery = isCustomPlan
+      ? totalAmount
+      : parseFloat((totalAmount + deliveryCharge).toFixed(2));
+    const totalPayable = parseFloat(
+      (planPlusDelivery + miscChargeAmount).toFixed(2),
+    );
+
+    const isPaymentCollected = paymentStatus === "Payment Collected";
+    const isPartialPayment =
+      isPaymentCollected && customerPaidFullAmount === false;
+
+    let amountPaid: number;
+    if (!isPaymentCollected) {
+      amountPaid = 0;
+    } else if (isPartialPayment) {
+      const advance = advanceAmountPaid ?? 0;
+      if (!Number.isFinite(advance) || advance <= 0) {
+        return {
+          success: false,
+          error: "Enter the advance amount collected from the customer.",
+        };
+      }
+      if (Math.round(advance * 100) > Math.round(totalPayable * 100)) {
+        return {
+          success: false,
+          error: `The advance amount cannot exceed the total payable of ₹${totalPayable.toFixed(2)}.`,
+        };
+      }
+      amountPaid = advance;
+    } else {
+      amountPaid = totalPayable;
+    }
+
+    const balanceDue = parseFloat((totalPayable - amountPaid).toFixed(2));
+    // An advance covering the whole total IS a full payment; collapsing it keeps
+    // the "no ledger ⇒ paid in full" invariant intact.
+    const createsAdvanceLedgerRow =
+      isPartialPayment && Math.round(balanceDue * 100) > 0;
+    const resolvedPaymentStatus = !isPaymentCollected
+      ? "PENDING"
+      : Math.round(balanceDue * 100) > 0
+        ? "PARTIALLY_PAID"
+        : "PAID";
+
     // Insert subscription with franchise_id
     const { data: newSub, error: subInsertErr } = await supabase
       .from("subscriptions")
@@ -178,6 +298,12 @@ export async function franchiseAddSubscription(
         pause_credits_used: 0,
         consumed_days: 0,
         franchise_id: franchiseId,
+        // meal-subscription-partial-payment (delivery_charge was previously
+        // dropped here entirely).
+        delivery_charge: deliveryCharge,
+        misc_charge: miscChargeAmount,
+        misc_charge_label: resolvedMiscLabel || null,
+        total_payable: totalPayable,
       })
       .select("id")
       .single();
@@ -216,13 +342,21 @@ export async function franchiseAddSubscription(
     const paymentRecord = {
       subscription_id: newSub.id,
       customer_profile_id: customerProfileId,
-      amount: totalAmount,
+      // Total_Payable: plan + delivery + miscellaneous. Stays the FULL payable
+      // even on a part payment so the invoice breakup reconciles; what was
+      // actually collected lives in amount_paid / balance_due.
+      amount: totalPayable,
       base_amount: baseAmount,
       tax_percent: taxPercent,
       tax_amount: taxAmount,
       discount_amount: 0,
+      delivery_charge: deliveryCharge,
+      misc_charge: miscChargeAmount,
+      misc_charge_label: resolvedMiscLabel || null,
+      amount_paid: amountPaid,
+      balance_due: balanceDue,
       payment_method: "MANUAL",
-      status: isPaid ? "PAID" : "PENDING",
+      status: resolvedPaymentStatus,
       paid_at: isPaid ? new Date().toISOString() : null,
       invoice_type: "SUBSCRIPTION",
       payment_reference: paymentReference || null,
@@ -253,11 +387,37 @@ export async function franchiseAddSubscription(
 
     if (payErr) console.error("Payment insert error:", payErr.message);
 
+    // ─── ADVANCE ledger row (meal-subscription-partial-payment) ────────────
+    // Only when a balance actually remains, and only after the invoice row, so a
+    // failed payments insert cannot leave a ledger claiming money against a
+    // subscription with no invoice. Mirrors the admin action.
+    if (createsAdvanceLedgerRow && !payErr) {
+      const { error: ledgerErr } = await supabase
+        .from("subscription_payment_transactions")
+        .insert({
+          subscription_id: newSub.id,
+          customer_profile_id: customerProfileId,
+          transaction_type: "ADVANCE",
+          amount: amountPaid,
+          transaction_date: getISTDateString(0),
+          payment_method: "MANUAL",
+          payment_reference: paymentReference || null,
+          comment: "Advance collected when the subscription was added",
+        });
+
+      if (ledgerErr) {
+        throw new Error(`Failed to record the advance payment: ${ledgerErr.message}`);
+      }
+    }
+
     await logAdminAction("CREATE", "subscription", newSub.id, {
       customer_profile_id: customerProfileId,
       plan: planDisplayName,
       status: subscriptionStatus,
       franchise_id: franchiseId,
+      total_payable: totalPayable,
+      amount_paid: amountPaid,
+      balance_due: balanceDue,
     });
 
     revalidatePath("/franchise/customers");

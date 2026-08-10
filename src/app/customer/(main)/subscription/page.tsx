@@ -8,7 +8,9 @@ import {
   NoSubscriptionCard,
 } from "@/shared/components/customer/subscription/plans/CurrentSubscriptionCard";
 import { ProfileGateBanner } from "@/shared/components/customer/subscription/plans/ProfileGateBanner";
+import { OutstandingBalanceBanner } from "@/shared/components/customer/subscription/plans/OutstandingBalanceBanner";
 import { SubscriptionPlansGrid } from "@/shared/components/customer/subscription/plans/SubscriptionPlansGrid";
+import { getOutstandingBalanceForCustomer } from "@/services/SubscriptionPaymentService";
 
 // Prefer showing the live subscription first, then an upcoming one, then any
 // terminal record, so the account view surfaces the most relevant subscription
@@ -40,8 +42,11 @@ export default async function StorefrontPage() {
     await getCustomerSession();
   if (error || !user) redirect("/login");
 
-  // Parallelize independent queries: subscriptions, plans, and profile data
-  const [subscriptionsResult, plansResult, profileResult] = await Promise.all([
+  // Parallelize independent queries: subscriptions, plans, profile data, and
+  // the outstanding-balance check that gates new purchases
+  // (meal-subscription-partial-payment, Phase 5.1).
+  const [subscriptionsResult, plansResult, profileResult, outstanding] =
+    await Promise.all([
     customerProfileId
       ? supabase
           .from("subscriptions")
@@ -63,11 +68,18 @@ export default async function StorefrontPage() {
           .eq("id", customerProfileId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    // Ledger-derived, so subscriptions paid in full at onboarding (which is all
+    // of them before this feature) have no ledger rows and can never register
+    // as outstanding.
+    customerProfileId
+      ? getOutstandingBalanceForCustomer(customerProfileId)
+      : Promise.resolve(null),
   ]);
 
   const subscriptions = subscriptionsResult.data;
   const plans = plansResult.data;
   const profile = profileResult.data;
+  const hasOutstandingBalance = outstanding?.hasOutstanding ?? false;
 
   // Pick the most relevant subscription to display (Req 11.1).
   const currentSubscription =
@@ -135,6 +147,15 @@ export default async function StorefrontPage() {
         <NoSubscriptionCard />
       )}
 
+      {/* OUTSTANDING BALANCE GATE — rendered above the profile gate because it
+          is the blocker the customer must resolve first; completing their
+          profile would not unlock anything while a balance is owed. */}
+      {hasOutstandingBalance && outstanding && (
+        <OutstandingBalanceBanner
+          outstandingAmount={outstanding.totalOutstanding}
+        />
+      )}
+
       {/* PROFILE GATE WARNING (unchanged business rule) */}
       {!isProfileComplete && <ProfileGateBanner />}
 
@@ -159,6 +180,7 @@ export default async function StorefrontPage() {
           plans={plans ?? []}
           currentPlanId={currentSubscription?.plan_id ?? null}
           isProfileComplete={isProfileComplete}
+          hasOutstandingBalance={hasOutstandingBalance}
         />
       </section>
     </div>

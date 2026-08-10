@@ -21,10 +21,13 @@ export function SubscriptionPlansGrid({
   plans,
   currentPlanId,
   isProfileComplete,
+  hasOutstandingBalance = false,
 }: {
   plans: SubscriptionPlanCardData[];
   currentPlanId: string | null;
   isProfileComplete: boolean;
+  /** Blocks every Subscribe CTA while a balance is owed (Phase 5.1). */
+  hasOutstandingBalance?: boolean;
 }) {
   if (plans.length === 0) {
     return <EmptyPlansState />;
@@ -42,6 +45,7 @@ export function SubscriptionPlansGrid({
             plan={plan}
             isCurrentPlan={plan.id === currentPlanId}
             isProfileComplete={isProfileComplete}
+            hasOutstandingBalance={hasOutstandingBalance}
           />
         ))}
       </div>

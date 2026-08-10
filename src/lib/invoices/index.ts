@@ -9,6 +9,10 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { addDaysToISODate } from "@/lib/dates/ist";
+import {
+  resolveInvoicePaymentState,
+  type InvoicePaymentState,
+} from "@/types/subscriptionPayment";
 
 /**
  * Invoice line item representation
@@ -44,6 +48,18 @@ export interface InvoicePricing {
    * charges"). This is what is rendered — never the word "Miscellaneous".
    */
   miscChargeLabel?: string | null;
+  /**
+   * Cash actually collected against this invoice so far
+   * (meal-subscription-partial-payment). Equals `totalAmount` on a settled
+   * invoice. 0 on legacy rows recorded before the columns existed, which is why
+   * the partial-payment block is gated on this being > 0.
+   */
+  amountPaid?: number;
+  /**
+   * Still owed. 0 means settled — which is what makes this the FINAL invoice.
+   * Derived label, never a stored `is_final_invoice` flag.
+   */
+  balanceDue?: number;
 }
 
 /**
@@ -72,6 +88,16 @@ export interface InvoiceData {
   lineItems: InvoiceLineItem[];
   pricing: InvoicePricing;
   isPending: boolean;
+  /**
+   * Three-state payment position (meal-subscription-partial-payment).
+   *
+   * `isPending` alone cannot express this: a legacy PENDING invoice has
+   * `balance_due = 0`, so testing `balanceDue <= 0` would stamp "FULLY PAID" on
+   * an unpaid invoice. Derived from `payments.status` first, with `balance_due`
+   * used only for the figures. `isPending` is retained for backwards
+   * compatibility and stays exactly equivalent to `paymentState === "PENDING"`.
+   */
+  paymentState: InvoicePaymentState;
 }
 
 /**
@@ -214,6 +240,11 @@ export async function generateInvoiceData(
         totalAmount: accTotalAmount,
       },
       isPending: accIsPending,
+      // Accommodation keeps its own balance in `stay_payment_transactions`, not
+      // in the meal columns, so the meal balance is deliberately passed as 0.
+      // A PAID stay invoice therefore resolves to "PAID" and renders exactly as
+      // it did before this feature.
+      paymentState: resolveInvoicePaymentState(payment.status, 0),
     };
   }
 
@@ -333,6 +364,8 @@ export async function generateInvoiceData(
         totalAmount: refundAmount,
       },
       isPending: refundIsPending,
+      // See the note on the final-invoice branch above.
+      paymentState: resolveInvoicePaymentState(payment.status, 0),
     };
   }
 
@@ -467,6 +500,17 @@ export async function generateInvoiceData(
   // Status-driven labels
   const isPending = payment.status === "PENDING";
 
+  // ─── Payment position (meal-subscription-partial-payment) ────────────────
+  // Both columns default to 0 in the DB, so an invoice recorded before this
+  // feature reports amountPaid = 0 / balanceDue = 0 and — because the state is
+  // resolved from `status` first — still renders exactly as it always did.
+  const amountPaidAmount = Number(payment.amount_paid ?? 0) || 0;
+  const balanceDueAmount = Number(payment.balance_due ?? 0) || 0;
+  const paymentState = resolveInvoicePaymentState(
+    payment.status,
+    balanceDueAmount,
+  );
+
   return {
     paymentId: payment.id,
     invoiceNumber: `INV-${payment.id.split("-")[0].toUpperCase()}`,
@@ -500,8 +544,11 @@ export async function generateInvoiceData(
       deliveryCharge: deliveryChargeAmount,
       miscCharge: miscChargeAmount,
       miscChargeLabel,
+      amountPaid: amountPaidAmount,
+      balanceDue: balanceDueAmount,
     },
     isPending,
+    paymentState,
   };
 }
 

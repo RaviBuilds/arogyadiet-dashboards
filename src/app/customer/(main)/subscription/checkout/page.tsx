@@ -2,12 +2,28 @@ import { getCustomerSession } from "@/lib/customer/get-session";
 import { redirect } from "next/navigation";
 import { CheckoutWizard } from "@/shared/components/customer/subscription/checkout/checkout-wizard.tsx";
 import { fetchHolidaysInRange } from "@/actions/admin-actions/holidayActions";
+import { getOutstandingBalanceForCustomer } from "@/services/SubscriptionPaymentService";
 import { addYears, format } from "date-fns";
 
 export default async function CheckoutPage() {
   const { supabase, user, customerProfileId, error } =
     await getCustomerSession();
   if (error || !user) redirect("/login");
+
+  // An unsettled balance on an existing/previous subscription blocks a new
+  // purchase (meal-subscription-partial-payment, Phase 5.1). Bounce back to the
+  // plans page, which is where the explanatory banner lives — rendering an
+  // unusable wizard would just strand the customer.
+  //
+  // The plans page already disables every Subscribe CTA in this state, so
+  // reaching here means a direct URL, a bookmarked link, or a balance recorded
+  // after the page was rendered.
+  if (customerProfileId) {
+    const outstanding = await getOutstandingBalanceForCustomer(customerProfileId);
+    if (outstanding.hasOutstanding) {
+      redirect("/subscription");
+    }
+  }
 
   //fetch the plan and profile in parallel
   const todayStr = format(new Date(), "yyyy-MM-dd");

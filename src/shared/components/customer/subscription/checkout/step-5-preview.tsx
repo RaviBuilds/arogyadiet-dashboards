@@ -282,8 +282,18 @@ export function OrderPreview({ data, plans, onBack }: any) {
         appliedCoupon?.code,
         customerProfileId,
       );
-      if (!orderRes.success || !orderRes.order)
-        throw new Error("Could not create order");
+      if (!orderRes.success || !orderRes.order) {
+        // Show the server's actual reason instead of a generic failure. The
+        // outstanding-balance gate (meal-subscription-partial-payment, Phase 5.2)
+        // rejects here, and "Could not create order" would leave the customer
+        // with no idea that they need to contact the admin.
+        setPaymentError(
+          ("error" in orderRes && orderRes.error) ||
+            "Could not create order. Please try again.",
+        );
+        setIsProcessing(false);
+        return;
+      }
 
       const options = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
