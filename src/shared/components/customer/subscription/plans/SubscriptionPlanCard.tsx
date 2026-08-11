@@ -29,10 +29,17 @@ export function SubscriptionPlanCard({
   plan,
   isCurrentPlan,
   isProfileComplete,
+  hasOutstandingBalance = false,
 }: {
   plan: SubscriptionPlanCardData;
   isCurrentPlan: boolean;
   isProfileComplete: boolean;
+  /**
+   * An unsettled balance on an existing/previous subscription blocks a new
+   * purchase (meal-subscription-partial-payment, Phase 5.1). Defaults to false
+   * so any other caller of this card is unaffected.
+   */
+  hasOutstandingBalance?: boolean;
 }) {
   const isFeatured = Boolean(plan.recommended);
 
@@ -132,6 +139,18 @@ export function SubscriptionPlanCard({
               disabled
             >
               Current Plan
+            </Button>
+          ) : hasOutstandingBalance ? (
+            /* Checked BEFORE the profile gate: a balance due is the blocker the
+               customer must resolve first, and completing their profile would
+               not unlock anything. The banner above the grid explains why. */
+            <Button
+              className="h-12 w-full rounded-full text-base font-semibold"
+              variant="outline"
+              disabled
+              title="Clear the outstanding balance on your existing subscription first"
+            >
+              Balance Due
             </Button>
           ) : isProfileComplete ? (
             <Button

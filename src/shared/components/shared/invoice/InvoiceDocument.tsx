@@ -13,6 +13,7 @@
 
 import { format } from "date-fns";
 import type { InvoiceData } from "@/lib/invoices";
+import { AutoPrintTrigger } from "./AutoPrintTrigger";
 
 export function InvoiceDocument({
   invoiceData,
@@ -25,6 +26,7 @@ export function InvoiceDocument({
     invoiceNumber,
     date,
     isPending,
+    paymentState,
     customerName,
     customerEmail,
     customerMobile,
@@ -35,11 +37,30 @@ export function InvoiceDocument({
     paymentMethod,
     paymentReference,
     paymentNotes,
-    status,
   } = invoiceData;
 
-  const statusLabel = isPending ? "PAYMENT PENDING" : status;
-  const totalLabel = isPending ? "Amount Due" : "Total Paid";
+  // Three-state payment position (meal-subscription-partial-payment).
+  // `isPending` cannot express a part payment, and `paymentState` is derived in
+  // `generateInvoiceData` from `payments.status` first — so a legacy PENDING
+  // invoice (which has balance_due = 0) is never mislabelled as fully paid.
+  const isPartiallyPaid = paymentState === "PARTIALLY_PAID";
+
+  const statusLabel = isPending
+    ? "PAYMENT PENDING"
+    : isPartiallyPaid
+      ? "PARTIAL PAYMENT PENDING"
+      : "FULLY PAID";
+
+  // On a part payment the figure below is what is OWED in total, not what was
+  // collected — calling it "Total Paid" would overstate the payment by the
+  // outstanding balance. The amount and its calculation are untouched; only the
+  // word changes.
+  const totalLabel = isPending
+    ? "Amount Due"
+    : isPartiallyPaid
+      ? "Total Payable"
+      : "Total Paid";
+
   const isManual = paymentMethod === "Manual";
 
   // Optional extra charges. Absent on invoices recorded before these were
@@ -47,16 +68,19 @@ export function InvoiceDocument({
   const deliveryCharge = pricing.deliveryCharge ?? 0;
   const miscCharge = pricing.miscCharge ?? 0;
 
+  // Payment position figures. Both default to 0 on legacy rows, which together
+  // with the `amountPaid > 0` gate below keeps historical invoices byte-identical.
+  const amountPaid = pricing.amountPaid ?? 0;
+  const balanceDue = pricing.balanceDue ?? 0;
+  const showPartialPaymentBlock = isPartiallyPaid && amountPaid > 0;
+
   return (
     <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4 print:p-0 print:bg-white">
-      {/* Auto-print trigger only for paid invoices */}
-      {autoPrint && !isPending && (
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `window.onload = function() { window.print(); }`,
-          }}
-        />
-      )}
+      {/* Auto-print for real invoices, never for an unpaid Proforma.
+          A PARTIALLY_PAID invoice does print — it is a genuine document.
+          Was an inline `<script>` tag, which React silently refuses to execute;
+          see AutoPrintTrigger for the details. */}
+      {autoPrint && !isPending && <AutoPrintTrigger />}
 
       <div className="bg-white w-full max-w-[210mm] min-h-[297mm] shadow-lg print:shadow-none p-10 md:p-16 border print:border-none relative">
         {/* Header */}
@@ -87,7 +111,7 @@ export function InvoiceDocument({
             </p>
             <div
               className={`mt-4 inline-block px-3 py-1 font-bold text-xs rounded-full uppercase tracking-wider border ${
-                isPending
+                isPending || isPartiallyPaid
                   ? "bg-amber-50 text-amber-700 border-amber-200"
                   : "bg-green-50 text-green-700 border-green-200"
               }`}
@@ -191,6 +215,33 @@ export function InvoiceDocument({
             ))}
           </tbody>
         </table>
+
+        {/* ── Partial payment position ──
+            Sits ABOVE the pricing breakup, which is deliberately left exactly as
+            it was: the breakup states what the subscription costs, this states
+            what has been settled against it. Only rendered for a part payment,
+            so every fully-paid and legacy invoice is unchanged. */}
+        {showPartialPaymentBlock && (
+          <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50/70 p-5">
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-700">
+              Payment Received
+            </p>
+            <div className="mt-3 flex flex-col gap-2">
+              <div className="flex justify-between text-sm text-amber-900">
+                <span>Total Amount Paid</span>
+                <span className="font-bold">₹{amountPaid.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between border-t border-amber-200 pt-2 text-sm text-amber-900">
+                <span className="font-bold">Balance Remaining</span>
+                <span className="font-black">₹{balanceDue.toFixed(2)}</span>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-amber-700">
+              This invoice is not final. A balance of ₹{balanceDue.toFixed(2)} is
+              still due on this subscription.
+            </p>
+          </div>
+        )}
 
         {/* Totals */}
         <div className="flex justify-end">

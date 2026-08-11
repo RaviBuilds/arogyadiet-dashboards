@@ -463,22 +463,44 @@ export async function getConsolidatedNetworkReport(
   const [revenue, activeSubscriptions, deliveries, activeRiders] =
     await Promise.all([
       // Consolidated revenue across the scope for the period (Req 11.5).
+      // PARTIALLY_PAID rows book only what was actually collected (amount_paid),
+      // not the full payable, so the unpaid balance is never booked as cash.
+      // Settled rows (PAID/SUCCESS/CAPTURED) use `amount` which equals the full
+      // payable — correct because they ARE fully collected.
       loadMetric<number>("revenue", async () => {
-        const { data, error } = await applyFranchiseDrilldown(
-          supabase
-            .from("payments")
-            .select("amount")
-            .in("status", [...REVENUE_PAYMENT_STATUSES])
-            .gte("created_at", fromStart)
-            .lte("created_at", toEnd),
-          franchiseId,
-        );
-        if (error) throw new Error(error.message);
-        return (data ?? []).reduce(
+        const [settledResult, partialResult] = await Promise.all([
+          applyFranchiseDrilldown(
+            supabase
+              .from("payments")
+              .select("amount")
+              .in("status", [...REVENUE_PAYMENT_STATUSES])
+              .gte("created_at", fromStart)
+              .lte("created_at", toEnd),
+            franchiseId,
+          ),
+          applyFranchiseDrilldown(
+            supabase
+              .from("payments")
+              .select("amount_paid")
+              .eq("status", "PARTIALLY_PAID")
+              .gte("created_at", fromStart)
+              .lte("created_at", toEnd),
+            franchiseId,
+          ),
+        ]);
+        if (settledResult.error) throw new Error(settledResult.error.message);
+        if (partialResult.error) throw new Error(partialResult.error.message);
+        const settled = (settledResult.data ?? []).reduce(
           (sum: number, row: { amount: number | null }) =>
             sum + Number(row.amount ?? 0),
           0,
         );
+        const partial = (partialResult.data ?? []).reduce(
+          (sum: number, row: { amount_paid: number | null }) =>
+            sum + Number(row.amount_paid ?? 0),
+          0,
+        );
+        return settled + partial;
       }),
 
       // Active subscription count across the scope (Req 11.7).

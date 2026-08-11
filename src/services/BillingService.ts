@@ -146,7 +146,10 @@ export async function recordOnboardingInvoice(
     .from("payments")
     .select("id")
     .eq("subscription_id", subscription.subscriptionId)
-    .eq("status", PAID_STATUS)
+    // A PARTIALLY_PAID row is already a real invoice for this subscription (it
+    // just hasn't been fully settled yet). Without including it, the guard would
+    // miss it and allow a second SUBSCRIPTION invoice to be inserted (finding D).
+    .in("status", [PAID_STATUS, "PARTIALLY_PAID"])
     .limit(1)
     .maybeSingle();
 

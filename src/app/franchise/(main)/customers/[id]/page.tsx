@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
 import { Button } from "@/shared/components/ui/button";
 import { Customer360Dashboard } from "@/shared/components/admin/customers/Customer360Dashboard";
+import { getSubscriptionPaymentOverview } from "@/services/SubscriptionPaymentService";
 
 import { franchiseAddSubscription } from "@/actions/franchise-actions/franchiseSubscriptionActions";
 import {
@@ -135,6 +136,11 @@ export default async function FranchiseCustomer360Page({
         tax_percent,
         tax_amount,
         discount_amount,
+        delivery_charge,
+        misc_charge,
+        misc_charge_label,
+        amount_paid,
+        balance_due,
         invoice_type,
         payment_reference,
         payment_notes,
@@ -148,6 +154,12 @@ export default async function FranchiseCustomer360Page({
       .eq("customer_profile_id", id)
       .order("created_at", { ascending: false }),
   ]);
+
+  // ── 4b. Subscription payment position ───────────────────────────────────────
+  // Mirrors the admin page: drives the "Subscription" tab's price breakup and
+  // whether a new subscription may be added
+  // (meal-subscription-partial-payment).
+  const subscriptionPayments = await getSubscriptionPaymentOverview(id);
 
   // ── 5. Shape the customer object ────────────────────────────────────────────
   const userData = data.users as any;
@@ -260,6 +272,7 @@ export default async function FranchiseCustomer360Page({
         initialCoupons={(coupons ?? []) as any[]}
         billingPayments={(payments ?? []) as any[]}
         hasActiveSubscription={hasActiveSubscription}
+        subscriptionPayments={subscriptionPayments}
         franchiseId={franchiseId}
         backHref="/customers"
         addSubscriptionAction={franchiseAddSubscription as any}

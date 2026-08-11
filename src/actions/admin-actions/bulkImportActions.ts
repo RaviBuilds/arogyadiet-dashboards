@@ -468,6 +468,11 @@ export async function bulkImportSubscriptionsAction(
     const res = await addSubscription(built.payload, built.isCustom, {
       skipStartDateCheck: true,
       skipOverlapCheck: true,
+      // Migration replays historical subscriptions that predate the
+      // partial-payment concept, so the outstanding-balance gate would fail an
+      // import on data that is not actually in arrears
+      // (meal-subscription-partial-payment, Phase 5.5).
+      skipOutstandingBalanceCheck: true,
     });
 
     if (res.success) {

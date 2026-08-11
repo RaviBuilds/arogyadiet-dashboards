@@ -86,29 +86,53 @@ export async function getKPISummary(window: DateWindow): Promise<KPISummary> {
   const { from, to } = getDateRange(window);
   const prev = getPreviousDateRange(window);
 
-  // Revenue - current period
-  const { data: currentPayments } = await supabase
-    .from("payments")
-    .select("amount, created_at")
-    .in("status", ["PAID", "SUCCESS", "CAPTURED"])
-    .gte("created_at", `${from}T00:00:00`)
-    .lte("created_at", `${to}T23:59:59`);
+  // Revenue - current period (including PARTIALLY_PAID → amount_paid only)
+  const [{ data: currentPayments }, { data: currentPartial }] = await Promise.all([
+    supabase
+      .from("payments")
+      .select("amount, created_at")
+      .in("status", ["PAID", "SUCCESS", "CAPTURED"])
+      .gte("created_at", `${from}T00:00:00`)
+      .lte("created_at", `${to}T23:59:59`),
+    supabase
+      .from("payments")
+      .select("amount_paid, created_at")
+      .eq("status", "PARTIALLY_PAID")
+      .gte("created_at", `${from}T00:00:00`)
+      .lte("created_at", `${to}T23:59:59`),
+  ]);
 
-  const grossRevenue = (currentPayments || []).reduce(
-    (sum, p) => sum + Number(p.amount || 0), 0
-  );
+  const grossRevenue =
+    (currentPayments || []).reduce(
+      (sum, p) => sum + Number(p.amount || 0), 0
+    ) +
+    (currentPartial || []).reduce(
+      (sum: number, p: any) => sum + Number(p.amount_paid || 0), 0
+    );
 
   // Revenue - previous period
-  const { data: prevPayments } = await supabase
-    .from("payments")
-    .select("amount")
-    .in("status", ["PAID", "SUCCESS", "CAPTURED"])
-    .gte("created_at", `${prev.from}T00:00:00`)
-    .lte("created_at", `${prev.to}T23:59:59`);
+  const [{ data: prevPayments }, { data: prevPartial }] = await Promise.all([
+    supabase
+      .from("payments")
+      .select("amount")
+      .in("status", ["PAID", "SUCCESS", "CAPTURED"])
+      .gte("created_at", `${prev.from}T00:00:00`)
+      .lte("created_at", `${prev.to}T23:59:59`),
+    supabase
+      .from("payments")
+      .select("amount_paid")
+      .eq("status", "PARTIALLY_PAID")
+      .gte("created_at", `${prev.from}T00:00:00`)
+      .lte("created_at", `${prev.to}T23:59:59`),
+  ]);
 
-  const prevRevenue = (prevPayments || []).reduce(
-    (sum, p) => sum + Number(p.amount || 0), 0
-  );
+  const prevRevenue =
+    (prevPayments || []).reduce(
+      (sum, p) => sum + Number(p.amount || 0), 0
+    ) +
+    (prevPartial || []).reduce(
+      (sum: number, p: any) => sum + Number(p.amount_paid || 0), 0
+    );
 
   const revenueGrowthPercent = prevRevenue > 0
     ? Math.round(((grossRevenue - prevRevenue) / prevRevenue) * 100)

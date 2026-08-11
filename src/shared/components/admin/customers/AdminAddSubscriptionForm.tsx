@@ -7,9 +7,14 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { addDays, format, startOfDay } from "date-fns";
 import { useRouter } from "next/navigation";
-import { CalendarIcon, Clock3, IndianRupee, Loader2, PauseCircle, AlertTriangle, Truck } from "lucide-react";
+import { CalendarIcon, Clock3, IndianRupee, Loader2, PauseCircle, AlertTriangle, Truck, Wallet } from "lucide-react";
 
 import { addSubscription } from "@/actions/admin-actions/adminSubscriptionActions";
+import {
+  MISC_CHARGE_LABEL_MAX_LENGTH,
+  validateMiscChargeAmount,
+  validateMiscChargeLabel,
+} from "@/lib/onboarding/miscCharge";
 import { calculateDeliveryChargeAction } from "@/actions/admin-actions/deliveryChargeActions";
 import { cn } from "@/lib/utils";
 import { earliestStartDate, getPastDateRangeForAddSub, pastDayStatusBoundary, ONBOARDING_CUTOFF_HOUR_IST } from "@/lib/onboarding/cutoff";
@@ -83,6 +88,37 @@ export type InitialSubscriptionData = {
 };
 
 // ─── Admin start-date helper (no 5 PM cutoff) ────────────────────────────────
+
+/**
+ * One line of the amount breakup. Mirrors the identically-named helper in
+ * `QuickOnboardingForm`, so the onboarding wizard and this form present the
+ * breakup the same way (meal-subscription-partial-payment).
+ */
+function AmountRow({
+  label,
+  amount,
+  note,
+}: {
+  label: string;
+  amount: number;
+  note?: string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-xs text-emerald-800">
+        {label}
+        {note && <span className="ml-1 text-emerald-600">({note})</span>}
+      </span>
+      <span className="text-xs font-medium tabular-nums text-emerald-900">
+        ₹
+        {amount.toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
+      </span>
+    </div>
+  );
+}
 
 function getMinStartDate(activeSubEnd: string | null): Date {
   let min = startOfDay(addDays(new Date(), 1));
@@ -168,6 +204,13 @@ export function AdminAddSubscriptionForm({
   const [isEndDateOpen, setIsEndDateOpen] = useState(false);
   const [showPastDayStatusPopup, setShowPastDayStatusPopup] = useState(false);
   const pendingFormDataRef = useRef<FormValues | null>(null);
+  /**
+   * Last server rejection, kept visible until the next submit.
+   * The outstanding-balance gate reports an amount owed, and a toast that
+   * vanishes after a few seconds is the wrong place for a figure the admin has
+   * to collect against.
+   */
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // ─── Delivery Charge State (Req 8.1–8.8) ──────────────────────────────────
   const [deliveryCharge, setDeliveryCharge] = useState<number | null>(null);
@@ -178,6 +221,30 @@ export function AdminAddSubscriptionForm({
   const [isCalculatingDelivery, setIsCalculatingDelivery] = useState(false);
   /** Tracks the system-calculated delivery charge for admin override audit (Req 12.4) */
   const [autoCalculatedDeliveryCharge, setAutoCalculatedDeliveryCharge] = useState<number | null>(null);
+
+  // ─── Miscellaneous charge + payment collection ────────────────────────────
+  // meal-subscription-partial-payment: parity with the Quick Onboarding wizard,
+  // so adding a subscription for an existing customer offers the same options as
+  // onboarding a new one. Held in local state alongside the delivery charge
+  // rather than in the Zod form, matching how that field is already handled.
+  const [miscChargeInput, setMiscChargeInput] = useState<string>("");
+  const [miscCharge, setMiscCharge] = useState<number | null>(null);
+  const [miscChargeLabel, setMiscChargeLabel] = useState<string>("");
+  const [miscChargeError, setMiscChargeError] = useState<string | null>(null);
+  const [miscChargeLabelError, setMiscChargeLabelError] = useState<string | null>(null);
+
+  const [customerPaidFullAmount, setCustomerPaidFullAmount] = useState(true);
+  const [advanceAmountInput, setAdvanceAmountInput] = useState<string>("");
+  const [advanceAmount, setAdvanceAmount] = useState<number | null>(null);
+  const [advanceAmountError, setAdvanceAmountError] = useState<string | null>(null);
+
+  /**
+   * Snapshot of the figures the admin signed off on, not a boolean.
+   * `pricingConfirmed` is derived by comparing it to the live figures, so ANY
+   * later edit invalidates the confirmation automatically — including a field
+   * added here later whose author forgets to wire up a reset.
+   */
+  const [confirmedPricingKey, setConfirmedPricingKey] = useState<string | null>(null);
 
   const { activeSubscription, mealCategories, addresses } = initialData;
   const subscriptionPlans = useMemo(
@@ -228,6 +295,145 @@ export function AdminAddSubscriptionForm({
   const pastDateEnabled = watch("pastDateEnabled");
 
   const selectedPlan = subscriptionPlans.find((p) => p.id === planId);
+
+  // ─── Amount breakup + payment collection (meal-subscription-partial-payment) ─
+  // The plan portion differs by mode: an existing plan's gross price, or the
+  // custom plan's base + computed tax.
+  const planAmount =
+    mode === "existing"
+      ? (selectedPlan?.price ?? 0)
+      : basePrice !== undefined
+        ? parseFloat(
+            (basePrice + basePrice * ((taxPercent ?? 0) / 100)).toFixed(2),
+          )
+        : 0;
+  const deliveryAmount = deliveryCharge ?? 0;
+  const miscAmount = miscCharge ?? 0;
+  const totalPayable = parseFloat(
+    (planAmount + deliveryAmount + miscAmount).toFixed(2),
+  );
+
+  const hasPlanSelection = mode === "existing" ? Boolean(selectedPlan) : planAmount > 0;
+  // Partial payment only means anything once money has actually been collected.
+  const isPaymentCollected = paymentStatus === "Payment Collected";
+  const showPaymentCollection = isPaymentCollected && hasPlanSelection;
+
+  const advanceAmountValue = advanceAmount ?? 0;
+  // Paise arithmetic: subtracting rupees as floats leaves ~1e-13 residue, which
+  // would render a settled plan as owing a fraction of a paisa.
+  const balanceRemaining =
+    Math.round(totalPayable * 100 - advanceAmountValue * 100) / 100;
+
+  // The delivery charge must be ANSWERED, not merely left at its default. A typed
+  // 0 is a valid answer ("not charged"); an empty box is an unanswered question,
+  // and silently treating both as 0 under-billed whenever the admin just forgot.
+  // Derived from the raw input string, since "" already distinguishes blank from 0.
+  const deliveryChargeMissing = deliveryChargeInput.trim() === "";
+
+  const advanceAmountMissing =
+    showPaymentCollection &&
+    !customerPaidFullAmount &&
+    (advanceAmount === null || advanceAmount <= 0);
+
+  const hasChargeErrors =
+    Boolean(miscChargeError) ||
+    Boolean(miscChargeLabelError) ||
+    Boolean(advanceAmountError);
+
+  // Every figure being signed off on. Changing any of them yields a different key,
+  // which invalidates a prior confirmation without needing a reset effect.
+  const pricingKey = [
+    mode,
+    planId ?? "",
+    planAmount,
+    deliveryAmount,
+    miscAmount,
+    miscChargeLabel.trim(),
+    customerPaidFullAmount ? "full" : "advance",
+    advanceAmount ?? "",
+    paymentStatus,
+  ].join("|");
+
+  const pricingConfirmed =
+    confirmedPricingKey !== null && confirmedPricingKey === pricingKey;
+
+  // Confirmation is only demanded where a part payment is actually on the table.
+  const requiresPricingConfirmation =
+    showPaymentCollection && !customerPaidFullAmount;
+  const canConfirmPricing =
+    !hasChargeErrors &&
+    !deliveryChargeMissing &&
+    !advanceAmountMissing &&
+    hasPlanSelection;
+
+  /**
+   * Toggles "Customer paid full amount".
+   *
+   * Clears the advance in the handler rather than an effect: it is a consequence
+   * of the click, not a synchronisation with an external system, and doing it in
+   * an effect would trip `react-hooks/set-state-in-effect`.
+   */
+  const handlePaidFullAmountChange = (checked: boolean) => {
+    setCustomerPaidFullAmount(checked);
+    if (checked) {
+      setAdvanceAmountInput("");
+      setAdvanceAmount(null);
+      setAdvanceAmountError(null);
+    }
+  };
+
+  const handleMiscChargeInput = (raw: string) => {
+    setMiscChargeInput(raw);
+    const amountError = validateMiscChargeAmount(raw);
+    setMiscChargeError(amountError);
+    const next = amountError !== null || raw.trim() === "" ? null : Number(raw);
+    setMiscCharge(next);
+    // The name becomes mandatory the moment an amount is charged.
+    setMiscChargeLabelError(validateMiscChargeLabel(miscChargeLabel, next));
+  };
+
+  const handleMiscChargeLabelInput = (raw: string) => {
+    setMiscChargeLabel(raw);
+    setMiscChargeLabelError(validateMiscChargeLabel(raw, miscCharge));
+  };
+
+  const handleAdvanceAmountInput = (raw: string) => {
+    setAdvanceAmountInput(raw);
+
+    if (raw.trim() === "") {
+      setAdvanceAmount(null);
+      setAdvanceAmountError(null);
+      return;
+    }
+
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      setAdvanceAmount(null);
+      setAdvanceAmountError("Advance amount must be a valid number");
+      return;
+    }
+    if (parsed <= 0) {
+      setAdvanceAmount(null);
+      setAdvanceAmountError("Advance amount must be greater than ₹0");
+      return;
+    }
+    const decimals = raw.split(".")[1];
+    if (decimals && decimals.length > 2) {
+      setAdvanceAmount(null);
+      setAdvanceAmountError("Advance amount cannot have more than 2 decimal places");
+      return;
+    }
+    if (Math.round(parsed * 100) > Math.round(totalPayable * 100)) {
+      setAdvanceAmount(null);
+      setAdvanceAmountError(
+        `Advance cannot exceed the total payable of ₹${totalPayable.toFixed(2)}`,
+      );
+      return;
+    }
+
+    setAdvanceAmount(parsed);
+    setAdvanceAmountError(null);
+  };
 
   // ─── Past-date calendar logic (Req 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.4) ────
   const istToday = useMemo(() => getISTDateString(0), []);
@@ -322,6 +528,11 @@ export function AdminAddSubscriptionForm({
     if (rawValue === "") {
       setDeliveryCharge(null);
       setDeliveryChargeError(null);
+      // Drop the "N km × ₹R/km" note too. Left behind, it kept describing a
+      // distance-derived charge next to a ₹0.00 line in the breakup — a figure
+      // the customer would be quoted from.
+      setDistanceKm(null);
+      setRatePerKm(null);
       return;
     }
 
@@ -517,6 +728,31 @@ export function AdminAddSubscriptionForm({
 
   /** Actually submits the form data to the server action. */
   const performSubmission = (values: FormValues) => {
+    // The submit button is already disabled in these cases; this catches a submit
+    // arriving by any other route (Enter key, a stale render) so the server never
+    // has to reject it after the fact.
+    if (deliveryChargeMissing) {
+      toast.error("Enter the delivery charge (enter 0 if delivery is free).");
+      return;
+    }
+    if (hasChargeErrors) {
+      toast.error(
+        miscChargeLabelError ??
+          miscChargeError ??
+          advanceAmountError ??
+          "Correct the charge details before creating the subscription.",
+      );
+      return;
+    }
+    if (advanceAmountMissing) {
+      toast.error("Enter the advance amount collected from the customer.");
+      return;
+    }
+    if (requiresPricingConfirmation && !pricingConfirmed) {
+      toast.error("Confirm the pricing before creating the subscription.");
+      return;
+    }
+
     startTransition(async () => {
       const isCustom = values.mode === "custom";
 
@@ -524,6 +760,27 @@ export function AdminAddSubscriptionForm({
         paymentStatus: values.paymentStatus,
         paymentReference: values.paymentReference || undefined,
         paymentNotes: values.paymentNotes || undefined,
+      };
+
+      /**
+       * Miscellaneous charge + payment collection, identical for both modes
+       * (meal-subscription-partial-payment).
+       *
+       * `customerPaidFullAmount` is forced true unless payment was actually
+       * collected, so a "Payment Pending" subscription can never arrive at the
+       * server claiming a partial collection.
+       */
+      const extraChargeAndPaymentFields = {
+        miscCharge: miscCharge ?? 0,
+        miscChargeLabel:
+          miscCharge && miscCharge > 0 ? miscChargeLabel.trim() : undefined,
+        customerPaidFullAmount: showPaymentCollection
+          ? customerPaidFullAmount
+          : true,
+        advanceAmountPaid:
+          showPaymentCollection && !customerPaidFullAmount
+            ? (advanceAmount ?? 0)
+            : undefined,
       };
 
       const startDateStr = format(values.startDate, "yyyy-MM-dd");
@@ -551,6 +808,7 @@ export function AdminAddSubscriptionForm({
             // Delivery charge fields (Req 6.1–6.5, 12.4)
             deliveryCharge: deliveryCharge ?? 0,
             autoCalculatedDeliveryCharge: autoCalculatedDeliveryCharge ?? undefined,
+            ...extraChargeAndPaymentFields,
           }
         : {
             customerProfileId,
@@ -569,12 +827,28 @@ export function AdminAddSubscriptionForm({
             // Delivery charge fields (Req 6.1–6.5, 12.4)
             deliveryCharge: deliveryCharge ?? 0,
             autoCalculatedDeliveryCharge: autoCalculatedDeliveryCharge ?? undefined,
+            ...extraChargeAndPaymentFields,
           };
 
       const res = await submitAction(payload, isCustom);
 
       if (res.success) {
+        setSubmitError(null);
         toast.success("Subscription created successfully!");
+        // `reset` only clears react-hook-form fields. The charge and payment
+        // figures live in local state, so they must be cleared explicitly —
+        // otherwise the next subscription would inherit the previous one's
+        // miscellaneous charge and advance.
+        setMiscChargeInput("");
+        setMiscCharge(null);
+        setMiscChargeLabel("");
+        setMiscChargeError(null);
+        setMiscChargeLabelError(null);
+        setCustomerPaidFullAmount(true);
+        setAdvanceAmountInput("");
+        setAdvanceAmount(null);
+        setAdvanceAmountError(null);
+        setConfirmedPricingKey(null);
         reset({
           mode: "existing",
           startDate: minStartDate,
@@ -588,7 +862,12 @@ export function AdminAddSubscriptionForm({
         });
         router.refresh();
       } else {
-        toast.error(res.error ?? "Failed to create subscription.");
+        const message = res.error ?? "Failed to create subscription.";
+        // Kept alongside the toast, not instead of it: a toast disappears, and a
+        // rejection like an outstanding balance names an amount the admin needs
+        // to read, act on, and possibly quote to the customer.
+        setSubmitError(message);
+        toast.error(message);
       }
     });
   };
@@ -1201,22 +1480,44 @@ export function AdminAddSubscriptionForm({
               </Button>
 
               <div className="flex-1 max-w-xs space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Delivery Charge (₹)
+                <Label
+                  htmlFor="addSubDeliveryCharge"
+                  className="text-xs text-muted-foreground"
+                >
+                  Delivery Charge (₹) <span className="text-destructive">*</span>
                 </Label>
                 <Input
+                  id="addSubDeliveryCharge"
                   type="text"
                   inputMode="decimal"
                   placeholder="0.00"
                   className="h-9"
+                  aria-invalid={
+                    Boolean(deliveryChargeError) || deliveryChargeMissing
+                  }
+                  aria-describedby="addSubDeliveryCharge-help"
                   value={deliveryChargeInput}
                   onChange={(e) => handleDeliveryChargeInput(e.target.value)}
                 />
               </div>
             </div>
 
+            <p
+              id="addSubDeliveryCharge-help"
+              className="text-xs text-muted-foreground"
+            >
+              Required. Press Calculate, or type the amount. Enter 0 if delivery is
+              not being charged.
+            </p>
+
             {deliveryChargeError && (
               <p className="text-xs text-destructive">{deliveryChargeError}</p>
+            )}
+
+            {!deliveryChargeError && deliveryChargeMissing && (
+              <p className="text-xs text-destructive">
+                Delivery charge is required. Enter 0 if not charged.
+              </p>
             )}
 
             {distanceKm !== null && ratePerKm !== null && (
@@ -1225,32 +1526,223 @@ export function AdminAddSubscriptionForm({
               </p>
             )}
 
-            {/* Total Payable display */}
-            {(mode === "existing" ? selectedPlan : basePrice !== undefined) && (
-              <Card className="border-border/70 bg-muted/20 shadow-none">
-                <CardContent className="flex items-center gap-3 p-4">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                    <IndianRupee className="h-4 w-4" />
+            {/* ── Miscellaneous charge: admin-named, optional ──
+                meal-subscription-partial-payment. Applies to BOTH modes; the
+                admin-entered name is what the customer's invoice prints. */}
+            <div className="space-y-3 border-t pt-4">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-muted-foreground" />
+                <Label className="text-sm font-semibold">
+                  Miscellaneous Charges
+                </Label>
+                <span className="text-xs text-muted-foreground">Optional</span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="addSubMiscChargeLabel"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Charge name
+                  </Label>
+                  <Input
+                    id="addSubMiscChargeLabel"
+                    type="text"
+                    placeholder="e.g. Additional product charges"
+                    maxLength={MISC_CHARGE_LABEL_MAX_LENGTH}
+                    className="h-9"
+                    aria-invalid={Boolean(miscChargeLabelError)}
+                    value={miscChargeLabel}
+                    onChange={(e) => handleMiscChargeLabelInput(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1 sm:w-40">
+                  <Label
+                    htmlFor="addSubMiscCharge"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Amount (₹)
+                  </Label>
+                  <Input
+                    id="addSubMiscCharge"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    className="h-9"
+                    aria-invalid={Boolean(miscChargeError)}
+                    value={miscChargeInput}
+                    onChange={(e) => handleMiscChargeInput(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                This name is printed on the customer&apos;s invoice exactly as typed.
+              </p>
+
+              {miscChargeLabelError && (
+                <p className="text-xs text-destructive">{miscChargeLabelError}</p>
+              )}
+              {miscChargeError && (
+                <p className="text-xs text-destructive">{miscChargeError}</p>
+              )}
+            </div>
+
+            {/* ── Amount breakup ── */}
+            {hasPlanSelection && (
+              <div className="space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-emerald-600">
+                  Amount breakup
+                </p>
+                <AmountRow
+                  label={
+                    mode === "existing" && selectedPlan
+                      ? `${selectedPlan.name} (${selectedPlan.duration_days} days)`
+                      : "Custom plan (base + tax)"
+                  }
+                  amount={planAmount}
+                />
+                <AmountRow
+                  label="Delivery charges"
+                  amount={deliveryAmount}
+                  note={
+                    distanceKm !== null && ratePerKm !== null
+                      ? `${distanceKm.toFixed(2)} km × ₹${ratePerKm.toFixed(2)}/km`
+                      : undefined
+                  }
+                />
+                {miscAmount > 0 && (
+                  <AmountRow
+                    label={miscChargeLabel.trim() || "Miscellaneous charges"}
+                    amount={miscAmount}
+                  />
+                )}
+                <div className="flex items-baseline justify-between border-t border-emerald-200 pt-1.5">
+                  <span className="text-sm font-semibold text-emerald-900">
+                    Total Payable
+                  </span>
+                  <span className="text-sm font-bold tabular-nums text-emerald-900">
+                    ₹
+                    {totalPayable.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+
+                {showPaymentCollection && !customerPaidFullAmount && advanceAmount !== null && (
+                  <div className="mt-1 space-y-1 border-t border-emerald-200 pt-1.5">
+                    <AmountRow label="Advance collected now" amount={advanceAmount} />
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-xs font-bold text-amber-700">
+                        Balance due
+                      </span>
+                      <span className="text-xs font-bold tabular-nums text-amber-700">
+                        ₹
+                        {balanceRemaining.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Total Payable (Plan + Delivery)
-                    </p>
-                    <p className="text-base font-semibold">
-                      ₹{" "}
-                      {mode === "existing" && selectedPlan
-                        ? (selectedPlan.price + (deliveryCharge ?? 0)).toFixed(2)
-                        : basePrice !== undefined && taxPercent !== undefined
-                          ? (
-                              basePrice +
-                              parseFloat((basePrice * ((taxPercent ?? 0) / 100)).toFixed(2)) +
-                              (deliveryCharge ?? 0)
-                            ).toFixed(2)
-                          : "—"}
-                    </p>
+                )}
+              </div>
+            )}
+
+            {/* ── How much was actually collected ──
+                Only once Payment Status is "Payment Collected": a part payment of
+                nothing is just the existing Pending case. */}
+            {showPaymentCollection && (
+              <div className="space-y-3 border-t pt-4">
+                <label className="flex cursor-pointer items-start gap-2 select-none">
+                  <Checkbox
+                    id="addSubCustomerPaidFullAmount"
+                    checked={customerPaidFullAmount}
+                    onCheckedChange={(checked) =>
+                      handlePaidFullAmountChange(checked === true)
+                    }
+                  />
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-semibold">
+                      Customer paid full amount
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Uncheck if the customer paid only an advance and will settle the
+                      balance later.
+                    </span>
+                  </span>
+                </label>
+
+                {!customerPaidFullAmount && (
+                  <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                    <div className="space-y-1 sm:max-w-xs">
+                      <Label
+                        htmlFor="addSubAdvanceAmount"
+                        className="text-xs font-medium text-amber-800"
+                      >
+                        Advance amount paid (₹){" "}
+                        <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="addSubAdvanceAmount"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        className="h-9 bg-background"
+                        aria-invalid={Boolean(advanceAmountError)}
+                        value={advanceAmountInput}
+                        onChange={(e) => handleAdvanceAmountInput(e.target.value)}
+                      />
+                    </div>
+
+                    {advanceAmountError && (
+                      <p className="text-xs text-destructive">{advanceAmountError}</p>
+                    )}
+
+                    <div className="flex items-baseline justify-between gap-3 border-t border-amber-200 pt-2">
+                      <span className="text-xs font-semibold text-amber-900">
+                        Balance remaining
+                      </span>
+                      <span className="text-sm font-bold tabular-nums text-amber-900">
+                        ₹
+                        {(advanceAmount === null ? totalPayable : balanceRemaining)
+                          .toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                      </span>
+                    </div>
+
+                    {/* Confirmation gate — only for a part payment, where the
+                        figures carry a consequence the admin should sign off on. */}
+                    <div className="flex flex-col gap-2 border-t border-amber-200 pt-2 sm:flex-row sm:items-center sm:justify-between">
+                      {pricingConfirmed ? (
+                        <p className="text-xs font-semibold text-emerald-700">
+                          ✓ Pricing confirmed
+                        </p>
+                      ) : (
+                        <p className="text-xs text-amber-800">
+                          Review the amounts, then confirm to enable creation.
+                        </p>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={pricingConfirmed ? "outline" : "default"}
+                        disabled={pricingConfirmed || !canConfirmPricing}
+                        onClick={() => setConfirmedPricingKey(pricingKey)}
+                      >
+                        {pricingConfirmed
+                          ? "Pricing confirmed"
+                          : "I have confirmed the pricing"}
+                      </Button>
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
+                )}
+              </div>
             )}
           </div>
 
@@ -1288,13 +1780,40 @@ export function AdminAddSubscriptionForm({
             </Alert>
           )}
 
+          {/* Persistent rejection reason. The outstanding-balance gate
+              (meal-subscription-partial-payment, Phase 5.4) names an amount the
+              admin has to act on, which a transient toast loses. */}
+          {submitError && (
+            <Alert
+              role="alert"
+              className="border-destructive/30 bg-destructive/5 text-destructive"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription className="text-destructive">
+                {submitError}
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
               A unique subscription code will be auto-generated.
             </p>
             <Button
               type="submit"
-              disabled={isPending || addresses.length === 0 || (showAutomationAlert && !automationOverrideAcknowledged)}
+              disabled={
+                isPending ||
+                addresses.length === 0 ||
+                (showAutomationAlert && !automationOverrideAcknowledged) ||
+                // meal-subscription-partial-payment: a charge the admin typed must
+                // be valid, the delivery charge must be answered, an advance must be
+                // entered, and a part payment must be signed off — otherwise the
+                // server would reject after the fact.
+                hasChargeErrors ||
+                deliveryChargeMissing ||
+                advanceAmountMissing ||
+                (requiresPricingConfirmation && !pricingConfirmed)
+              }
             >
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create Subscription

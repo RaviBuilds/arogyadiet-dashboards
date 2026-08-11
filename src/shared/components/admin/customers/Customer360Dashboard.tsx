@@ -84,11 +84,14 @@ import {
   ShieldAlert,
   Star,
   Trash2,
+  TriangleAlert,
   UserCheck,
   UserX,
 } from "lucide-react";
 import { format, isValid } from "date-fns";
 import type { AddressFormValues } from "@/validations/addressSchema";
+import { SubscriptionPaymentSummaryCard } from "./SubscriptionPaymentSummaryCard";
+import type { CustomerSubscriptionPaymentOverview } from "@/services/SubscriptionPaymentService";
 import {
   AdminAddSubscriptionForm,
   type InitialSubscriptionData,
@@ -184,6 +187,17 @@ interface CustomerAddress {
  * the raw enum, which is how the accommodation types used to surface — a row
  * reading "ACCOMMODATION_FINAL_INVOICE" in the Plan / Type column.
  */
+/**
+ * The tab that leads with the current subscription's payment breakup and then
+ * offers the Add form (meal-subscription-partial-payment).
+ *
+ * Renamed from "Add Subscription" because the tab is no longer purely an add
+ * surface. Tab names double as `?tab=` deep-link values, so the old name is
+ * still accepted and normalised — see the `activeTab` initialiser.
+ */
+const SUBSCRIPTION_TAB = "Subscription" as const;
+const LEGACY_SUBSCRIPTION_TAB = "Add Subscription" as const;
+
 const INVOICE_TYPE_LABELS: Record<string, string> = {
   SUBSCRIPTION: "Meal Subscription",
   ADDON: "Shop Order",
@@ -203,6 +217,13 @@ interface BillingPayment {
   invoice_type?: string | null;
   payment_reference?: string | null;
   payment_notes?: string | null;
+  delivery_charge?: number | string | null;
+  misc_charge?: number | string | null;
+  misc_charge_label?: string | null;
+  /** Cash collected so far (meal-subscription-partial-payment). */
+  amount_paid?: number | string | null;
+  /** Still owed (meal-subscription-partial-payment). */
+  balance_due?: number | string | null;
   subscriptions?: {
     subscription_code?: string | null;
     status?: string | null;
@@ -231,6 +252,7 @@ export function Customer360Dashboard({
   initialCoupons,
   billingPayments = [],
   hasActiveSubscription = false,
+  subscriptionPayments = null,
   actions,
   addSubscriptionAction,
   createCouponAction,
@@ -306,6 +328,15 @@ export function Customer360Dashboard({
     adminToggleCustomerActive: typeof adminToggleCustomerActive;
     deactivateCustomerAccount: typeof deactivateCustomerAccount;
   }>;
+  /**
+   * Payment position of the customer's subscriptions, driving the Subscription
+   * tab's breakup cards and whether the Add form is offered at all
+   * (meal-subscription-partial-payment).
+   *
+   * Optional and defaults to null so any caller that has not been updated keeps
+   * today's behaviour: no breakup cards, Add form always shown.
+   */
+  subscriptionPayments?: CustomerSubscriptionPaymentOverview | null;
   addSubscriptionAction?: (
     payload: any,
     isCustom: boolean,
@@ -348,8 +379,13 @@ export function Customer360Dashboard({
   const isMealCustomer = customerCategory === "MEAL";
   const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(
-    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", "Add Subscription", "Accommodation", "Subscription History", "KIT History", "Accommodation History"].includes(requestedTab)
-      ? requestedTab
+    // "Add Subscription" is the tab's FORMER name, kept in the accepted list so
+    // existing bookmarks and links keep working; it is normalised to the new
+    // name below rather than 404-ing to the default tab.
+    requestedTab && ["Profile & Medical", "KIT", "Shipping", "Addresses", "Billing", "Coupons", "User Management", SUBSCRIPTION_TAB, LEGACY_SUBSCRIPTION_TAB, "Accommodation", "Subscription History", "KIT History", "Accommodation History"].includes(requestedTab)
+      ? requestedTab === LEGACY_SUBSCRIPTION_TAB
+        ? SUBSCRIPTION_TAB
+        : requestedTab
       : "Profile & Medical",
   );
 
@@ -646,14 +682,32 @@ export function Customer360Dashboard({
   const pendingPayments = billingPayments.filter(
     (payment) => payment.status === "PENDING",
   );
-  const totalPaid = successfulPayments.reduce(
-    (sum, payment) => sum + Number(payment.amount || 0),
-    0,
+  const partiallyPaidPayments = billingPayments.filter(
+    (payment) => payment.status === "PARTIALLY_PAID",
   );
-  const totalPending = pendingPayments.reduce(
-    (sum, payment) => sum + Number(payment.amount || 0),
-    0,
-  );
+  // Settled invoices: amount IS what was collected. Partially paid invoices:
+  // amount_paid is what was collected; amount is what is OWED in total, and
+  // booking that as revenue would double-count the unpaid balance.
+  const totalPaid =
+    successfulPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount || 0),
+      0,
+    ) +
+    partiallyPaidPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount_paid || 0),
+      0,
+    );
+  // Pending Collection = PENDING invoices (full amount) + PARTIALLY_PAID
+  // balance_due (only the part still owed, not the full invoice amount).
+  const totalPending =
+    pendingPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount || 0),
+      0,
+    ) +
+    partiallyPaidPayments.reduce(
+      (sum, payment) => sum + Number(payment.balance_due || 0),
+      0,
+    );
   const formatMoney = (value: number | string) =>
     `₹${Number(value || 0).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
@@ -684,7 +738,7 @@ export function Customer360Dashboard({
                 ]
               : [
                   "Profile & Medical",
-                  "Add Subscription",
+                  SUBSCRIPTION_TAB,
                   "Addresses",
                   "Billing",
                   "Coupons",
@@ -692,11 +746,16 @@ export function Customer360Dashboard({
                   "User Management",
                 ];
           // Req 5.10, 16.1: "User Management" (PIN reset, email change,
-          // deactivate) and "Add Subscription" are pure write surfaces,
-          // removed entirely for a Dietitian's read-only workspace.
+          // deactivate) and the Subscription tab are removed entirely for a
+          // Dietitian's read-only workspace.
+          //
+          // The Subscription tab now also carries read-only payment information,
+          // so exposing it to Dietitians would arguably be useful — but that is a
+          // deliberate widening of a documented access rule and is out of scope
+          // here. Behaviour is unchanged: Dietitians still do not see it.
           return isDietitian
             ? allTabs.filter(
-                (tab) => tab !== "User Management" && tab !== "Add Subscription",
+                (tab) => tab !== "User Management" && tab !== SUBSCRIPTION_TAB,
               )
             : allTabs;
         })()}
@@ -999,13 +1058,76 @@ export function Customer360Dashboard({
           </div>
         )}
 
-        {activeTab === "Add Subscription" && (
-          <AdminAddSubscriptionForm
-            customerProfileId={customer.id}
-            initialData={initialSubscriptionData}
-            submitAction={addSubscriptionAction}
-            franchiseId={franchiseId}
-          />
+        {activeTab === SUBSCRIPTION_TAB && (
+          <div className="space-y-6">
+            {/* ── Current subscription payment position ──
+                Leads the tab: what it costs, what was collected, what is owed.
+                (meal-subscription-partial-payment) */}
+            {subscriptionPayments && subscriptionPayments.summaries.length > 0 && (
+              <div className="space-y-4">
+                {/* Only worth a section heading when there is more than one card
+                    to group. With a single subscription the card's own
+                    "Subscription Overview — <plan>" title already says it, and a
+                    heading above it just repeats itself. */}
+                {subscriptionPayments.summaries.length > 1 && (
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight">
+                      Subscriptions
+                    </h2>
+                    <p className="text-sm text-muted-foreground">
+                      Price breakup, payments collected, and any balance still due.
+                    </p>
+                  </div>
+                )}
+
+                {subscriptionPayments.summaries.map((summary) => (
+                  <SubscriptionPaymentSummaryCard
+                    key={summary.subscriptionId}
+                    summary={summary}
+                    invoiceHrefBase={`${backHref}/${customer.id}/billing/invoice`}
+                    customerProfileId={customer.id}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* ── Add New Subscription ──
+                Only rendered when EVERY existing subscription is exactly
+                settled — no balance owed and no refund pending. Hidden rather
+                than disabled: a form that cannot be submitted invites the admin
+                to fill it in and then discover it was pointless.
+
+                The server-side gate in `addSubscription` is the authoritative
+                one; this only decides what is worth showing.
+
+                The `!isDietitian` check is belt-and-braces: the whole tab is
+                already filtered out for Dietitians (Req 5.10, 16.1). */}
+            {!isDietitian &&
+              (!subscriptionPayments || subscriptionPayments.canAddSubscription ? (
+                <AdminAddSubscriptionForm
+                  customerProfileId={customer.id}
+                  initialData={initialSubscriptionData}
+                  submitAction={addSubscriptionAction}
+                  franchiseId={franchiseId}
+                />
+              ) : (
+                <Card className="border-amber-300 bg-amber-50/50 shadow-sm">
+                  <CardContent className="flex flex-col gap-3 p-6 sm:flex-row sm:items-start">
+                    <TriangleAlert className="h-5 w-5 shrink-0 text-amber-600" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-amber-900">
+                        New subscription unavailable
+                      </p>
+                      <p className="text-sm leading-relaxed text-amber-800">
+                        {subscriptionPayments.hasOutstanding
+                          ? `This customer has an outstanding balance of ${formatMoney(subscriptionPayments.totalOutstanding)} on an existing subscription. Settle the balance to add a new subscription.`
+                          : `A refund of ${formatMoney(subscriptionPayments.totalRefundDue)} is pending on an existing subscription. Process the refund to add a new subscription.`}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+          </div>
         )}
 
         {activeTab === "KIT" && showSendNewKitForm && (
@@ -1336,10 +1458,13 @@ export function Customer360Dashboard({
                           const isPaid = ["PAID", "SUCCESS", "CAPTURED"].includes(
                             payment.status,
                           );
+                          const isPartiallyPaid =
+                            payment.status === "PARTIALLY_PAID";
                           const isPendingManual =
                             payment.status === "PENDING" &&
                             payment.payment_method === "MANUAL";
-                          const showInvoiceButton = isPaid || isPendingManual;
+                          const showInvoiceButton =
+                            isPaid || isPartiallyPaid || isPendingManual;
 
                           return (
                             <tr key={payment.id} className="hover:bg-muted/20">

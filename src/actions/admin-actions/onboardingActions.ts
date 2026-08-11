@@ -62,6 +62,7 @@ import {
   type AddOnActivationPayment,
   type DeliveryChargeContext,
   type MiscChargeContext,
+  type PaymentCollectionContext,
 } from "@/services/OnboardingService";
 import { isValidPinFormat } from "@/lib/pin/pinUtils";
 import {
@@ -339,6 +340,38 @@ export async function onboardCustomerAction(
       ? Number(rawPayload.calculatedDeliveryCharge)
       : null;
 
+  // (6a-i) MEAL: the delivery charge must be ANSWERED, not merely defaulted
+  // (meal-subscription-partial-payment, Phase 2.6). A blank field is rejected;
+  // an explicit 0 is accepted — "free delivery" is a decision, an empty box is
+  // an oversight, and silently defaulting to 0 hid the difference.
+  //
+  // Safe to enforce here: QuickOnboardingForm is the only caller of this action
+  // (bulk migration goes through addSubscription instead).
+  if (input.primaryCategory === "MEAL") {
+    const deliveryProvided =
+      rawPayload.deliveryCharge !== undefined &&
+      rawPayload.deliveryCharge !== null &&
+      String(rawPayload.deliveryCharge).trim() !== "";
+
+    if (!deliveryProvided) {
+      return {
+        success: false,
+        error: "Enter the delivery charge (enter 0 if delivery is free).",
+        fieldErrors: {
+          deliveryCharge: "Delivery charge is required. Enter 0 if not charged.",
+        },
+      };
+    }
+
+    if (!Number.isFinite(rawDeliveryCharge) || rawDeliveryCharge < 0) {
+      return {
+        success: false,
+        error: "Enter a valid delivery charge (0 or more).",
+        fieldErrors: { deliveryCharge: "Enter a valid delivery charge." },
+      };
+    }
+  }
+
   const deliveryChargeAmount = isNaN(rawDeliveryCharge) || rawDeliveryCharge < 0
     ? 0
     : rawDeliveryCharge;
@@ -393,12 +426,74 @@ export async function onboardCustomerAction(
       ? { miscCharge: rawMiscCharge, miscChargeLabel: rawMiscChargeLabel }
       : undefined;
 
+  // (6b) Payment collection — full amount, or an advance with a balance left
+  // (meal-subscription-partial-payment, Phase 2.6).
+  //
+  // `customerPaidFullAmount` mirrors the "Customer paid full amount" checkbox,
+  // which is CHECKED by default. Absent from the payload therefore means "paid in
+  // full", preserving the previous behaviour for any caller that never learns
+  // about this field.
+  //
+  // The advance is NOT validated against a client-supplied total here — the
+  // service recomputes Total_Payable from server-resolved plan pricing and
+  // validates against that, so a tampered total cannot activate a subscription
+  // for a rupee. This block only parses.
+  const paidFullRaw = rawPayload.customerPaidFullAmount;
+  const paidInFull =
+    paidFullRaw === undefined || paidFullRaw === null
+      ? true
+      : paidFullRaw === true || paidFullRaw === "true";
+
+  let collectionContext: PaymentCollectionContext | undefined;
+
+  if (!paidInFull) {
+    if (input.primaryCategory !== "MEAL") {
+      return {
+        success: false,
+        error: "Partial payment is only available for MEAL subscriptions.",
+      };
+    }
+
+    const rawAdvance =
+      typeof rawPayload.advanceAmountPaid === "number"
+        ? rawPayload.advanceAmountPaid
+        : typeof rawPayload.advanceAmountPaid === "string" &&
+            rawPayload.advanceAmountPaid.trim() !== ""
+          ? Number(rawPayload.advanceAmountPaid)
+          : NaN;
+
+    if (!Number.isFinite(rawAdvance) || rawAdvance <= 0) {
+      return {
+        success: false,
+        error: "Enter the advance amount collected from the customer.",
+        fieldErrors: {
+          advanceAmountPaid: "The advance amount must be greater than ₹0.",
+        },
+      };
+    }
+
+    // Money carries at most 2 decimals; anything finer is a typo or a tampered
+    // payload, and would not survive the NUMERIC(10,2) column anyway.
+    if (Math.round(rawAdvance * 100) !== Number((rawAdvance * 100).toFixed(4))) {
+      return {
+        success: false,
+        error: "The advance amount cannot have more than 2 decimal places.",
+        fieldErrors: {
+          advanceAmountPaid: "Use at most 2 decimal places.",
+        },
+      };
+    }
+
+    collectionContext = { paidInFull: false, advanceAmount: rawAdvance };
+  }
+
   const outcome = await serviceOnboard(
     input,
     { adminUserId },
     { pinHash, isTempPin: true },
     deliveryContext,
     miscContext,
+    collectionContext,
   );
   if (!outcome.ok) {
     return {
@@ -418,6 +513,22 @@ export async function onboardCustomerAction(
     await logAdminAction("UPDATE", "delivery_charge_override", outcome.ids.subscription_id, {
       calculatedAmount: deliveryContext.calculatedDeliveryCharge,
       overriddenAmount: deliveryContext.deliveryCharge,
+      surface: "quick_onboarding",
+    });
+  }
+
+  // (6c) Audit: activating a subscription against a part payment is a financial
+  // concession, so record who granted it and how much was left outstanding.
+  // Read from `outcome.ids`, which echoes what the RPC actually committed —
+  // not from the request, which may have been collapsed to a full payment when
+  // the advance equalled the total.
+  if (outcome.ids.payment_status === "PARTIALLY_PAID") {
+    await logAdminAction("CREATE", "subscription_advance_payment", outcome.ids.subscription_id, {
+      totalPayable: outcome.ids.total_payable,
+      amountPaid: outcome.ids.amount_paid,
+      balanceDue: outcome.ids.balance_due,
+      paymentId: outcome.ids.payment_id,
+      advanceTransactionId: outcome.ids.advance_transaction_id,
       surface: "quick_onboarding",
     });
   }

@@ -213,7 +213,6 @@ BEGIN
     lot_id,
     transaction_type,
     quantity_changed,
-    financial_value_changed,
     reason,
     dest_franchise_id,
     franchise_transfer_id
@@ -222,7 +221,6 @@ BEGIN
     v_first_lot_id,
     'OUT',
     -(p_quantity),
-    0,  -- financial value can be computed by caller if needed
     'Franchise Dispatch',
     p_dest_franchise_id,
     v_transfer_id

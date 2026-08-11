@@ -13,6 +13,8 @@ import {
 } from "@/lib/coupons/resolveSubscriptionCoupon";
 import { computeForCustomer } from "@/services/DeliveryChargeService";
 import { calculateTotalPayable } from "@/lib/delivery/deliveryCharge";
+import { getOutstandingBalanceForCustomer } from "@/services/SubscriptionPaymentService";
+import { OUTSTANDING_BALANCE_CUSTOMER_MESSAGE } from "@/types/subscriptionPayment";
 const razorpay = new Razorpay({
   key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
   key_secret: process.env.RAZORPAY_KEY_SECRET!,
@@ -119,6 +121,34 @@ export async function createRazorpayOrderAction(
   customerProfileId?: string,
 ) {
   try {
+    // 0. OUTSTANDING BALANCE GATE (meal-subscription-partial-payment, Phase 5.2)
+    //
+    // This is the authoritative server-side gate, and it lives HERE — before a
+    // Razorpay order exists — on purpose.
+    //
+    // It deliberately does NOT also guard `activateSubscription`: by the time
+    // activation runs, Razorpay has already captured the customer's money, so
+    // refusing there would take payment and withhold the subscription. The only
+    // safe place to say no is before any money moves.
+    //
+    // Residual race: if a balance is recorded between order creation and
+    // payment, activation still proceeds. That is the correct trade — the
+    // customer paid for this plan, and the older balance remains owed
+    // independently.
+    //
+    // The UI gate (disabled CTAs + the checkout-page redirect) is a courtesy;
+    // this holds against a direct POST.
+    if (customerProfileId) {
+      const outstanding = await getOutstandingBalanceForCustomer(customerProfileId);
+      if (outstanding.hasOutstanding) {
+        return {
+          success: false,
+          error: OUTSTANDING_BALANCE_CUSTOMER_MESSAGE,
+          outstandingBalance: outstanding.totalOutstanding,
+        };
+      }
+    }
+
     // 1. Fetch the exact base price from the database securely!
     const { data: plan } = await supabaseAdmin
       .from("subscription_plans")
