@@ -26,7 +26,7 @@ export type DeliveryOrderStatus =
   | "FAILED";
 
 /** Same WhatsApp support surface already used app-wide (FloatingSupportMenu). */
-const SUPPORT_WHATSAPP_NUMBER = "918639659020";
+const SUPPORT_WHATSAPP_NUMBER = "918247533492";
 
 type CtaTarget = { label: string; href: string };
 

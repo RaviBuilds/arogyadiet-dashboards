@@ -36,7 +36,7 @@ export type MealJourneyStatus =
   | "FAILED";
 
 /** Same WhatsApp support surface already used app-wide (FloatingSupportMenu / dashboard delivery-status). */
-const SUPPORT_WHATSAPP_NUMBER = "918639659020";
+const SUPPORT_WHATSAPP_NUMBER = "918247533492";
 
 /**
  * A CTA is one of three shapes, never a dead link:

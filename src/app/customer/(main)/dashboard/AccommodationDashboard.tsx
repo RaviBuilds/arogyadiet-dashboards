@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 import type { StayEntry, StayStatus } from "@/types/accommodation";
 
 /** Same WhatsApp support surface used app-wide (FloatingSupportMenu / dashboard). */
-const SUPPORT_WHATSAPP_NUMBER = "918639659020";
+const SUPPORT_WHATSAPP_NUMBER = "918247533492";
 const BOOKING_WHATSAPP_URL = `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20arrange%20an%20accommodation%20stay.`;
 
 /** Real Arogya Gramam property photography: the farmhouse entrance gate,

@@ -9,7 +9,7 @@ import {
 } from "@/shared/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-const TEMP_SUPPORT_WHATSAPP = "918639659020";
+const TEMP_SUPPORT_WHATSAPP = "918247533492";
 
 const SUPPORT_OPTIONS = [
   {
