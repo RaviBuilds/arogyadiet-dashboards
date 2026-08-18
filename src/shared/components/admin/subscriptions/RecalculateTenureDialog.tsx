@@ -57,6 +57,14 @@ export interface RecalculateTenureInvoice {
   miscChargeLabel: string | null;
   totalPayable: number;
   amountPaid: number;
+  /**
+   * Manual discount currently on the invoice
+   * (admin-manual-onboarding-discount). Recalculation re-prices from scratch and
+   * CLEARS it, so the admin has to be told — otherwise they would be reading
+   * `baseAmount` as a list price when it is in fact already discounted, and
+   * would not know the concession is about to disappear.
+   */
+  discountAmount: number;
 }
 
 export function RecalculateTenureDialog({
@@ -216,7 +224,14 @@ export function RecalculateTenureDialog({
             </p>
             <div className="grid grid-cols-2 gap-2">
               <Row label="Running" value={`${format(new Date(startsOn), "MMM d, yyyy")} → ${format(new Date(currentEffectiveEndOn), "MMM d, yyyy")}`} span2 />
-              <Row label="Subscription charge" value={money(invoice.baseAmount)} />
+              <Row
+                label={
+                  invoice.discountAmount > 0
+                    ? "Subscription charge (after discount)"
+                    : "Subscription charge"
+                }
+                value={money(invoice.baseAmount)}
+              />
               <Row label="GST" value={money(invoice.taxAmount)} />
               <Row label="Delivery charges" value={money(invoice.deliveryCharge)} />
               {invoice.miscCharge > 0 && (
@@ -225,6 +240,26 @@ export function RecalculateTenureDialog({
               <Row label="Total payable" value={money(invoice.totalPayable)} bold />
               <Row label="Advance + payments paid" value={money(invoice.amountPaid)} bold />
             </div>
+
+            {/* Without this the admin reads "Subscription charge" as a list price
+                when it is already net of a concession, and has no idea the
+                concession is about to be dropped. Re-pricing from scratch means
+                the figure they type IS the final agreed charge, so the old
+                discount cannot survive — but that has to be said, not implied. */}
+            {invoice.discountAmount > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
+                <p className="text-sm font-semibold text-amber-900">
+                  A discount of {money(invoice.discountAmount)} is applied to this
+                  subscription
+                </p>
+                <p className="text-xs text-amber-800">
+                  The figures above are already net of it. Recalculating clears the
+                  discount, so enter the <strong>final agreed charge</strong> below
+                  rather than a list price minus the discount. The original
+                  concession is kept in the recalculation history.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* New end date */}

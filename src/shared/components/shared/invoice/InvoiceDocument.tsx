@@ -251,11 +251,26 @@ export function InvoiceDocument({
               <span>₹{pricing.baseAmount.toFixed(2)}</span>
             </div>
             {pricing.discountAmount > 0 && (
-              <div className="flex justify-between py-2 text-sm text-zinc-600">
-                <span>Discount Applied</span>
-                <span className="text-green-600">
-                  -₹{pricing.discountAmount.toFixed(2)}
-                </span>
+              <div className="py-2">
+                <div className="flex justify-between text-sm text-zinc-600">
+                  <span>Discount Applied</span>
+                  <span className="text-green-600">
+                    -₹{pricing.discountAmount.toFixed(2)}
+                  </span>
+                </div>
+                {/* The customer was quoted ONE figure, but it is split across the
+                    charge and its GST so the tax below is charged on the reduced
+                    taxable value. Printing the total concession keeps the invoice
+                    recognisable against what the admin told them at the counter.
+                    Gated on grossDiscount, which is only set for a manual
+                    onboarding discount — legacy and add-on rows are unaffected. */}
+                {(pricing.grossDiscount ?? 0) > 0 && (
+                  <p className="mt-0.5 text-[0.7rem] leading-snug text-zinc-500">
+                    Total discount ₹{(pricing.grossDiscount ?? 0).toFixed(2)} — ₹
+                    {pricing.discountAmount.toFixed(2)} on charges and ₹
+                    {(pricing.discountTaxRelief ?? 0).toFixed(2)} on GST
+                  </p>
+                )}
               </div>
             )}
             {pricing.discountAmount > 0 && (

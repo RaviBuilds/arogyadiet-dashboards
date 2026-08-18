@@ -13,6 +13,7 @@ import {
   resolveInvoicePaymentState,
   type InvoicePaymentState,
 } from "@/types/subscriptionPayment";
+import { reconstructPreDiscountPricing } from "@/lib/onboarding/discount";
 
 /**
  * Invoice line item representation
@@ -27,10 +28,26 @@ export interface InvoiceLineItem {
  * Invoice pricing breakdown
  */
 export interface InvoicePricing {
+  /** Taxable value BEFORE any discount — the invoice's "Base Price" row. */
   baseAmount: number;
+  /** GST actually charged, on the taxable value AFTER any discount. */
   taxAmount: number;
   taxPercent: number;
+  /**
+   * The PRE-TAX portion of the discount — what "Discount Applied" shows, so that
+   * `baseAmount - discountAmount = finalPrice` and GST below it is charged on the
+   * reduced value.
+   */
   discountAmount: number;
+  /**
+   * The TOTAL concession the admin granted and the customer was quoted, i.e.
+   * `discountAmount + discountTaxRelief` (admin-manual-onboarding-discount).
+   * 0 when no manual discount was applied, which is why the note that prints it
+   * is gated on this rather than on `discountAmount`.
+   */
+  grossDiscount?: number;
+  /** The GST portion of `grossDiscount`. */
+  discountTaxRelief?: number;
   finalPrice: number;
   totalAmount: number;
   /**
@@ -396,6 +413,20 @@ export async function generateInvoiceData(
   let taxPercentCalc: number;
   let discountAmount: number;
 
+  // Whether `discountAmount` follows the admin-manual-onboarding-discount
+  // convention: a GROSS concession, with base_amount / tax_amount stored NET of
+  // it. Only subscription invoices written by onboard_customer use that
+  // convention.
+  //
+  // It matters because this file has TWO incompatible conventions. The legacy
+  // MEAL fallback below infers a discount as `planPrice - priceBeforeTax` and
+  // sets baseAmount to the PRE-discount price, which is also what
+  // InvoiceDocument's "Base Price → Discount → Price After Discount" rows expect.
+  // Add-on orders have their own. Flagging the new convention lets it be
+  // converted into the one the component already renders, without touching how
+  // any existing row displays.
+  let paymentDiscountIsGross = false;
+
   if (addonOrder) {
     // ADDON ORDER
     const totalAmount = Number(payment.amount);
@@ -421,10 +452,35 @@ export async function generateInvoiceData(
   } else if (sub?.customer_category === "KIT" && sub?.kit_products) {
     // KIT SUBSCRIPTION
     const kitProduct = sub.kit_products;
-    baseAmount = Number(kitProduct.base_price);
-    taxAmountCalc = baseAmount * Number(kitProduct.tax_rate);
-    taxPercentCalc = Number(kitProduct.tax_rate) * 100;
-    discountAmount = 0;
+
+    // Prefer the figures RECORDED ON THE PAYMENT, exactly as the MEAL branch
+    // does, and fall back to deriving them from the product only for rows that
+    // predate those columns being populated.
+    //
+    // The old code derived tax FORWARD off `kit_products.base_price`
+    // (`base * tax_rate`) while treating that same base_price as the taxable
+    // value. But base_price is stored tax-INCLUSIVE — resolveKitProductPricing
+    // and the onboarding wizard both reverse it out — so a Rs.28,080 kit invoiced
+    // Rs.28,080 rendered as base Rs.28,080 + GST Rs.1,404, which does not
+    // reconcile against the total. Reading the payment columns fixes that AND is
+    // what makes a KIT discount renderable at all, since the concession only
+    // exists on the payment row.
+    if (payment.base_amount != null && payment.tax_amount != null) {
+      baseAmount = Number(payment.base_amount);
+      taxAmountCalc = Number(payment.tax_amount);
+      taxPercentCalc = Number(
+        payment.tax_percent ?? Number(kitProduct.tax_rate ?? 0.05) * 100,
+      );
+      discountAmount = Number(payment.discount_amount ?? 0);
+      paymentDiscountIsGross = true;
+    } else {
+      const taxRate = Number(kitProduct.tax_rate ?? 0.05);
+      const inclusivePrice = Number(kitProduct.base_price);
+      baseAmount = inclusivePrice / (1 + taxRate);
+      taxAmountCalc = inclusivePrice - baseAmount;
+      taxPercentCalc = taxRate * 100;
+      discountAmount = 0;
+    }
 
     lineItems.push({
       description: `${kitProduct.name} - ${sub.kit_duration_days} Days`,
@@ -440,6 +496,7 @@ export async function generateInvoiceData(
       taxAmountCalc = Number(payment.tax_amount);
       taxPercentCalc = Number(payment.tax_percent ?? 5);
       discountAmount = Number(payment.discount_amount ?? 0);
+      paymentDiscountIsGross = true;
     } else {
       const priceBeforeTax = totalAmount / 1.05;
       taxAmountCalc = totalAmount - priceBeforeTax;
@@ -459,6 +516,44 @@ export async function generateInvoiceData(
         "Includes daily meal delivery, pause credits, and dynamic address routing.",
       amount: baseAmount,
     });
+  }
+
+  // ─── Manual discount: convert to the rendering convention ────────────────
+  // admin-manual-onboarding-discount stores the GROSS concession the admin typed
+  // (e.g. Rs.2,000) with base_amount / tax_amount already NET of it. But GST is
+  // only correct if the discount is shown BEFORE tax, so the invoice renders:
+  //
+  //   Base Price              <- taxable value BEFORE the discount
+  //   Discount Applied        <- the pre-tax PORTION of the concession
+  //   Price After Discount    <- taxable value after (== stored base_amount)
+  //   GST                     <- stored tax_amount, charged on the reduced value
+  //
+  // which reconciles to payment.amount and states the tax actually collected.
+  // `grossDiscount` and `discountTaxRelief` are carried through so the document
+  // can also print the single figure the customer was quoted, since Rs.2,000
+  // splits into roughly Rs.1,904.77 of charges plus Rs.95.23 of GST relief.
+  let grossDiscount = 0;
+  let discountTaxRelief = 0;
+
+  if (paymentDiscountIsGross && discountAmount > 0) {
+    const reconstructed = reconstructPreDiscountPricing(
+      baseAmount,
+      taxAmountCalc,
+      discountAmount,
+      taxPercentCalc,
+    );
+
+    grossDiscount = discountAmount;
+    discountTaxRelief = reconstructed.taxRelief;
+    baseAmount = reconstructed.originalTaxableAmount;
+    discountAmount = reconstructed.baseRelief;
+
+    // The subscription line item was pushed with the NET base by the branch
+    // above; it must show the same "Base Price" the totals block does, or the
+    // itemised list and the totals disagree on the same invoice.
+    if (lineItems.length > 0) {
+      lineItems[0].amount = baseAmount;
+    }
   }
 
   // ─── Extra charges folded into payment.amount ───────────────────────────
@@ -539,6 +634,8 @@ export async function generateInvoiceData(
       taxAmount: taxAmountCalc,
       taxPercent: taxPercentCalc,
       discountAmount,
+      grossDiscount,
+      discountTaxRelief,
       finalPrice,
       totalAmount,
       deliveryCharge: deliveryChargeAmount,

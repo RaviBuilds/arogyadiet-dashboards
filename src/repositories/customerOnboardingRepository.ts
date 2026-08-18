@@ -100,8 +100,19 @@ export interface OnboardSubscriptionInput {
   /** Admin-supplied name for `misc_charge`, printed verbatim on the invoice. */
   misc_charge_label?: string | null;
   /**
-   * Total_Payable snapshot = plan/kit amount + delivery charge + miscellaneous
-   * charge, frozen at creation (meal-subscription-partial-payment, D2).
+   * Gross manual discount granted by the admin at onboarding
+   * (admin-manual-onboarding-discount). MEAL/KIT only — the RPC rejects a
+   * non-zero value for any other category.
+   *
+   * `total_payable` is stored NET of this amount; the discount is kept alongside
+   * it so the net figure stays explainable without re-reading a plan price that
+   * may since have changed. Omitted → 0.
+   */
+  discount_amount?: number | null;
+  /**
+   * Total_Payable snapshot = discounted subscription amount + delivery charge +
+   * miscellaneous charge, frozen at creation
+   * (meal-subscription-partial-payment, D2).
    *
    * Deliberately a snapshot rather than re-derived from `subscription_plans.price`
    * at read time: plan prices change, and re-deriving would silently re-price a
@@ -116,9 +127,23 @@ export interface OnboardSubscriptionInput {
 /** The `payment` block of the RPC payload. */
 export interface OnboardPaymentInput {
   amount: number;
+  /**
+   * Taxable value, stored NET of `discount_amount`. Keeping it net is what
+   * preserves the invoice identity
+   * `base_amount + tax_amount + delivery_charge + misc_charge = amount`.
+   */
   base_amount?: number | null;
   tax_percent?: number | null;
+  /** GST, stored NET of `discount_amount` (see `base_amount`). */
   tax_amount?: number | null;
+  /**
+   * Gross manual discount granted at onboarding
+   * (admin-manual-onboarding-discount). Together with the two NET figures above
+   * it reconstructs the original GST-inclusive subscription charge:
+   * `base_amount + tax_amount + discount_amount = original gross`, which is how
+   * the invoice renders a truthful "Base Price → Discount → After discount"
+   * progression. Never reduces `delivery_charge` or `misc_charge`.
+   */
   discount_amount?: number | null;
   delivery_charge?: number | null;
   /** Optional admin-entered miscellaneous charge included in `amount`. */
@@ -201,6 +226,12 @@ export interface OnboardIds {
   total_payable?: number | null;
   amount_paid?: number | null;
   balance_due?: number | null;
+  /**
+   * The discount the RPC actually committed. Echoed for the same reason as the
+   * figures above: the admin audit log records what the database accepted, not
+   * what the request asked for.
+   */
+  discount_amount?: number | null;
   /** `PAID` or `PARTIALLY_PAID`, as actually written to `payments.status`. */
   payment_status?: string | null;
 }

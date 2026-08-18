@@ -26,6 +26,7 @@ import {
   Truck,
   Wallet,
   CalendarCheck,
+  BadgePercent,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
@@ -36,6 +37,11 @@ import {
   validateMiscChargeAmount,
   validateMiscChargeLabel,
 } from "@/lib/onboarding/miscCharge";
+import {
+  applySubscriptionDiscount,
+  isDiscountableCategory,
+  validateDiscountAmount,
+} from "@/lib/onboarding/discount";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
@@ -305,6 +311,15 @@ export function QuickOnboardingForm({
   const [miscChargeError, setMiscChargeError] = useState<string | null>(null);
   const [miscChargeLabelError, setMiscChargeLabelError] = useState<string | null>(null);
 
+  // ─── Manual Discount State (admin-manual-onboarding-discount) ─────────────
+  // An optional rupee concession the admin grants on the subscription charge.
+  // MEAL and KIT only — never ACCOMMODATION. It is absorbed entirely by the
+  // subscription amount and its GST, so Total Payable falls by exactly what is
+  // entered; delivery and miscellaneous charges are never reduced.
+  const [discountInput, setDiscountInput] = useState<string>("");
+  const [discountAmount, setDiscountAmount] = useState<number | null>(null);
+  const [discountError, setDiscountError] = useState<string | null>(null);
+
   // ─── Partial Payment State (meal-subscription-partial-payment, Phase 3) ───
   // Some customers pay the whole plan up front; others pay an advance at the
   // counter and settle the rest over time. CHECKED by default, because paying in
@@ -439,24 +454,91 @@ export function QuickOnboardingForm({
   // Req 5.2: Show automation override checkbox when after cutoff AND start date is tomorrow.
   const showAutomationOverride = isAfterCutoff && startDate === tomorrowIST;
 
+  // Live payable breakup: subscription + delivery + miscellaneous, less any
+  // discount. Recomputed on every keystroke from local state, so no page refresh
+  // is needed.
+  const planAmount = selectedPlan?.price ?? 0;
+  const deliveryAmount = deliveryCharge ?? 0;
+  const miscAmount = miscCharge ?? 0;
+
+  // ─── Discount derivations (admin-manual-onboarding-discount) ──────────────
+  // The GST-inclusive subscription amount the discount applies to. MEAL reads
+  // the plan price; KIT reads the product's base_price, which is stored
+  // tax-INCLUSIVE. `planAmount` alone would be 0 for KIT, which is why this is a
+  // separate derivation rather than a reuse.
+  const grossSubscriptionAmount =
+    primaryCategory === "KIT"
+      ? (selectedKitProduct?.base_price ?? 0)
+      : primaryCategory === "MEAL"
+        ? planAmount
+        : 0;
+
+  // KIT products carry their own tax_rate; MEAL plans are 5% inclusive. Mirrors
+  // resolveKitProductPricing / resolvePlanPricing on the server.
+  const subscriptionTaxRate =
+    primaryCategory === "KIT" ? (selectedKitProduct?.tax_rate ?? 0.05) : 0.05;
+
+  // Same helper the server action and the service use, so this panel shows the
+  // figures that will actually be written — not an approximation of them.
+  //
+  // Deliberately NOT wrapped in useMemo: it is a handful of arithmetic
+  // operations on primitives, so memoizing costs more than it saves, and the
+  // React Compiler cannot preserve a manual memo here anyway.
+  const discountedPricing = applySubscriptionDiscount(
+    grossSubscriptionAmount,
+    discountAmount ?? 0,
+    subscriptionTaxRate,
+  );
+
+  const discountApplied = discountedPricing.discountApplied;
+  const hasDiscount = discountApplied > 0;
+
+  // DERIVED, not captured in the input handler's error state, because the ceiling
+  // can move AFTER the discount was typed: going back a step and picking a
+  // cheaper plan, or switching MEAL→KIT, changes `grossSubscriptionAmount`
+  // without the discount field being touched. `applySubscriptionDiscount`
+  // clamps, so the breakup panel would keep showing a valid-looking total while
+  // the payload still carried the original, now-too-large figure — and the server
+  // would reject it only after the admin hit Onboard. Deriving it means a stale
+  // discount is caught the moment the plan changes.
+  const discountExceedsSubscription =
+    (discountAmount ?? 0) > 0 &&
+    grossSubscriptionAmount > 0 &&
+    Math.round((discountAmount ?? 0) * 100) >
+      Math.round(grossSubscriptionAmount * 100);
+
+  // A discount that no longer applies to the selected category is equally stale.
+  const discountNotAllowedForCategory =
+    (discountAmount ?? 0) > 0 && !isDiscountableCategory(primaryCategory);
+
+  const totalPayable =
+    discountedPricing.discountedGross + deliveryAmount + miscAmount;
+
   // A charge the admin typed must be valid before onboarding can proceed —
   // otherwise the server would reject the submission after the fact.
   const hasChargeErrors =
     Boolean(deliveryChargeError) ||
     Boolean(miscChargeError) ||
-    Boolean(miscChargeLabelError);
-
-  // Live payable breakup: plan + delivery + miscellaneous. Recomputed on every
-  // keystroke from local state, so no page refresh is needed.
-  const planAmount = selectedPlan?.price ?? 0;
-  const deliveryAmount = deliveryCharge ?? 0;
-  const miscAmount = miscCharge ?? 0;
-  const totalPayable = planAmount + deliveryAmount + miscAmount;
+    Boolean(miscChargeLabelError) ||
+    Boolean(discountError) ||
+    discountExceedsSubscription ||
+    discountNotAllowedForCategory;
 
   // ─── Partial payment derivations ──────────────────────────────────────────
   // The MEAL payment panel only exists once payment has been marked collected,
   // so every gate below is scoped to that.
   const isMealPaymentPanelOpen = primaryCategory === "MEAL" && paymentStatus === "PAID";
+
+  // ─── Discount panel gate ──────────────────────────────────────────────────
+  // A discount is offered for MEAL and KIT, once payment is marked collected —
+  // it describes money taken at the counter, so it makes no sense before then.
+  //
+  // KIT previously had NO pricing panel at all, so this is the first thing to
+  // appear on that step for a KIT customer. Deliberately scoped to the discount
+  // alone: delivery, miscellaneous and partial payment remain MEAL-only and stay
+  // inside `isMealPaymentPanelOpen`.
+  const isDiscountPanelOpen =
+    isDiscountableCategory(primaryCategory) && paymentStatus === "PAID";
 
   // Delivery charge must be ANSWERED, not merely left at its default. A typed 0
   // is a valid answer ("free delivery"); an empty box is an unanswered question.
@@ -482,17 +564,31 @@ export function QuickOnboardingForm({
     (advanceAmount === null || advanceAmount <= 0);
 
   // Confirmation is only demanded where there is pricing to confirm.
-  const requiresPricingConfirmation = isMealPaymentPanelOpen;
+  //
+  // MEAL always requires it (the panel always shows a total). KIT requires it
+  // ONLY when a discount has actually been entered: a KIT onboarding with no
+  // discount has no figures the admin is being asked to decide, so demanding a
+  // confirmation click there would add a step to a flow that previously had none.
+  const requiresPricingConfirmation =
+    isMealPaymentPanelOpen || (isDiscountPanelOpen && hasDiscount);
   const canConfirmPricing =
     !deliveryChargeMissing && !advanceAmountMissing && !hasChargeErrors &&
-    !Boolean(advanceAmountError) && Boolean(selectedPlan);
+    !Boolean(advanceAmountError) &&
+    Boolean(primaryCategory === "KIT" ? selectedKitProduct : selectedPlan);
 
   // Every figure the admin is signing off on. Changing any of them produces a
   // different key, which invalidates a prior confirmation without needing an
   // effect to reset it.
+  //
+  // The discount and the subscription gross MUST both be here: without them an
+  // admin could confirm a total, then edit the discount, and onboard against a
+  // figure they never actually signed off on.
   const pricingKey = [
     selectedPlan?.id ?? "",
+    selectedKitProduct?.id ?? "",
     planAmount,
+    grossSubscriptionAmount,
+    discountApplied,
     deliveryAmount,
     miscAmount,
     miscChargeLabel.trim(),
@@ -529,6 +625,13 @@ export function QuickOnboardingForm({
             ? (deliveryChargeError ??
               miscChargeError ??
               miscChargeLabelError ??
+              discountError ??
+              (discountExceedsSubscription
+                ? "The discount cannot exceed the subscription charge — reduce it or pick a different plan"
+                : null) ??
+              (discountNotAllowedForCategory
+                ? "Discounts are not available for this category — clear the discount"
+                : null) ??
               "Correct the charge details before completing onboarding")
             : deliveryChargeMissing
               ? "Enter the delivery charge (enter 0 if delivery is free)"
@@ -753,6 +856,29 @@ export function QuickOnboardingForm({
   const handleMiscChargeLabelInput = (rawValue: string) => {
     setMiscChargeLabel(rawValue);
     setMiscChargeLabelError(validateMiscChargeLabel(rawValue, miscCharge));
+  };
+
+  /**
+   * Validates and sets the manual discount from admin input.
+   *
+   * Bounds mirror the server action, the service and the DB CHECK constraint,
+   * because they all call the same `validateDiscountAmount`. The ceiling is the
+   * GST-inclusive subscription amount, not Total Payable — the discount can only
+   * be absorbed by the subscription charge and its GST, so anything larger would
+   * have to eat into delivery or miscellaneous charges.
+   */
+  const handleDiscountInput = (rawValue: string) => {
+    setDiscountInput(rawValue);
+
+    const error = validateDiscountAmount(
+      rawValue,
+      grossSubscriptionAmount > 0 ? grossSubscriptionAmount : null,
+    );
+    setDiscountError(error);
+
+    setDiscountAmount(
+      error !== null || rawValue.trim() === "" ? null : Number(rawValue),
+    );
   };
 
   /**
@@ -988,6 +1114,14 @@ export function QuickOnboardingForm({
         jumpToDetails = true;
         continue;
       }
+      // The discount is local state, not a react-hook-form field, so setError
+      // would attach the message to a field that does not exist and the admin
+      // would see only the toast with no inline explanation. It lives on the
+      // step the admin is already on at submit time, so no navigation either.
+      if (key === "discountAmount") {
+        setDiscountError(message);
+        continue;
+      }
       // Dotted paths like "pastDayStatuses.2.mealType" refer to array entries
       // within the popup which is already closed at submission time — show as
       // individual toast notifications since they can't map to inline fields.
@@ -1154,6 +1288,14 @@ export function QuickOnboardingForm({
       calculatedDeliveryCharge: calculatedDeliveryCharge,
       miscCharge: miscCharge ?? 0,
       miscChargeLabel: miscCharge && miscCharge > 0 ? miscChargeLabel.trim() : "",
+      // Manual discount (admin-manual-onboarding-discount). Sent as the RAW
+      // figure the admin typed, never the clamped one: if the two ever disagree
+      // the server must reject the submission rather than quietly bill a
+      // different concession than the one on screen. ACCOMMODATION never reaches
+      // this branch, and a category without a discount sends 0.
+      discountAmount: isDiscountableCategory(values.primaryCategory)
+        ? (discountAmount ?? 0)
+        : 0,
       // Payment collection (meal-subscription-partial-payment, Phase 3.8).
       // KIT has no payment panel, so it always reports a full payment — which is
       // exactly the behaviour it had before this feature existed.
@@ -2164,6 +2306,227 @@ export function QuickOnboardingForm({
                 />
               </div>
 
+              {/* ── Subscription Discount (admin-manual-onboarding-discount) ──
+                  Offered for MEAL and KIT once payment is marked collected.
+                  ACCOMMODATION is excluded entirely — stay pricing is settled
+                  through a separate ledger at a different GST rate.
+
+                  The discount comes off the GST-INCLUSIVE subscription amount, so
+                  Total Payable drops by exactly what is entered. Delivery and
+                  miscellaneous charges are never reduced. */}
+              {isDiscountPanelOpen && (
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                  <div className="flex items-center gap-2">
+                    <BadgePercent className="h-4 w-4 text-slate-500" />
+                    <p className="text-sm font-semibold text-slate-800">
+                      Subscription Discount
+                    </p>
+                    <span className="text-xs text-slate-400">Optional</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr] sm:items-start">
+                    <div className="space-y-1 sm:w-48">
+                      <label
+                        htmlFor="discountAmount"
+                        className="text-xs font-medium text-slate-500"
+                      >
+                        Discount (₹)
+                      </label>
+                      <Input
+                        id="discountAmount"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        className="h-9"
+                        aria-invalid={
+                          Boolean(discountError) || discountExceedsSubscription
+                        }
+                        aria-describedby="discountAmount-help"
+                        value={discountInput}
+                        onChange={(e) => handleDiscountInput(e.target.value)}
+                        disabled={grossSubscriptionAmount <= 0}
+                      />
+                    </div>
+
+                    {/* The two figures that bound the decision, shown next to the
+                        box so the admin never has to compute the ceiling. */}
+                    <div className="space-y-1 rounded-lg bg-slate-50 px-3 py-2">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-xs text-slate-500">
+                          {primaryCategory === "KIT"
+                            ? "KIT charge (incl. GST)"
+                            : "Subscription charge (incl. GST)"}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-700 tabular-nums">
+                          ₹
+                          {grossSubscriptionAmount.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-xs text-slate-500">Maximum discount</span>
+                        <span className="text-xs font-semibold text-slate-700 tabular-nums">
+                          ₹
+                          {grossSubscriptionAmount.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p id="discountAmount-help" className="text-xs text-slate-500">
+                    Leave blank for no discount. The discount reduces the
+                    subscription charge and its GST only — delivery and
+                    miscellaneous charges are not reduced.
+                  </p>
+
+                  {grossSubscriptionAmount <= 0 && (
+                    <p className="text-xs text-amber-700">
+                      Select a{" "}
+                      {primaryCategory === "KIT" ? "KIT product" : "subscription plan"}{" "}
+                      before entering a discount.
+                    </p>
+                  )}
+
+                  {discountError && (
+                    <p className="text-xs text-destructive">{discountError}</p>
+                  )}
+
+                  {/* Fires when the ceiling moved after the discount was typed —
+                      e.g. the admin went back and chose a cheaper plan. */}
+                  {!discountError && discountExceedsSubscription && (
+                    <p className="text-xs text-destructive">
+                      This discount is larger than the selected subscription charge
+                      of ₹
+                      {grossSubscriptionAmount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                      . Reduce it or choose a different plan.
+                    </p>
+                  )}
+
+                  {/* Where the concession actually lands. Shown because the single
+                      figure the admin typed is split across two GST-relevant lines
+                      on the customer's invoice, and they will be asked about it. */}
+                  {hasDiscount && !discountExceedsSubscription && (
+                    <div className="space-y-1.5 rounded-lg border border-teal-200 bg-teal-50 px-3 py-3">
+                      <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-teal-700">
+                        How this discount applies
+                      </p>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-xs text-teal-800">
+                          Off the subscription charge
+                        </span>
+                        <span className="text-xs font-medium text-teal-900 tabular-nums">
+                          -₹
+                          {discountedPricing.baseRelief.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-xs text-teal-800">
+                          Off GST ({discountedPricing.taxPercent.toFixed(0)}%)
+                        </span>
+                        <span className="text-xs font-medium text-teal-900 tabular-nums">
+                          -₹
+                          {discountedPricing.taxRelief.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between border-t border-teal-200 pt-1.5">
+                        <span className="text-xs font-semibold text-teal-900">
+                          Subscription after discount
+                        </span>
+                        <span className="text-xs font-bold text-teal-900 tabular-nums">
+                          ₹
+                          {discountedPricing.discountedGross.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── KIT-only breakup + confirmation ──
+                      MEAL gets both from the payment panel below. KIT has no such
+                      panel, so a discounted KIT onboarding would otherwise show no
+                      total and skip the sign-off gate entirely. Rendered only when
+                      a discount exists, so a plain KIT onboarding keeps exactly the
+                      flow it had before this feature. */}
+                  {primaryCategory === "KIT" && hasDiscount && selectedKitProduct && (
+                    <div className="space-y-3 border-t border-slate-100 pt-3">
+                      <div className="space-y-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                        <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-emerald-600">
+                          Amount breakup
+                        </p>
+                        <AmountRow
+                          label={selectedKitProduct.name}
+                          amount={grossSubscriptionAmount}
+                        />
+                        <AmountRow
+                          label="Discount"
+                          amount={discountApplied}
+                          negative
+                        />
+                        {miscAmount > 0 && (
+                          <AmountRow
+                            label={miscChargeLabel.trim() || "Miscellaneous charges"}
+                            amount={miscAmount}
+                          />
+                        )}
+                        <div className="flex items-baseline justify-between border-t border-emerald-200 pt-1.5">
+                          <span className="text-sm font-semibold text-emerald-900">
+                            Total Payable
+                          </span>
+                          <span className="text-sm font-bold text-emerald-900 tabular-nums">
+                            ₹
+                            {totalPayable.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        {pricingConfirmed ? (
+                          <p className="text-xs font-semibold text-emerald-700">
+                            ✓ Pricing confirmed — you can now onboard the customer
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-500">
+                            Review the discounted total above, then confirm to enable
+                            onboarding.
+                          </p>
+                        )}
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={pricingConfirmed ? "outline" : "default"}
+                          disabled={pricingConfirmed || !canConfirmPricing}
+                          onClick={() => setConfirmedPricingKey(pricingKey)}
+                        >
+                          {pricingConfirmed
+                            ? "Pricing confirmed"
+                            : "I have confirmed the pricing"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* ── Delivery Charge Section (Req 7.1–7.7) ──
                   Gated on the payment toggle as well as the category
                   (meal-subscription-partial-payment, Phase 3.1): the panel
@@ -2379,6 +2742,19 @@ export function QuickOnboardingForm({
                         label={`${selectedPlan.name} (${selectedPlan.durationDays} days)`}
                         amount={planAmount}
                       />
+                      {/* Placed immediately under the plan row, because that is
+                          the only line it reduces. */}
+                      {hasDiscount && (
+                        <AmountRow
+                          label="Discount"
+                          amount={discountApplied}
+                          negative
+                          note={`incl. ₹${discountedPricing.taxRelief.toLocaleString(
+                            "en-IN",
+                            { minimumFractionDigits: 2, maximumFractionDigits: 2 },
+                          )} GST`}
+                        />
+                      )}
                       <AmountRow
                         label="Delivery charges"
                         amount={deliveryAmount}
@@ -2500,17 +2876,35 @@ export function QuickOnboardingForm({
                         />
                         {selectedKitProduct && (
                           <>
+                            {/* Derived from the SAME helper the server uses, so a
+                                discounted KIT shows the taxable value and GST that
+                                will actually be invoiced rather than the list
+                                split. With no discount these are identical to the
+                                previous inline `/ 1.05` arithmetic. */}
                             <ReviewRow
                               label="Base Price"
-                              value={`₹${(selectedKitProduct.base_price / 1.05).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              value={`₹${discountedPricing.taxableAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                             />
                             <ReviewRow
-                              label="Tax (5%)"
-                              value={`₹${(selectedKitProduct.base_price - selectedKitProduct.base_price / 1.05).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              label={`Tax (${discountedPricing.taxPercent.toFixed(0)}%)`}
+                              value={`₹${discountedPricing.taxAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                             />
+                            {hasDiscount && (
+                              <ReviewRow
+                                label="Discount applied"
+                                value={`-₹${discountApplied.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                highlight
+                              />
+                            )}
+                            {miscAmount > 0 && (
+                              <ReviewRow
+                                label={miscChargeLabel.trim() || "Miscellaneous"}
+                                value={`₹${miscAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              />
+                            )}
                             <ReviewRow
                               label="Total Price"
-                              value={`₹${selectedKitProduct.base_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                              value={`₹${totalPayable.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                               highlight
                             />
                             <ReviewRow
@@ -2578,6 +2972,13 @@ export function QuickOnboardingForm({
                           }
                         />
                         {/* Full breakup so the total is never an unexplained figure. */}
+                        {hasDiscount && (
+                          <ReviewRow
+                            label="Discount applied"
+                            value={`-₹${discountApplied.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            highlight
+                          />
+                        )}
                         <ReviewRow
                           label="Delivery"
                           value={`₹${deliveryAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -2952,21 +3353,31 @@ function AmountRow({
   label,
   amount,
   note,
+  negative,
 }: {
   label: string;
   amount: number;
   note?: string;
+  /** Renders the amount as a deduction (`-₹X`) in a contrasting colour. */
+  negative?: boolean;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <span className="text-xs text-emerald-800">
+      <span className={cn("text-xs", negative ? "text-teal-700" : "text-emerald-800")}>
         {label}
         {note && (
-          <span className="ml-1 text-emerald-600">({note})</span>
+          <span className={cn("ml-1", negative ? "text-teal-600" : "text-emerald-600")}>
+            ({note})
+          </span>
         )}
       </span>
-      <span className="text-xs font-medium text-emerald-900 tabular-nums">
-        ₹
+      <span
+        className={cn(
+          "text-xs font-medium tabular-nums",
+          negative ? "text-teal-700" : "text-emerald-900",
+        )}
+      >
+        {negative ? "-" : ""}₹
         {amount.toLocaleString("en-IN", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,

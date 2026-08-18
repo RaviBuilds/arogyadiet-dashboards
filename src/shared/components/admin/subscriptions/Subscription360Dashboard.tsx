@@ -66,13 +66,20 @@ export function Subscription360Dashboard({
   allCustomerSubs: any[];
   mealCategories: any[];
   deliveryOrders: any[];
-  /** meal-subscription-early-closure: the SUBSCRIPTION invoice row (base_amount, tax_amount, delivery_charge, misc_charge, amount_paid), needed by the Recalculate Tenure dialog. */
+  /** meal-subscription-early-closure: the SUBSCRIPTION invoice row (base_amount, tax_amount, delivery_charge, misc_charge, discount_amount, amount_paid), needed by the Recalculate Tenure dialog. */
   invoicePayment?: {
     base_amount: number | string | null;
     tax_amount: number | string | null;
     delivery_charge: number | string | null;
     misc_charge: number | string | null;
     misc_charge_label: string | null;
+    /**
+     * admin-manual-onboarding-discount: surfaced so the dialog can warn that
+     * `base_amount` is already net of a concession and that recalculating clears
+     * it. Optional so a caller that has not been updated still compiles and
+     * simply shows no warning.
+     */
+    discount_amount?: number | string | null;
     amount: number | string | null;
     amount_paid: number | string | null;
   } | null;
@@ -746,6 +753,7 @@ export function Subscription360Dashboard({
             deliveryCharge: Number(invoicePayment.delivery_charge ?? 0),
             miscCharge: Number(invoicePayment.misc_charge ?? 0),
             miscChargeLabel: invoicePayment.misc_charge_label ?? null,
+            discountAmount: Number(invoicePayment.discount_amount ?? 0),
             totalPayable: Number(invoicePayment.amount ?? 0),
             amountPaid: Number(invoicePayment.amount_paid ?? 0),
           }}

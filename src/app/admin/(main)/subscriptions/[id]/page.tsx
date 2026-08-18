@@ -66,7 +66,7 @@ export default async function Subscription360Page({ params }: { params: Promise<
   // show the current figures and enforce "new charge must be lower".
   const { data: invoicePayment } = await supabaseAdmin
     .from("payments")
-    .select("id, base_amount, tax_amount, delivery_charge, misc_charge, misc_charge_label, amount, amount_paid, balance_due, status")
+    .select("id, base_amount, tax_amount, delivery_charge, misc_charge, misc_charge_label, discount_amount, amount, amount_paid, balance_due, status")
     .eq("subscription_id", id)
     .eq("invoice_type", "SUBSCRIPTION")
     .maybeSingle();
