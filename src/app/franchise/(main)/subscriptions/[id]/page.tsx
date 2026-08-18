@@ -93,7 +93,7 @@ export default async function FranchiseSubscription360Page({
   // meal-subscription-early-closure: see the admin page's equivalent comment.
   const { data: invoicePayment } = await supabase
     .from("payments")
-    .select("id, base_amount, tax_amount, delivery_charge, misc_charge, misc_charge_label, amount, amount_paid, balance_due, status")
+    .select("id, base_amount, tax_amount, delivery_charge, misc_charge, misc_charge_label, discount_amount, amount, amount_paid, balance_due, status")
     .eq("subscription_id", id)
     .eq("invoice_type", "SUBSCRIPTION")
     .maybeSingle();

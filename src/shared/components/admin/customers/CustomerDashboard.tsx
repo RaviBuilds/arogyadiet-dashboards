@@ -36,6 +36,7 @@ import { OnboardingCustomersSection } from "./OnboardingCustomersSection";
 import { MealCustomerSection } from "./MealCustomerSection";
 import { KitCustomerSection } from "./KitCustomerSection";
 import { AccommodationCustomerSection } from "./AccommodationCustomerSection";
+import { PartialPaymentSection } from "./PartialPaymentSection";
 import { AddonServiceRequestsPanel } from "./AddonServiceRequestsPanel";
 import { UserPlus, Stethoscope } from "lucide-react";
 import {
@@ -259,7 +260,12 @@ export default function CustomerDashboard({
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    if (tab === "Meal Customers" || tab === "KIT Customer" || tab === "Accommodation Customers") {
+    if (
+      tab === "Meal Customers" ||
+      tab === "KIT Customer" ||
+      tab === "Accommodation Customers" ||
+      tab === "Partial Payment"
+    ) {
       setSearchColumn("fullName");
     } else {
       setSearchColumn("customer_name");
@@ -428,7 +434,12 @@ export default function CustomerDashboard({
   );
 
   const searchOptions = useMemo(() => {
-    if (activeTab === "Meal Customers" || activeTab === "KIT Customer" || activeTab === "Accommodation Customers") {
+    if (
+      activeTab === "Meal Customers" ||
+      activeTab === "KIT Customer" ||
+      activeTab === "Accommodation Customers" ||
+      activeTab === "Partial Payment"
+    ) {
       return [
         { value: "fullName", label: "Name" },
         { value: "mobile", label: "Phone Number" },
@@ -644,6 +655,7 @@ export default function CustomerDashboard({
           "KIT Customer",
           "Accommodation Customers",
           "Onboarded",
+          "Partial Payment",
         ]}
         activeTab={activeTab}
         onTabChange={handleTabChange}
@@ -785,6 +797,25 @@ export default function CustomerDashboard({
             isDietitian={isDietitian}
           />
         </div>
+      ) : activeTab === "Partial Payment" ? (
+        // Receives the FULL scoped directory, not a category- or archive-filtered
+        // slice: an outstanding balance is owed whether the customer is a meal or
+        // accommodation subscriber, and whether or not their account has since
+        // been archived. The section joins balances onto this list, which is what
+        // makes it inherit the page's franchise / clinic / dietitian scoping.
+        <PartialPaymentSection
+          customers={customers}
+          clinicFilter={clinicFilter}
+          setClinicFilter={setClinicFilter}
+          clinicOptions={clinicOptions}
+          lockedClinicName={lockedClinicName}
+          searchColumn={searchColumn}
+          setSearchColumn={setSearchColumn}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          searchOptions={searchOptions}
+          isDietitian={isDietitian}
+        />
       ) : null}
 
       {/* --- EDIT CUSTOMER MODAL --- */}

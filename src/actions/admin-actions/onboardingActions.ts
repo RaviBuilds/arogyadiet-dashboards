@@ -61,6 +61,7 @@ import {
   type ActivateAddOnResult,
   type AddOnActivationPayment,
   type DeliveryChargeContext,
+  type DiscountContext,
   type MiscChargeContext,
   type PaymentCollectionContext,
 } from "@/services/OnboardingService";
@@ -69,6 +70,10 @@ import {
   MISC_CHARGE_MAX,
   MISC_CHARGE_LABEL_MAX_LENGTH,
 } from "@/lib/onboarding/miscCharge";
+import {
+  DISCOUNT_MAX,
+  isDiscountableCategory,
+} from "@/lib/onboarding/discount";
 import { hashPin } from "@/services/PinService";
 import { logAdminAction } from "@/lib/logger";
 
@@ -426,6 +431,58 @@ export async function onboardCustomerAction(
       ? { miscCharge: rawMiscCharge, miscChargeLabel: rawMiscChargeLabel }
       : undefined;
 
+  // (6a-ii) Manual discount — an optional admin concession on the subscription
+  // charge (admin-manual-onboarding-discount). Read from the raw payload like
+  // `deliveryCharge` / `miscCharge` / `tempPin`.
+  //
+  // Only SHAPE and CATEGORY are checked here. The ceiling ("cannot exceed the
+  // subscription charge") is deliberately NOT enforced at this layer, because it
+  // depends on the plan / kit price, which only the service resolves from the
+  // database. Validating it here against a client-supplied figure would be
+  // theatre — the same reason the advance amount is left to the service.
+  const rawDiscount = typeof rawPayload.discountAmount === "number"
+    ? rawPayload.discountAmount
+    : typeof rawPayload.discountAmount === "string" &&
+        rawPayload.discountAmount.trim() !== ""
+      ? Number(rawPayload.discountAmount)
+      : 0;
+
+  if (!Number.isFinite(rawDiscount) || rawDiscount < 0) {
+    return {
+      success: false,
+      error: "Enter a valid discount amount (0 or more).",
+      fieldErrors: { discountAmount: "Enter a valid discount amount." },
+    };
+  }
+  if (rawDiscount > DISCOUNT_MAX) {
+    return {
+      success: false,
+      error: `Discount cannot exceed ₹${DISCOUNT_MAX.toLocaleString("en-IN")}.`,
+      fieldErrors: { discountAmount: "Discount is too large." },
+    };
+  }
+  // Money carries at most 2 decimals; anything finer is a typo or a tampered
+  // payload, and would not survive the NUMERIC(10,2) column anyway.
+  if (Math.round(rawDiscount * 100) !== Number((rawDiscount * 100).toFixed(4))) {
+    return {
+      success: false,
+      error: "The discount cannot have more than 2 decimal places.",
+      fieldErrors: { discountAmount: "Use at most 2 decimal places." },
+    };
+  }
+  if (rawDiscount > 0 && !isDiscountableCategory(input.primaryCategory)) {
+    return {
+      success: false,
+      error: "A discount can only be applied to MEAL and KIT onboarding.",
+      fieldErrors: {
+        discountAmount: "Discounts are not available for this category.",
+      },
+    };
+  }
+
+  const discountContext: DiscountContext | undefined =
+    rawDiscount > 0 ? { discountAmount: rawDiscount } : undefined;
+
   // (6b) Payment collection — full amount, or an advance with a balance left
   // (meal-subscription-partial-payment, Phase 2.6).
   //
@@ -494,6 +551,7 @@ export async function onboardCustomerAction(
     deliveryContext,
     miscContext,
     collectionContext,
+    discountContext,
   );
   if (!outcome.ok) {
     return {
@@ -513,6 +571,25 @@ export async function onboardCustomerAction(
     await logAdminAction("UPDATE", "delivery_charge_override", outcome.ids.subscription_id, {
       calculatedAmount: deliveryContext.calculatedDeliveryCharge,
       overriddenAmount: deliveryContext.deliveryCharge,
+      surface: "quick_onboarding",
+    });
+  }
+
+  // (6b-ii) Audit: a manual discount is a financial concession granted at an
+  // admin's discretion, so record who granted it and against what.
+  //
+  // Read from `outcome.ids`, which echoes what the RPC actually committed — not
+  // from the request, which the service may have rejected or clamped.
+  if (
+    outcome.ids.discount_amount != null &&
+    Number(outcome.ids.discount_amount) > 0
+  ) {
+    await logAdminAction("CREATE", "subscription_discount", outcome.ids.subscription_id, {
+      discountAmount: Number(outcome.ids.discount_amount),
+      totalPayable: outcome.ids.total_payable,
+      category: input.primaryCategory,
+      planId: input.primaryCategory === "MEAL" ? input.planId : null,
+      kitProductId: input.primaryCategory === "KIT" ? input.kitProductId : null,
       surface: "quick_onboarding",
     });
   }

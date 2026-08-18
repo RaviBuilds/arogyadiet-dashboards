@@ -56,6 +56,12 @@ import {
 import { pastDayStatusBoundary } from "@/lib/onboarding/cutoff";
 import { calculateTotalPayable } from "@/lib/delivery/deliveryCharge";
 import {
+  applySubscriptionDiscount,
+  isDiscountableCategory,
+  resolveMaxDiscount,
+  toPaise,
+} from "@/lib/onboarding/discount";
+import {
   generateDailyPreferences,
   RecordCountMismatchError,
   type DailyPreferencesContext,
@@ -269,6 +275,28 @@ export interface PaymentCollectionContext {
   advanceAmount: number;
 }
 
+/**
+ * Optional manual discount context for a MEAL or KIT onboarding
+ * (admin-manual-onboarding-discount).
+ *
+ * The discount is absorbed entirely by the subscription charge and its GST —
+ * the delivery charge and the miscellaneous charge are never reduced — so
+ * Total_Payable falls by EXACTLY the amount granted. See
+ * `src/lib/onboarding/discount.ts` for the arithmetic and the reasoning behind
+ * discounting the GST-inclusive amount rather than the pre-tax base.
+ *
+ * The service validates the amount against the subscription price IT resolves
+ * from the database, never against a figure supplied by the client, for the same
+ * reason the advance amount is validated server-side: a tampered payload must
+ * not be able to buy a subscription for a rupee.
+ *
+ * ACCOMMODATION is rejected outright.
+ */
+export interface DiscountContext {
+  /** The gross concession in INR (> 0 when present). */
+  discountAmount: number;
+}
+
 // ---------------------------------------------------------------------------
 // onboard — the atomic quick-onboarding write
 // ---------------------------------------------------------------------------
@@ -301,6 +329,8 @@ export interface PaymentCollectionContext {
  * @param misc     optional miscellaneous charge + its admin-supplied invoice label
  * @param collection optional advance/partial payment collection (MEAL only);
  *                   omit for the default "paid in full" behaviour
+ * @param discount optional manual discount granted by the admin (MEAL/KIT only);
+ *                 omit for the default "no discount" behaviour
  */
 export async function onboard(
   payload: QuickOnboardingInput,
@@ -309,6 +339,7 @@ export async function onboard(
   delivery?: DeliveryChargeContext,
   misc?: MiscChargeContext,
   collection?: PaymentCollectionContext,
+  discount?: DiscountContext,
 ): Promise<OnboardOutcome> {
   // (1) PAID precondition (Req 8.1/8.2). No customer record is persisted while
   //     Payment_Status is anything other than PAID.
@@ -517,12 +548,78 @@ export async function onboard(
   const miscChargeLabel =
     miscChargeAmount > 0 ? misc!.miscChargeLabel.trim() : null;
 
-  // Total_Payable = plan/kit amount + delivery + miscellaneous. Computed HERE,
-  // from server-resolved plan pricing, and used for both `payments.amount` and
-  // `subscriptions.total_payable` so the two can never disagree. The client's
-  // displayed total is never trusted.
+  // ── Manual discount (admin-manual-onboarding-discount) ───────────────────
+  //
+  // The GST-inclusive subscription amount the discount is granted against,
+  // resolved from the DATABASE (subscription_plans.price / kit_products.
+  // base_price), never from the request. Everything below is validated against
+  // this figure, so a tampered payload cannot manufacture a larger concession
+  // than the subscription is worth.
+  const grossSubscriptionAmount =
+    category === "MEAL" && plan
+      ? plan.totalAmount
+      : (kitProduct?.totalAmount ?? 0);
+
+  const requestedDiscount =
+    discount && discount.discountAmount > 0 ? discount.discountAmount : 0;
+
+  if (requestedDiscount > 0) {
+    // A discount is a concession on a subscription charge. ACCOMMODATION prices
+    // live in stay_entries at 18% GST and are settled through a different
+    // ledger entirely, so none of this arithmetic applies to them.
+    if (!isDiscountableCategory(category)) {
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: "A discount can only be applied to MEAL and KIT onboarding.",
+        fieldErrors: { discountAmount: "Discounts are not available for this category." },
+      };
+    }
+
+    // The ceiling is the subscription amount, NOT Total_Payable: the discount
+    // can only be absorbed by the subscription charge and its GST, so anything
+    // larger would have to eat into the delivery or miscellaneous charge, which
+    // the business rule forbids.
+    const maxDiscount = resolveMaxDiscount(grossSubscriptionAmount);
+
+    // Compared in paise for the same reason the advance is: float rupees leave
+    // ~1e-13 residue, which would reject a legitimate full-value discount.
+    if (toPaise(requestedDiscount) > toPaise(maxDiscount)) {
+      return {
+        ok: false,
+        reason: "ERROR",
+        message: "The discount cannot exceed the subscription charge.",
+        fieldErrors: {
+          discountAmount: `The discount cannot exceed ₹${maxDiscount.toFixed(2)}.`,
+        },
+      };
+    }
+  }
+
+  // Split the (possibly discounted) subscription amount into taxable value and
+  // GST. With no discount this returns the plan's own base/tax split, so the
+  // figures written are identical to what they were before this feature.
+  const discountedPricing = applySubscriptionDiscount(
+    grossSubscriptionAmount,
+    requestedDiscount,
+    // Reverse-derived from the resolved pricing rather than hardcoding 5%: MEAL
+    // plans carry their own base_price/tax_amount split and KIT products their
+    // own tax_rate, and both may differ from 5% per row.
+    (category === "MEAL" && plan ? plan.taxPercent : (kitProduct?.taxPercent ?? 5)) /
+      100,
+  );
+
+  const discountAmount = discountedPricing.discountApplied;
+
+  // Total_Payable = discounted subscription amount + delivery + miscellaneous.
+  // Computed HERE, from server-resolved plan pricing, and used for both
+  // `payments.amount` and `subscriptions.total_payable` so the two can never
+  // disagree. The client's displayed total is never trusted.
+  //
+  // Because the discount comes off the GST-INCLUSIVE amount, Total_Payable falls
+  // by exactly the amount granted — the figure the admin quoted at the counter.
   const totalPayable = calculateTotalPayable(
-    category === "MEAL" && plan ? plan.totalAmount : (kitProduct?.totalAmount ?? 0),
+    discountedPricing.discountedGross,
     deliveryChargeAmount,
     miscChargeAmount,
   );
@@ -656,20 +753,34 @@ export async function onboard(
       delivery_charge: deliveryChargeAmount,
       misc_charge: miscChargeAmount,
       misc_charge_label: miscChargeLabel,
+      // The gross concession, kept alongside the NET total_payable so the net
+      // figure stays explainable without re-reading a plan price that may since
+      // have changed.
+      discount_amount: discountAmount,
       // The Total_Payable snapshot the balance derivation measures against.
       total_payable: totalPayable,
       franchise_id: franchiseId,
       initial_meal_category_id: mealCategoryId,  // For daily preferences generation
     },
     payment: {
-      // Total_Payable = plan/kit amount + delivery charge + miscellaneous charge.
-      // Unchanged by partial payment: `amount` remains the full payable so the
-      // invoice's itemised breakup still reconciles (design decision D3). How
-      // much was actually collected lives in `amount_paid` / `balance_due`.
+      // Total_Payable = discounted subscription amount + delivery charge +
+      // miscellaneous charge. Unchanged by partial payment: `amount` remains the
+      // full payable so the invoice's itemised breakup still reconciles (design
+      // decision D3). How much was actually collected lives in `amount_paid` /
+      // `balance_due`.
       amount: totalPayable,
-      base_amount: category === "MEAL" && plan ? plan.baseAmount : (kitProduct?.baseAmount ?? 0),
-      tax_percent: category === "MEAL" && plan ? plan.taxPercent : (kitProduct?.taxPercent ?? 5),
-      tax_amount: category === "MEAL" && plan ? plan.taxAmount : (kitProduct?.taxAmount ?? 0),
+      // base_amount and tax_amount are stored NET of the discount, which is what
+      // keeps the invoice identity intact:
+      //   base_amount + tax_amount + delivery_charge + misc_charge = amount
+      // With no discount these are the plan's/product's own split, byte-for-byte
+      // what was written before this feature.
+      base_amount: discountedPricing.taxableAmount,
+      tax_percent: discountedPricing.taxPercent,
+      tax_amount: discountedPricing.taxAmount,
+      // The gross concession. Together with the two NET figures above it lets
+      // the invoice reconstruct the pre-discount base price:
+      //   base_amount + tax_amount + discount_amount = original gross
+      discount_amount: discountAmount,
       delivery_charge: deliveryChargeAmount,
       misc_charge: miscChargeAmount,
       misc_charge_label: miscChargeLabel,
