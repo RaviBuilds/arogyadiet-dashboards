@@ -4,61 +4,48 @@ import { useState, useMemo, useCallback, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Badge } from "@/shared/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/shared/components/ui/table";
 import { Button } from "@/shared/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/shared/components/ui/dropdown-menu";
 import { ConfirmDeleteModal } from "@/shared/components/admin/core/ConfirmDeleteModal";
 import { AdminSubmenuBar } from "@/shared/components/admin/core/AdminSubmenuBar";
-import { DataTableCard } from "@/shared/components/admin/core/DataTableCard";
-import { DataSearchFilter } from "@/shared/components/admin/core/DataSearchFilter";
-import { SectionHeader } from "@/shared/components/admin/core/SectionHeader";
-import { StatusBadge } from "@/shared/components/admin/core/StatusBadge";
-import { ExportButton, RefreshButton } from "@/shared/components/admin/core/ActionButtons";
+// ExportButton / RefreshButton are no longer imported: the Meal and KIT table
+// sections render their own from the `onExport` / `onRefresh` props.
 import { KitCustomerSection } from "@/shared/components/admin/customers/KitCustomerSection";
+import { MealCustomerSection } from "@/shared/components/admin/customers/MealCustomerSection";
+import {
+  matchesDietAllergy,
+  matchesStatus,
+  matchesDietitian,
+  matchesMedical,
+  matchesLocationFlags,
+} from "@/shared/components/admin/customers/CustomerTableCells";
+import type { SubscriptionPeriod } from "@/shared/components/admin/customers/CustomerDashboard";
 import { OnboardingCustomersSection } from "@/shared/components/admin/customers/OnboardingCustomersSection";
+import { PartialPaymentSection } from "@/shared/components/admin/customers/PartialPaymentSection";
+import { franchiseGetPartialPaymentBalances } from "@/actions/franchise-actions/franchisePartialPaymentActions";
 import { PageHeader } from "@/shared/components/franchise/ui/PageHeader";
-import { ALL_CLINICS } from "@/lib/clinic/visibility";
-import { cn } from "@/lib/utils";
+import {
+  ALL_CLINICS,
+  clinicDisplayName,
+  filterRowsByClinic,
+  type ClinicFilterSelection,
+} from "@/lib/clinic/visibility";
 import {
   Users,
   Plus,
-  MoreHorizontal,
-  Eye,
-  Edit,
-  Trash2,
   UserPlus,
   Stethoscope,
+  ShoppingBag,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
 import { FranchiseCreateCustomerModal } from "./FranchiseCreateCustomerModal";
 import { FranchiseCustomerOverview } from "./FranchiseCustomerOverview";
 import { FranchiseQuickEditModal } from "./FranchiseQuickEditModal";
-import {
-  applyAllFilters,
-  type SearchColumn,
-} from "./franchiseCustomerFilters";
+// `applyAllFilters` is no longer imported: the Meal tab's filtering now uses the
+// shared predicates from `CustomerTableCells` (the same module that builds the
+// dropdown options), so the franchise-local filter pipeline is gone along with the
+// franchise-local table.
+import type { SearchColumn } from "./franchiseCustomerFilters";
 import { franchiseDeactivateCustomerAccount } from "@/actions/franchise-actions/franchiseCustomerManagementActions";
 import { revalidateFranchiseCustomersPage } from "@/actions/franchise-actions/franchiseCustomerManagementActions";
 
@@ -81,10 +68,47 @@ export interface CustomerData {
   isActive: boolean;
   clinic_id: string | null;
   clinicName: string | null;
+  /**
+   * The customer's Dietitian_Link. Selected so the server page can apply
+   * `dietitianCanRead` before these rows are sent (the franchise list reads via
+   * the service-role client, so RLS does not narrow them), and so the directory
+   * can offer a Dietitian filter.
+   */
+  dietitianId?: string | null;
+  /**
+   * Resolved Dietitian name. `matchesDietitian` filters on the NAME, and the
+   * shared `DietitianCell` displays it, so both this and `dietitianId` are needed.
+   */
+  dietitianName?: string | null;
+  /**
+   * Whether the primary address carries usable coordinates. Backs the "No GPS"
+   * data-quality toggle in the shared Location column header.
+   */
+  hasCoords?: boolean;
 }
+
+// NOTE: the three fields above are declared with exactly the same names, types
+// and optionality as the ADMIN `CustomerData`
+// (`shared/components/admin/customers/CustomerDashboard.tsx`), because the Meal
+// and KIT tabs now render the SHARED table components, whose `customers` prop is
+// typed against that interface. Keeping them identical is what makes franchise
+// rows assignable without a cast.
 
 interface Props {
   customers: CustomerData[];
+  /**
+   * ACTIVE subscription windows for the visible customers, correlated by email.
+   *
+   * Supplied by the server page, which intersects them with the already
+   * dietitian-scoped customer set — so a Dietitian cannot receive a window for a
+   * customer they are not assigned to. Drives the "Expiring in N days" filter and
+   * the Plan Period column, neither of which the franchise directory had.
+   */
+  activeSubscriptions?: {
+    email: string;
+    starts_on: string | null;
+    ends_on: string | null;
+  }[];
   franchiseId: string;
   /**
    * Renders the read-only Franchise Dietitian workspace (dietitian-management,
@@ -94,13 +118,26 @@ interface Props {
    * callers keep their current behavior.
    */
   isDietitian?: boolean;
+  /**
+   * Whether the signed-in franchise user holds `manage` (not merely `view`) on
+   * the `customers` Operations_Group (franchise-scoped-access Task 5/9).
+   *
+   * Defaults to `true` so any caller that does not yet pass it keeps its
+   * current behaviour. The server-side gate in
+   * `franchiseCustomerManagementActions` is the real enforcement; this flag
+   * only avoids presenting controls that would be refused.
+   */
+  canManage?: boolean;
 }
 
+// No "Accommodation Customers" tab: Accommodation is not a franchise product.
+// Otherwise this mirrors the admin directory's tab set.
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "meal", label: "Meal Customers" },
   { id: "kit", label: "KIT Customers" },
   { id: "onboarded", label: "Onboarded" },
+  { id: "partial-payment", label: "Partial Payment" },
 ];
 
 const SEARCH_OPTIONS = [
@@ -110,7 +147,24 @@ const SEARCH_OPTIONS = [
   { value: "primary_pincode", label: "Pincode" },
 ];
 
-export default function FranchiseCustomerDashboard({ customers, franchiseId, isDietitian = false }: Props) {
+export default function FranchiseCustomerDashboard({
+  customers,
+  activeSubscriptions = [],
+  franchiseId,
+  isDietitian = false,
+  canManage = true,
+}: Props) {
+  /**
+   * Whether to present any mutating control at all.
+   *
+   * Two INDEPENDENT reasons to withhold them: the caller is a Dietitian (a
+   * role), or they hold `customers: "view"` rather than `"manage"` (a permission
+   * level). This is presentation only — the real enforcement is the server-side
+   * `checkFranchiseGroupManage("customers")` gate in
+   * `franchiseCustomerManagementActions`, which refuses the write regardless of
+   * what the UI renders.
+   */
+  const canWrite = !isDietitian && canManage;
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
@@ -126,14 +180,29 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
     [router, searchParams],
   );
 
-  // Filters (Meal tab)
+  // Filters (Meal tab).
+  //
+  // These now mirror the ADMIN directory one-for-one, because the Meal tab renders
+  // the shared `MealCustomerSection` rather than a franchise-local copy of the
+  // table. That is the point of this change: the franchise directory was missing
+  // the clinic filter, the dietitian filter, the location data-quality flags, the
+  // "expiring in N days" filter, the plan sub-filter inside Status, the Plan Period
+  // column and pagination — all of which the shared component already has.
+  //
+  // The franchise-only standalone Allergy select is gone: admin folds allergy into
+  // the Diet & Allergy column filter (`dietAllergyFilterSections`), and keeping a
+  // second control would mean two sources of truth for the same predicate.
   const [searchColumn, setSearchColumn] = useState<SearchColumn>("fullName");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterDiet, setFilterDiet] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
-  const [filterMedical, setFilterMedical] = useState("ALL");
-  const [filterAllergy, setFilterAllergy] = useState("ALL");
+  const [filterMedicalRecord, setFilterMedicalRecord] = useState("ALL");
+  const [filterDietitian, setFilterDietitian] = useState("ALL");
   const [showArchived, setShowArchived] = useState(false);
+  const [clinicFilter, setClinicFilter] =
+    useState<ClinicFilterSelection>(ALL_CLINICS);
+  const [locationFlags, setLocationFlags] = useState<string[]>([]);
+  const [expiringInDays, setExpiringInDays] = useState<number | null>(null);
 
   // KIT tab filters
   const [kitSearchColumn, setKitSearchColumn] = useState("fullName");
@@ -163,20 +232,132 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
     [customers],
   );
 
-  // Apply meal tab filters
-  const filteredMealCustomers = useMemo(
+  // ── Filter option sets, derived from the loaded rows ───────────────────────
+
+  /**
+   * Distinct clinics present in the rows. A franchise owns exactly one clinic
+   * today, so this is usually a single option — but deriving it rather than
+   * hard-coding `[]` (as the KIT tab used to) means the control is correct if a
+   * franchise ever spans more, and it lets the KIT tab share the same filter.
+   */
+  const clinicOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    customers.forEach((row) => {
+      if (row.clinic_id) map.set(row.clinic_id, clinicDisplayName(row.clinicName));
+    });
+    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [customers]);
+
+  const uniquePlans = useMemo(
     () =>
-      applyAllFilters(mealCustomers, {
-        searchColumn,
-        searchTerm,
-        filterDiet,
-        filterStatus,
-        filterMedical,
-        filterAllergy,
-        showArchived,
-      }),
-    [mealCustomers, searchColumn, searchTerm, filterDiet, filterStatus, filterMedical, filterAllergy, showArchived],
+      Array.from(
+        new Set(
+          customers
+            .map((c) => c.activePlanName)
+            .filter((p): p is string => Boolean(p)),
+        ),
+      ),
+    [customers],
   );
+
+  const uniqueDietitians = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          customers
+            .map((c) => c.dietitianName)
+            .filter((n): n is string => Boolean(n)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [customers],
+  );
+
+  /**
+   * customer email → earliest-ending ACTIVE subscription window.
+   *
+   * Drives BOTH the expiring-soon filter and the Plan Period column, so a row is
+   * always filtered on the same dates it displays.
+   */
+  const customerPeriodMap = useMemo(() => {
+    const map = new Map<string, SubscriptionPeriod>();
+    for (const sub of activeSubscriptions) {
+      if (!sub.ends_on) continue;
+      const existing = map.get(sub.email);
+      if (
+        !existing?.endsOn ||
+        new Date(sub.ends_on) < new Date(existing.endsOn)
+      ) {
+        map.set(sub.email, { startsOn: sub.starts_on ?? null, endsOn: sub.ends_on });
+      }
+    }
+    return map;
+  }, [activeSubscriptions]);
+
+  // Apply meal tab filters. Predicates come from `CustomerTableCells`, the same
+  // module that builds the dropdown options, so the options and the filtering can
+  // never disagree.
+  const filteredMealCustomers = useMemo(() => {
+    let result = filterRowsByClinic(mealCustomers, clinicFilter);
+
+    result = result.filter((customer) =>
+      matchesLocationFlags(customer, locationFlags),
+    );
+
+    result = showArchived
+      ? result.filter((customer) => !customer.isActive)
+      : result.filter((customer) => customer.isActive);
+
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter((row) => {
+        if (searchColumn === "fullName")
+          return row.fullName.toLowerCase().includes(term);
+        if (searchColumn === "mobile")
+          return row.mobile.toLowerCase().includes(term);
+        if (searchColumn === "email")
+          return row.email.toLowerCase().includes(term);
+        if (searchColumn === "primary_pincode")
+          return row.primary_pincode.toLowerCase().includes(term);
+        return true;
+      });
+    }
+
+    result = result.filter(
+      (customer) =>
+        matchesDietAllergy(customer, filterDiet) &&
+        matchesStatus(customer, filterStatus) &&
+        matchesDietitian(customer, filterDietitian) &&
+        matchesMedical(customer, filterMedicalRecord),
+    );
+
+    if (expiringInDays !== null) {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + expiringInDays * 86400000);
+      result = result.filter((customer) => {
+        const endDate = customerPeriodMap.get(customer.email)?.endsOn;
+        if (!endDate) return false;
+        const end = new Date(endDate);
+        return end >= now && end <= cutoff;
+      });
+    }
+
+    return result;
+  }, [
+    mealCustomers,
+    clinicFilter,
+    locationFlags,
+    showArchived,
+    searchTerm,
+    searchColumn,
+    filterDiet,
+    filterStatus,
+    filterDietitian,
+    filterMedicalRecord,
+    expiringInDays,
+    customerPeriodMap,
+  ]);
 
   // Refresh handler
   const handleRefresh = useCallback(async () => {
@@ -262,7 +443,7 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
                 Log Customer
               </Link>
             </Button>
-          ) : (
+          ) : canManage ? (
             <div className="flex items-center gap-3">
               <Button variant="outline" size="sm" asChild>
                 <Link href="/customers/quick-onboard">
@@ -278,7 +459,10 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
                 Create Customer
               </Button>
             </div>
-          )
+          ) : null
+          // A view-only franchise user gets neither the Dietitian's Log Customer
+          // CTA nor the onboarding/create CTAs — every one of them leads to a
+          // write the server would refuse.
         }
       />
 
@@ -288,21 +472,30 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
         activeTab={activeTab}
         onTabChange={setActiveTab}
         actions={
+          // Links only — no Export/Refresh here, matching the admin directory's
+          // submenu bar.
+          //
+          // Both table sections (`MealCustomerSection`, `KitCustomerSection`)
+          // render their OWN Export and Refresh controls from the `onExport` /
+          // `onRefresh` props below. While the Meal tab used a franchise-local
+          // table that had none, duplicating them here was the only way to offer
+          // them; now it produces TWO Export and TWO Refresh buttons on the same
+          // screen. `read-only-workspace.property.test.tsx` caught exactly that —
+          // its `queryByRole("button", { name: /export/i })` throws on multiple
+          // matches.
           <div className="flex items-center gap-2">
-            {/* Req 23.1: the mutating Excel export is removed for a Franchise Dietitian. */}
+            {/* The Shop_Orders ledger. Hidden from a Dietitian, whose read-only
+                workspace does not include shop orders — `guardFranchiseGroupAccess`
+                on that page would bounce them to their landing route anyway, so
+                offering the link would only lead to a dead end. */}
             {!isDietitian && (
-              <ExportButton
-                onClick={handleExport}
-                disabled={
-                  activeTab === "overview" ||
-                  activeTab === "onboarded" ||
-                  (activeTab === "meal"
-                    ? filteredMealCustomers.length === 0
-                    : kitCustomers.length === 0)
-                }
-              />
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/customers/shop-orders">
+                  <ShoppingBag className="h-4 w-4 mr-1.5" />
+                  Shop Orders
+                </Link>
+              </Button>
             )}
-            <RefreshButton onClick={handleRefresh} isLoading={isRefreshing} />
           </div>
         }
       />
@@ -313,34 +506,51 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
       )}
 
       {activeTab === "meal" && (
-        <MealCustomerTab
+        <MealCustomerSection
           customers={filteredMealCustomers}
-          searchColumn={searchColumn}
-          setSearchColumn={(val) => setSearchColumn(val as SearchColumn)}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
+          clinicFilter={clinicFilter}
+          setClinicFilter={setClinicFilter}
+          clinicOptions={clinicOptions}
+          locationFlags={locationFlags}
+          setLocationFlags={setLocationFlags}
           filterDiet={filterDiet}
           setFilterDiet={setFilterDiet}
           filterStatus={filterStatus}
           setFilterStatus={setFilterStatus}
-          filterMedical={filterMedical}
-          setFilterMedical={setFilterMedical}
-          filterAllergy={filterAllergy}
-          setFilterAllergy={setFilterAllergy}
+          filterMedicalRecord={filterMedicalRecord}
+          setFilterMedicalRecord={setFilterMedicalRecord}
+          filterDietitian={filterDietitian}
+          setFilterDietitian={setFilterDietitian}
+          uniquePlans={uniquePlans}
+          uniqueDietitians={uniqueDietitians}
           showArchived={showArchived}
           setShowArchived={setShowArchived}
+          expiringInDays={expiringInDays}
+          setExpiringInDays={setExpiringInDays}
+          searchColumn={searchColumn}
+          setSearchColumn={(val) => setSearchColumn(val as SearchColumn)}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          searchOptions={SEARCH_OPTIONS}
+          periodMap={customerPeriodMap}
+          isLoading={isRefreshing}
+          onRefresh={handleRefresh}
+          onExport={handleExport}
           onEdit={setQuickEditTarget}
           onDeactivate={setDeactivateTarget}
-          isDietitian={isDietitian}
+          // The shared component names this `isDietitian`, but it means "hide the
+          // mutating controls". A view-only franchise user must be hidden them too,
+          // so `!canWrite` is passed rather than `isDietitian` alone.
+          isDietitian={!canWrite}
         />
       )}
 
       {activeTab === "kit" && (
         <KitCustomerSection
           customers={kitCustomers}
-          clinicFilter={ALL_CLINICS}
-          setClinicFilter={() => {}}
-          clinicOptions={[]}
+          clinicFilter={clinicFilter}
+          setClinicFilter={setClinicFilter}
+          clinicOptions={clinicOptions}
           showArchived={kitShowArchived}
           setShowArchived={setKitShowArchived}
           showExpired={kitShowExpired}
@@ -355,7 +565,7 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
           onExport={handleExport}
           onEdit={setQuickEditTarget}
           onDeactivate={setDeactivateTarget}
-          isDietitian={isDietitian}
+          readOnly={!canWrite}
         />
       )}
 
@@ -363,8 +573,34 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
         <OnboardingCustomersSection status="IN_PROGRESS" />
       )}
 
-      {/* Modals — never rendered for a Franchise Dietitian (Req 23.1). */}
-      {!isDietitian && (
+      {activeTab === "partial-payment" && (
+        // Receives the FULL scoped directory, not a category- or archive-filtered
+        // slice: a balance is owed whether or not the account has since been
+        // archived. The section joins balances onto this list, which is how it
+        // inherits this page's franchise and dietitian scoping.
+        //
+        // `loadBalancesAction` is REQUIRED here. The section's default loader is
+        // the admin action, which redirects non-admins and — worse — reads the
+        // balance views with no tenant filter at all. The franchise action applies
+        // franchise_id, restricts to MEAL, and adds the Dietitian_Link.
+        <PartialPaymentSection
+          customers={customers}
+          clinicFilter={clinicFilter}
+          setClinicFilter={setClinicFilter}
+          clinicOptions={clinicOptions}
+          searchColumn={searchColumn}
+          setSearchColumn={(val) => setSearchColumn(val as SearchColumn)}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          searchOptions={SEARCH_OPTIONS}
+          isDietitian={!canWrite}
+          loadBalancesAction={franchiseGetPartialPaymentBalances}
+        />
+      )}
+
+      {/* Modals — never rendered for a Franchise Dietitian (Req 23.1), nor for a
+          view-only user, since every one of them performs a write. */}
+      {canWrite && (
         <>
           <FranchiseCreateCustomerModal
             isOpen={isCreateModalOpen}
@@ -393,330 +629,10 @@ export default function FranchiseCustomerDashboard({ customers, franchiseId, isD
   );
 }
 
-
-// ─── Meal Customers Tab ───────────────────────────────────────────────────────
-
-interface MealCustomerTabProps {
-  customers: CustomerData[];
-  searchColumn: string;
-  setSearchColumn: (val: string) => void;
-  searchTerm: string;
-  setSearchTerm: (val: string) => void;
-  filterDiet: string;
-  setFilterDiet: (val: string) => void;
-  filterStatus: string;
-  setFilterStatus: (val: string) => void;
-  filterMedical: string;
-  setFilterMedical: (val: string) => void;
-  filterAllergy: string;
-  setFilterAllergy: (val: string) => void;
-  showArchived: boolean;
-  setShowArchived: (val: boolean) => void;
-  onEdit: (customer: CustomerData) => void;
-  onDeactivate: (customer: CustomerData) => void;
-  /** Removes the mutating edit/deactivate controls for a Franchise Dietitian (Req 23.1). */
-  isDietitian?: boolean;
-}
-
-function MealCustomerTab({
-  customers,
-  searchColumn,
-  setSearchColumn,
-  searchTerm,
-  setSearchTerm,
-  filterDiet,
-  setFilterDiet,
-  filterStatus,
-  setFilterStatus,
-  filterMedical,
-  setFilterMedical,
-  filterAllergy,
-  setFilterAllergy,
-  showArchived,
-  setShowArchived,
-  onEdit,
-  onDeactivate,
-  isDietitian = false,
-}: MealCustomerTabProps) {
-  return (
-    <DataTableCard
-      header={<SectionHeader title="Meal Customers" icon={Users} />}
-      controls={
-        <div className="flex flex-wrap items-center gap-4">
-          <DataSearchFilter
-            searchColumn={searchColumn}
-            onColumnChange={setSearchColumn}
-            searchTerm={searchTerm}
-            onTermChange={setSearchTerm}
-            options={SEARCH_OPTIONS}
-          />
-          <Select value={filterDiet} onValueChange={setFilterDiet}>
-            <SelectTrigger className="w-[140px] border-slate-200 bg-white">
-              <SelectValue placeholder="Diet" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Diets</SelectItem>
-              <SelectItem value="VEG">Veg</SelectItem>
-              <SelectItem value="NON_VEG">Non-Veg</SelectItem>
-              <SelectItem value="NOT_SET">Not Set</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-[140px] border-slate-200 bg-white">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Status</SelectItem>
-              <SelectItem value="Active">Active</SelectItem>
-              <SelectItem value="Pending">Pending</SelectItem>
-              <SelectItem value="Stopped">Stopped</SelectItem>
-              <SelectItem value="Expired">Expired</SelectItem>
-              <SelectItem value="No Plan">No Plan</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filterMedical} onValueChange={setFilterMedical}>
-            <SelectTrigger className="w-[160px] border-slate-200 bg-white">
-              <SelectValue placeholder="Medical" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Medical</SelectItem>
-              <SelectItem value="HAS_MEDICAL">Has Medical History</SelectItem>
-              <SelectItem value="NO_MEDICAL">No Medical History</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filterAllergy} onValueChange={setFilterAllergy}>
-            <SelectTrigger className="w-[150px] border-slate-200 bg-white">
-              <SelectValue placeholder="Allergy" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Allergies</SelectItem>
-              <SelectItem value="HAS_ALLERGY">Has Allergies</SelectItem>
-              <SelectItem value="NO_ALLERGY">No Allergies</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            type="button"
-            variant={showArchived ? "default" : "outline"}
-            size="sm"
-            onClick={() => setShowArchived(!showArchived)}
-          >
-            {showArchived ? "Showing Archived" : "Show Archived"}
-          </Button>
-        </div>
-      }
-    >
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-slate-50/50 border-b border-slate-200">
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Customer Info
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Contact
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Diet & Allergy
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Pincode
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Active Plan
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Clinic
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Medical History
-            </TableHead>
-            <TableHead className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Status
-            </TableHead>
-            <TableHead className="w-[50px] text-xs font-medium text-slate-500 uppercase tracking-wider">
-              <span className="sr-only">Actions</span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {customers.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={9}
-                className="text-center py-12 text-sm text-slate-500"
-              >
-                <div className="flex flex-col items-center gap-1.5">
-                  <Users className="h-8 w-8 text-slate-300" />
-                  <span className="text-sm font-medium text-slate-700">
-                    No customers found
-                  </span>
-                  <span className="max-w-md text-xs text-slate-500">
-                    Try adjusting your search or filter criteria.
-                  </span>
-                </div>
-              </TableCell>
-            </TableRow>
-          ) : (
-            customers.map((customer) => (
-              <TableRow
-                key={customer.id}
-                className="hover:bg-slate-50 transition-colors duration-200"
-              >
-                {/* Customer Info */}
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-slate-900 tracking-tight">
-                      {customer.fullName}
-                    </span>
-                  </div>
-                  <div className="text-sm text-slate-500 mt-0.5">
-                    {customer.gender && customer.gender !== "N/A" ? (
-                      <span>
-                        {customer.gender.charAt(0).toUpperCase()} -{" "}
-                        {customer.age ? `${customer.age} yrs` : "N/A"}
-                      </span>
-                    ) : (
-                      <span>N/A</span>
-                    )}
-                  </div>
-                </TableCell>
-
-                {/* Contact */}
-                <TableCell>
-                  <div className="font-medium text-slate-900 text-sm">
-                    {customer.mobile}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-0.5 truncate max-w-[160px]">
-                    {customer.email}
-                  </div>
-                </TableCell>
-
-                {/* Diet & Allergy */}
-                <TableCell>
-                  <Badge
-                    className={cn(
-                      "rounded-full border-0 px-2 text-[10px] font-semibold",
-                      customer.dietary_preference === "Veg"
-                        ? "bg-green-100 text-green-700 hover:bg-green-100"
-                        : customer.dietary_preference === "Non-Veg"
-                          ? "bg-red-100 text-red-700 hover:bg-red-100"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-100",
-                    )}
-                  >
-                    {customer.dietary_preference === "N/A"
-                      ? "Not Set"
-                      : customer.dietary_preference}
-                  </Badge>
-                  {customer.allergies &&
-                    customer.allergies.trim() !== "" &&
-                    customer.allergies.toLowerCase() !== "none" &&
-                    customer.allergies.toLowerCase() !== "no allergy" && (
-                      <div className="text-[10px] text-slate-500 mt-1 truncate max-w-[120px]" title={customer.allergies}>
-                        {customer.allergies.length > 30
-                          ? `${customer.allergies.slice(0, 30)}…`
-                          : customer.allergies}
-                      </div>
-                    )}
-                </TableCell>
-
-                {/* Pincode */}
-                <TableCell>
-                  <span className="text-sm font-mono text-slate-600">
-                    {customer.primary_pincode}
-                  </span>
-                </TableCell>
-
-                {/* Active Plan */}
-                <TableCell>
-                  <span className="text-sm text-slate-600">
-                    {customer.activePlanName || (
-                      <span className="text-slate-400">—</span>
-                    )}
-                  </span>
-                </TableCell>
-
-                {/* Clinic */}
-                <TableCell>
-                  <span
-                    className={cn(
-                      "text-sm",
-                      customer.clinicName
-                        ? "text-slate-700"
-                        : "text-slate-400",
-                    )}
-                  >
-                    {customer.clinicName || "—"}
-                  </span>
-                </TableCell>
-
-                {/* Medical History */}
-                <TableCell>
-                  {customer.hasMedicalHistory ? (
-                    <Badge className="rounded-full border-0 bg-blue-100 px-2 text-[10px] font-semibold text-blue-700 hover:bg-blue-100">
-                      Medical History
-                    </Badge>
-                  ) : null}
-                </TableCell>
-
-                {/* Status */}
-                <TableCell>
-                  <StatusBadge
-                    status={customer.status}
-                    variant={
-                      customer.status === "Active" ? "solid" : "outline"
-                    }
-                  />
-                </TableCell>
-
-                {/* Actions */}
-                <TableCell>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        className="h-8 w-8 p-0 transition-all duration-200 hover:bg-slate-100"
-                      >
-                        <MoreHorizontal className="h-4 w-4 text-slate-500" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-[180px]">
-                      <DropdownMenuItem asChild>
-                        <Link
-                          href={`/customers/${customer.id}`}
-                          className="cursor-pointer font-medium flex items-center"
-                        >
-                          <Eye className="mr-2 h-4 w-4 text-primary" />
-                          View 360 Dashboard
-                        </Link>
-                      </DropdownMenuItem>
-                      {!isDietitian && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="cursor-pointer font-medium"
-                            onClick={() => onEdit(customer)}
-                          >
-                            <Edit className="mr-2 h-4 w-4 text-muted-foreground" />
-                            Quick Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:bg-destructive/10 cursor-pointer font-medium"
-                            onClick={() => onDeactivate(customer)}
-                            disabled={!customer.isActive}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Deactivate Customer
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
-    </DataTableCard>
-  );
-}
+// The franchise-local `MealCustomerTab` that used to live here has been REMOVED.
+//
+// It was a second, drifting copy of the admin Meal directory table. The Meal tab
+// now renders the shared `MealCustomerSection`, which already had everything the
+// local copy lacked: the clinic filter, the Dietitian column and filter, the
+// Location data-quality flags, the "Expiring in N days" filter, the plan
+// sub-filter inside Status, the Plan Period column, and pagination.

@@ -66,7 +66,27 @@ describe("Smoke: the five Dietitian storages, their indexes and RLS policies exi
     expect(SCHEMA_SQL).toMatch(/idx_health_log_audit_customer/);
     expect(SCHEMA_SQL).toMatch(/idx_customer_profiles_dietitian_id/);
     expect(SCHEMA_SQL).toMatch(/idx_users_dietitian_clinic_id/);
+    // `users_one_active_dietitian_per_franchise` is still DECLARED by this
+    // original schema script — it is dropped by the later migration
+    // `allow-multiple-franchise-dietitians.sql`, which the runtime assertion
+    // below verifies. Historical scripts are not rewritten.
     expect(SCHEMA_SQL).toMatch(/users_one_active_dietitian_per_franchise/);
+  });
+
+  it("the later migration drops the one-dietitian-per-franchise cap (franchise-scoped-access Task 11)", () => {
+    const MIGRATION_SQL = readFileSync(
+      path.join(REPO_ROOT, "scripts", "allow-multiple-franchise-dietitians.sql"),
+      "utf8",
+    );
+    expect(MIGRATION_SQL).toMatch(
+      /DROP INDEX IF EXISTS public\.users_one_active_dietitian_per_franchise/,
+    );
+    // And it narrows the FRANCHISE disjunct to require the Dietitian_Link…
+    expect(MIGRATION_SQL).toMatch(/cp\.dietitian_id = d\.user_id/);
+    // …while leaving the CORE disjunct intact.
+    expect(MIGRATION_SQL).toMatch(
+      /d\.franchise_id IS NULL AND cp\.dietitian_id = d\.user_id/,
+    );
   });
 
   it("declares RLS policies for every table it creates (Req 26.2)", () => {
@@ -127,11 +147,22 @@ describe("Smoke: the five Dietitian storages, their indexes and RLS policies exi
                        WHERE i.schemaname = 'public' AND i.indexname = t.name) AS present
         FROM unnest(ARRAY[
           'idx_health_logs_customer_date', 'idx_health_log_audit_customer',
-          'idx_customer_profiles_dietitian_id', 'idx_users_dietitian_clinic_id',
-          'users_one_active_dietitian_per_franchise'
+          'idx_customer_profiles_dietitian_id', 'idx_users_dietitian_clinic_id'
         ]) AS t(name)
       `);
       for (const row of indexes) expect(row.present, row.name).toBe(true);
+
+      // `users_one_active_dietitian_per_franchise` must be ABSENT once
+      // `allow-multiple-franchise-dietitians.sql` has been applied: a Franchise
+      // may hold a team of Dietitians.
+      const [cap] = await queryJson<{ present: boolean }>(`
+        SELECT EXISTS (
+          SELECT 1 FROM pg_indexes
+          WHERE schemaname = 'public'
+            AND indexname = 'users_one_active_dietitian_per_franchise'
+        ) AS present
+      `);
+      expect(cap?.present, "users_one_active_dietitian_per_franchise").toBe(false);
 
       const policies = await queryJson<{ name: string; present: boolean }>(`
         SELECT t.name,

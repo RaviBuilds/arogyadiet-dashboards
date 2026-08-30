@@ -369,11 +369,12 @@ describe("Property 7: Account and onboarding creation are atomic", () => {
         kind: "MOBILE_VIOLATION",
         message: 'duplicate key value violates unique constraint "users_mobile_key"',
       },
-      {
-        kind: "FRANCHISE_VIOLATION",
-        message:
-          'duplicate key value violates unique constraint "users_one_active_dietitian_per_franchise"',
-      },
+      // The former FRANCHISE_VIOLATION mode is gone: it modelled the
+      // `users_one_active_dietitian_per_franchise` unique-index violation, and
+      // `scripts/allow-multiple-franchise-dietitians.sql` DROPS that index so a
+      // Franchise can hold a team of Dietitians. GENERIC_ERROR still covers the
+      // "any other failure after the auth identity exists" case this property
+      // is really about.
     ] as const;
 
     it("for any failing step after the auth identity is created, neither the auth identity nor a users row remains", async () => {

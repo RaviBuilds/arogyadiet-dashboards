@@ -44,7 +44,9 @@ import {
   isDietitianLevel,
   landingRouteFor,
   hasGroupAccess,
+  isPortalPathAllowed,
   type AccessConfiguration,
+  type OperationsGroup,
 } from "@/lib/auth/adminAccessCore";
 
 interface FranchiseNavbarProps {
@@ -87,6 +89,57 @@ const DIETITIAN_NAV_ITEMS: typeof NAV_ITEMS = [
   { href: "/profile", label: "Profile", icon: User },
 ];
 
+/**
+ * Which Operations_Group (if any) gates each nav destination
+ * (franchise-scoped-access Task 9).
+ *
+ * Previously every item rendered for every non-Dietitian level, so a user
+ * granted only `customers` still saw six links that all bounced them straight
+ * back to their landing route. Entries absent from this map are NOT
+ * group-gated:
+ *   /dashboard, /profile  — reachable by every level
+ *   /inventory            — gated by capability AREA, not by group, so it is
+ *                           handled separately below
+ * The group values match the canonical path each franchise route resolves to
+ * via `toCanonicalPath`'s alias map.
+ */
+/**
+ * Destinations that are NEUTRAL to the portal path gate but carry their own,
+ * stricter group guard on the page itself. `/franchise/dietitian-activity`
+ * canonicalises to a path no classifier recognises, so the route gate lets any
+ * operations-level user through — but the page calls
+ * `guardFranchiseGroupAccess("customers")` and redirects. The nav must reflect
+ * the stricter of the two.
+ */
+const NAV_ITEM_EXTRA_GROUP: Readonly<Record<string, OperationsGroup>> = {
+  "/dietitian-activity": "customers",
+};
+
+/**
+ * Is `href` reachable under `config`? Exported as a pure function so the
+ * reachability rules can be unit-tested without rendering the navbar.
+ *
+ * DELEGATES to `isPortalPathAllowed` rather than restating the rules, because a
+ * second implementation drifts: an earlier hand-rolled version treated
+ * `/dashboard` as neutral and so offered it to an inventory-only user, whom the
+ * real gate bounces (`/admin/dashboard` is classified as the OPERATIONS area).
+ *
+ * Invariant: this may be STRICTER than the route gate (see
+ * NAV_ITEM_EXTRA_GROUP) but never more permissive — the nav must not offer a
+ * link that bounces.
+ */
+export function isFranchiseNavItemVisible(
+  href: string,
+  config: AccessConfiguration,
+): boolean {
+  if (!isPortalPathAllowed(config, `/franchise${href}`, "/franchise")) {
+    return false;
+  }
+  const extraGroup = NAV_ITEM_EXTRA_GROUP[href];
+  if (extraGroup !== undefined) return hasGroupAccess(config, extraGroup);
+  return true;
+}
+
 export default function FranchiseNavbar({
   userProfile,
   email,
@@ -109,7 +162,21 @@ export default function FranchiseNavbar({
         ...NAV_ITEMS.slice(2),
       ]
     : NAV_ITEMS;
-  const visibleNavItems = isDietitian ? DIETITIAN_NAV_ITEMS : baseNavItems;
+
+  /**
+   * Hide destinations the caller cannot reach, so the nav never offers a link
+   * that the route gate will bounce. When no config is supplied the full list is
+   * kept, preserving the previous behaviour for any caller that does not pass
+   * one.
+   */
+  const permittedNavItems =
+    config == null
+      ? baseNavItems
+      : baseNavItems.filter((item) =>
+          isFranchiseNavItemVisible(item.href, config),
+        );
+
+  const visibleNavItems = isDietitian ? DIETITIAN_NAV_ITEMS : permittedNavItems;
   // A Dietitian cannot reach /dashboard, so the brand link points at their
   // landing route; every other level keeps /dashboard.
   const homeHref = isDietitian ? landingRouteFor("dietitian") : "/dashboard";

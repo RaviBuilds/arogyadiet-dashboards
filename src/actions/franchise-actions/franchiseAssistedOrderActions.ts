@@ -35,8 +35,10 @@ import {
 } from "@/services/AssistedOrderService";
 import { PAID_STATUS, type CartLine } from "@/lib/shop/assisted-order/core";
 import type { AssistedOrderPricing } from "@/lib/shop/assisted-order/pricing";
+import type { WalkInCustomerInput } from "@/lib/shop/assisted-order/walkin";
 import type { ShopOrderDiscount } from "@/lib/pricing/inclusive-tax";
 import type { ActionResult } from "@/types/franchise";
+import { revalidatePath } from "next/cache";
 
 const UNAUTHORIZED_ERROR =
   "You are not authorized to place assisted shop orders.";
@@ -189,5 +191,55 @@ export async function markPaidAndPlaceOrderAction(
   if (!result.ok) {
     return { success: false, error: result.error };
   }
+  return { success: true, data: result.value };
+}
+
+/**
+ * Mark PAID and place a WALK-IN shop order — a counter sale to a buyer who has
+ * no customer profile at all (they bought only a shop product, with no meal or
+ * KIT subscription).
+ *
+ * The franchise twin of the admin `markPaidAndPlaceWalkInOrderAction`. Same
+ * authorization and PAID gating as {@link markPaidAndPlaceOrderAction}; the buyer
+ * is identified by a recorded name (plus optional mobile and address) instead of
+ * a `customer_profile_id`, so every unit leaving shop stock still has exactly one
+ * auditable order behind it. The service validates the buyer details server-side
+ * and creates the sale already delivered (counter handover), so it never enters
+ * delivery routing.
+ *
+ * NO FULFILLING CLINIC IS PASSED, unlike the admin version. That parameter exists
+ * to resolve a Core_Clinic for a CORE operator; `placeWalkInOrder` requires one
+ * only when `ctx.scope.kind === "CORE"`. A franchise order is attributed by
+ * `franchise_id` and its `clinic_id` stays NULL by design, so supplying one here
+ * would be meaningless — and accepting one from the client would let a franchise
+ * operator stamp another tenant's clinic onto the sale.
+ */
+export async function markPaidAndPlaceWalkInOrderAction(
+  cart: CartLine[],
+  walkIn: WalkInCustomerInput,
+  discount?: ShopOrderDiscount,
+): Promise<ActionResult<PlaceOrderOutcome>> {
+  const resolved = await resolveFranchiseOperatorContext();
+  if (!resolved.ok) {
+    return { success: false, error: resolved.error };
+  }
+
+  const service = new AssistedOrderService();
+  const result = await service.placeWalkInOrder(
+    resolved.ctx,
+    cart,
+    walkIn,
+    PAID_STATUS,
+    discount,
+  );
+
+  if (!result.ok) {
+    return { success: false, error: result.error };
+  }
+
+  // The counter sale is immediately visible in the franchise ledger and depletes
+  // shop stock, so both surfaces are stale the moment it lands.
+  revalidatePath("/franchise/customers/shop-orders");
+  revalidatePath("/franchise/shop-products");
   return { success: true, data: result.value };
 }

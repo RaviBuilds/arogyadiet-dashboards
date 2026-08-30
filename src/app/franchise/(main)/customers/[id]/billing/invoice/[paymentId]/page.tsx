@@ -1,8 +1,8 @@
-import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { generateInvoiceData } from "@/lib/invoices";
 import { InvoiceDocument } from "@/shared/components/shared/invoice/InvoiceDocument";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { guardFranchiseCustomersWorkspace } from "@/lib/auth/adminAccess";
 
 export const revalidate = 0;
 
@@ -20,12 +20,12 @@ export default async function FranchiseInvoicePage({
 }) {
   const { id, paymentId } = await params;
 
-  const cookieStore = await cookies();
-  const franchiseId = cookieStore.get("x-franchise-id")?.value ?? "";
-
-  if (!franchiseId) {
-    notFound();
-  }
+  // Authorization + tenant identity (franchise-scoped-access Task 5). Replaces
+  // an `x-franchise-id` cookie read that performed no Operations_Group check:
+  // a franchise user without the `customers` group could previously pull any
+  // invoice belonging to their tenant. The two ownership checks below are
+  // retained unchanged — permission and tenancy are independent concerns.
+  const { franchiseId } = await guardFranchiseCustomersWorkspace();
 
   const supabaseAdmin = createAdminClient();
 

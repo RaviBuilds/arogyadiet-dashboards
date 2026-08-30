@@ -39,7 +39,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  countActiveDietitiansForFranchise,
+
   getDietitianById,
   insertDietitian,
   listClinicsWithFranchiseName,
@@ -56,7 +56,7 @@ import {
   type UpdateDietitianInput,
 } from "@/validations/dietitianSchema";
 import {
-  FRANCHISE_ALREADY_HAS_DIETITIAN,
+
   MOBILE_ALREADY_REGISTERED,
 } from "@/lib/dietitian/messages";
 import type { DietitianAccount } from "@/types/dietitian";
@@ -93,22 +93,13 @@ function isMobileUniqueViolation(error: PgErrorLike | null | undefined): boolean
   return isUnique && haystack.includes("mobile");
 }
 
-/**
- * Whether a raised error is the `users_one_active_dietitian_per_franchise`
- * partial unique index violation (Req 2.11, 2.12, 10.4, 10.5). The index is
- * what makes two concurrent creates for the same Franchise safe — this maps
- * that violation to the pinned message rather than surfacing raw DB text.
- */
-function isFranchiseDietitianUniqueViolation(
-  error: PgErrorLike | null | undefined,
-): boolean {
-  if (!error) return false;
-  const haystack = `${error.message ?? ""} ${error.details ?? ""} ${
-    error.hint ?? ""
-  }`.toLowerCase();
-  const isUnique = error.code === PG_UNIQUE_VIOLATION || haystack.includes("duplicate key");
-  return isUnique && haystack.includes("users_one_active_dietitian_per_franchise");
-}
+// REMOVED: `isFranchiseDietitianUniqueViolation`.
+//
+// It mapped the `users_one_active_dietitian_per_franchise` partial unique index
+// violation to a friendly message. `scripts/allow-multiple-franchise-dietitians.sql`
+// DROPS that index — a Franchise may now hold a team of Dietitians — so the
+// violation can no longer occur and the mapper had become dead code that
+// implied a constraint the database no longer enforces.
 
 /**
  * Delete a just-created Supabase Auth identity, swallowing any error from the
@@ -190,28 +181,20 @@ async function findClinic(clinicId: string | null): Promise<ClinicWithFranchiseN
 }
 
 /**
- * Assert that assigning a Dietitian to `franchiseId` would not create a
- * second active Dietitian for that Franchise (Req 2.11, 3.7, 10.2, 10.4).
- * `franchiseId === null` (Core_Business) is always permitted — a Core Clinic
- * may carry many active Dietitians (Req 10.1). `excludeDietitianId` lets an
- * update ignore the Dietitian's own existing row when reassigning it to the
- * same Franchise it already belongs to.
+ * Formerly asserted that a Franchise held at most one active Dietitian.
  *
- * This is an application-layer pre-check that returns a friendly error before
- * attempting the write; the database's partial unique index
- * (`users_one_active_dietitian_per_franchise`) is the concurrency-safe source
- * of truth and is mapped by {@link isFranchiseDietitianUniqueViolation} when a
- * race slips past this check (Req 2.12).
+ * `scripts/allow-multiple-franchise-dietitians.sql` lifted that cap — a
+ * Franchise now needs a TEAM of Dietitians, each reading only the
+ * Customer_Records assigned to them — so this is now unconditionally permissive.
+ *
+ * Kept as a no-op seam rather than deleted at every call site: it documents that
+ * the rule was removed deliberately (not overlooked), and gives one place to
+ * reinstate a limit if the business ever wants one.
  */
 async function assertFranchiseDietitianCardinality(
-  franchiseId: string | null,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _franchiseId: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (franchiseId === null) return { ok: true };
-
-  const activeCount = await countActiveDietitiansForFranchise(franchiseId);
-  if (activeCount > 0) {
-    return { ok: false, error: FRANCHISE_ALREADY_HAS_DIETITIAN };
-  }
   return { ok: true };
 }
 
@@ -314,9 +297,6 @@ export async function createDietitian(
     if (isMobileUniqueViolation(pgError)) {
       return { success: false, error: MOBILE_ALREADY_REGISTERED, field: "mobile" };
     }
-    if (isFranchiseDietitianUniqueViolation(pgError)) {
-      return { success: false, error: FRANCHISE_ALREADY_HAS_DIETITIAN, field: "clinicId" };
-    }
     return {
       success: false,
       error: err instanceof Error ? err.message : "Failed to create dietitian",
@@ -388,9 +368,6 @@ export async function updateDietitian(
     if (isMobileUniqueViolation(pgError)) {
       return { success: false, error: MOBILE_ALREADY_REGISTERED, field: "mobile" };
     }
-    if (isFranchiseDietitianUniqueViolation(pgError)) {
-      return { success: false, error: FRANCHISE_ALREADY_HAS_DIETITIAN, field: "clinicId" };
-    }
     return {
       success: false,
       error: err instanceof Error ? err.message : "Failed to update dietitian",
@@ -420,7 +397,7 @@ export type ToggleDietitianActiveResult =
  * always permitted, mirroring {@link assertFranchiseDietitianCardinality}. A
  * cardinality race that slips past this pre-check (e.g. two concurrent
  * reactivations) is mapped from the database's partial unique index
- * violation by {@link isFranchiseDietitianUniqueViolation}, exactly as
+ * violation (no longer possible — the index was dropped), exactly as
  * {@link createDietitian} and {@link updateDietitian} do (Req 2.12).
  */
 export async function toggleDietitianActive(
@@ -463,10 +440,6 @@ export async function toggleDietitianActive(
 
     return { success: true, data: dietitian };
   } catch (err) {
-    const pgError = extractPgError(err);
-    if (isFranchiseDietitianUniqueViolation(pgError)) {
-      return { success: false, error: FRANCHISE_ALREADY_HAS_DIETITIAN };
-    }
     return {
       success: false,
       error: err instanceof Error ? err.message : "Failed to update dietitian status",

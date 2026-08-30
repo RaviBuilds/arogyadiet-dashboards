@@ -26,7 +26,6 @@ import {
   applyDietitianScope,
   dietitianCanRead,
   dietitianScopeFromUser,
-  dietitianScopeOrFilter,
   filterScopableCustomers,
   type DietitianScope,
   type ScopableCustomer,
@@ -102,9 +101,16 @@ function sqlDietitianCanReadCustomer(
   d: CurrentDietitianRow,
   cp: ScopableCustomer,
 ): boolean {
+  // Franchise scope is the CONJUNCTION of tenant and Dietitian_Link
+  // (scripts/allow-multiple-franchise-dietitians.sql). The tenant alone would
+  // let every Dietitian of a Franchise read every colleague's customer, which
+  // stopped being acceptable once a Franchise could hold more than one.
   const franchiseDisjunct = and3(
     d.franchise_id !== null,
-    eq3(cp.franchise_id, d.franchise_id),
+    and3(
+      eq3(cp.franchise_id, d.franchise_id),
+      eq3(cp.dietitian_id, d.user_id),
+    ),
   );
   // Core scope is strictly the Dietitian_Link — the linked Clinic no longer
   // widens the read scope, so there is no `clinic_id` disjunct here.
@@ -118,7 +124,7 @@ function sqlDietitianCanReadCustomer(
 /**
  * The `users` row behind a generated scope. A Franchise Dietitian may well
  * carry a `dietitian_clinic_id` too — the SQL ignores it, and so must the
- * application scope, which is what makes the franchise case tenant-only.
+ * application scope: the Clinic widens neither kind of scope.
  */
 function dietitianRowFor(
   scope: DietitianScopeSample,
@@ -294,9 +300,14 @@ describe("Property 3: Dietitian read scope is sound", () => {
     );
   });
 
-  it("a franchise Dietitian reads the tenant only and never picks up the Dietitian_Link disjunct", () => {
+  it("a franchise Dietitian needs BOTH the tenant and the Dietitian_Link", () => {
     /**
-     * **Validates: Requirements 21.8, 21.11, 22.8**
+     * **Validates: Requirements 21.8, 21.11, 22.8 as amended by
+     * scripts/allow-multiple-franchise-dietitians.sql**
+     *
+     * The franchise disjunct used to be the tenant alone. That was equivalent to
+     * "their own customers" only while a Franchise was capped at one Dietitian;
+     * with a team it would expose every colleague's customers.
      */
     fc.assert(
       fc.property(
@@ -311,14 +322,36 @@ describe("Property 3: Dietitian read scope is sound", () => {
           };
           const customer = toScopable(record);
 
-          // Tenant match is the whole predicate.
+          // Both conjuncts are required.
           expect(dietitianCanRead(scope, customer)).toBe(
-            customer.franchise_id === franchiseId,
+            customer.franchise_id === franchiseId &&
+              customer.dietitian_id === dietitianUserId,
           );
 
-          // Forcing a Dietitian_Link to this Dietitian, and forcing the
-          // Dietitian's own Clinic onto the record, must not make an
-          // out-of-tenant record readable.
+          // A same-tenant record NOT linked to this Dietitian is unreadable —
+          // this is the colleague-isolation property multiple Dietitians need.
+          const sameTenantUnlinked: ScopableCustomerSample = {
+            ...customer,
+            franchise_id: franchiseId,
+            dietitian_id: null,
+          };
+          expect(dietitianCanRead(scope, sameTenantUnlinked)).toBe(false);
+
+          const otherDietitian = DIETITIAN_IDS.find(
+            (id) => id !== dietitianUserId,
+          );
+          if (otherDietitian !== undefined) {
+            expect(
+              dietitianCanRead(scope, {
+                ...customer,
+                franchise_id: franchiseId,
+                dietitian_id: otherDietitian,
+              }),
+            ).toBe(false);
+          }
+
+          // Conversely, a link alone must not defeat the tenant check: forcing
+          // the link onto an out-of-tenant record keeps it unreadable.
           const linkedOutOfTenant: ScopableCustomerSample = {
             ...customer,
             dietitian_id: dietitianUserId,
@@ -392,7 +425,11 @@ describe("Property 3: Dietitian read scope is sound", () => {
           const builder = new RecordingBuilder();
 
           applyDietitianScope(builder, scope);
-          expect(builder.filters.length).toBe(1);
+          // A core scope emits one filter (the link); a franchise scope emits
+          // two (tenant AND link), which PostgREST ANDs together.
+          expect(builder.filters.length).toBe(
+            scopeSample.kind === "franchise" ? 2 : 1,
+          );
 
           for (const record of records) {
             const customer = toScopable(record);
@@ -406,23 +443,10 @@ describe("Property 3: Dietitian read scope is sound", () => {
     );
   });
 
-  it("dietitianScopeOrFilter names both disjuncts of the core scope", () => {
-    /**
-     * **Validates: Requirements 5.5, 5.6**
-     */
-    fc.assert(
-      fc.property(
-        fc.constantFrom(...DIETITIAN_IDS),
-        fc.constantFrom(...CLINIC_IDS),
-        (dietitianUserId, clinicId) => {
-          expect(dietitianScopeOrFilter(dietitianUserId, clinicId)).toBe(
-            `dietitian_id.eq.${dietitianUserId},clinic_id.eq.${clinicId}`,
-          );
-        },
-      ),
-      { numRuns: NUM_RUNS },
-    );
-  });
+  // REMOVED: the `dietitianScopeOrFilter` test. That helper built an `or`
+  // filter naming a `clinic_id` disjunct which the predicate no longer has, had
+  // no production callers, and contradicted the real scope — so it was deleted
+  // from `src/lib/dietitian/scope.ts` rather than left as a trap.
 
   it("rejects a non-uuid identity rather than inlining it into a filter string", () => {
     /**
@@ -442,12 +466,19 @@ describe("Property 3: Dietitian read scope is sound", () => {
         notAUuid,
         fc.constantFrom(...CLINIC_IDS),
         (badId, clinicId) => {
-          expect(() => dietitianScopeOrFilter(badId, clinicId)).toThrow();
           expect(() =>
             applyDietitianScope(new RecordingBuilder(), {
               kind: "core",
               dietitianUserId: badId,
               clinicId: null,
+            }),
+          ).toThrow();
+          // The franchise branch must validate BOTH ids it inlines.
+          expect(() =>
+            applyDietitianScope(new RecordingBuilder(), {
+              kind: "franchise",
+              dietitianUserId: badId,
+              franchiseId: CLINIC_FRANCHISE[clinicId] ?? FRANCHISE_IDS[0],
             }),
           ).toThrow();
         },

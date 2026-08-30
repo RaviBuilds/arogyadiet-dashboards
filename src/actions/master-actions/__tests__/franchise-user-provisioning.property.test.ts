@@ -267,7 +267,6 @@ import {
 } from "../franchiseUserActions";
 import {
   WIRE_CLINIC_TO_FRANCHISE_FIRST,
-  FRANCHISE_ALREADY_HAS_DIETITIAN,
 } from "@/lib/dietitian/messages";
 
 const { db } = H;
@@ -516,23 +515,19 @@ describe("Property 34: Franchise user provisioning derives role and tenant, and 
               expect(
                 db.users.some((u: any) => u.email === dietitianEmail),
               ).toBe(false);
-            } else if (state.hasActiveDietitian) {
-              // A Clinic exists but already has an active Dietitian → the
-              // Master Portal would show Edit Dietitian instead; Create is
-              // correctly rejected and leaves no partial account (Req 22.6,
-              // 22.7).
-              expect(dietitianResult.success).toBe(false);
-              if (!dietitianResult.success) {
-                expect(dietitianResult.error).toBe(FRANCHISE_ALREADY_HAS_DIETITIAN);
-              }
-              expect(
-                db.users.some((u: any) => u.email === dietitianEmail),
-              ).toBe(false);
             } else {
-              // Clinic present, no active Dietitian yet → Create Dietitian is
-              // enabled and succeeds, deriving role FRANCHISE_ADMIN,
-              // franchise_id and the Dietitian_Clinic_Link from the
-              // Franchise's own Clinic (Req 22.3, 22.5).
+              // Clinic present → Create Dietitian succeeds, deriving role
+              // FRANCHISE_ADMIN, franchise_id and the Dietitian_Clinic_Link from
+              // the Franchise's own Clinic (Req 22.3, 22.5).
+              //
+              // UPDATED by franchise-scoped-access Task 11: this branch used to
+              // split on `state.hasActiveDietitian` and expect a rejection with
+              // FRANCHISE_ALREADY_HAS_DIETITIAN when one already existed. That
+              // cap (the `users_one_active_dietitian_per_franchise` partial
+              // unique index) has been DROPPED — a Franchise now needs a TEAM of
+              // Dietitians, each reading only the Customer_Records assigned to
+              // them. So creation succeeds whether or not the Franchise already
+              // has one.
               expect(dietitianResult.success).toBe(true);
               if (dietitianResult.success) {
                 expect(dietitianResult.data.roleCode).toBe("FRANCHISE_ADMIN");
@@ -540,9 +535,8 @@ describe("Property 34: Franchise user provisioning derives role and tenant, and 
                 expect(dietitianResult.data.clinicId).toBe(clinicId);
                 expect(dietitianResult.data.isActive).toBe(true);
 
-                // Now that this Franchise has an active Dietitian, a second
-                // Create Dietitian attempt must be rejected the same way the
-                // UI would now show Edit Dietitian instead (Req 22.5, 22.6).
+                // A SECOND Dietitian for the same Franchise must now also
+                // succeed — this is the behaviour change, asserted positively.
                 const secondAttempt = await createFranchiseDietitian({
                   franchiseId,
                   fullName: "Second Dietitian",
@@ -550,9 +544,10 @@ describe("Property 34: Franchise user provisioning derives role and tenant, and 
                   mobile: String(9300000000 + nextUnique()),
                   password: "password123",
                 });
-                expect(secondAttempt.success).toBe(false);
-                if (!secondAttempt.success) {
-                  expect(secondAttempt.error).toBe(FRANCHISE_ALREADY_HAS_DIETITIAN);
+                expect(secondAttempt.success).toBe(true);
+                if (secondAttempt.success) {
+                  expect(secondAttempt.data.franchiseId).toBe(franchiseId);
+                  expect(secondAttempt.data.clinicId).toBe(clinicId);
                 }
               }
             }

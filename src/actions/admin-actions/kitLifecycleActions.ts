@@ -13,6 +13,10 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  isFranchiseCaller,
+  authorizeFranchiseCustomerAccess,
+} from "@/lib/auth/sharedCustomerActor";
+import {
   assertGroupAccess,
   GroupAccessDeniedError,
 } from "@/lib/auth/adminAccess";
@@ -64,14 +68,25 @@ export async function sendNewKitAction(
   customerProfileId: string,
   formData: unknown
 ): Promise<SendNewKitActionResult> {
-  // (1) Authorization
-  try {
-    await assertGroupAccess("customers");
-  } catch (err) {
-    if (err instanceof GroupAccessDeniedError) {
-      return { success: false, error: "You do not have permission to manage customers." };
+  // (1) Authorization.
+  //
+  // The FRANCHISE branch is additive: `assertGroupAccess` admits only
+  // ADMIN / MASTER_ADMIN, so a franchise user was refused outright and the KIT
+  // tabs were unusable on that portal. A franchise caller now goes through the
+  // franchise `customers` gate plus a tenancy check, so they may send a KIT to
+  // their OWN customers and no one else's. The core path below is unchanged.
+  if (await isFranchiseCaller()) {
+    const gate = await authorizeFranchiseCustomerAccess(customerProfileId, "manage");
+    if (!gate.ok) return { success: false, error: gate.error };
+  } else {
+    try {
+      await assertGroupAccess("customers");
+    } catch (err) {
+      if (err instanceof GroupAccessDeniedError) {
+        return { success: false, error: "You do not have permission to manage customers." };
+      }
+      throw err;
     }
-    throw err;
   }
 
   // (2) Zod re-validate server-side — never trust the client
@@ -122,14 +137,22 @@ export async function sendNewKitAction(
 export async function checkKitEligibilityAction(
   customerProfileId: string
 ): Promise<CheckKitEligibilityActionResult> {
-  // Authorization
-  try {
-    await assertGroupAccess("customers");
-  } catch (err) {
-    if (err instanceof GroupAccessDeniedError) {
-      return { success: false, error: "You do not have permission to view customers." };
+  // Authorization. This is a READ (it only decides whether the "Send New KIT"
+  // button is offered), so the franchise branch asks for read access — a
+  // view-only franchise user and a Franchise Dietitian may both see the badge.
+  // The core path is unchanged.
+  if (await isFranchiseCaller()) {
+    const gate = await authorizeFranchiseCustomerAccess(customerProfileId, "read");
+    if (!gate.ok) return { success: false, error: gate.error };
+  } else {
+    try {
+      await assertGroupAccess("customers");
+    } catch (err) {
+      if (err instanceof GroupAccessDeniedError) {
+        return { success: false, error: "You do not have permission to view customers." };
+      }
+      throw err;
     }
-    throw err;
   }
 
   if (!customerProfileId || customerProfileId.trim().length === 0) {

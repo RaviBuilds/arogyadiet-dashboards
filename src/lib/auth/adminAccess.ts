@@ -369,13 +369,52 @@ export async function guardAdminPage(
 export async function guardFranchiseGroupAccess(
   group: OperationsGroup,
 ): Promise<{ config: AccessConfiguration; franchiseId: string }> {
+  const ctx = await resolveFranchiseAccessContext();
+  if (!ctx) redirect("/unauthorized");
+
+  if (!hasGroupAccess(ctx.config, group)) {
+    redirect(landingRouteFor(ctx.config.level));
+  }
+
+  return { config: ctx.config, franchiseId: ctx.franchiseId };
+}
+
+/**
+ * The request-scoped identity of a signed-in Franchise_Portal user, with the
+ * Franchise_Owner override already applied.
+ */
+export interface FranchiseAccessContext {
+  /** `public.users.id`. */
+  userId: string;
+  franchiseId: string;
+  /** Resolved configuration; forced to full access for the Franchise_Owner. */
+  config: AccessConfiguration;
+  /** `franchises.owner_user_id === users.id` (Req 21.6). */
+  isOwner: boolean;
+}
+
+/**
+ * Resolve the caller as a Franchise_Portal user, applying every eligibility
+ * rule the Franchise_Portal layout applies (franchise-scoped-access Task 3).
+ *
+ * Extracted so the redirect-style page guard and the result-style action gates
+ * below cannot drift apart on WHO counts as a valid franchise caller — the same
+ * class of divergence that let franchise customer writes fail while the layout
+ * happily rendered the page.
+ *
+ * Postcondition: returns `null` (never throws, never redirects) when there is
+ * no session, the caller's role is not `FRANCHISE_ADMIN`, the caller has no
+ * `franchise_id`, or the Franchise is suspended. Otherwise returns the context
+ * with the Franchise_Owner override applied.
+ */
+async function resolveFranchiseAccessContext(): Promise<FranchiseAccessContext | null> {
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/unauthorized");
+  if (!user) return null;
 
   const { data: userProfileData } = await supabase
     .from("users")
@@ -392,10 +431,10 @@ export async function guardFranchiseGroupAccess(
     | undefined;
   const roleCode = Array.isArray(roles) ? roles[0]?.code : roles?.code;
 
-  if (roleCode !== "FRANCHISE_ADMIN") redirect("/unauthorized");
+  if (roleCode !== "FRANCHISE_ADMIN") return null;
 
   const franchiseId = userProfileData?.franchise_id;
-  if (!franchiseId) redirect("/unauthorized");
+  if (!franchiseId) return null;
 
   const { data: franchise } = await supabase
     .from("franchises")
@@ -403,23 +442,188 @@ export async function guardFranchiseGroupAccess(
     .eq("id", franchiseId)
     .single();
 
-  if (franchise?.status === "suspended") redirect("/unauthorized");
+  if (franchise?.status === "suspended") return null;
 
-  const isFranchiseOwner =
+  const isOwner =
     typeof franchise?.owner_user_id === "string" &&
     franchise.owner_user_id === userProfileData?.id;
-  const config: AccessConfiguration = isFranchiseOwner
+
+  const config: AccessConfiguration = isOwner
     ? { level: "inventory_operations", groups: {} }
     : resolveAccessConfiguration(
         userProfileData?.admin_access_level,
         userProfileData?.admin_operations_access,
       );
 
-  if (!hasGroupAccess(config, group)) {
-    redirect(landingRouteFor(config.level));
+  return {
+    userId: userProfileData?.id as string,
+    franchiseId: franchiseId as string,
+    config,
+    isOwner,
+  };
+}
+
+/**
+ * Write guard for Franchise_Portal server actions — the franchise twin of
+ * {@link assertGroupManage} (franchise-scoped-access Task 3).
+ *
+ * WHY A SEPARATE GATE RATHER THAN WIDENING `assertGroupManage`:
+ * the admin gate's `roleCode !== "ADMIN"` rejection is load-bearing SECURITY,
+ * not an oversight. `Customer360Dashboard` is shared and imports the admin
+ * customer actions as fallbacks, so their server-action ids reach the franchise
+ * client bundle and are directly invocable; those actions perform no franchise
+ * ownership check, so that role rejection is the only thing preventing a
+ * cross-tenant write. The franchise portal therefore gets its own gate over the
+ * shared ungated cores instead (see `src/services/customerManagementCore.ts`).
+ *
+ * NOTE: this establishes PERMISSION only. Tenancy is a separate, independent
+ * concern — callers must still verify the target row belongs to the caller's
+ * Franchise (`guardProfile` / `guardAuthUser` / `guardEmail`).
+ *
+ * Throws `GroupAccessDeniedError`, with `readOnly` distinguishing "has view
+ * access, attempted a write" from "no access to this group at all", so the
+ * messages match the admin portal's exactly.
+ */
+export async function assertFranchiseGroupManage(
+  group: OperationsGroup,
+): Promise<FranchiseAccessContext> {
+  const ctx = await resolveFranchiseAccessContext();
+  // Not a valid franchise caller at all: indistinguishable from "no access".
+  if (!ctx) throw new GroupAccessDeniedError(group, false);
+
+  if (canManageGroup(ctx.config, group)) return ctx;
+
+  throw new GroupAccessDeniedError(group, hasGroupAccess(ctx.config, group));
+}
+
+/**
+ * Result-style twin of {@link assertFranchiseGroupManage} for franchise server
+ * actions returning an `ActionResult`-shaped value. Returns the same two
+ * user-facing messages the admin gate returns, so read-only feedback is
+ * identical across portals.
+ *
+ * Usage:
+ *   const gate = await checkFranchiseGroupManage("customers");
+ *   if (!gate.ok) return { success: false, error: gate.error };
+ */
+export async function checkFranchiseGroupManage(
+  group: OperationsGroup,
+): Promise<
+  { ok: true; ctx: FranchiseAccessContext } | { ok: false; error: string }
+> {
+  try {
+    const ctx = await assertFranchiseGroupManage(group);
+    return { ok: true, ctx };
+  } catch (err) {
+    if (err instanceof GroupAccessDeniedError) {
+      return {
+        ok: false,
+        error: err.readOnly
+          ? "You have read-only access to this section."
+          : "You do not have permission to perform this action.",
+      };
+    }
+    throw err;
+  }
+}
+
+/**
+ * READ gate for Franchise_Portal server actions scoped to the `customers`
+ * group — the read-capable twin of {@link checkFranchiseGroupManage}.
+ *
+ * WHY A SEPARATE GATE RATHER THAN REUSING `checkFranchiseGroupManage`:
+ * that one requires MANAGE, so a franchise user holding `customers: "view"` and
+ * every Franchise Dietitian would be refused a plain READ. The Customer_360 KIT
+ * tabs are mostly reads (KIT history, subscription history, eligibility, the KIT
+ * product catalogue), and a view-only user is entitled to see them.
+ *
+ * WHY IT ADMITS DIETITIANS EXPLICITLY: `hasGroupAccess` returns `false` for the
+ * `dietitian` level by design — a Dietitian holds no Operations_Group at all,
+ * their reachability comes from DIETITIAN_ALLOWED_PREFIXES. Gating reads on
+ * `hasGroupAccess` alone would therefore lock a Dietitian out of the very
+ * customer records they are assigned to, which is the same trap
+ * {@link guardFranchiseCustomersWorkspace} documents for the page guard.
+ *
+ * `isDietitian` is returned because tenancy is NOT sufficient for a Dietitian:
+ * callers must additionally require the Dietitian_Link
+ * (`customer_profiles.dietitian_id === ctx.userId`), matching
+ * `dietitian_can_read_customer` and `scopeFranchiseCustomersForDietitian`.
+ * Without that, one Dietitian could read a colleague's customer's history.
+ *
+ * NOTE: this establishes PERMISSION only. Tenancy remains the caller's job.
+ */
+export async function checkFranchiseCustomersRead(): Promise<
+  | { ok: true; ctx: FranchiseAccessContext; isDietitian: boolean }
+  | { ok: false; error: string }
+> {
+  const ctx = await resolveFranchiseAccessContext();
+  if (!ctx) {
+    return {
+      ok: false,
+      error: "You do not have permission to perform this action.",
+    };
   }
 
-  return { config, franchiseId };
+  const isDietitian = isDietitianLevel(ctx.config);
+  if (!isDietitian && !hasGroupAccess(ctx.config, "customers")) {
+    return {
+      ok: false,
+      error: "You do not have permission to perform this action.",
+    };
+  }
+
+  return { ok: true, ctx, isDietitian };
+}
+
+/**
+ * Redirect-style page guard for the Franchise_Portal `customers` workspace —
+ * the franchise twin of {@link guardCustomersWorkspace}
+ * (franchise-scoped-access Task 5).
+ *
+ * WHY THIS IS NOT `guardFranchiseGroupAccess("customers")`:
+ * `hasGroupAccess` returns `false` for the `dietitian` level by design (it
+ * grants no Operations_Group; a Dietitian's reachability comes from
+ * DIETITIAN_ALLOWED_PREFIXES instead). And `landingRouteFor("dietitian")` is
+ * `"/customers"`. So gating this page with the plain group guard would redirect
+ * a franchise Dietitian to the very page they were already requesting — an
+ * INFINITE REDIRECT LOOP, not merely a lockout. This guard therefore admits the
+ * Dietitian explicitly, exactly as the admin portal's workspace guard does.
+ *
+ * `guardFranchiseGroupAccess` keeps its dietitian-EXCLUDING behaviour untouched,
+ * because the Dietitian Activity pages depend on it to keep Dietitians out.
+ *
+ * Returns everything the workspace needs from one context resolution:
+ *   - `config`      the resolved configuration (Owner override applied)
+ *   - `franchiseId` the tenant every read must be filtered by
+ *   - `canManage`   drives read-only rendering; `false` for a Dietitian and for
+ *                   any user holding `customers: "view"`
+ *   - `isDietitian` selects the Dietitian read-only workspace
+ *   - `userId`      `public.users.id`, used to resolve the Dietitian's own scope
+ */
+export async function guardFranchiseCustomersWorkspace(): Promise<{
+  config: AccessConfiguration;
+  franchiseId: string;
+  canManage: boolean;
+  isDietitian: boolean;
+  userId: string;
+}> {
+  const ctx = await resolveFranchiseAccessContext();
+  if (!ctx) redirect("/unauthorized");
+
+  const isDietitian = isDietitianLevel(ctx.config);
+  if (!isDietitian && !hasGroupAccess(ctx.config, "customers")) {
+    redirect(landingRouteFor(ctx.config.level));
+  }
+
+  return {
+    config: ctx.config,
+    franchiseId: ctx.franchiseId,
+    // A Dietitian never gains write access from this guard: `canManageGroup`
+    // is false for the dietitian level, so the workspace renders read-only.
+    canManage: canManageGroup(ctx.config, "customers"),
+    isDietitian,
+    userId: ctx.userId,
+  };
 }
 
 // ─── Warehouse access guards ──────────────────────────────────────────────────

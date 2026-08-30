@@ -378,6 +378,97 @@ export function validateOperationsAccessInput(
 }
 
 /**
+ * Access levels a plain "Create Franchise User" may carry (Req 21.2).
+ *
+ * `dietitian` is deliberately excluded — a Franchise Dietitian is provisioned
+ * ONLY through `createFranchiseDietitian`, which resolves the Franchise's Clinic
+ * and applies the Dietitian-specific invariants that the generic create path
+ * does not know about.
+ *
+ * WHY THIS LIVES HERE AND NOT IN `master-actions/franchiseUserActions.ts`:
+ * that module carries the `"use server"` directive, and Next.js permits a
+ * `"use server"` module to export NOTHING BUT async functions. Exporting this
+ * array from there threw at module-evaluation time —
+ * `A "use server" file can only export async functions, found object` — which
+ * broke every Server Action in the master Franchise Hierarchy actions bundle,
+ * not just this one. The Franchise Users dialog could render but died the moment
+ * it called `listFranchiseUsers`. Keep shared VALUE constants in this pure
+ * module, which both the action layer and Client Components may import freely.
+ */
+export const FRANCHISE_USER_ACCESS_LEVELS = [
+  "inventory",
+  "operations",
+  "inventory_operations",
+] as const satisfies readonly AdminAccessLevel[];
+
+export type FranchiseUserAccessLevel =
+  (typeof FRANCHISE_USER_ACCESS_LEVELS)[number];
+
+/**
+ * The Operations_Groups offered to a FRANCHISE user (franchise-scoped-access
+ * Req 1).
+ *
+ * `franchises` is deliberately excluded: that group governs the Franchise
+ * NETWORK management surface (`/admin/franchises`), which is a Core_Business
+ * concern. Granting it to a user who is themselves scoped to a single Franchise
+ * is meaningless, so the master UI never offers it and
+ * {@link validateFranchiseOperationsAccessInput} rejects it on the write path.
+ *
+ * Every other group is available, because one Franchise owns exactly one Clinic
+ * and therefore needs no clinic-level sub-scoping (which is also why
+ * `users.admin_clinic_id` is never set for a franchise user — the database
+ * restricts it to Core Clinics via `enforce_admin_clinic_is_core()`).
+ */
+export const FRANCHISE_OPERATIONS_GROUPS = [
+  "customers",
+  "subscriptions",
+  "riders",
+  "operations",
+  "shop_products",
+] as const satisfies readonly OperationsGroup[];
+
+export type FranchiseOperationsGroup =
+  (typeof FRANCHISE_OPERATIONS_GROUPS)[number];
+
+/** Is this group grantable to a franchise user? */
+export function isFranchiseOperationsGroup(
+  value: unknown,
+): value is FranchiseOperationsGroup {
+  return (
+    typeof value === "string" &&
+    (FRANCHISE_OPERATIONS_GROUPS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Strictly validate a submitted operations-access map for a FRANCHISE user.
+ *
+ * Applies every rule {@link validateOperationsAccessInput} applies, then
+ * additionally rejects any group outside {@link FRANCHISE_OPERATIONS_GROUPS} —
+ * i.e. `franchises`. Used by the master portal's franchise-user write path so a
+ * hand-crafted submission cannot persist a group the UI never offers.
+ */
+export function validateFranchiseOperationsAccessInput(
+  raw: unknown,
+): OperationsAccessValidation {
+  const base = validateOperationsAccessInput(raw);
+  if (!base.ok) return base;
+
+  for (const key of Object.keys(base.value)) {
+    if (!isFranchiseOperationsGroup(key)) {
+      return {
+        ok: false,
+        error: `The ${
+          GROUP_LABELS[key as OperationsGroup] ?? key
+        } group is not available to a franchise user`,
+      };
+    }
+  }
+
+  return base;
+}
+
+/**
  * Classify a rewritten admin pathname into an OperationsGroup, or null when the
  * path is not a group page. Case-sensitive, path-segment boundary matching,
  * longest-prefix wins (Req 6.4, 8.5).
@@ -441,11 +532,51 @@ export type PortalBase = "/admin" | "/franchise";
  * The identity on "/admin" is what keeps `isAdminPathAllowed` byte-identical for
  * every pre-existing caller and level (Req 26.5, 26.6).
  */
+/**
+ * Franchise_Portal route families whose Core counterpart is NOT the same path
+ * segment, mapped explicitly onto the admin path that classifies them
+ * (franchise-scoped-access Task 4).
+ *
+ * Without these, the plain `/franchise/x` -> `/admin/x` rewrite produces a path
+ * that matches no entry in `GROUP_ROUTE_PREFIX` or `OPERATIONS_PREFIXES`, so
+ * `classifyAdminPath` returns `null`, the path is treated as NEUTRAL, and
+ * `isPortalPathAllowed` lets EVERY access level reach it. Each of these four
+ * routes was reachable by any franchise user regardless of their granted
+ * groups:
+ *
+ *   /franchise/shop-products  the Core surface lives at /admin/kitchen-shop,
+ *                             which is what the `shop_products` group names
+ *   /franchise/orders         "Orders & Deliveries" — meal delivery operations
+ *                             (renders FranchiseOrders), NOT shop products
+ *   /franchise/disputes       operations
+ *   /franchise/reports        revenue / delivery / subscription analytics
+ *
+ * Matching uses the same case-sensitive, segment-boundary rule as the
+ * classifiers, so nested paths (`/franchise/orders/123`) resolve too.
+ */
+const FRANCHISE_PATH_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  ["/franchise/shop-products", "/admin/kitchen-shop"],
+  ["/franchise/orders", "/admin/operations"],
+  ["/franchise/disputes", "/admin/operations"],
+  ["/franchise/reports", "/admin/operations"],
+];
+
 export function toCanonicalPath(
   pathname: string,
   base: PortalBase = "/admin",
 ): string {
+  // Identity on the admin base — this is what keeps every pre-existing admin
+  // caller byte-identical (Req 26.5, 26.6). Nothing below may run for /admin.
   if (base === "/admin") return pathname;
+
+  // Explicit aliases take precedence over the generic segment rewrite.
+  for (const [franchisePath, canonicalPath] of FRANCHISE_PATH_ALIASES) {
+    if (pathname === franchisePath) return canonicalPath;
+    if (matchesPrefixAtBoundary(pathname, franchisePath)) {
+      return canonicalPath + pathname.slice(franchisePath.length);
+    }
+  }
+
   if (pathname === base) return "/admin";
   if (pathname.startsWith(base + "/")) {
     return "/admin" + pathname.slice(base.length);

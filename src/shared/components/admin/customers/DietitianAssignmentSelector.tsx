@@ -48,6 +48,28 @@ interface DietitianAssignmentSelectorProps {
   mode: "clinic" | "all";
   /** Required when `mode === "clinic"`; `null` disables the dropdown (Req 8.3). */
   clinicId?: string | null;
+  /**
+   * Portal-specific replacements for the two Server Actions this control calls
+   * (franchise-scoped-access Task 10).
+   *
+   * The defaults are the ADMIN actions, which are gated by the admin group gate
+   * and therefore refuse a `FRANCHISE_ADMIN` outright. The Franchise_Portal
+   * injects its own correctly-scoped equivalents — the same
+   * dependency-injection pattern `Customer360Dashboard` already uses for its
+   * `actions` prop, and the same reason: one shared component, two
+   * authorization models.
+   *
+   * Omitting this leaves every pre-existing admin call site unchanged.
+   */
+  actions?: {
+    listDietitians: () => Promise<
+      { success: true; data: DietitianAccount[] } | { success: false; error: string }
+    >;
+    assignDietitian: (
+      profileId: string,
+      dietitianUserId: string | null,
+    ) => Promise<{ success: boolean; error?: string }>;
+  };
 }
 
 export function DietitianAssignmentSelector({
@@ -55,6 +77,7 @@ export function DietitianAssignmentSelector({
   currentDietitianId,
   mode,
   clinicId = null,
+  actions,
 }: DietitianAssignmentSelectorProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -75,8 +98,11 @@ export function DietitianAssignmentSelector({
     }
 
     setLoading(true);
-    const load =
-      mode === "all"
+    // An injected lister ignores `mode`: a Franchise's Dietitians are resolved
+    // from the caller's own tenant, never from a clinic parameter.
+    const load = actions
+      ? actions.listDietitians()
+      : mode === "all"
         ? listActiveDietitiansForAdmin()
         : listDietitiansForClinic(clinicId!);
 
@@ -85,13 +111,21 @@ export function DietitianAssignmentSelector({
       if (result.success) setDietitians(result.data);
       else toast.error(result.error);
     });
-  }, [mode, clinicId, disabled]);
+    // Depends on the LISTER FUNCTION, not on the whole `actions` object.
+    // Callers pass that object inline, so it is a fresh reference on every
+    // render and including it would re-run this effect forever. The function
+    // itself is a module-level Server Action import, so it is stable and is the
+    // correct dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, clinicId, disabled, actions?.listDietitians]);
 
   const handleAssign = () => {
     const dietitianIdToSet =
       selectedDietitianId === UNASSIGNED ? null : selectedDietitianId;
     startTransition(async () => {
-      const result = await assignCustomerDietitian(profileId, dietitianIdToSet);
+      const result = actions
+        ? await actions.assignDietitian(profileId, dietitianIdToSet)
+        : await assignCustomerDietitian(profileId, dietitianIdToSet);
       if (result.success) {
         toast.success("Dietitian assigned successfully.");
         router.refresh();
