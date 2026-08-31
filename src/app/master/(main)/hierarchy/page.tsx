@@ -1,10 +1,10 @@
-// src/app/master/(main)/hierarchy/page.tsx
+// this page src/app/master/(main)/hierarchy/page.tsx
 // Master Hierarchy tree page (multi-tenant-franchise — Task 13.1,
 // Req 12.1/12.2/12.3/12.6). Server Component that loads the
 // Business(Franchise) → City → Group → Kitchen → Franchise → Clinic hierarchy
 // and hands the assembled tree to the client <HierarchyTree>.
 //
-// GATING (defense in depth):
+// GATING (defense in depth): 
 //   1. The parent layout (`(main)/layout.tsx`) already redirects any non
 //      MASTER_ADMIN to /unauthorized.
 //   2. This page ALSO re-resolves the caller's role and short-circuits BEFORE
