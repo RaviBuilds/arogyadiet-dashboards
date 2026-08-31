@@ -222,11 +222,24 @@ describe.skipIf(dbSkip !== null)(dbSuiteName, () => {
       DELETE FROM public.roles WHERE id = '${roleId}';
     `);
 
-    expect(winners.length).toBe(1);
-    expect(losers.length).toBe(1);
-    const loserMessage = losers[0]!.ok ? "" : losers[0]!.message;
-    expect(loserMessage.toLowerCase()).toContain(
-      "users_one_active_dietitian_per_franchise"
+    // INVERTED by franchise-scoped-access Task 11.
+    //
+    // This assertion used to be `winners === 1, losers === 1`, proving the
+    // partial unique index `users_one_active_dietitian_per_franchise` let exactly
+    // one concurrent insert through. `scripts/allow-multiple-franchise-dietitians.sql`
+    // DROPS that index because a Franchise now needs a TEAM of Dietitians, each
+    // reading only the Customer_Records assigned to them. So BOTH inserts must
+    // now succeed, and no cardinality error may be raised.
+    const failureMessages = losers.map((r) => (r.ok ? "" : r.message));
+    expect(
+      winners.length,
+      `both concurrent franchise-dietitian inserts should succeed; failures: ${failureMessages.join(
+        " | ",
+      )}`,
+    ).toBe(2);
+    expect(losers.length).toBe(0);
+    expect(failureMessages.join(" ").toLowerCase()).not.toContain(
+      "users_one_active_dietitian_per_franchise",
     );
   }, 30_000);
 });

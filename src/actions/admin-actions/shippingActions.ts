@@ -4,6 +4,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logAdminAction } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import {
+  assertGroupAccess,
+  GroupAccessDeniedError,
+} from "@/lib/auth/adminAccess";
+import {
+  isFranchiseCaller,
+  authorizeFranchiseSubscriptionAccess,
+} from "@/lib/auth/sharedCustomerActor";
 import type {
   ShippingInfo,
   ShippingInfoRow,
@@ -102,6 +110,46 @@ export async function saveShippingInfoAction(
       success: false,
       error: parsed.error.issues[0].message,
     };
+  }
+
+  // ── Authorization ────────────────────────────────────────────────────────
+  //
+  // This action previously had NO authorization gate of any kind. It is reached
+  // from `CourierForm`, which lives in `src/shared/components/admin/customers/`
+  // and is rendered by `Customer360Dashboard` — a component BOTH portals render.
+  // Its server-action id is therefore compiled into the franchise client bundle
+  // as well, so any session reaching either bundle could write
+  // `kit_shipping_info` for ANY subscription. Wrapping it franchise-side could
+  // not fix that; the gate has to be here.
+  //
+  // READ-capable (`assertGroupAccess`) rather than manage-only, deliberately: an
+  // admin holding `customers: "view"` can already open the KIT tab, and
+  // tightening to manage would revoke courier entry from anyone relying on it
+  // today. This closes the "no gate at all" hole without changing what any
+  // legitimately-permissioned admin can do.
+  //
+  // The franchise branch additionally enforces TENANCY, resolved from the
+  // subscription server-side. Note it deliberately does not trust
+  // `input.customer_profile_id`: pairing your own profile id with another
+  // tenant's subscription would otherwise pass.
+  if (await isFranchiseCaller()) {
+    const gate = await authorizeFranchiseSubscriptionAccess(
+      parsed.data.subscription_id,
+      "manage",
+    );
+    if (!gate.ok) return { success: false, error: gate.error };
+  } else {
+    try {
+      await assertGroupAccess("customers");
+    } catch (err) {
+      if (err instanceof GroupAccessDeniedError) {
+        return {
+          success: false,
+          error: "You do not have permission to manage customers.",
+        };
+      }
+      throw err;
+    }
   }
 
   // Category validation: Prevent MEAL customers from accessing KIT operations (Req 7.3, Task 17.2)

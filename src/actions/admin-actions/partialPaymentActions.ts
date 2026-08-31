@@ -48,6 +48,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { guardCustomersWorkspace } from "@/lib/auth/adminAccess";
 import { deriveSubscriptionBalance } from "@/services/SubscriptionPaymentService";
 import { deriveStayBalance, toPaise } from "@/services/AccommodationService";
+import { byDateAsc, summarise } from "@/lib/payments/partialPaymentBreakup";
 import type { StayPaymentTransaction } from "@/types/accommodation";
 import type {
   PartialPaymentBalance,
@@ -56,38 +57,9 @@ import type {
 import type { CustomerData } from "@/shared/components/admin/customers/CustomerDashboard";
 
 /** Chronological, oldest first — the order a collection history reads in. */
-function byDateAsc(
-  a: PartialPaymentBreakupEntry,
-  b: PartialPaymentBreakupEntry,
-): number {
-  return a.transactionDate.localeCompare(b.transactionDate);
-}
-
-/**
- * Roll a ledger up into the summary figures the row displays.
- *
- * `advance` is read from the ADVANCE row rather than "the first payment": the
- * partial unique indexes (`uniq_stay_advance_transaction`,
- * `uniq_subscription_advance_transaction`) guarantee at most one, so this is
- * exact rather than an assumption about insert order.
- */
-function summarise(breakup: PartialPaymentBreakupEntry[]) {
-  const advance = breakup.find((entry) => entry.transactionType === "ADVANCE");
-  const collections = breakup.filter(
-    (entry) => entry.transactionType !== "REFUND",
-  );
-  return {
-    advanceAmount: advance?.amount ?? 0,
-    advanceDate: advance?.transactionDate ?? null,
-    instalmentCount: breakup.filter(
-      (entry) => entry.transactionType === "PARTIAL_BALANCE_PAYMENT",
-    ).length,
-    lastPaymentDate:
-      collections.length > 0
-        ? collections[collections.length - 1].transactionDate
-        : null,
-  };
-}
+// `byDateAsc` and `summarise` moved to `@/lib/payments/partialPaymentBreakup` so
+// the FRANCHISE board reuses the identical summary semantics instead of restating
+// them. Imported above.
 
 /** Stay checkout: the real timestamp once checked out, else start + nights. */
 function deriveStayDueDate(

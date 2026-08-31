@@ -109,6 +109,16 @@ interface KitCustomerSectionProps {
   onDeactivate: (customer: CustomerData) => void;
   /** Removes the mutating export/edit/deactivate controls for a Dietitian (dietitian-management, Req 16.1). */
   isDietitian?: boolean;
+  /**
+   * Removes the same mutating controls for a caller who has READ-ONLY access to
+   * the customers group — i.e. `customers: "view"` rather than `"manage"`
+   * (franchise-scoped-access Task 9).
+   *
+   * Separate from `isDietitian` because the two reasons are unrelated: a
+   * Dietitian is a role, this is a permission level. Defaults to `false`, so the
+   * admin portal's call sites are unaffected.
+   */
+  readOnly?: boolean;
   /** customer email → active subscription window, for the expiry filter. */
   periodMap?: Map<string, SubscriptionPeriod>;
 }
@@ -136,8 +146,15 @@ export function KitCustomerSection({
   onEdit,
   onDeactivate,
   isDietitian = false,
+  readOnly = false,
   periodMap = new Map(),
 }: KitCustomerSectionProps) {
+  /**
+   * Mutating controls are hidden for either reason — a Dietitian (role) or a
+   * view-only permission level. Both collapse to the same rendering.
+   */
+  const hideMutations = isDietitian || readOnly;
+
   const [shippingStatuses, setShippingStatuses] = useState<
     Map<string, KitCustomerShippingStatus>
   >(new Map());
@@ -407,7 +424,7 @@ export function KitCustomerSection({
       }
       actions={
         <>
-          {!isDietitian && (
+          {!hideMutations && (
             <ExportButton onClick={onExport} disabled={customers.length === 0} />
           )}
           <RefreshButton onClick={onRefresh} isLoading={isLoading} />
@@ -613,7 +630,7 @@ export function KitCustomerSection({
                             Shipping
                           </Link>
                         </DropdownMenuItem>
-                        {!isDietitian && (
+                        {!hideMutations && (
                           <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem

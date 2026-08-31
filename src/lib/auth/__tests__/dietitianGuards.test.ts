@@ -293,9 +293,22 @@ describe("checkDietitianScope", () => {
       franchiseId: FRANCHISE,
       clinicId: CLINIC,
     });
-    setCustomer({ franchise_id: FRANCHISE });
+    // UPDATED by franchise-scoped-access Task 11: a Franchise Dietitian now
+    // needs BOTH the tenant AND the Dietitian_Link. The tenant alone used to
+    // suffice, which was equivalent to "their own customers" only while a
+    // Franchise was capped at one Dietitian; with a team it would expose every
+    // colleague's customers.
+    setCustomer({ franchise_id: FRANCHISE, dietitian_id: ME });
     expect((await checkDietitianScope(CUSTOMER)).ok).toBe(true);
 
+    // Same tenant, NOT linked to this Dietitian — the colleague-isolation case.
+    setCustomer({ franchise_id: FRANCHISE, dietitian_id: null });
+    expect(await checkDietitianScope(CUSTOMER)).toEqual({
+      ok: false,
+      error: CUSTOMER_NOT_IN_SCOPE,
+    });
+
+    // Linked but out of tenant — the link alone must not defeat the tenant check.
     setCustomer({ franchise_id: OTHER, dietitian_id: ME, clinic_id: CLINIC });
     expect(await checkDietitianScope(CUSTOMER)).toEqual({
       ok: false,

@@ -12,6 +12,7 @@ import {
   checkEligibilityAction,
   priceCartAction,
   markPaidAndPlaceOrderAction,
+  markPaidAndPlaceWalkInOrderAction,
 } from "@/actions/franchise-actions/franchiseAssistedOrderActions";
 
 // Feature: admin-place-shop-order-for-customer — franchise portal wiring (task 9.3).
@@ -92,6 +93,11 @@ export default async function FranchiseAssistedOrderPage() {
           checkEligibilityAction,
           priceCartAction,
           markPaidAndPlaceOrderAction,
+          // Enables the WALK-IN / counter-sale mode. `AssistedOrderBuilder` gates
+          // that whole buyer mode on this action being a function, so injecting it
+          // is what turns the feature on for this portal — the franchise had no
+          // counter-sale path at all before.
+          markPaidAndPlaceWalkInOrderAction,
         }}
         scopeLabel={franchise?.name ?? "franchise"}
       />

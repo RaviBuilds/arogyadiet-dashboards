@@ -250,8 +250,15 @@ describe("Property 4: Every operational write is denied to a Dietitian", () => {
         fc.boolean(),
         async (clinicId, franchiseId, customerProfileId, isFranchise) => {
           if (isFranchise) {
+            // Franchise Dietitian scope is ALSO assignment-only as of
+            // franchise-scoped-access Task 11: the in-scope customer must be
+            // both in the tenant AND linked to this Dietitian
+            // (id "dietitian-user-1"). The tenant alone no longer suffices.
             setUsersRow({ roleCode: "FRANCHISE_ADMIN", level: "dietitian", franchiseId });
-            setCustomerRow({ franchise_id: franchiseId });
+            setCustomerRow({
+              franchise_id: franchiseId,
+              dietitian_id: "dietitian-user-1",
+            });
           } else {
             // Core Dietitian scope is assignment-only: the in-scope customer
             // must be linked to this Dietitian (id "dietitian-user-1"), not

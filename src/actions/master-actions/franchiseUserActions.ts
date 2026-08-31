@@ -44,9 +44,17 @@ import { resolveScope } from "@/lib/auth/scope-resolver";
 import { FRANCHISE_FEATURES_ENABLED } from "@/lib/franchise/constants";
 import {
   DIETITIAN_ACCESS_LEVEL,
+  ACCESS_LEVEL_LABELS,
+  FRANCHISE_USER_ACCESS_LEVELS,
+  landingRouteFor,
   resolveAccessLevel,
+  resolveAccessConfiguration,
+  validateFranchiseOperationsAccessInput,
   type AdminAccessLevel,
+  type OperationsAccess,
 } from "@/lib/auth/adminAccessCore";
+import { logAdminAction } from "@/lib/logger";
+import { sendNotificationToUser } from "@/lib/notifications";
 import { getFranchiseById } from "@/repositories/franchise/franchiseRepository";
 import { listClinicsByFranchise } from "@/repositories/franchise/franchiseClinicRepository";
 import { createDietitian } from "@/services/DietitianAccountService";
@@ -60,22 +68,50 @@ const FRANCHISE_ADMIN_ROLE_CODE = "FRANCHISE_ADMIN";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
 
-/**
- * Access levels a plain "Create Franchise User" may carry (Req 21.2). The
- * `dietitian` level deliberately excluded — a Franchise Dietitian is
- * provisioned ONLY through {@link createFranchiseDietitian}, which resolves
- * the Franchise's Clinic and enforces the per-franchise cardinality rule that
- * this generic action does not know about. Exported so the Franchise Users
- * panel's Access_Level `<Select>` offers exactly the levels this action
- * accepts.
- */
-export const FRANCHISE_USER_ACCESS_LEVELS = [
-  "inventory",
-  "operations",
-  "inventory_operations",
-] as const;
+// `FRANCHISE_USER_ACCESS_LEVELS` — the levels this generic create path accepts,
+// excluding `dietitian` — now lives in `@/lib/auth/adminAccessCore` and is
+// imported above. It MUST NOT be re-exported from this file: the `"use server"`
+// directive on line 1 restricts this module's exports to async functions only,
+// and exporting the array threw
+// `A "use server" file can only export async functions, found object` at module
+// evaluation, taking down every Server Action in the master Franchise Hierarchy
+// bundle. The Franchise Users dialog rendered but failed on its first call.
+// Client Components import the constant straight from `adminAccessCore`.
 
 const franchiseUserAccessLevelSchema = z.enum(FRANCHISE_USER_ACCESS_LEVELS);
+
+/**
+ * Resolve the per-group operations access to persist for a franchise user
+ * (franchise-scoped-access Task 6).
+ *
+ * Mirrors `resolveOperationsAccessForLevel` in `master-actions/adminActions.ts`,
+ * but validates through {@link validateFranchiseOperationsAccessInput} so the
+ * `franchises` group — Core_Business network management, meaningless for a user
+ * scoped to a single Franchise — is rejected on the write path and not merely
+ * absent from the UI.
+ *
+ * WHY THIS EXISTS: `createFranchiseUser` previously accepted `accessLevel` and
+ * wrote ONLY that column, silently discarding the group matrix. An
+ * `operations`-level franchise user therefore resolved to `groups: {}`, so
+ * `hasGroupAccess` was false for every group and they could reach nothing but
+ * their landing route — the "Operations only" access level was non-functional.
+ *
+ * Postcondition: `null` for any level other than `operations` (those levels
+ * carry no per-group configuration), otherwise the validated map.
+ */
+function resolveFranchiseOperationsAccess(
+  level: AdminAccessLevel,
+  operationsAccess: unknown,
+):
+  | { ok: true; value: OperationsAccess | null }
+  | { ok: false; error: string } {
+  if (level !== "operations") {
+    return { ok: true, value: null };
+  }
+  const validation = validateFranchiseOperationsAccessInput(operationsAccess);
+  if (!validation.ok) return { ok: false, error: validation.error };
+  return { ok: true, value: validation.value };
+}
 
 // ─── Authorization + feature gate ───────────────────────────────────────────
 
@@ -122,6 +158,53 @@ async function assertFullNetworkScope(): Promise<
   return { ok: true, authUserId: user.id };
 }
 
+/**
+ * The `roles.id` of {@link FRANCHISE_ADMIN_ROLE_CODE}.
+ *
+ * WHY EVERY PATH IN THIS FILE NEEDS IT: `users.franchise_id` is stamped on
+ * EVERY user belonging to a Franchise, not just its portal staff. A Franchise's
+ * Customers (role `CUSTOMER`) and Riders (role `RIDER`) carry it too, because
+ * that column is how their records are attributed to the tenant.
+ *
+ * Those people are NOT franchise portal users. They sign in on entirely
+ * different subdomains — `customer.arogyadiet.com` and
+ * `deliverypartner.arogyadiet.com` — and are administered from the Customers and
+ * Riders sections. Selecting on `franchise_id` alone therefore pulls them into
+ * this admin roster, where every Edit / Deactivate / Delete control is wired
+ * straight at them.
+ *
+ * This is an ALLOWLIST on the role, deliberately, rather than a denylist that
+ * excludes `CUSTOMER` and `RIDER`: any future tenant-scoped role would otherwise
+ * leak into the roster the moment it was introduced.
+ */
+async function resolveFranchiseAdminRoleId(
+  admin: ReturnType<typeof createAdminClient>,
+): Promise<
+  | { ok: true; roleId: string }
+  | { ok: false; result: { success: false; error: string } }
+> {
+  const { data, error } = await admin
+    .from("roles")
+    .select("id")
+    .eq("code", FRANCHISE_ADMIN_ROLE_CODE)
+    .single();
+
+  if (error || !data) {
+    return {
+      ok: false,
+      result: {
+        success: false,
+        error: `Role ${FRANCHISE_ADMIN_ROLE_CODE} is not configured`,
+      },
+    };
+  }
+  return { ok: true, roleId: data.id as string };
+}
+
+/** Refused when a Customer or Rider row is targeted through this surface. */
+const NOT_A_FRANCHISE_PORTAL_USER =
+  "This account is not a franchise portal user. Customers and riders belong to the Customers and Riders sections and cannot be managed here.";
+
 // ─── List ────────────────────────────────────────────────────────────────────
 
 /** One row of the Franchise Users section (Req 21.1). */
@@ -133,6 +216,21 @@ export interface FranchiseUserListItem {
   accessLevel: AdminAccessLevel;
   /** `true` iff this row is the Franchise's Dietitian (Access_Level `dietitian`), so the UI can flag it distinctly from a plain franchise user. */
   isDietitian: boolean;
+  /**
+   * The stored per-group Manage/View matrix, already normalised by
+   * `resolveAccessConfiguration` (so `{}` for any level other than
+   * `operations`). Lets the Edit dialog prefill the group checkboxes without
+   * re-deriving them client-side (franchise-scoped-access Task 6).
+   */
+  operationsAccess: OperationsAccess;
+  /**
+   * `true` iff this user is the Franchise_Owner (`franchises.owner_user_id`).
+   * The Owner's access is derived from that column, NOT from
+   * `admin_access_level`, so editing their level would be silently ineffective
+   * — the UI shows them as full-access and the lifecycle actions refuse to
+   * demote or deactivate them.
+   */
+  isOwner: boolean;
   isActive: boolean;
   createdAt: string;
 }
@@ -155,18 +253,43 @@ export async function listFranchiseUsers(
   }
 
   const admin = createAdminClient();
+
+  // Portal staff only. Without the role filter this roster also listed the
+  // Franchise's Customers and Riders — see {@link resolveFranchiseAdminRoleId}.
+  const role = await resolveFranchiseAdminRoleId(admin);
+  if (!role.ok) return role.result;
+
   const { data, error } = await admin
     .from("users")
-    .select("id, full_name, email, mobile, admin_access_level, is_active, created_at")
+    .select(
+      "id, full_name, email, mobile, admin_access_level, admin_operations_access, is_active, created_at",
+    )
     .eq("franchise_id", trimmedFranchiseId)
+    .eq("role_id", role.roleId)
     .order("created_at", { ascending: false });
 
   if (error) {
     return { success: false, error: error.message };
   }
 
+  // One extra read to resolve the Franchise_Owner, so the UI can render their
+  // row as derived-full-access rather than offering an edit that would not take
+  // effect.
+  const { data: franchiseRow } = await admin
+    .from("franchises")
+    .select("owner_user_id")
+    .eq("id", trimmedFranchiseId)
+    .maybeSingle();
+  const ownerUserId = (franchiseRow?.owner_user_id as string | null) ?? null;
+
   const users: FranchiseUserListItem[] = (data ?? []).map((row) => {
     const accessLevel = resolveAccessLevel(row.admin_access_level);
+    // Reuse the shared normaliser so the list and the runtime gate can never
+    // disagree about what is stored (it yields `{}` for non-`operations` levels).
+    const { groups } = resolveAccessConfiguration(
+      row.admin_access_level,
+      row.admin_operations_access,
+    );
     return {
       id: row.id as string,
       fullName: (row.full_name as string | null) ?? "",
@@ -174,6 +297,8 @@ export async function listFranchiseUsers(
       mobile: (row.mobile as string | null) ?? null,
       accessLevel,
       isDietitian: accessLevel === DIETITIAN_ACCESS_LEVEL,
+      operationsAccess: groups,
+      isOwner: ownerUserId !== null && ownerUserId === (row.id as string),
       isActive: Boolean(row.is_active),
       createdAt: row.created_at as string,
     };
@@ -209,6 +334,13 @@ export async function createFranchiseUser(input: {
   mobile?: string;
   password: string;
   accessLevel?: string;
+  /**
+   * Per-group Manage/View matrix, meaningful only when `accessLevel` is
+   * `operations`. Ignored (and persisted as `null`) for every other level, and
+   * REQUIRED to be a non-empty selection of franchise-grantable groups when the
+   * level IS `operations` — see {@link resolveFranchiseOperationsAccess}.
+   */
+  operationsAccess?: OperationsAccess;
 }): Promise<ActionResult<{ userId: string }>> {
   const guard = await assertFullNetworkScope();
   if (!guard.ok) return guard.result;
@@ -245,6 +377,17 @@ export async function createFranchiseUser(input: {
     }
     accessLevel = parsedLevel.data;
   }
+
+  // Resolve + validate the group matrix BEFORE anything is written, so a bad
+  // submission cannot leave an auth user or a `users` row behind.
+  const opsResolved = resolveFranchiseOperationsAccess(
+    accessLevel,
+    input.operationsAccess,
+  );
+  if (!opsResolved.ok) {
+    return { success: false, error: opsResolved.error, field: "operationsAccess" };
+  }
+  const operationsAccessValue = opsResolved.value;
 
   // The target Franchise must exist (Req 21.3).
   const franchise = await getFranchiseById(franchiseId);
@@ -310,6 +453,11 @@ export async function createFranchiseUser(input: {
       mobile,
       franchise_id: franchiseId,
       admin_access_level: accessLevel,
+      admin_operations_access: operationsAccessValue,
+      // `admin_clinic_id` is deliberately NEVER set for a franchise user: one
+      // Franchise owns exactly one Clinic, so clinic-level sub-scoping is
+      // meaningless here, and the database restricts that column to Core
+      // Clinics anyway (enforce_admin_clinic_is_core()).
       is_active: true,
       is_email_verified: true,
       force_password_change: true,
@@ -396,4 +544,367 @@ export async function createFranchiseDietitian(input: {
   }
 
   return result;
+}
+
+// ─── Franchise user lifecycle: update / toggle / delete ──────────────────────
+//
+// franchise-scoped-access Task 7. These mirror `master-actions/adminActions.ts`
+// (`updateAdminUser` / `toggleAdminActive` / `deleteAdminUser`) so a Franchise's
+// user roster is managed exactly like the Core admin roster.
+//
+// TWO RULES EVERY ACTION BELOW ENFORCES:
+//
+//  1. TENANT BINDING — the target `users` row must carry the supplied
+//     `franchiseId`. Without it, a master-portal request could be replayed with
+//     another franchise's user id and mutate an account outside the franchise
+//     being edited.
+//
+//  2. THE FRANCHISE_OWNER IS NOT EDITABLE HERE — the Owner's effective access is
+//     derived from `franchises.owner_user_id` (the override applied in
+//     `middleware.ts`, `franchise/(main)/layout.tsx` and
+//     `resolveFranchiseAccessContext`), NOT from `admin_access_level`. Writing a
+//     lower level onto the Owner would persist a value that is then ignored at
+//     runtime, so the UI would report a demotion that never took effect.
+//     Deactivating them would lock the Franchise out of its own portal. Both are
+//     refused with an explanatory message rather than silently accepted.
+
+/** The Franchise_Owner cannot be demoted or deactivated through this surface. */
+const OWNER_NOT_EDITABLE =
+  "This user is the Franchise Owner. Their access is derived from the franchise ownership record and cannot be changed here. Transfer ownership first.";
+
+/**
+ * Resolve a franchise user for mutation: the row must exist, belong to
+ * `franchiseId`, and (unless `allowOwner`) must not be the Franchise_Owner.
+ *
+ * Returns the current level + owner flag so callers can decide whether the
+ * access level actually changed without a second read.
+ */
+async function resolveFranchiseUserForWrite(
+  admin: ReturnType<typeof createAdminClient>,
+  franchiseId: string,
+  userId: string,
+): Promise<
+  | {
+      ok: true;
+      authUserId: string | null;
+      currentLevel: AdminAccessLevel;
+      /**
+       * The stored group matrix, normalised. Returned so a partial update (e.g.
+       * renaming a user without touching permissions) can PRESERVE it rather
+       * than be rejected for not resubmitting it.
+       */
+      currentOperationsAccess: OperationsAccess;
+      isActive: boolean;
+      isOwner: boolean;
+    }
+  | { ok: false; result: { success: false; error: string; field?: string } }
+> {
+  const trimmedFranchiseId = franchiseId?.trim() ?? "";
+  const trimmedUserId = userId?.trim() ?? "";
+
+  if (trimmedFranchiseId.length === 0) {
+    return {
+      ok: false,
+      result: { success: false, error: "Franchise id is required", field: "franchiseId" },
+    };
+  }
+  if (trimmedUserId.length === 0) {
+    return {
+      ok: false,
+      result: { success: false, error: "User id is required", field: "userId" },
+    };
+  }
+
+  const { data: row } = await admin
+    .from("users")
+    .select(
+      "id, auth_user_id, role_id, franchise_id, admin_access_level, admin_operations_access, is_active",
+    )
+    .eq("id", trimmedUserId)
+    .maybeSingle();
+
+  if (!row) {
+    return { ok: false, result: { success: false, error: "Franchise user not found" } };
+  }
+
+  // Rule 1 — tenant binding.
+  if ((row.franchise_id as string | null) !== trimmedFranchiseId) {
+    return {
+      ok: false,
+      result: {
+        success: false,
+        error: "This user does not belong to the selected franchise",
+      },
+    };
+  }
+
+  // Rule 1b — the target must be franchise PORTAL staff.
+  //
+  // The tenant check above is satisfied by a Customer or a Rider of this same
+  // Franchise, because `users.franchise_id` is stamped on them too. Before this
+  // check, `deleteFranchiseUser` would happily delete a paying Customer's
+  // account and `toggleFranchiseUserActive` would lock them out of
+  // `customer.arogyadiet.com`. Enforced here rather than only in the list query
+  // so a replayed or hand-crafted request cannot reach them either.
+  const role = await resolveFranchiseAdminRoleId(admin);
+  if (!role.ok) return { ok: false, result: role.result };
+  if ((row.role_id as string | null) !== role.roleId) {
+    return {
+      ok: false,
+      result: { success: false, error: NOT_A_FRANCHISE_PORTAL_USER },
+    };
+  }
+
+  const { data: franchiseRow } = await admin
+    .from("franchises")
+    .select("owner_user_id")
+    .eq("id", trimmedFranchiseId)
+    .maybeSingle();
+
+  const isOwner =
+    typeof franchiseRow?.owner_user_id === "string" &&
+    franchiseRow.owner_user_id === (row.id as string);
+
+  const { groups } = resolveAccessConfiguration(
+    row.admin_access_level,
+    row.admin_operations_access,
+  );
+
+  return {
+    ok: true,
+    authUserId: (row.auth_user_id as string | null) ?? null,
+    currentLevel: resolveAccessLevel(row.admin_access_level),
+    currentOperationsAccess: groups,
+    isActive: Boolean(row.is_active),
+    isOwner,
+  };
+}
+
+/**
+ * Update a franchise user's profile fields, Access_Level and group matrix
+ * (franchise-scoped-access Task 7).
+ *
+ * Everything is validated BEFORE any write, so a rejection leaves the stored
+ * row, level and matrix exactly as they were. Exactly one access-level-changed
+ * notification is sent, and only when the level actually changed —
+ * `sendNotificationToUser` swallows its own errors, so a notification failure
+ * can never revert the persisted change.
+ *
+ * Email is intentionally not editable here (same as `updateAdminUser`): it is
+ * the auth identity and changing it requires an Auth-side update.
+ */
+export async function updateFranchiseUser(input: {
+  franchiseId: string;
+  userId: string;
+  fullName: string;
+  mobile?: string;
+  accessLevel?: string;
+  operationsAccess?: OperationsAccess;
+}): Promise<ActionResult<{ accessLevel: AdminAccessLevel }>> {
+  const guard = await assertFullNetworkScope();
+  if (!guard.ok) return guard.result;
+
+  const fullName = input.fullName?.trim() ?? "";
+  if (fullName.length === 0) {
+    return { success: false, error: "Full name is required", field: "fullName" };
+  }
+
+  const admin = createAdminClient();
+  const target = await resolveFranchiseUserForWrite(
+    admin,
+    input.franchiseId,
+    input.userId,
+  );
+  if (!target.ok) return target.result;
+
+  // Rule 2 — the Owner's level is derived, so refuse rather than persist a
+  // value that would be ignored at runtime.
+  if (target.isOwner && input.accessLevel !== undefined) {
+    const requested = resolveAccessLevel(input.accessLevel);
+    if (requested !== target.currentLevel) {
+      return { success: false, error: OWNER_NOT_EDITABLE, field: "accessLevel" };
+    }
+  }
+
+  // A Dietitian's level is managed by its own dedicated flow, which enforces
+  // clinic assignment; the generic edit path must not move an account into or
+  // out of that level.
+  if (target.currentLevel === DIETITIAN_ACCESS_LEVEL && input.accessLevel !== undefined) {
+    const requested = resolveAccessLevel(input.accessLevel);
+    if (requested !== DIETITIAN_ACCESS_LEVEL) {
+      return {
+        success: false,
+        error:
+          "A Dietitian's access level cannot be changed here. Use the Dietitian controls instead.",
+        field: "accessLevel",
+      };
+    }
+  }
+
+  let nextLevel: AdminAccessLevel = target.currentLevel;
+  if (input.accessLevel !== undefined && target.currentLevel !== DIETITIAN_ACCESS_LEVEL) {
+    const parsedLevel = franchiseUserAccessLevelSchema.safeParse(input.accessLevel);
+    if (!parsedLevel.success) {
+      return { success: false, error: "Invalid access level", field: "accessLevel" };
+    }
+    nextLevel = parsedLevel.data;
+  }
+
+  // A partial update (e.g. renaming a user, or toggling nothing but the mobile)
+  // must not be forced to resubmit the whole permission matrix. When no matrix
+  // is supplied AND the level is unchanged, the stored one is preserved;
+  // otherwise the submitted value is used. Changing away from `operations`
+  // clears the entries regardless, since those levels carry no matrix.
+  const submittedOperationsAccess =
+    input.operationsAccess !== undefined
+      ? input.operationsAccess
+      : nextLevel === target.currentLevel
+        ? target.currentOperationsAccess
+        : undefined;
+
+  const opsResolved = resolveFranchiseOperationsAccess(
+    nextLevel,
+    submittedOperationsAccess,
+  );
+  if (!opsResolved.ok) {
+    return { success: false, error: opsResolved.error, field: "operationsAccess" };
+  }
+
+  const { error } = await admin
+    .from("users")
+    .update({
+      full_name: fullName,
+      mobile: input.mobile?.trim() || null,
+      admin_access_level: nextLevel,
+      admin_operations_access: opsResolved.value,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.userId);
+
+  if (error) return { success: false, error: error.message };
+
+  if (target.currentLevel !== nextLevel) {
+    await sendNotificationToUser(input.userId, {
+      title: "Access level updated",
+      message: `Your access level has been updated to ${ACCESS_LEVEL_LABELS[nextLevel]}.`,
+      actionUrl: landingRouteFor(nextLevel),
+      type: "ADMIN_ACCESS_LEVEL_CHANGED",
+    });
+  }
+
+  await logAdminAction("UPDATE", "franchise_user", input.userId, {
+    franchise_id: input.franchiseId,
+    full_name: fullName,
+    admin_access_level: nextLevel,
+  });
+
+  revalidatePath(MASTER_SYSTEM_PATH);
+  return { success: true, data: { accessLevel: nextLevel } };
+}
+
+/**
+ * Activate or deactivate a franchise user (franchise-scoped-access Task 7).
+ *
+ * Mirrors `toggleAdminActive`: flips `users.is_active` AND bans/unbans the
+ * Supabase Auth account, so a deactivated user cannot simply sign in again.
+ * `876600h` (~100 years) is the same ban duration the admin path uses.
+ *
+ * Deactivating the Franchise_Owner is refused — it would lock the Franchise out
+ * of its own portal.
+ */
+export async function toggleFranchiseUserActive(input: {
+  franchiseId: string;
+  userId: string;
+  currentlyActive: boolean;
+}): Promise<ActionResult<{ isActive: boolean }>> {
+  const guard = await assertFullNetworkScope();
+  if (!guard.ok) return guard.result;
+
+  const admin = createAdminClient();
+  const target = await resolveFranchiseUserForWrite(
+    admin,
+    input.franchiseId,
+    input.userId,
+  );
+  if (!target.ok) return target.result;
+
+  const nextActive = !input.currentlyActive;
+
+  if (target.isOwner && !nextActive) {
+    return { success: false, error: OWNER_NOT_EDITABLE };
+  }
+
+  const { error: userError } = await admin
+    .from("users")
+    .update({ is_active: nextActive, updated_at: new Date().toISOString() })
+    .eq("id", input.userId);
+
+  if (userError) return { success: false, error: userError.message };
+
+  if (target.authUserId) {
+    const { error: authError } = await admin.auth.admin.updateUserById(
+      target.authUserId,
+      { ban_duration: nextActive ? "none" : "876600h" },
+    );
+    if (authError) return { success: false, error: authError.message };
+  }
+
+  await logAdminAction("UPDATE", "franchise_user", input.userId, {
+    franchise_id: input.franchiseId,
+    action: nextActive ? "activate" : "deactivate",
+  });
+
+  revalidatePath(MASTER_SYSTEM_PATH);
+  return { success: true, data: { isActive: nextActive } };
+}
+
+/**
+ * Permanently delete a franchise user (franchise-scoped-access Task 7).
+ *
+ * Order matters, and matches `deleteAdminUser`: the `public.users` row is
+ * removed FIRST, then the Auth account. Deleting Auth first would leave an
+ * orphaned `users` row pointing at a non-existent identity — a state no guard
+ * can resolve — whereas the reverse leaves at worst an unreferenced Auth user.
+ *
+ * Deleting the Franchise_Owner is refused.
+ */
+export async function deleteFranchiseUser(input: {
+  franchiseId: string;
+  userId: string;
+}): Promise<ActionResult<{ userId: string }>> {
+  const guard = await assertFullNetworkScope();
+  if (!guard.ok) return guard.result;
+
+  const admin = createAdminClient();
+  const target = await resolveFranchiseUserForWrite(
+    admin,
+    input.franchiseId,
+    input.userId,
+  );
+  if (!target.ok) return target.result;
+
+  if (target.isOwner) {
+    return { success: false, error: OWNER_NOT_EDITABLE };
+  }
+
+  const { error: userError } = await admin
+    .from("users")
+    .delete()
+    .eq("id", input.userId);
+
+  if (userError) return { success: false, error: userError.message };
+
+  if (target.authUserId) {
+    const { error: authError } = await admin.auth.admin.deleteUser(
+      target.authUserId,
+    );
+    if (authError) return { success: false, error: authError.message };
+  }
+
+  await logAdminAction("DELETE", "franchise_user", input.userId, {
+    franchise_id: input.franchiseId,
+  });
+
+  revalidatePath(MASTER_SYSTEM_PATH);
+  return { success: true, data: { userId: input.userId } };
 }

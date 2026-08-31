@@ -4,8 +4,8 @@
 // accepted structurally so this file stays testable without a client).
 //
 // This module is the application-side twin of the SQL security-definer helper
-// `public.dietitian_can_read_customer(uuid)` in
-// `scripts/create-dietitian-management-rls.sql`. The two are load-bearing
+// `public.dietitian_can_read_customer(uuid)`, most recently replaced by
+// `scripts/allow-multiple-franchise-dietitians.sql`. The two are load-bearing
 // together: RLS is the last line of defence, this predicate is what the
 // services and guards read. They MUST agree row for row, so the SQL is
 // transcribed here literally, including its NULL semantics:
@@ -14,21 +14,28 @@
 //     SELECT 1
 //     FROM public.current_dietitian() d
 //     JOIN public.customer_profiles cp ON cp.id = p_profile_id
-//     WHERE (d.franchise_id IS NOT NULL AND cp.franchise_id = d.franchise_id)
+//     WHERE (d.franchise_id IS NOT NULL
+//              AND cp.franchise_id = d.franchise_id
+//              AND cp.dietitian_id = d.user_id)
 //        OR (d.franchise_id IS NULL AND cp.dietitian_id = d.user_id)
 //   )
 //
 // Notes on the transcription:
 //   * `DietitianScope.kind` encodes `d.franchise_id IS NOT NULL` — a
 //     `franchise` scope is the first disjunct, a `core` scope is the second.
-//     The two disjuncts are therefore mutually exclusive, exactly as in SQL:
-//     a Franchise Dietitian reads by tenant only (Req 21.8, 21.11, 22.8), and
-//     never by Dietitian_Link.
-//   * A Core_Business Dietitian reads ONLY the Customer_Records assigned to
-//     them via Dietitian_Link (`cp.dietitian_id = d.user_id`). The linked
-//     Clinic does NOT widen the read scope — a Dietitian never sees a
-//     clinic-mate's customer they were not assigned to. `d.clinic_id` is kept
-//     on the scope object for other, non-read concerns but is inert here.
+//     The two disjuncts are mutually exclusive, exactly as in SQL.
+//   * EVERY Dietitian, Core or Franchise, reads ONLY the Customer_Records
+//     assigned to them via Dietitian_Link (`cp.dietitian_id = d.user_id`). A
+//     Franchise Dietitian must ALSO match the tenant; the tenant alone is not
+//     enough. Before `allow-multiple-franchise-dietitians.sql` a Franchise
+//     Dietitian read their whole tenant, which was equivalent to "their own
+//     customers" only while a Franchise was capped at one Dietitian — with a
+//     team it would have meant every Dietitian seeing every colleague's
+//     customers.
+//   * The linked Clinic does NOT widen the read scope for either kind — a
+//     Dietitian never sees a clinic-mate's customer they were not assigned to.
+//     `d.clinic_id` is kept on the scope object for other, non-read concerns
+//     but is inert here.
 //   * SQL `=` on a NULL operand yields NULL, not TRUE. Because every id carried
 //     by a scope is a non-null string, plain `===` reproduces that: a
 //     Customer_Record with `franchise_id` or `dietitian_id` NULL simply fails
@@ -115,9 +122,18 @@ export function dietitianCanRead(
   scope: DietitianScope,
   customer: ScopableCustomer,
 ): boolean {
-  // (d.franchise_id IS NOT NULL AND cp.franchise_id = d.franchise_id)
+  // (d.franchise_id IS NOT NULL AND cp.franchise_id = d.franchise_id
+  //                             AND cp.dietitian_id = d.user_id)
+  //
+  // BOTH conjuncts are required. The tenant match alone would let every
+  // Dietitian of a Franchise read every colleague's customer; the link alone
+  // would let a link that somehow pointed across tenants grant a cross-tenant
+  // read. Keeping both makes each a backstop for the other.
   if (scope.kind === "franchise") {
-    return customer.franchise_id === scope.franchiseId;
+    return (
+      customer.franchise_id === scope.franchiseId &&
+      customer.dietitian_id === scope.dietitianUserId
+    );
   }
 
   // (d.franchise_id IS NULL AND cp.dietitian_id = d.user_id)
@@ -137,8 +153,12 @@ export function dietitianCanRead(
  * (select, count, joined select) without importing a Supabase type.
  */
 interface ScopeFilterBuilder {
-  eq(column: string, value: string): unknown;
-  or(filters: string): unknown;
+  /**
+   * Returns the builder so filters can be CHAINED — the franchise scope applies
+   * two `.eq()`s (tenant AND link). PostgREST ANDs successive filters, which is
+   * exactly the conjunction the predicate expresses.
+   */
+  eq(column: string, value: string): ScopeFilterBuilder;
 }
 
 /** PostgREST filter strings are unquoted, so only opaque ids may be inlined. */
@@ -152,21 +172,14 @@ function assertUuid(value: string, label: string): string {
   return value;
 }
 
-/**
- * The PostgREST `or` filter for a core Dietitian who has a Clinic:
- * `dietitian_id.eq.<me>,clinic_id.eq.<clinic>`.
- *
- * Exported so the repositories can reuse the exact same string on embedded
- * resources, where `.or()` needs a `referencedTable` option.
- */
-export function dietitianScopeOrFilter(
-  dietitianUserId: string,
-  clinicId: string,
-): string {
-  const me = assertUuid(dietitianUserId, "dietitian id");
-  const clinic = assertUuid(clinicId, "clinic id");
-  return `${CUSTOMER_DIETITIAN_COLUMN}.eq.${me},${CUSTOMER_CLINIC_COLUMN}.eq.${clinic}`;
-}
+// REMOVED: `dietitianScopeOrFilter(dietitianUserId, clinicId)`.
+//
+// It built the PostgREST `or` filter `dietitian_id.eq.<me>,clinic_id.eq.<clinic>`
+// for a core Dietitian's linked Clinic. That clinic disjunct was deleted from the
+// predicate by `scripts/restrict-dietitian-read-scope-to-assigned.sql`, after
+// which the helper had NO production callers (only a test) and actively
+// contradicted the real scope — anyone reusing it would have re-widened a
+// Dietitian's reads to their whole clinic. Deleted rather than left as a trap.
 
 /**
  * Narrows a `customer_profiles` query to the Dietitian's readable scope, so the
@@ -174,17 +187,24 @@ export function dietitianScopeOrFilter(
  *
  * PostgREST ANDs each applied filter, so the emitted SQL is the same shape as
  * the predicate above:
- *   * franchise scope → `franchise_id = <tenant>`
- *   * core scope → `dietitian_id = <me>` (the Clinic never widens the scope)
+ *   * franchise scope → `franchise_id = <tenant> AND dietitian_id = <me>`
+ *   * core scope      → `dietitian_id = <me>`
+ * The Clinic never widens either scope.
  */
 export function applyDietitianScope<Q>(query: Q, scope: DietitianScope): Q {
   const builder = query as unknown as ScopeFilterBuilder;
 
   if (scope.kind === "franchise") {
-    return builder.eq(
-      CUSTOMER_FRANCHISE_COLUMN,
-      assertUuid(scope.franchiseId, "franchise id"),
-    ) as Q;
+    // Two chained filters = the conjunction of tenant AND link.
+    return builder
+      .eq(
+        CUSTOMER_FRANCHISE_COLUMN,
+        assertUuid(scope.franchiseId, "franchise id"),
+      )
+      .eq(
+        CUSTOMER_DIETITIAN_COLUMN,
+        assertUuid(scope.dietitianUserId, "dietitian id"),
+      ) as Q;
   }
 
   // Core scope is strictly the Dietitian_Link, regardless of any linked Clinic.

@@ -154,10 +154,41 @@ function formatDate(iso: string | null): string {
 export default function AllShopOrdersView({
   shopOrders = [],
   loadedLimit,
+  actions,
+  showClinicColumn = true,
 }: {
   shopOrders?: ShopOrderAdminData[];
   loadedLimit?: number;
+  /**
+   * Injectable row actions. Defaults to the ADMIN-scoped ones, so the admin
+   * ledger is unchanged.
+   *
+   * The Franchise_Portal must pass its own: both admin actions open with
+   * `checkGroupManage("customers")`, which admits only ADMIN / MASTER_ADMIN, so a
+   * franchise caller is refused. That refusal is correct and is pinned by
+   * `customer-actions-authorization.pin.test.ts` — hence injection here rather
+   * than widening the admin gate. The franchise equivalents live in
+   * `franchise-actions/franchiseShopOrderActions.ts` and additionally verify the
+   * order's `franchise_id`.
+   */
+  actions?: Partial<{
+    updateDeliveryDate: typeof adminUpdateAddonOrderDeliveryDate;
+    markDeliveredOffline: typeof adminMarkAddonOrderDeliveredOffline;
+  }>;
+  /**
+   * The Clinic column is a Core_Business concern: `addon_orders.clinic_id` is the
+   * Core_Clinic stamp and is NULL by design for a franchise order, which is
+   * attributed via `franchise_id` instead. Rendering it on the franchise ledger
+   * would give a column of dashes, so that portal hides it.
+   */
+  showClinicColumn?: boolean;
 }) {
+  const act = {
+    updateDeliveryDate:
+      actions?.updateDeliveryDate ?? adminUpdateAddonOrderDeliveryDate,
+    markDeliveredOffline:
+      actions?.markDeliveredOffline ?? adminMarkAddonOrderDeliveredOffline,
+  };
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -245,7 +276,9 @@ export default function AllShopOrdersView({
       "Customer / Buyer": row.customer_name,
       Mobile: row.customer_mobile ?? "",
       "Walk-in Address": row.walkin_address ?? "",
-      Clinic: clinicDisplayName(row.clinic_name),
+      // Omitted entirely for a franchise export: `clinic_id` is the Core_Clinic
+      // stamp and is NULL for franchise orders, so the column would be dashes.
+      ...(showClinicColumn ? { Clinic: clinicDisplayName(row.clinic_name) } : {}),
       Items: row.items.map((i) => `${i.product_name} x${i.quantity}`).join(", "),
       "Units": row.items.reduce((sum, i) => sum + Number(i.quantity ?? 0), 0),
       "Amount (₹)":
@@ -279,10 +312,7 @@ export default function AllShopOrdersView({
   const handleEditSubmit = () => {
     if (!activeOrder || !editDate) return;
     startEditTransition(async () => {
-      const res = await adminUpdateAddonOrderDeliveryDate(
-        activeOrder.id,
-        editDate,
-      );
+      const res = await act.updateDeliveryDate(activeOrder.id, editDate);
       if (res.success) {
         toast.success("Delivery date updated successfully.");
         setIsEditOpen(false);
@@ -302,7 +332,7 @@ export default function AllShopOrdersView({
   const handleMarkDeliveredOffline = () => {
     if (!deliverTarget) return;
     startDeliverTransition(async () => {
-      const res = await adminMarkAddonOrderDeliveredOffline(deliverTarget.id);
+      const res = await act.markDeliveredOffline(deliverTarget.id);
       if (res.success) {
         toast.success("Order marked delivered (offline).");
         setDeliverTarget(null);
@@ -397,9 +427,11 @@ export default function AllShopOrdersView({
               <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 Source
               </TableHead>
-              <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                Clinic
-              </TableHead>
+              {showClinicColumn ? (
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                  Clinic
+                </TableHead>
+              ) : null}
               <TableHead className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 Items
               </TableHead>
@@ -421,7 +453,7 @@ export default function AllShopOrdersView({
             {filteredOrders.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={showClinicColumn ? 9 : 8}
                   className="py-12 text-center text-sm text-slate-500"
                 >
                   {/* Req 12.7: covers both a genuinely empty ledger and "no
@@ -494,9 +526,11 @@ export default function AllShopOrdersView({
                       ) : null}
                     </TableCell>
 
-                    <TableCell className="text-sm text-slate-700">
-                      {clinicDisplayName(order.clinic_name)}
-                    </TableCell>
+                    {showClinicColumn ? (
+                      <TableCell className="text-sm text-slate-700">
+                        {clinicDisplayName(order.clinic_name)}
+                      </TableCell>
+                    ) : null}
 
                     <TableCell>
                       <div className="max-w-[240px] text-sm text-slate-700">

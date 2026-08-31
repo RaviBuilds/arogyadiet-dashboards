@@ -14,6 +14,10 @@
 
 import { getCurrentAdminContext } from "@/lib/auth/adminAccess";
 import {
+  isFranchiseCaller,
+  authorizeFranchiseCustomerAccess,
+} from "@/lib/auth/sharedCustomerActor";
+import {
   getMealSubscriptionsForCustomer,
   getStaysForCustomer,
   type MealSubscriptionRow,
@@ -57,11 +61,34 @@ async function assertAdmin(): Promise<{ ok: true } | { ok: false; error: string 
   return { ok: true };
 }
 
+/**
+ * Authorize the caller for ONE customer's history.
+ *
+ * `ALLOWED_ROLES` admits `FRANCHISE_ADMIN`, but until now nothing checked that
+ * the named customer belonged to the caller's franchise — so a franchise admin
+ * could read any tenant's history by passing its `customerProfileId`. A franchise
+ * caller now goes through `authorizeFranchiseCustomerAccess`, which adds tenancy
+ * and, for a Franchise Dietitian, the Dietitian_Link.
+ *
+ * The CORE branch is `assertAdmin()` exactly as before: Core_Business behaviour
+ * on the admin dashboard is unchanged, including for a core Dietitian (whose
+ * role is ADMIN and who must keep reading the history of customers assigned to
+ * them).
+ */
+async function assertHistoryAccess(
+  customerProfileId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (await isFranchiseCaller()) {
+    return authorizeFranchiseCustomerAccess(customerProfileId, "read");
+  }
+  return assertAdmin();
+}
+
 /** MEAL subscriptions for the Subscription History tab, newest first. */
 export async function getAdminMealSubscriptionHistoryAction(
   customerProfileId: string,
 ): Promise<ActionResult<MealSubscriptionRow[]>> {
-  const auth = await assertAdmin();
+  const auth = await assertHistoryAccess(customerProfileId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   try {
@@ -76,7 +103,7 @@ export async function getAdminMealSubscriptionHistoryAction(
 export async function getAdminKitHistoryAction(
   customerProfileId: string,
 ): Promise<ActionResult<KitHistoryEntry[]>> {
-  const auth = await assertAdmin();
+  const auth = await assertHistoryAccess(customerProfileId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   try {
@@ -94,7 +121,11 @@ export async function getAdminKitHistoryAction(
 export async function getAdminStayHistoryAction(
   customerProfileId: string,
 ): Promise<ActionResult<AdminStayHistoryRow[]>> {
-  const auth = await assertAdmin();
+  // Accommodation is not a franchise product, so no franchise caller has a
+  // legitimate reason to reach this. It is routed through the same gate anyway:
+  // the tenancy check is what refuses them, rather than relying on the UI never
+  // rendering the tab.
+  const auth = await assertHistoryAccess(customerProfileId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   try {
@@ -128,7 +159,7 @@ export async function getAdminStayHistoryAction(
 export async function getAdminAddonRequestHistoryAction(
   customerProfileId: string,
 ): Promise<ActionResult<AdminAddonRequestHistoryRow[]>> {
-  const auth = await assertAdmin();
+  const auth = await assertHistoryAccess(customerProfileId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   try {

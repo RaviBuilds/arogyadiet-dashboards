@@ -64,17 +64,15 @@ import {
 import {
   ADMIN_ACCESS_LEVELS,
   ACCESS_LEVEL_LABELS,
-  OPERATIONS_GROUPS,
-  GROUP_LABELS,
   DIETITIAN_ACCESS_LEVEL,
+  OPERATIONS_GROUPS,
   CLINIC_SCOPED_GROUPS,
   resolveAccessLevel,
   resolveAccessConfiguration,
   type AdminAccessLevel,
   type OperationsAccess,
-  type OperationsGroup,
-  type PermissionLevel,
 } from "@/lib/auth/adminAccessCore";
+import { OperationsGroupConfig } from "@/shared/components/master/OperationsGroupConfig";
 
 /** Access Level options offered by the Edit Admin dialog — `dietitian` is
  * excluded here because promoting an existing plain Admin into a Dietitian
@@ -111,73 +109,11 @@ interface UserManagementProps {
   initialAdmins: AdminUser[];
 }
 
-/**
- * Per-group operations access editor. Shown only when the selected Access Level
- * is `operations`. Each of the six groups can be selected and set to Manage
- * (default) or View (read-only).
- */
-function OperationsGroupConfig({
-  value,
-  onChange,
-  idPrefix,
-  groups = OPERATIONS_GROUPS,
-}: {
-  value: OperationsAccess;
-  onChange: (next: OperationsAccess) => void;
-  idPrefix: string;
-  /** Req 13.7, 13.8 — a Clinic_Scoped_Admin offers exactly the four
-   * Clinic_Scoped_Groups instead of the full OPERATIONS_GROUPS set. */
-  groups?: readonly OperationsGroup[];
-}) {
-  const toggle = (group: OperationsGroup, checked: boolean) => {
-    const next: OperationsAccess = { ...value };
-    if (checked) next[group] = next[group] ?? "manage";
-    else delete next[group];
-    onChange(next);
-  };
-  const setPermission = (group: OperationsGroup, perm: PermissionLevel) => {
-    onChange({ ...value, [group]: perm });
-  };
-
-  return (
-    <div className="space-y-2.5 rounded-md border p-3">
-      <p className="text-xs font-medium text-muted-foreground">
-        Operations access — select groups and set each to Manage or View
-      </p>
-      {groups.map((group) => {
-        const selected = value[group] !== undefined;
-        return (
-          <div key={group} className="flex items-center justify-between gap-3">
-            <label
-              htmlFor={`${idPrefix}-${group}`}
-              className="flex items-center gap-2 text-sm"
-            >
-              <Checkbox
-                id={`${idPrefix}-${group}`}
-                checked={selected}
-                onCheckedChange={(c) => toggle(group, c === true)}
-              />
-              {GROUP_LABELS[group]}
-            </label>
-            <Select
-              value={selected ? value[group] : undefined}
-              onValueChange={(v) => setPermission(group, v as PermissionLevel)}
-              disabled={!selected}
-            >
-              <SelectTrigger className="h-8 w-28">
-                <SelectValue placeholder="Manage" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="manage">Manage</SelectItem>
-                <SelectItem value="view">View</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+// `OperationsGroupConfig` now lives in its own module so the Franchise Users
+// panel can reuse the identical control (franchise-scoped-access Task 8). It is
+// imported at the top of this file; behaviour here is unchanged, including the
+// Clinic_Scoped_Admin call that passes `groups={CLINIC_SCOPED_GROUPS}`
+// (Req 13.7, 13.8).
 
 const SEARCH_OPTIONS = [
   { value: "full_name", label: "Name" },

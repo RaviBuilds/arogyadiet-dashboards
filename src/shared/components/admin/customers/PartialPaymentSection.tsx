@@ -24,7 +24,7 @@
 //    out rather than mutating here. A second write surface for balances would be
 //    a second place for the balance to go wrong.
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
@@ -112,6 +112,17 @@ interface PartialPaymentSectionProps {
   searchOptions: { value: string; label: string }[];
   /** Removes the mutating Excel export for a Dietitian (Req 16.1). */
   isDietitian?: boolean;
+  /**
+   * Loader for the outstanding balances. Defaults to the ADMIN action, so the
+   * admin board is unchanged; the Franchise_Portal injects its own
+   * franchise-scoped one (see the note at the destructure).
+   *
+   * Read ONCE on mount (captured in a ref), so changing it later has no effect
+   * and passing an inline arrow is harmless.
+   */
+  loadBalancesAction?: () => Promise<
+    { success: true; data: PartialPaymentBalance[] } | { error: string }
+  >;
 }
 
 // ─── Money + date formatting ──────────────────────────────────────────────────
@@ -254,7 +265,26 @@ export function PartialPaymentSection({
   setSearchTerm,
   searchOptions,
   isDietitian = false,
+  loadBalancesAction,
 }: PartialPaymentSectionProps) {
+  /**
+   * Defaults to the ADMIN loader, so the admin board is unchanged.
+   *
+   * The Franchise_Portal MUST inject its own. The admin action opens with
+   * `guardCustomersWorkspace()`, which REDIRECTS anything that is not
+   * ADMIN / MASTER_ADMIN, and — more importantly — it queries the balance views
+   * with no tenant filter at all, confining only by `clinic_id`. Widening its
+   * gate would have exposed every tenant's dues to every franchise, so the
+   * franchise gets a separately-scoped action instead.
+   */
+  // Captured ONCE, in a ref, deliberately. This board fetches on mount only, so
+  // the loader must not be a dependency of that effect: making it one both
+  // reintroduces a cascading-render lint error and means a caller who ever passed
+  // an inline arrow would refetch on every render. The ref makes the one-shot
+  // fetch structural rather than something callers have to be careful about.
+  const loadActionRef = useRef(
+    loadBalancesAction ?? getPartialPaymentBalancesAction,
+  );
   const [balances, setBalances] = useState<PartialPaymentBalance[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -278,7 +308,7 @@ export function PartialPaymentSection({
 
   const loadBalances = useCallback(async () => {
     setLoading(true);
-    const result = await getPartialPaymentBalancesAction();
+    const result = await loadActionRef.current();
     if ("error" in result) {
       toast.error(`Could not load balances: ${result.error}`);
       setBalances([]);
@@ -289,6 +319,9 @@ export function PartialPaymentSection({
     // No dependency on `customerById`: scoping is applied by the join in
     // `joinedRows`, which recomputes on every scope change. Depending on it here
     // would refetch the same balances every time the franchise selector moved.
+    //
+    // The loader is read through `loadActionRef`, so it is not a dependency
+    // either and this stays a genuine one-shot fetch.
   }, []);
 
   useEffect(() => {
