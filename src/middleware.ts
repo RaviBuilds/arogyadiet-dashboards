@@ -347,6 +347,16 @@ export async function middleware(request: NextRequest) {
   // This whole path is inert unless FRANCHISE_FEATURES_ENABLED is true, because
   // `setFranchiseSessionContext` itself short-circuits when the flag is off.
 
+
+  // Architechure Logic to access:
+  const isArchitecturePath =
+  url.pathname === "/architecture" ||
+  url.pathname.startsWith("/architecture/");
+
+if (isArchitecturePath) {
+  return response;
+}
+
   // 3. Route protection, gatekeeper logic
 
   // Exclude static files and APIs from Auth checks
