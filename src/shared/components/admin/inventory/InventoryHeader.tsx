@@ -58,9 +58,9 @@ export default function InventoryHeader({
     // For sub-routes (manufacturing, mappings, ledger), match with startsWith.
     // For the base path (Master Catalog), exact match only.
     if (href !== basePath) {
-      return pathname.startsWith(href);
+      return (pathname ?? "").startsWith(href);
     }
-    return pathname === href;
+    return (pathname ?? "") === href;
   }
 
   return (

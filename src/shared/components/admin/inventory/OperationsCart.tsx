@@ -128,7 +128,7 @@ export default function OperationsCart({
   }
 
   const isHiddenRoute = (hideOnPathSuffixes ?? []).some(
-    (suffix) => pathname === suffix || pathname.endsWith(suffix),
+    (suffix) => (pathname ?? "") === suffix || (pathname ?? "").endsWith(suffix),
   );
 
   if (isHiddenRoute) {

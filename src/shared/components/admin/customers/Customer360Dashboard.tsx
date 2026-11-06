@@ -377,7 +377,7 @@ export function Customer360Dashboard({
   const isKitCustomer = customerCategory === "KIT";
   const isAccommodationCustomer = customerCategory === "ACCOMMODATION";
   const isMealCustomer = customerCategory === "MEAL";
-  const requestedTab = searchParams.get("tab");
+  const requestedTab = searchParams?.get("tab");
   const [activeTab, setActiveTab] = useState(
     // "Add Subscription" is the tab's FORMER name, kept in the accepted list so
     // existing bookmarks and links keep working; it is normalised to the new

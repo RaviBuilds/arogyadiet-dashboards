@@ -120,7 +120,7 @@ export default function AdminNavbar({
     window.location.href = "/";
   };
 
-  const isActive = (path: string) => pathname.startsWith(path);
+  const isActive = (path: string) => (pathname ?? "").startsWith(path);
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-200 bg-white/95 backdrop-blur-sm shadow-sm">

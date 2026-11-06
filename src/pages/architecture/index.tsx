@@ -1,7 +1,7 @@
 import type { GetServerSideProps } from "next";
 import { promises as fs } from "fs";
 import path from "path";
-import { ArchitectureViewer, type ArchDoc } from "./viewer";
+import { ArchitectureViewer, type ArchDoc } from "@/shared/components/architecture/ArchitectureViewer";
 
 /**
  * TEMPORARY architecture viewer (isolation contract):
