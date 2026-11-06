@@ -36,8 +36,8 @@ function encodeDestination(value: string): string {
 }
 
 /** The current destination value read from the `destination` search param. */
-function readCurrentDestination(searchParams: URLSearchParams): string {
-  return searchParams.get(DESTINATION_PARAM) ?? ALL_CLINICS_VALUE;
+function readCurrentDestination(searchParams: URLSearchParams | null): string {
+  return searchParams?.get(DESTINATION_PARAM) ?? ALL_CLINICS_VALUE;
 }
 
 interface ShopProductsDestinationSelectorProps {
@@ -109,7 +109,7 @@ export function ShopProductsDestinationSelector({
   const isEmpty = !loading && !loadFailed && clinics.length === 0 && franchises.length === 0;
 
   function handleValueChange(value: string) {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
 
     if (value === ALL_CLINICS_VALUE) {
       params.delete(DESTINATION_PARAM);
@@ -118,7 +118,7 @@ export function ShopProductsDestinationSelector({
     }
 
     const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname);
+    router.replace(query ? `${pathname ?? ""}?${query}` : pathname ?? "");
   }
 
   return (

@@ -132,9 +132,9 @@ export function ShopStockInCart({
   /** Point the destination selector at the cart's clinic (Req 5.9's URL model). */
   function handleSwitchToCartClinic() {
     if (!cartClinicId) return;
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
     params.set("destination", `clinic:${cartClinicId}`);
-    router.replace(`${pathname}?${params.toString()}`);
+    router.replace(`${pathname ?? ""}?${params.toString()}`);
     setIsOpen(false);
   }
 

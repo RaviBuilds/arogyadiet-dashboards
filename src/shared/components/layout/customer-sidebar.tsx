@@ -384,7 +384,7 @@ export function CustomerSidebar({
       )}
     >
       <SidebarContent
-        pathname={pathname}
+        pathname={pathname ?? ""}
         onNavigate={onNavigate}
         customerCategory={customerCategory}
       />

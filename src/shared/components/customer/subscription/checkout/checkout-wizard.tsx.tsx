@@ -42,7 +42,7 @@ export function CheckoutWizard({
   holidaysByDate?: Record<string, string>;
 }) {
   const searchParams = useSearchParams();
-  const preSelectedPlan = searchParams.get("plan");
+  const preSelectedPlan = searchParams?.get("plan");
   const [step, setStep] = useState(1);
 
   const [checkoutData, setCheckoutData] = useState({

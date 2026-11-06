@@ -170,10 +170,10 @@ export default function FranchiseCustomerDashboard({
   const [isPending, startTransition] = useTransition();
 
   // Tab state from URL
-  const activeTab = searchParams.get("tab") || "meal";
+  const activeTab = searchParams?.get("tab") || "meal";
   const setActiveTab = useCallback(
     (tab: string) => {
-      const params = new URLSearchParams(searchParams.toString());
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
       params.set("tab", tab);
       router.replace(`?${params.toString()}`, { scroll: false });
     },

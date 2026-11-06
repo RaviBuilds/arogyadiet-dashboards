@@ -180,7 +180,7 @@ export function GlobalLoader({ message }: { message?: string }) {
     // identical to cold launch; clearTimers() in begin() has already cleared
     // any stale removal timer from a previous visit, so re-adding cleanly
     // restarts the one-shot animations.
-    const destPath = pathnameRef.current;
+    const destPath = pathnameRef.current ?? "";
     const isDashboardArrival =
       destPath === "/dashboard" || destPath.startsWith("/dashboard/");
     if (modeRef.current === "cold" || isDashboardArrival) {
@@ -372,6 +372,10 @@ export function GlobalLoader({ message }: { message?: string }) {
   useEffect(() => {
     if (firstCommitRef.current) {
       firstCommitRef.current = false; // cold launch handled on mount
+      return;
+    }
+    // Early return if pathname is null (e.g., during SSR or before hydration)
+    if (pathname === null) {
       return;
     }
     // The route commit fires immediately — before the destination's content

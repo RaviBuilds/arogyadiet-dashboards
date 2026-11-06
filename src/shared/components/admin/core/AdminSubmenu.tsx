@@ -33,7 +33,7 @@ export function AdminSubmenu({
   // 3. Automatically set the active tab based on the URL pathname (Only runs for complex tabs with hrefs)
   useEffect(() => {
     const currentTab = normalizedTabs.find(
-      (tab) => tab.href && pathname.includes(tab.href),
+      (tab) => tab.href && (pathname ?? "").includes(tab.href),
     );
     if (currentTab && currentTab.id !== activeTab) {
       onTabChange(currentTab.id);
@@ -54,7 +54,7 @@ export function AdminSubmenu({
       if (tab.href) {
         router.push(tab.href);
       } else {
-        router.push(`${pathname}?tab=${tab.id}`);
+        router.push(`${pathname ?? ""}?tab=${tab.id}`);
       }
     }
   };

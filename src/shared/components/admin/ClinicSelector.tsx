@@ -156,7 +156,7 @@ export function ClinicSelector({
     );
   }
 
-  const rawValue = searchParams.get(paramName);
+  const rawValue = searchParams?.get(paramName);
   // Req 12.3: no param and "all" both mean "no clinic filter" — when the
   // All Clinics option is offered, treat an absent param as that option
   // being selected rather than showing the "select a clinic" placeholder.
@@ -164,14 +164,14 @@ export function ClinicSelector({
     rawValue ?? (includeAllOption ? ALL_CLINICS : undefined);
 
   function handleValueChange(value: string) {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
     if (includeAllOption && value === ALL_CLINICS) {
       params.delete(paramName);
     } else {
       params.set(paramName, value);
     }
     const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname);
+    router.replace(query ? `${pathname ?? ""}?${query}` : pathname ?? "");
   }
 
   return (

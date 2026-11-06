@@ -186,7 +186,7 @@ export default function FranchiseNavbar({
     window.location.href = "/";
   };
 
-  const isActive = (path: string) => pathname.startsWith(path);
+  const isActive = (path: string) => (pathname ?? "").startsWith(path);
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-white/40 bg-white/70 shadow-[0_4px_30px_rgb(0,0,0,0.03)] backdrop-blur-xl">
